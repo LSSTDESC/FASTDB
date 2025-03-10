@@ -21,9 +21,32 @@ services:
       timeout: 10s
       retries: 5
 
+  mongodb:
+    image: ${DOCKER_ARCHIVE:-registry.nersc.gov/m1727/raknop}/fastdb-mongodb:${DOCKER_VERSION:-latest}
+    build:
+      context: ./docker/mongodb
+    environment:
+      - MONGODB_ADMIN_USER=admin
+      - MONGODB_ADMIN_PASSWD=fragile
+      - MONGODB_ALERT_READER_USER=alertreader
+      - MONGODB_ALERT_READER_PASSWD=reader
+      - MONGODB_ALERT_WRITER_USER=alertwriter
+      - MONGODB_ALERT_WRITER_PASSWD=writer
+    volumes:
+      - type: volume
+        source: mongodb_data
+        target: /data/db
+    healthcheck:
+      test: test `mongosh mongodb://admin:$$MONGODB_ADMIN_PASSWD@localhost/admin --eval "use admin" --eval "db.system.users.find({user:'$$MONGODB_ADMIN_USER'}).count()"` -eq 1 || exit 1
+      interval: 5s
+      timeout: 10s
+      retries: 5
+
   createdb:
     depends_on:
       postgres:
+        condition: service_healthy
+      mongodb:
         condition: service_healthy
     image: ${DOCKER_ARCHIVE:-registry.nersc.gov/m1727/raknop}/fastdb-shell:${DOCKER_VERSION:-latest}
     build:
@@ -111,8 +134,47 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      # createdb:
-      #   condition: service_completed_successfully
+      mongodb:
+        condition: service_healthy
+      createdb:
+        condition: service_completed_successfully
+    image: ${DOCKER_ARCHIVE:-registry.nersc.gov/m1727/raknop}/fastdb-shell:${DOCKER_VERSION:-latest}
+    build:
+      context: ./docker/webserver
+      target: shell
+    user: ${USERID:-0}:${GROUPID:-0}
+    volumes:
+      - type: bind
+        source: tests/secrets
+        target: /secrets
+        read_only: true
+      - type: bind
+        source: .
+        target: /code
+      - type: bind
+        source: install
+        target: /fastdb
+      - type: volume
+        source: sessions
+        target: /sessions
+      - type: volume
+        source: query_results
+        target: /query_results
+    post_start:
+      - command: /bin/bash -c "
+                   chown -R ${USERID:-0}:${GROUPID:-0} /sessions
+                   && chown -R ${USERID:-0}:${GROUPID:-0} /query_results
+                   "
+        privileged: true
+        user: root
+    working_dir: /code
+
+  shell-nocreatedb:
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
     image: ${DOCKER_ARCHIVE:-registry.nersc.gov/m1727/raknop}/fastdb-shell:${DOCKER_VERSION:-latest}
     build:
       context: ./docker/webserver
@@ -146,5 +208,6 @@ services:
 
 volumes:
   postgres_data:
+  mongodb_data:
   query_results:
   sessions:

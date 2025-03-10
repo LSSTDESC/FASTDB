@@ -18,13 +18,36 @@ ENV TZ="UTC"
 RUN  apt-get update \
     && apt-get -y upgrade \
     && apt-get -y install -y \
-         python3 tmux netcat-openbsd curl elinks postgresql-client make rlwrap socat \
+         python3 locales tmux netcat-openbsd gnupg curl elinks postgresql-client make rlwrap socat \
     && apt-get -y autoremove \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
+RUN cat /etc/locale.gen | perl -pe 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' > /etc/locale.gen.new \
+    && mv /etc/locale.gen.new /etc/locale.gen
+RUN locale-gen en_US.utf8
+ENV LANG=en_US.UTF-8
+ENV LANGUAGE=en_US:en
+ENV LC_ALL=en_US.UTF-8
+
 RUN ln -s /usr/bin/python3 /usr/bin/python
 ENV LESS=-XLRi
+
+
+# Install mongosh (which adds >250MB to the docker image :( )
+
+RUN curl -fsSL https://www.mongodb.org/static/pgp/server-8.0.asc | \
+   gpg -o /usr/share/keyrings/mongodb-server-8.0.gpg \
+   --dearmor
+
+RUN echo "deb [ signed-by=/usr/share/keyrings/mongodb-server-8.0.gpg ] http://repo.mongodb.org/apt/debian bookworm/mongodb-org/8.0 main" | tee /etc/apt/sources.list.d/mongodb-org-8.0.list
+
+RUN apt-get update \
+  && DEBIAN_FRONTEND="noninteractive" TZ="UTC" apt-get -y install -y --no-install-recommends \
+          mongodb-mongosh \
+  && apt-get clean \
+  && rm -rf /var/lib/apt/lists/*
+
 
 # ======================================================================
 FROM base AS build
@@ -50,6 +73,7 @@ RUN source /venv/bin/activate && \
        pandas \
        psycopg2 \
        pycryptodome \
+       pymongo \
        pytest \
        pytest-timestamper \
        python-dateutil \
