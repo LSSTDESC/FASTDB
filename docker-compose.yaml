@@ -37,7 +37,7 @@ services:
         source: mongodb_data
         target: /data/db
     healthcheck:
-      test: test `mongosh mongodb://admin:$$MONGODB_ADMIN_PASSWD@localhost/admin --eval "use admin" --eval "db.system.users.find({user:'$$MONGODB_ADMIN_USER'}).count()"` -eq 1 || exit 1
+      test: test `mongosh mongodb://$$MONGODB_ADMIN_USER:$$MONGODB_ADMIN_PASSWD@localhost/admin --eval "use admin" --eval "db.system.users.find({user:'$$MONGODB_ADMIN_USER'}).count()"` -eq 1 || exit 1
       interval: 5s
       timeout: 10s
       retries: 5

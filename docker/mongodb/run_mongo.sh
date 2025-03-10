@@ -28,7 +28,7 @@ if [ `mongosh --eval "use admin" --eval "db.system.users.find({user:'$MONGODB_AD
     echo
 else
     echo
-    echo "*** Mongo admin users exists***"
+    echo "*** Mongo admin user exists***"
     echo
 fi
 
