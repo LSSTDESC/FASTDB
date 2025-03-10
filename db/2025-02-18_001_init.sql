@@ -29,7 +29,7 @@ CREATE TABLE processing_version(
   validity_start timestamp with time zone NOT NULL,
   validity_end timestamp with time zone
 );
-CREATE UNIQUE INDEX idx_processingversion_desc ON processing_version(description);  
+CREATE UNIQUE INDEX idx_processingversion_desc ON processing_version(description);
 
 -- SnapShot
 -- Can define a set of objects by tagging the processing version and thing id
@@ -245,14 +245,14 @@ CREATE TABLE diasource(
 
   scienceflux real,
   sciencefluxerr real,
-  
+
   fpbkgd real,
   fpbkgderr real,
 
   parentdiasourceid bigint,
   extendedness real,
   reliability real,
-  
+
   ixx real,
   ixxerr real,
   iyy real,
@@ -265,7 +265,7 @@ CREATE TABLE diasource(
   ixxpsf real,
   iyypsf real,
   ixypsf real,
-  
+
   flags integer,
   pixelflags integer,
 
@@ -284,7 +284,7 @@ ALTER TABLE diasource ADD CONSTRAINT fk_diasource_diaobject
 CREATE INDEX idx_diasource_procver ON diasource(processing_version);
 ALTER TABLE diasource ADD CONSTRAINT fk_diasource_procver
   FOREIGN KEY (processing_version) REFERENCES processing_version(id) ON DELETE RESTRICT;
-  
+
 CREATE TABLE diasource_default PARTITION OF diasource DEFAULT;
 
 

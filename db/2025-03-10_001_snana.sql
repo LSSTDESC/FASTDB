@@ -121,14 +121,14 @@ CREATE TABLE ppdb_diasource(
 
   scienceflux real,
   sciencefluxerr real,
-  
+
   fpbkgd real,
   fpbkgderr real,
 
   parentdiasourceid bigint,
   extendedness real,
   reliability real,
-  
+
   ixx real,
   ixxerr real,
   iyy real,
@@ -141,7 +141,7 @@ CREATE TABLE ppdb_diasource(
   ixxpsf real,
   iyypsf real,
   ixypsf real,
-  
+
   flags integer,
   pixelflags integer
 );
