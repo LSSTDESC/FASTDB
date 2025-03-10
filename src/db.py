@@ -657,6 +657,33 @@ class DiaForcedSourceSnapshot( DBBase ):
 
 
 # ======================================================================
+# SNANA PPDB simulation tables
+
+class PPDBHostGalaxy( DBBase ):
+    __tablename__ = "ppdb_host_galaxy"
+    _tablemeta = None
+    _pk = [ 'id' ]
+
+
+class PPDBDiaObject( DBBase ):
+    __tablename__ = "ppdb_diaobject"
+    _tablemeta = None
+    _pk = [ 'diaobjectid' ]
+
+
+class PPDBDiaSource( DBBase ):
+    __tablename__ = "ppdb_diasource"
+    _tablemeta = None
+    _pk = [ 'diasourceid' ]
+
+
+class PPDBDiaForcedSource( DBBase ):
+    __tablename__ = "ppdb_diaforcedsource"
+    _tablemeta = None
+    _pk = [ 'diaforcedsourceid' ]
+
+
+# ======================================================================
 class QueryQueue( DBBase ):
     __tablename__ = "query_queue"
     _tablemeta = None

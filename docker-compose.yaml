@@ -46,8 +46,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      mongodb:
-        condition: service_healthy
     image: ${DOCKER_ARCHIVE:-registry.nersc.gov/m1727/raknop}/fastdb-shell:${DOCKER_VERSION:-latest}
     build:
       context: ./docker/webserver
@@ -92,6 +90,8 @@ services:
 
   webap:
     depends_on:
+      mongodb:
+        condition: service_healthy
       createdb:
         condition: service_completed_successfully
       mailhog:

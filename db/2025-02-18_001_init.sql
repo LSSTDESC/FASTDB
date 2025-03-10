@@ -145,10 +145,13 @@ CREATE INDEX idx_diaobject_diaobjectid ON diaobject(diaobjectid);
 CREATE INDEX idx_diaobject_procver ON diaobject(processing_version);
 ALTER TABLE diaobject ADD CONSTRAINT fk_diaobject_procver
   FOREIGN KEY (processing_version) REFERENCES processing_version(id) ON DELETE RESTRICT;
+CREATE INDEX idx_diaobject_nearbyext1 ON diaobject(nearbyextobj1id);
 ALTER TABLE diaobject ADD CONSTRAINT fk_diaobject_nearbyext1
   FOREIGN KEY (nearbyextobj1id) REFERENCES host_galaxy(id) ON DELETE SET NULL;
+CREATE INDEX idx_diaobject_nearbyext2 ON diaobject(nearbyextobj2id);
 ALTER TABLE diaobject ADD CONSTRAINT fk_diaobject_nearbyext2
   FOREIGN KEY (nearbyextobj2id) REFERENCES host_galaxy(id) ON DELETE SET NULL;
+CREATE INDEX idx_diaobject_nearbyext3 ON diaobject(nearbyextobj3id);
 ALTER TABLE diaobject ADD CONSTRAINT fk_diaobject_nearbyext3
   FOREIGN KEY (nearbyextobj3id) REFERENCES host_galaxy(id) ON DELETE SET NULL;
 

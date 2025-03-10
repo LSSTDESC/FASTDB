@@ -6,7 +6,7 @@ from db import HostGalaxy
 from basetest import BaseTestDB
 
 
-class TestDiaObject( BaseTestDB ):
+class TestHostGalaxy( BaseTestDB ):
 
     @pytest.fixture
     def basetest_setup( self, procver1 ):
