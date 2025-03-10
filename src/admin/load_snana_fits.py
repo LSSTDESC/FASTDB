@@ -20,7 +20,8 @@ import astropy.table
 from fastdb_loader import FastDBLoader
 from util import NULLUUID
 from db import ( DB, HostGalaxy, DiaObject, DiaSource, DiaForcedSource,
-                 DiaObjectSnapshot, DiaSourceSnapshot, DiaForcedSourceSnapshot )
+                 DiaObjectSnapshot, DiaSourceSnapshot, DiaForcedSourceSnapshot,
+                 PPDBDiaObject, PPDBHostGalaxy, PPDBDiaSource,PPDBDiaForcedSource )
 
 
 # ======================================================================
@@ -110,7 +111,7 @@ class FITSFileHandler( ColumnMapper ):
         for attr in [ 'max_sources_per_object', 'photflag_detect',
                       'snana_zeropoint',
                       'processing_version', 'snapshot',
-                      'really_do', 'verbose' ]:
+                      'really_do', 'verbose', 'ppdb' ]:
             setattr( self, attr, getattr( parent, attr ) )
 
         self.logger = logging.getLogger( f"logger {os.getpid()}" )
@@ -170,11 +171,13 @@ class FITSFileHandler( ColumnMapper ):
             hostgal = hostgal[ hostgal[ 'objectid' ] > 0 ]
             hostgal = astropy.table.unique( hostgal, keys='objectid' )
             hostgal.add_column( [ str(uuid.uuid4()) for i in range(len(hostgal)) ], name='id' )
-            hostgal.add_column( self.processing_version, name='processing_version' )
+            if not self.ppdb:
+                hostgal.add_column( self.processing_version, name='processing_version' )
 
             # Build the diaobject table in head
             self.diaobject_map_columns( head )
-            head.add_column( self.processing_version, name='processing_version' )
+            if not self.ppdb:
+                head.add_column( self.processing_version, name='processing_version' )
 
             head.add_column( str(NULLUUID), name='nearbyextobj1id' )
             head.add_column( str(NULLUUID), name='nearbyextobj2id' )
@@ -213,11 +216,13 @@ class FITSFileHandler( ColumnMapper ):
 
             if self.really_do:
                 with DB() as conn:
-                    nhost = HostGalaxy.bulk_insert_or_upsert( dict(hostgal), assume_no_conflict=True, dbcon=conn )
+                    cls = PPDBHostGalaxy if self.ppdb else HostGalaxy
+                    nhost = cls.bulk_insert_or_upsert( dict(hostgal), assume_no_conflict=True, dbcon=conn )
                     self.logger.info( f"PID {os.getpid()} loaded {nhost} host galaxies from {headfile.name}" )
 
-                    q = DiaObject.bulk_insert_or_upsert( dict(head), assume_no_conflict=True,
-                                                         dbcon=conn, nocommit=True )
+                    cls = PPDBDiaObject if self.ppdb else DiaObject
+                    q = cls.bulk_insert_or_upsert( dict(head), assume_no_conflict=True,
+                                                   dbcon=conn, nocommit=True )
                     cursor = conn.cursor()
                     cursor.execute( "UPDATE temp_bulk_upsert SET nearbyextobj1=NULL, nearbyextobj1id=NULL, "
                                     "                            nearbyextobj1sep=NULL "
@@ -241,20 +246,21 @@ class FITSFileHandler( ColumnMapper ):
                 self.logger.info( f"PID {os.getpid()} would try to load {nobj} objects and {nhost} host galaxies" )
 
             # Load the diaobject_snapshot table
-            no_ss = 0
-            if self.snapshot is not None:
-                o_ss = astropy.table.Table()
-                o_ss['diaobjectid'] = head['diaobjectid']
-                o_ss.add_column( self.processing_version, name='processing_version' )
-                o_ss.add_column( self.snapshot, name='snapshot' )
+            if not self.ppdb:
+                no_ss = 0
+                if self.snapshot is not None:
+                    o_ss = astropy.table.Table()
+                    o_ss['diaobjectid'] = head['diaobjectid']
+                    o_ss.add_column( self.processing_version, name='processing_version' )
+                    o_ss.add_column( self.snapshot, name='snapshot' )
 
-                if self.really_do:
-                    no_ss = DiaObjectSnapshot.bulk_insert_or_upsert( dict(o_ss), assume_no_conflict=True )
-                    self.logger.info( f"PID {os.getpid()} loaded {no_ss} "
-                                      f"DiaObjectSnapshot from {headfile.name}" )
-                else:
-                    no_ss = len( o_ss )
-                    self.logger.info( f"PID {os.getpid()} would try to load {no_ss} rows into diaobject_snapshot" )
+                    if self.really_do:
+                        no_ss = DiaObjectSnapshot.bulk_insert_or_upsert( dict(o_ss), assume_no_conflict=True )
+                        self.logger.info( f"PID {os.getpid()} loaded {no_ss} "
+                                          f"DiaObjectSnapshot from {headfile.name}" )
+                    else:
+                        no_ss = len( o_ss )
+                        self.logger.info( f"PID {os.getpid()} would try to load {no_ss} rows into diaobject_snapshot" )
 
 
             # Calculate some derived fields we'll need for source and forced sourced tables
@@ -270,10 +276,12 @@ class FITSFileHandler( ColumnMapper ):
 
             self.diasource_map_columns( phot )
             phot.add_column( np.int64(-1), name='diaobjectid' )
-            phot.add_column( -1, name='diaobject_procver' )
+            if not self.ppdb:
+                phot.add_column( -1, name='diaobject_procver' )
             phot['band'] = [ i.strip() for i in phot['band'] ]
             phot.add_column( np.int64(-1), name='diaforcedsourceid' )
-            phot.add_column( self.processing_version, name='processing_version' )
+            if not self.ppdb:
+                phot.add_column( self.processing_version, name='processing_version' )
             phot.add_column( -1., name='ra' )
             phot.add_column( -100., name='dec' )
             phot.add_column( 0, name='visit' )
@@ -292,7 +300,8 @@ class FITSFileHandler( ColumnMapper ):
                                        f'which is more than max_sources_per_object={self.max_sources_per_object}' )
                     raise RuntimeError( "Too many sources" )
                 phot['diaobjectid'][pmin:pmax+1] = headrow['diaobjectid']
-                phot['diaobject_procver'][pmin:pmax+1] = headrow['processing_version']
+                if not self.ppdb:
+                    phot['diaobject_procver'][pmin:pmax+1] = headrow['processing_version']
                 phot['visit'][pmin:pmax+1] = obj['SNID']             # Just something
                 phot['diaforcedsourceid'][pmin:pmax+1] = ( obj['SNID'] * self.max_sources_per_object
                                                            + np.arange( pmax - pmin + 1 ) )
@@ -305,7 +314,8 @@ class FITSFileHandler( ColumnMapper ):
             if self.really_do:
                 forcedphot = astropy.table.Table( phot )
                 forcedphot.remove_column( 'photflag' )
-                nfrc = DiaForcedSource.bulk_insert_or_upsert( dict(forcedphot), assume_no_conflict=True )
+                cls = PPDBDiaForcedSource if self.ppdb else DiaForcedSource
+                nfrc = cls.bulk_insert_or_upsert( dict(forcedphot), assume_no_conflict=True )
                 self.logger.info( f"PID {os.getpid()} loaded {nfrc} forced photometry points from {photfile.name}" )
                 del forcedphot
             else:
@@ -313,21 +323,22 @@ class FITSFileHandler( ColumnMapper ):
                 self.logger.info( f"PID {os.getpid()} would try to load {nfrc} forced photometry points" )
 
             # Load the diaforcedsource_snapshot table
-            nfs_ss = 0
-            if self.snapshot is not None:
-                fs_ss = astropy.table.Table()
-                fs_ss['diaforcedsourceid'] = phot['diaforcedsourceid']
-                fs_ss.add_column( self.processing_version, name='processing_version' )
-                fs_ss.add_column( self.snapshot, name='snapshot' )
+            if not self.ppdb:
+                nfs_ss = 0
+                if self.snapshot is not None:
+                    fs_ss = astropy.table.Table()
+                    fs_ss['diaforcedsourceid'] = phot['diaforcedsourceid']
+                    fs_ss.add_column( self.processing_version, name='processing_version' )
+                    fs_ss.add_column( self.snapshot, name='snapshot' )
 
-                if self.really_do:
-                    nfs_ss = DiaForcedSourceSnapshot.bulk_insert_or_upsert( dict(fs_ss), assume_no_conflict=True )
-                    self.logger.info( f"PID {os.getpid()} loaded {nfs_ss} "
-                                      f"DiaForcedSourceSnapshot from {photfile.name}" )
-                else:
-                    nfs_ss = len( fs_ss )
-                    self.logger.info( f"PID {os.getpid()} would try to load {nfs_ss} "
-                                      f"rows into diaforcedsource_snapshot" )
+                    if self.really_do:
+                        nfs_ss = DiaForcedSourceSnapshot.bulk_insert_or_upsert( dict(fs_ss), assume_no_conflict=True )
+                        self.logger.info( f"PID {os.getpid()} loaded {nfs_ss} "
+                                          f"DiaForcedSourceSnapshot from {photfile.name}" )
+                    else:
+                        nfs_ss = len( fs_ss )
+                        self.logger.info( f"PID {os.getpid()} would try to load {nfs_ss} "
+                                          f"rows into diaforcedsource_snapshot" )
 
             # Load the DiaSource table
             phot.rename_column( 'diaforcedsourceid', 'diasourceid' )
@@ -336,30 +347,36 @@ class FITSFileHandler( ColumnMapper ):
             phot.remove_column( 'photflag' )
 
             if self.really_do:
-                nsrc = DiaSource.bulk_insert_or_upsert( dict(phot), assume_no_conflict=True )
+                cls = PPDBDiaSource if self.ppdb else DiaSource
+                nsrc = cls.bulk_insert_or_upsert( dict(phot), assume_no_conflict=True )
                 self.logger.info( f"PID {os.getpid()} loaded {nsrc} sources from {photfile.name}" )
             else:
                 nsrc = len(phot)
                 self.logger.info( f"PID {os.getpid()} would try to load {nsrc} sources" )
 
             # Load the diasource_snapshot table
-            ns_ss = 0
-            if self.snapshot is not None:
-                s_ss = astropy.table.Table()
-                s_ss['diasourceid'] = phot['diasourceid']
-                s_ss.add_column( self.processing_version, name='processing_version' )
-                s_ss.add_column( self.snapshot, name='snapshot' )
+            if not self.ppdb:
+                ns_ss = 0
+                if self.snapshot is not None:
+                    s_ss = astropy.table.Table()
+                    s_ss['diasourceid'] = phot['diasourceid']
+                    s_ss.add_column( self.processing_version, name='processing_version' )
+                    s_ss.add_column( self.snapshot, name='snapshot' )
 
-                if self.really_do:
-                    ns_ss = DiaSourceSnapshot.bulk_insert_or_upsert( dict(s_ss), assume_no_conflict=True )
-                    self.logger.info( f"PID {os.getpid()} loaded {ns_ss} DiaSourceSnapshot from {photfile.name}" )
-                else:
-                    ns_ss = len( s_ss )
-                    self.logger.info( f"PID {os.getpid()} would try to load {ns_ss} rows into DStoPVtoSS" )
+                    if self.really_do:
+                        ns_ss = DiaSourceSnapshot.bulk_insert_or_upsert( dict(s_ss), assume_no_conflict=True )
+                        self.logger.info( f"PID {os.getpid()} loaded {ns_ss} DiaSourceSnapshot from {photfile.name}" )
+                    else:
+                        ns_ss = len( s_ss )
+                        self.logger.info( f"PID {os.getpid()} would try to load {ns_ss} rows into DStoPVtoSS" )
 
-            return { 'ok': True, 'msg': ( f"Loaded {nobj} objects, {nsrc} sources, {nfrc} forced, "
-                                          f"{no_ss} object_snapshot, {nfs_ss} forced_snapshot, "
-                                          f"{ns_ss} source_snapshot" ) }
+            if self.ppdb:
+                return { 'ok': True, 'msg': ( f"Loaded {nobj} ppdb objects, {nsrc} ppdb sources, "
+                                              f"{nfrc} ppdb forced sources" ) }
+            else:
+                return { 'ok': True, 'msg': ( f"Loaded {nobj} objects, {nsrc} sources, {nfrc} forced, "
+                                              f"{no_ss} object_snapshot, {nfs_ss} forced_snapshot, "
+                                              f"{ns_ss} source_snapshot" ) }
         except Exception:
             self.logger.error( f"Exception loading {headfile}: {traceback.format_exc()}" )
             return { "ok": False, "msg": traceback.format_exc() }
@@ -373,6 +390,7 @@ class FITSLoader( FastDBLoader ):
                   snana_zeropoint=27.5,
                   processing_version=None, snapshot=None,
                   really_do=False, verbose=False, dont_disable_indexes_fks=False,
+                  ppdb=False,
                   logger=logging.getLogger( "load_snana_fits") ):
         super().__init__()
         self.nprocs = nprocs
@@ -390,6 +408,7 @@ class FITSLoader( FastDBLoader ):
         self.sublogger = None
         self.verbose = verbose
         self.dont_disable_indexes_fks = dont_disable_indexes_fks
+        self.ppdb = ppdb
 
 
     def make_procver_and_snapshot( self ):
@@ -465,7 +484,8 @@ class FITSLoader( FastDBLoader ):
 
         # Get the ids of the processing version and snapshot
         #  (and load them into the database if they're not there already)
-        self.make_procver_and_snapshot()
+        if not self.ppdb:
+            self.make_procver_and_snapshot()
 
 
         # Be very scary and remove all indexes and foreign key constraints
@@ -618,12 +638,14 @@ Does *not* load root_diaobject.
                          help=( "The bit (really, 2^the bit) that indicates if a source is detected" ) )
     parser.add_argument( '-z', '--snana-zeropoint', default=27.5, type=float,
                          help="Zeropoint to move all photometry to" )
-    parser.add_argument( '--processing-version', '--pv', default='default', required=True,
+    parser.add_argument( '--processing-version', '--pv', default=None,
                          help="String value of the processing version to set for all objects" )
     parser.add_argument( '-s', '--snapshot', default=None,
                          help="If given, create this snapshot and put all loaded sources/forced sources in it" )
     parser.add_argument( '--dont-disable-indexes-fks', action='store_true', default=False,
                          help="Don't temporarily disable indexes and foreign keys (by default will)" )
+    parser.add_argument( '--ppdb', action='store_true', default=False,
+                         help="Load PPDB tables instead of main tables." )
     parser.add_argument( '--do', action='store_true', default=False,
                          help="Actually do it (otherwise, slowly reads FITS files but doesn't affect db" )
 
@@ -631,6 +653,15 @@ Does *not* load root_diaobject.
 
     if args.verbose:
         logger.setLevel( logging.DEBUG )
+
+    if args.ppdb:
+        if ( args.snapshot is not None ) or ( args.processing_version is not None ):
+            logger.warning( "processing_version and snapshot are ignored when loading the ppdb" )
+        else:
+            if args.processing_version is None:
+                logger.error( "processing_version is required" )
+            if args.snapshot is None:
+                logger.warning( "No snapshot specified, snapshot tables will not be loaded" )
 
     fitsloader = FITSLoader( args.nprocs,
                              args.directories,
@@ -642,6 +673,7 @@ Does *not* load root_diaobject.
                              snapshot=args.snapshot,
                              really_do=args.do,
                              dont_disable_indexes_fks=args.dont_disable_indexes_fks,
+                             ppdb=args.ppdb,
                              verbose=args.verbose,
                              logger=logger )
 
