@@ -35,7 +35,7 @@ class AlertReconstructor:
             Only include previous diaForcedSources that are at least this many days ago.
 
           schemadir : str or Path
-            Directory with DiaAlert.avsc, DiaObject.avsc, DiaSource.avsc, and DiaForcedSource.avsc
+            Directory with Alert.avsc, DiaObject.avsc, DiaSource.avsc, and DiaForcedSource.avsc
 
         """
 
@@ -49,12 +49,15 @@ class AlertReconstructor:
         self.diaobject_schema = fastavro.schema.load_schema( schemadir / "DiaObject.avsc" )
         self.diasource_schema = fastavro.schema.load_schema( schemadir / "DiaSource.avsc" )
         self.diaforcedsource_schema = fastavro.schema.load_schema( schemadir / "DiaForcedSource.avsc" )
-        self.alert_schema = fastavro.schema.load_schema( schemadir / "Alert.avsc" )
+        named_schemas = { 'fastdb_test_0.1.DiaObject': self.diaobject_schema,
+                          'fastdb_test_0.1.DiaSource': self.diasource_schema,
+                          'fastdb_test_0.1.DiaForcedSource': self.diaforcedsource_schema }
+        self.alert_schema = fastavro.schema.load_schema( schemadir / "Alert.avsc", named_schemas=named_schemas )
 
 
     def object_data_to_dicts( self, rows, columns ):
         allfields = [ f['name'] for f in self.diaobject_schema['fields'] ]
-        lcfields = { 'diaobjectid', 'radecmjdtai', 'ra', 'raErr', 'dec', 'decErr', 'ra_dec_Cov',
+        lcfields = { 'diaObjectId', 'raDecMjdTai', 'ra', 'raErr', 'dec', 'decErr', 'ra_dec_Cov',
                      'nearbyExtObj1', 'nearbyExtObj1Sep', 'nearbyExtObj2', 'nearbyExtObj2Sep',
                      'nearbyExtObj3', 'nearbyExtObj3Sep', 'nearbyLowzGal', 'nearbyLowzGalSep',
                      'parallax', 'parallaxErr', 'pmRa', 'pmRaErr', 'pmRa_parallax_Cov',
@@ -74,6 +77,7 @@ class AlertReconstructor:
                     curdict[col] = None if val is None else int( val.timestamp() * 1000 + 0.5 )
                 else:
                     curdict[col] = None
+            dicts.append( curdict )
 
         return dicts
 
@@ -123,6 +127,7 @@ class AlertReconstructor:
                     curdict[col] = None if val is None else int( val.timestamp() * 1000 + 0.5 )
                 else:
                     curdict[col] = None
+            dicts.append( curdict )
 
         return dicts
 
@@ -131,13 +136,13 @@ class AlertReconstructor:
         with db.DB( con ) as con:
             cursor = con.cursor()
             q = ( "SELECT * FROM ppdb_diasource WHERE diaobjectid=%(objid)s "
-                  "AND midpointmjdtai>=%(minmjd)s AND midpointmjdtai<%(maxmjds)s "
+                  "AND midpointmjdtai>=%(minmjd)s AND midpointmjdtai<%(maxmjd)s "
                   "AND diasourceid!=%(srcid)s ORDER BY midpointmjdtai" )
-            cursor.execute( q, { 'objid': diasource['diaobjectid'],
-                                 'srcid': diasource['diasourceid'],
-                                 'minmjd': diasource['midpointmjdtai'] - self.prefsrc,
-                                 'maxmjd': diasource['midpointmjdtai'] } )
-            columns = [ col_desc[0] for col_desc in cursor.description ]
+            cursor.execute( q, { 'objid': diasource['diaObjectId'],
+                                 'srcid': diasource['diaSourceId'],
+                                 'minmjd': diasource['midpointMjdTai'] - self.prevsrc,
+                                 'maxmjd': diasource['midpointMjdTai'] } )
+            columns = { col_desc[0]: i for i, col_desc in enumerate(cursor.description) }
             rows = cursor.fetchall()
 
         return self.source_data_to_dicts( rows, columns )
@@ -147,12 +152,12 @@ class AlertReconstructor:
         with db.DB( con ) as con:
             cursor = con.cursor()
             q = ( "SELECT * FROM ppdb_diaforcedsource WHERE diaobjectid=%(objid)s "
-                  "AND midpointmjdtai>%(midmjd)s AND midpointmjdtai<%(maxmjd)s "
+                  "AND midpointmjdtai>%(minmjd)s AND midpointmjdtai<%(maxmjd)s "
                   "ORDER BY midpointmjdtai" )
-            cursor.execute( q, { 'objid': diasource['diaobjectid'],
-                                 'minmjd': diasource['midpointmjdtai'] - self.prevfrced,
-                                 'maxmjd': diasource['midpointmjdtai'] - self.prevfrced_gap } )
-            columns = [ col_desc[0] for col_desc in cursor.description ]
+            cursor.execute( q, { 'objid': diasource['diaObjectId'],
+                                 'minmjd': diasource['midpointMjdTai'] - self.prevfrced,
+                                 'maxmjd': diasource['midpointMjdTai'] - self.prevfrced_gap } )
+            columns = { col_desc[0]: i for i, col_desc in enumerate(cursor.description) }
             rows = cursor.fetchall()
 
         return self.forced_source_data_to_dicts( rows, columns )
@@ -162,24 +167,24 @@ class AlertReconstructor:
         with db.DB( con ) as con:
             cursor = con.cursor()
             cursor.execute( "SELECT * FROM ppdb_diasource WHERE diasourceid=%(id)s", { 'id': diasourceid } )
-            columns = [ col_desc[0] for col_desc in cursor.description ]
+            columns = { col_desc[0]: i for i, col_desc in enumerate(cursor.description) }
             rows = cursor.fetchall()
             if len(rows) == 0:
                 raise ValueError( f"Unknown diasource {diasourceid}" )
             if len(rows) > 1:
                 raise RuntimeError( f"diasource {diasourceid} is multiply defined, I don't know how to cope." )
-            diasource = self.source_data_to_dicts( rows, columns, con=con )[0]
+            diasource = self.source_data_to_dicts( rows, columns )[0]
             previous_sources = self.previous_sources( diasource, con=con )
             previous_forced_sources = self.previous_forced_sources( diasource, con=con )
             cursor.execute( "SELECT * FROM ppdb_diaobject WHERE diaobjectid=%(id)s",
-                            { 'id': diasource['diaobjectid'] } )
-            columns = [ col_desc[0] for col_desc in cursor.description ]
+                            { 'id': diasource['diaObjectId'] } )
+            columns = { col_desc[0]: i for i, col_desc in enumerate(cursor.description) }
             rows = cursor.fetchall()
             if len(rows) == 0:
-                raise ValueError( f"Unknown diaobject {diasource['diaobjectid']} for source {diasourceid}" )
+                raise ValueError( f"Unknown diaobject {diasource['diaObjectId']} for source {diasourceid}" )
             if len(rows) > 1:
-                raise RuntimeError( f"diaobject {diasource['diaobjectid']} is multiply defined, I can't cope." )
-            diaobject = self.object_data_to_dicts( rows, columns )
+                raise RuntimeError( f"diaobject {diasource['diaObjectId']} is multiply defined, I can't cope." )
+            diaobject = self.object_data_to_dicts( rows, columns )[0]
 
             alert = { "alertId": diasourceid,
                       "diaSource": diasource,
