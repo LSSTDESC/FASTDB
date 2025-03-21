@@ -238,8 +238,8 @@ top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
 AUTOMAKE_OPTION = subdir-objects
 servicesdir = @installdir@/services
-install_DATA = config.py db.py util.py
-services_DATA = services/long_query_runner.py
+install_DATA = __init__.py config.py db.py util.py
+services_DATA = services/__init__.py services/long_query_runner.py services/projectsim.py
 all: all-am
 
 .SUFFIXES:

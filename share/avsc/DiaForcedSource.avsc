@@ -1,0 +1,67 @@
+{ "type": "record",
+  "namespace": "fastdb_test_0.1",
+  "name": "DiaForcedSource",
+  "fields": [
+    { "name": "band",
+      "type": "string",
+      "doc": "Filter band this source was observed with."
+    },
+    { "name": "dec",
+      "type": "double",
+      "doc": "Declination coordinate of the position of the DiaObject at time radecMjdTai. (deg)"
+    },
+    { "name": "detector",
+      "type": [ "int", "null" ],
+      "doc": "Id of the detector where this forcedSource was measured. Datatype short instead of byte because of DB concerns about unsigned bytes."
+    },
+    { "name": "diaForcedSourceId",
+      "type": "long",
+      "doc": "Unique id."
+    },
+    { "name": "diaObjectId",
+      "type": "long",
+      "doc": "Id of the DiaObject that this DiaForcedSource was associated with."
+    },
+    { "name": "midpointMjdTai",
+      "type": "double",
+      "doc": "Effective mid-visit time for this diaForcedSource, expressed as Modified Julian Date, International Atomic Time. (d)"
+    },
+    { "name": "psfFlux",
+      "type": "float",
+      "doc": "Point Source model flux. (nJy)"
+    },
+    { "name": "psfFluxErr",
+      "type": "float",
+      "doc": "Uncertainty of psfFlux. (nJy)"
+    },
+    { "name": "ra",
+      "type": "double",
+      "doc": "Right ascension coordinate of the position of the DiaObject at time radecMjdTai. (deg)"
+    },
+    { "name": "scienceFlux",
+      "type": [ "float", "null" ],
+      "doc": "Forced photometry flux for a point source model measured on the visit image centered at the DiaObject position. (nJy)"
+    },
+    { "name": "scienceFluxErr",
+      "type": [ "float", "null" ],
+      "doc": "Uncertainty of scienceFlux. (nJy)"
+    },
+    { "name": "time_processed",
+      "type": [ "long", "null" ],
+      "logicalType": "timestamp-millis",
+      "default": null,
+      "doc": "Time when this record was generated."
+    },
+    { "name": "time_withdrawn",
+      "type": [ "long", "null" ],
+      "logicalType": "timestamp-millis",
+      "default": null,
+      "doc": "Time when this record was marked invalid."
+    },
+    { "name": "visit",
+      "type": [ "long", "null" ],
+      "doc": "Id of the visit where this forcedSource was measured."
+    }
+  ]
+}
+

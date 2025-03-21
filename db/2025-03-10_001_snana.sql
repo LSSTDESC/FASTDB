@@ -72,7 +72,7 @@ CREATE TABLE ppdb_diaobject(
   pmdec real,
   pmdecerr real,
   pmdec_parallax_cov real,
-  pm_ra_dec_cov real
+  pmra_pmdec_cov real
 );
 CREATE INDEX idx_ppdb_diaobject_nearbyext1 ON ppdb_diaobject(nearbyextobj1id);
 ALTER TABLE ppdb_diaobject ADD CONSTRAINT fk_ppdb_diaobject_nearbyext1

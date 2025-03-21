@@ -62,25 +62,27 @@ RUN python3 -mvenv /venv
 
 RUN source /venv/bin/activate && \
     pip --no-cache install \
-       apscheduler \
-       astropy \
-       flask \
-       flask-session \
-       flask-sock \
-       gevent \
-       gunicorn \
-       numpy \
-       pandas \
-       psycopg2 \
-       pycryptodome \
-       pymongo \
-       pytest \
-       pytest-timestamper \
-       python-dateutil \
-       pytz \
-       remote-pdb \
-       requests \
-       simplejson
+       apscheduler==3.11.0 \
+       astropy==7.0.1 \
+       confluent_kafka==2.8.2 \
+       fastavro==1.10.0 \
+       flask==3.1.0 \
+       flask-session==0.8.0 \
+       flask-sock==0.7.0 \
+       gevent==24.11.1 \
+       gunicorn==23.0.0 \
+       numpy==2.2.4 \
+       pandas=2.2.3 \
+       psycopg2==2.9.10 \
+       pycryptodome==3.22.0 \
+       pymongo==4.11.3 \
+       pytest==8.3.5 \
+       pytest-timestamper==0.0.10 \
+       python-dateutil==2.9.0.post0 \
+       pytz==2025.1 \
+       remote-pdb==2.1.0 \
+       requests==2.32.3 \
+       simplejson==3.20.1
 
 # ======================================================================
 # This is for the test webserver.  It installs crappy keys so you

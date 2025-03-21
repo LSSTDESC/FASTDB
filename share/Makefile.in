@@ -86,7 +86,7 @@ POST_INSTALL = :
 NORMAL_UNINSTALL = :
 PRE_UNINSTALL = :
 POST_UNINSTALL = :
-subdir = src/webserver
+subdir = share
 ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
 am__aclocal_m4_deps = $(top_srcdir)/configure.ac
 am__configure_deps = $(am__aclocal_m4_deps) $(CONFIGURE_DEPENDENCIES) \
@@ -141,9 +141,8 @@ am__uninstall_files_from_dir = { \
     || { echo " ( cd '$$dir' && rm -f" $$files ")"; \
          $(am__cd) "$$dir" && rm -f $$files; }; \
   }
-am__installdirs = "$(DESTDIR)$(staticdir)" "$(DESTDIR)$(templdir)" \
-	"$(DESTDIR)$(webapdir)"
-DATA = $(static_DATA) $(templ_DATA) $(webap_DATA)
+am__installdirs = "$(DESTDIR)$(avscdir)"
+DATA = $(avsc_DATA)
 am__tagged_files = $(HEADERS) $(SOURCES) $(TAGS_FILES) $(LISP)
 am__DIST_COMMON = $(srcdir)/Makefile.in
 DISTFILES = $(DIST_COMMON) $(DIST_SOURCES) $(TEXINFOS) $(EXTRA_DIST)
@@ -237,18 +236,10 @@ target_alias = @target_alias@
 top_build_prefix = @top_build_prefix@
 top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
-AUTOMAKE_OPTION = subdir-objects
-webapdir = @installdir@/webserver
-templdir = @installdir@/webserver/templates
-staticdir = @installdir@/webserver/static
-webap_DATA = __init__.py baseview.py dbapp.py server.py \
-	../../extern/rkwebutil/rkwebutil.py ../../extern/rkwebutil/rkauth_flask.py
-
-static_DATA = static/fastdb.css static/fastdb.js static/fastdb_start.js \
-	../../extern/rkwebutil/rkwebutil.js ../../extern/rkwebutil/rkauth.js \
-	../../extern/rkwebutil/resetpasswd_start.js
-
-templ_DATA = templates/base.html templates/fastdb_webap.html
+AUTOMAKE_OPTION = subdicr-objects
+sharedir = @installdir@/share
+avscdir = @installdir@/share/avsc
+avsc_DATA = avsc/Alert.avsc avsc/DiaForcedSource.avsc avsc/DiaObject.avsc avsc/DiaSource.avsc
 all: all-am
 
 .SUFFIXES:
@@ -261,9 +252,9 @@ $(srcdir)/Makefile.in:  $(srcdir)/Makefile.am  $(am__configure_deps)
 	      exit 1;; \
 	  esac; \
 	done; \
-	echo ' cd $(top_srcdir) && $(AUTOMAKE) --foreign src/webserver/Makefile'; \
+	echo ' cd $(top_srcdir) && $(AUTOMAKE) --foreign share/Makefile'; \
 	$(am__cd) $(top_srcdir) && \
-	  $(AUTOMAKE) --foreign src/webserver/Makefile
+	  $(AUTOMAKE) --foreign share/Makefile
 Makefile: $(srcdir)/Makefile.in $(top_builddir)/config.status
 	@case '$?' in \
 	  *config.status*) \
@@ -281,69 +272,27 @@ $(top_srcdir)/configure:  $(am__configure_deps)
 $(ACLOCAL_M4):  $(am__aclocal_m4_deps)
 	cd $(top_builddir) && $(MAKE) $(AM_MAKEFLAGS) am--refresh
 $(am__aclocal_m4_deps):
-install-staticDATA: $(static_DATA)
+install-avscDATA: $(avsc_DATA)
 	@$(NORMAL_INSTALL)
-	@list='$(static_DATA)'; test -n "$(staticdir)" || list=; \
+	@list='$(avsc_DATA)'; test -n "$(avscdir)" || list=; \
 	if test -n "$$list"; then \
-	  echo " $(MKDIR_P) '$(DESTDIR)$(staticdir)'"; \
-	  $(MKDIR_P) "$(DESTDIR)$(staticdir)" || exit 1; \
+	  echo " $(MKDIR_P) '$(DESTDIR)$(avscdir)'"; \
+	  $(MKDIR_P) "$(DESTDIR)$(avscdir)" || exit 1; \
 	fi; \
 	for p in $$list; do \
 	  if test -f "$$p"; then d=; else d="$(srcdir)/"; fi; \
 	  echo "$$d$$p"; \
 	done | $(am__base_list) | \
 	while read files; do \
-	  echo " $(INSTALL_DATA) $$files '$(DESTDIR)$(staticdir)'"; \
-	  $(INSTALL_DATA) $$files "$(DESTDIR)$(staticdir)" || exit $$?; \
+	  echo " $(INSTALL_DATA) $$files '$(DESTDIR)$(avscdir)'"; \
+	  $(INSTALL_DATA) $$files "$(DESTDIR)$(avscdir)" || exit $$?; \
 	done
 
-uninstall-staticDATA:
+uninstall-avscDATA:
 	@$(NORMAL_UNINSTALL)
-	@list='$(static_DATA)'; test -n "$(staticdir)" || list=; \
+	@list='$(avsc_DATA)'; test -n "$(avscdir)" || list=; \
 	files=`for p in $$list; do echo $$p; done | sed -e 's|^.*/||'`; \
-	dir='$(DESTDIR)$(staticdir)'; $(am__uninstall_files_from_dir)
-install-templDATA: $(templ_DATA)
-	@$(NORMAL_INSTALL)
-	@list='$(templ_DATA)'; test -n "$(templdir)" || list=; \
-	if test -n "$$list"; then \
-	  echo " $(MKDIR_P) '$(DESTDIR)$(templdir)'"; \
-	  $(MKDIR_P) "$(DESTDIR)$(templdir)" || exit 1; \
-	fi; \
-	for p in $$list; do \
-	  if test -f "$$p"; then d=; else d="$(srcdir)/"; fi; \
-	  echo "$$d$$p"; \
-	done | $(am__base_list) | \
-	while read files; do \
-	  echo " $(INSTALL_DATA) $$files '$(DESTDIR)$(templdir)'"; \
-	  $(INSTALL_DATA) $$files "$(DESTDIR)$(templdir)" || exit $$?; \
-	done
-
-uninstall-templDATA:
-	@$(NORMAL_UNINSTALL)
-	@list='$(templ_DATA)'; test -n "$(templdir)" || list=; \
-	files=`for p in $$list; do echo $$p; done | sed -e 's|^.*/||'`; \
-	dir='$(DESTDIR)$(templdir)'; $(am__uninstall_files_from_dir)
-install-webapDATA: $(webap_DATA)
-	@$(NORMAL_INSTALL)
-	@list='$(webap_DATA)'; test -n "$(webapdir)" || list=; \
-	if test -n "$$list"; then \
-	  echo " $(MKDIR_P) '$(DESTDIR)$(webapdir)'"; \
-	  $(MKDIR_P) "$(DESTDIR)$(webapdir)" || exit 1; \
-	fi; \
-	for p in $$list; do \
-	  if test -f "$$p"; then d=; else d="$(srcdir)/"; fi; \
-	  echo "$$d$$p"; \
-	done | $(am__base_list) | \
-	while read files; do \
-	  echo " $(INSTALL_DATA) $$files '$(DESTDIR)$(webapdir)'"; \
-	  $(INSTALL_DATA) $$files "$(DESTDIR)$(webapdir)" || exit $$?; \
-	done
-
-uninstall-webapDATA:
-	@$(NORMAL_UNINSTALL)
-	@list='$(webap_DATA)'; test -n "$(webapdir)" || list=; \
-	files=`for p in $$list; do echo $$p; done | sed -e 's|^.*/||'`; \
-	dir='$(DESTDIR)$(webapdir)'; $(am__uninstall_files_from_dir)
+	dir='$(DESTDIR)$(avscdir)'; $(am__uninstall_files_from_dir)
 tags TAGS:
 
 ctags CTAGS:
@@ -387,7 +336,7 @@ check-am: all-am
 check: check-am
 all-am: Makefile $(DATA)
 installdirs:
-	for dir in "$(DESTDIR)$(staticdir)" "$(DESTDIR)$(templdir)" "$(DESTDIR)$(webapdir)"; do \
+	for dir in "$(DESTDIR)$(avscdir)"; do \
 	  test -z "$$dir" || $(MKDIR_P) "$$dir"; \
 	done
 install: install-am
@@ -440,8 +389,7 @@ info: info-am
 
 info-am:
 
-install-data-am: install-staticDATA install-templDATA \
-	install-webapDATA
+install-data-am: install-avscDATA
 
 install-dvi: install-dvi-am
 
@@ -485,23 +433,21 @@ ps: ps-am
 
 ps-am:
 
-uninstall-am: uninstall-staticDATA uninstall-templDATA \
-	uninstall-webapDATA
+uninstall-am: uninstall-avscDATA
 
 .MAKE: install-am install-strip
 
 .PHONY: all all-am check check-am clean clean-generic cscopelist-am \
 	ctags-am distclean distclean-generic distdir dvi dvi-am html \
-	html-am info info-am install install-am install-data \
-	install-data-am install-dvi install-dvi-am install-exec \
-	install-exec-am install-html install-html-am install-info \
-	install-info-am install-man install-pdf install-pdf-am \
-	install-ps install-ps-am install-staticDATA install-strip \
-	install-templDATA install-webapDATA installcheck \
-	installcheck-am installdirs maintainer-clean \
+	html-am info info-am install install-am install-avscDATA \
+	install-data install-data-am install-dvi install-dvi-am \
+	install-exec install-exec-am install-html install-html-am \
+	install-info install-info-am install-man install-pdf \
+	install-pdf-am install-ps install-ps-am install-strip \
+	installcheck installcheck-am installdirs maintainer-clean \
 	maintainer-clean-generic mostlyclean mostlyclean-generic pdf \
 	pdf-am ps ps-am tags-am uninstall uninstall-am \
-	uninstall-staticDATA uninstall-templDATA uninstall-webapDATA
+	uninstall-avscDATA
 
 .PRECIOUS: Makefile
 

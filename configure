@@ -2525,7 +2525,7 @@ END
   fi
 fi
 
-ac_config_files="$ac_config_files Makefile src/Makefile src/webserver/Makefile src/config.py"
+ac_config_files="$ac_config_files Makefile src/Makefile src/webserver/Makefile src/config.py share/Makefile"
 
 
 
@@ -3378,6 +3378,7 @@ do
     "src/Makefile") CONFIG_FILES="$CONFIG_FILES src/Makefile" ;;
     "src/webserver/Makefile") CONFIG_FILES="$CONFIG_FILES src/webserver/Makefile" ;;
     "src/config.py") CONFIG_FILES="$CONFIG_FILES src/config.py" ;;
+    "share/Makefile") CONFIG_FILES="$CONFIG_FILES share/Makefile" ;;
 
   *) as_fn_error $? "invalid argument: \`$ac_config_target'" "$LINENO" 5;;
   esac

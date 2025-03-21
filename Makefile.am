@@ -1,1 +1,1 @@
-SUBDIRS = src src/webserver
+SUBDIRS = src src/webserver share

@@ -1,5 +1,7 @@
 import pytest
+import pathlib
 import datetime
+import subprocess
 
 from db import ProcessingVersion, DiaObject, DiaSource, DiaForcedSource, Snapshot, DB, AuthUser
 from util import asUUID
@@ -228,3 +230,34 @@ tyOci9saPPfI1bNnKD202zsCAwEAAQ==
     yield user
 
     user.delete_from_db()
+
+
+@pytest.fixture( scope='session' )
+def snana_fits_ppdb_loaded():
+    e2td = pathlib.Path( "elasticc2_test_data" )
+    assert e2td.is_dir()
+    dirs = e2td.glob( "*" )
+    dirs = [ d for d in dirs if d.is_dir() ]
+    assert len(dirs) > 0
+
+    try:
+        com = [ "python", "/code/src/admin/load_snana_fits.py",
+                "-n", "5",
+                "-v",
+                "--ppdb",
+                "-d",
+               ]
+        com.extend( dirs )
+        com.append( "--do" )
+
+        res = subprocess.run( com, capture_output=True )
+        assert res.returncode == 0
+
+        yield True
+
+    finally:
+        with DB() as conn:
+            cursor = conn.cursor()
+            for tab in [ 'ppdb_host_galaxy', 'ppdb_diaobject', 'ppdb_diasource', 'ppdb_diaforcedsource' ]:
+                cursor.execute( f"TRUNCATE TABLE {tab} CASCADE" )
+            conn.commit()
