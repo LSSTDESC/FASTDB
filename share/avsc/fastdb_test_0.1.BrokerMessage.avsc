@@ -1,0 +1,46 @@
+{
+  "name": "Alert",
+  "namespace": "fastdb_test_0.1",
+  "type": "record",
+  "fields": [
+    { "name": "alertId",
+      "type": "long",
+      "doc": "unique alert identifer"
+    },
+    { "name": "diaSource",
+      "type": "fastdb_test_0.1.DiaSource"
+    },
+    { "name": "prvDiaSources",
+      "type": ["null", { "type": "array",
+                         "items": "fastdb_test_0.1.DiaSource" }
+              ],
+      "default": null
+    },
+    { "name": "prvDiaForcedSources",
+      "type": ["null", { "type": "array",
+                         "items": "fastdb_test_0.1.DiaForcedSource" }
+              ],
+      "default": null
+    },
+    { "name": "diaObject",
+      "type": "fastdb_test_0.1.DiaObject"
+    },
+    { "name": "classifications",
+      "type": {
+        "type": "array",
+        "items": {
+          "type": "record",
+          "name": "classificationDict",
+          "fields": [
+            { "name": "classId",
+              "type": "int",
+              "doc": "See https://github.com/LSSTDESC/elasticc/tree/main/taxonomy/taxonomy.ipynb for specification" },
+            { "name": "probability",
+              "type": "float",
+              "doc": "0-1" }
+          ]
+        }
+      }
+    }
+  ]
+}

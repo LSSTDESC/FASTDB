@@ -133,7 +133,8 @@ class KafkaConsumer:
         consumer.assign( partitions )
         self._sub_callback( consumer, partitions )
 
-    # I've had trouble using this
+    # I've had trouble using this.
+    # Have had better luck passing reset=True to subscribe.
     def reset_to_start( self, topic ):
         self.logger.info( f'Resetting partitions for topic {topic}\n' )
         # Poll once to make sure things are connected

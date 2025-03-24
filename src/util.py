@@ -35,9 +35,14 @@ def get_alert_schema( schemadir=None ):
                       'fastdb_test_0.1.DiaForcedSource': diaforcedsource_schema }
     alert_schema = fastavro.schema.load_schema( schemadir / f"{_schema_namespace}.Alert.avsc",
                                                 named_schemas=named_schemas )
+    brokermessage_schema = fastavro.schema.load_schema( schemadir / f"{_schema_namespace}.BrokerMessage.avsc",
+                                                        named_schemas=named_schemas )
 
     return { 'alert': alert_schema,
              'diaobject': diaobject_schema,
              'diasource': diasource_schema,
              'diaforcedsource': diaforcedsource_schema,
-             'alert_schema_file': schemadir / f"{_schema_namespace}.Alert.avsc" }
+             'brokermessage': brokermessage_schema,
+             'alert_schema_file': schemadir / f"{_schema_namespace}.Alert.avsc",
+             'brokermessage_schema_file': schemadir / f"{_schema_namespace}.BrokerMessage.avsc"
+            }

@@ -1,10 +1,15 @@
+import sys
 import pytest
 import pathlib
 import datetime
 import subprocess
+import multiprocessing
 
 from db import ProcessingVersion, DiaObject, DiaSource, DiaForcedSource, Snapshot, DB, AuthUser
 from util import asUUID
+
+sys.path.insert( 0, pathlib.Path(__file__).parent )
+from fakebroker import FakeBroker
 
 
 @pytest.fixture
@@ -261,3 +266,21 @@ def snana_fits_ppdb_loaded():
             for tab in [ 'ppdb_host_galaxy', 'ppdb_diaobject', 'ppdb_diasource', 'ppdb_diaforcedsource' ]:
                 cursor.execute( f"TRUNCATE TABLE {tab} CASCADE" )
             conn.commit()
+
+
+# Use this fixtured by calling next( fakebroker_factory( topic_barf ) )
+@pytest.fixture
+def fakebroker_factory():
+    def run_fakebroker( topic_barf, group_id='fakebroker' ):
+        broker = FakeBroker( "kafka-server:9092", [ f"alerts-{topic_barf}" ],
+                             "kafka-server:9092", f"classifications-{topic_barf}",
+                             group_id=group_id, reset=True )
+        proc = multiprocessing.Process( target=broker, daemon=True )
+        proc.start()
+
+        yield True
+
+        proc.terminate()
+        proc.join()
+
+    return run_fakebroker
