@@ -56,10 +56,10 @@ def main():
         if row.Column_Name in args.no_null:
             outio.write( f'      "type": "{typestr}",\n' )
         else:
-            outio.write( f'      "type": [ "{typestr}", "null" ],\n' )
+            outio.write( f'      "type": [ "null", "{typestr}" ],\n' )
+            outio.write(  '      "default": null,\n' )
         if row.Data_Type in logicaltype:
             outio.write( f'      "logicalType": "{logicaltype[row.Data_Type]}",\n' )
-            outio.write(  '      "default": null,\n' )
         outio.write( f'      "doc": "{docstr}"\n' )
         outio.write(  '    }' )
 

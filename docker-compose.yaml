@@ -2,6 +2,31 @@
 # environment
 
 services:
+  kafka-zookeeper:
+    image: ${DOCKER_ARCHIVE:-registry.nersc.gov/m1727/raknop}/fastdb-kafka-test:${DOCKER_VERSION:-latest}
+    build:
+      context: ./docker/kafka
+    healthcheck:
+      test: netcat -w 1 localhost 2181 || exit 1
+      interval: 5s
+      timeout: 10s
+      retries: 5
+    entrypoint: [ "bin/zookeeper-server-start.sh", "config/zookeeper.properties" ]
+
+  kafka-server:
+    depends_on:
+       kafka-zookeeper:
+         condition: service_healthy
+    image: ${DOCKER_ARCHIVE:-registry.nersc.gov/m1727/raknop}/fastdb-kafka-test:${DOCKER_VERSION:-latest}
+    build:
+      context: ./docker/kafka
+    healthcheck:
+      test: netcat -w 1 localhost 9092 || exit 1
+      interval: 5s
+      timeout: 10s
+      retries: 5
+    entrypoint: [ "bin/kafka-server-start.sh", "config/server.properties" ]
+
   postgres:
     image: ${DOCKER_ARCHIVE:-registry.nersc.gov/m1727/raknop}/fastdb-postgres:${DOCKER_VERSION:-latest}
     build:
@@ -132,6 +157,8 @@ services:
 
   shell:
     depends_on:
+      kafka-server:
+        condition: service_healthy
       postgres:
         condition: service_healthy
       mongodb:

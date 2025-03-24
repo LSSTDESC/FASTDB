@@ -239,7 +239,11 @@ top_srcdir = @top_srcdir@
 AUTOMAKE_OPTION = subdicr-objects
 sharedir = @installdir@/share
 avscdir = @installdir@/share/avsc
-avsc_DATA = avsc/Alert.avsc avsc/DiaForcedSource.avsc avsc/DiaObject.avsc avsc/DiaSource.avsc
+avsc_DATA = avsc/fastdb_test_0.1.Alert.avsc \
+	avsc/fastdb_test_0.1.DiaForcedSource.avsc \
+	avsc/fastdb_test_0.1.DiaObject.avsc \
+	avsc/fastdb_test_0.1.DiaSource.avsc
+
 all: all-am
 
 .SUFFIXES:
