@@ -284,7 +284,7 @@ class AlertSender:
         #   for 5 seconds.  Then go nuclear on anything left.
         t0 = time.perf_counter()
         _logger.debug( "In cleanup." )
-        # I'm getting errors "can only test a subprocess" here, but these *are* subprocesses... ??
+        # I'm sometimes getting errors "can only test a subprocess" here, but these *are* subprocesses... ??
         while still_alive := [ p for p in self.procinfo.values() if p['proc'].is_alive() ]:
             dt = time.perf_counter() - t0
             _logger.debug( f"{len(still_alive)} still alive after {dt:.2f} seconds" )
