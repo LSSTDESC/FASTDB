@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # Make sure we have needed env vars
-if [ -z "$MONGODB_ADMIN_USER" ] || [ -z "$MONGODB_ADMIN_PASSWD" ] || [ -z "$MONGODB_ALERT_READER_USER" ] || [ -z "$MONGODB_ALERT_READER_PASSWD" ] || [ -z "$MONGODB_ALERT_WRITER_USER" ] || [ -z "$MONGODB_ALERT_WRITER_PASSWD" ]; then
-    echo "Must set all of MONGODB_(ADMIN|ALERT_READER|ALERT_WRITER)_(USER|PASSWD)"
+if [ -z "$MONGODB_DBNAME" ] || [ -z "$MONGODB_ADMIN_USER" ] || [ -z "$MONGODB_ADMIN_PASSWD" ] || [ -z "$MONGODB_ALERT_READER_USER" ] || [ -z "$MONGODB_ALERT_READER_PASSWD" ] || [ -z "$MONGODB_ALERT_WRITER_USER" ] || [ -z "$MONGODB_ALERT_WRITER_PASSWD" ]; then
+    echo "Must set all of MONGODB_DBNAME and MONGODB_(ADMIN|ALERT_READER|ALERT_WRITER)_(USER|PASSWD)"
     exit 1
 fi
 
@@ -20,9 +20,9 @@ if [ `mongosh --eval "use admin" --eval "db.system.users.find({user:'$MONGODB_AD
     echo
     mongosh --eval "use admin" \
             --eval "db.createUser({user:'$MONGODB_ADMIN_USER', pwd:'$MONGODB_ADMIN_PASSWD', roles: [{role:'userAdminAnyDatabase', db: 'admin'}, 'readWriteAnyDatabase']})" \
-            --eval "use brokeralert" \
-            --eval "db.createUser({user:'$MONGODB_ALERT_READER_USER', pwd:'$MONGODB_ALERT_READER_PASSWD', roles: [{role:'read', db: 'brokeralert'}]})" \
-            --eval "db.createUser({user:'$MONGODB_ALERT_WRITER_USER', pwd:'$MONGODB_ALERT_WRITER_PASSWD', roles: [{role:'readWrite', db: 'brokeralert'}]})" \
+            --eval "use $MONGODB_DBNAME" \
+            --eval "db.createUser({user:'$MONGODB_ALERT_READER_USER', pwd:'$MONGODB_ALERT_READER_PASSWD', roles: [{role:'read', db: '$MONGODB_DBNAME'}]})" \
+            --eval "db.createUser({user:'$MONGODB_ALERT_WRITER_USER', pwd:'$MONGODB_ALERT_WRITER_PASSWD', roles: [{role:'readWrite', db: '$MONGODB_DBNAME'}]})" \
     echo
     echo "*** Done creating mongo users ***"
     echo

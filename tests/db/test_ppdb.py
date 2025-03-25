@@ -196,7 +196,7 @@ class TestPPDBDiaObject( BaseTestDB ):
             'pmdec',
             'pmdecerr',
             'pmdec_parallax_cov',
-            'pm_ra_dec_cov' }
+            'pmra_pmdec_cov' }
         self.safe_to_modify = [
             'radecmjdtai',
             'validitystart',
@@ -222,7 +222,7 @@ class TestPPDBDiaObject( BaseTestDB ):
             'pmdec',
             'pmdecerr',
             'pmdec_parallax_cov',
-            'pm_ra_dec_cov'
+            'pmra_pmdec_cov'
         ]
         self.uniques = []
 

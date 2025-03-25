@@ -3,11 +3,15 @@ import os
 import io
 import re
 import time
+import yaml
 import datetime
 import traceback
 import pathlib
 import urllib
 import logging
+import argparse
+import multiprocessing
+import signal
 
 import confluent_kafka
 import fastavro
@@ -37,7 +41,14 @@ class BrokerConsumer:
     (currently broken and commented out) code for pulling from the
     pubsub Pitt-Google broker.
 
-    LOGGING : logs to two different places.  ROB TODO.
+    Logging : sends log messages to stderr with a log message prefix that
+    includes loggername_prefix and loggername.  Writes log messages with
+    counts to a file created under _logdir (which is set in the env var
+    $LOGDIR, but defaults to /logs).  The count log file is named
+    "countlogger_{loggername_prefix}{loggername}".  (The variables
+    loggername_prefix and loggername are passed at object construction).
+
+    TODO : implement count log file rotation?
 
     """
 
@@ -72,17 +83,19 @@ class BrokerConsumer:
             auto.offset.reset, or group.id; those are automatically
             constructed and sent.)
 
-          scheamless : bool, default True
+          schemaless : bool, default True
             If True, expecting schemaless avro messages.  If False,
             expecting embedded schema.  Ignored if you pass a handler to
             poll.  Currently can't handle False.
 
-          schemafile : Path or str, default ...
-            Only used if you poke inside this object and use its
-            internal variables.  Your handler will need schema, but this
-            class usually doesn't.  So, don't worry about it too much.
-            (Defaults to the BrokerMessage schema at the location it lives
-            in the docker environment we usually run in.)
+          schemafile : Path or str
+            The .avsc the that holds the schema of the messsages we'll be
+            ingesting.  Required if schemaless is True (which, right now, it
+            has to be).  The schema must be named properly for its namespace,
+            and any other schema in the same namespace referred to by that
+            .avsc file must be in the same directory with the right names.  If
+            not given, uses the location where it is find in the docker image
+            we use.
 
           pipe : multiprocessing.Pipe or None
             If not None, a call to poll will regularly send hearbeats to
@@ -96,21 +109,20 @@ class BrokerConsumer:
           loggername_prefix : str, default ""
             Used in headers of log messages
 
-          mongodb_host : str, default $MONGOHOST
+          mongodb_host : str, default $MONGODB_HOST
             The host where Mongo is running
 
-          mongodb_dbname : None
-            Required.  The name of the mongodb running on the mongo server
+          mongodb_dbname : str, default $MONGODB_DBNAME
+            The database name
 
-          mongodb_collection : None
-            Required.  The collection to write alerts to in the mongo database.
+          mongodb_collection : str, default $MONGODB_DEFAULT_COLLECTION
+            The collection
 
-          mongodb_user : str, default $MONGODB_ALERT_WRITER
+          mongodb_user : str, default $MONGODB_ALERT_WRITER_USER
             Username that can write alerts to mongodb_collection
 
-          mongodb_password : str, default $MONGODB_ALERT_WRITER_PASSWORD
+          mongodb_password : str, default $MONGODB_ALERT_WRITER_PASSWD
             Password for mongodb_user.
-
 
         """
 
@@ -158,29 +170,30 @@ class BrokerConsumer:
             self.countlogger.error( "CRASHING.  I only know how to handle schemaless streams." )
             raise RuntimeError( "I only know how to handle schemaless streams" )
         self.schemafile = schemafile
+        self.schema = fastavro.schema.load_schema( self.schemafile )
 
         self.nmessagesconsumed = 0
 
-        if ( mongodb_dbname is None ) or ( mongodb_collection ) is None:
-            raise RuntimeError( "mongodb_dbname and mongodb_collection are required" )
-        self.mongodb_dbname = mongodb_dbname
-        self.mongodb_collection = mongodb_collection
-        self.mongohost = mongodb_host if mongodb_host is not None else os.getenv( "MONGOHOST" )
-        if self.mongohost is None:
-            raise ValueError( "Error, must specify mongodb_host or set env var MONGOHOST" )
-        self.mongousername = mongodb_user if mongodb_user is not None else os.getenv( "MONGODB_ALERT_WRITER" )
-        if self.mongousername is None:
-            raise ValueError( "Error, must specify mongodb_user or set env var MONGODB_ALERT_WRITER" )
-        self.mongopassword = ( mongodb_password if mongodb_password is not None
-                               else os.getenv( "MONGODB_ALERT_WRITER_PASSWORD" ) )
-        if self.mongopassword is None:
-            raise ValueError( "Error, must specify mongodb_password or set env var MONGODB_ALERT_WRITER_PASSWORD" )
-
-        self.mongohost = urllib.parse.quote_plus( self.mongohost )
-        self.mongodb_dbname = urllib.parse_quote_plus( self.mongodb_name )
-        self.mongodb_collection = urllib.parse_quote_plus( self.mongodb_collection )
-        self.monogousername = urllib.parse.quote_plus( self.mongousername )
-        self.mongopassword = urllib.parse.quote_plus( self.mongopassword )
+        mongoconfigs = [ ( 'mongodb_host', mongodb_host, 'MONGODB_HOST' ),
+                         ( 'mongodb_dbname', mongodb_dbname, 'MONGODB_DBNAME' ),
+                         ( 'mongodb_collection', mongodb_collection, 'MONGODB_DEFAULT_COLLECTION' ),
+                         ( 'mongodb_user', mongodb_user, 'MONGODB_ALERT_WRITER_USER' ),
+                         ( 'mongodb_password', mongodb_password, 'MONGODB_ALERT_WRITER_PASSWD' ) ]
+        missing = []
+        for mc in mongoconfigs:
+            setattr( self, mc[0], mc[1] if mc[1] is not None else os.getenv( mc[2] ) )
+            if getattr( self, mc[0] ) is None:
+                missing.append( mc )
+            else:
+                setattr( self, mc[0], urllib.parse.quote_plus( getattr( self, mc[0] ) ) )
+        if len( missing ) > 0:
+            strio = io.StringIO()
+            strio.write( "Must provide all of:\n" )
+            for mc in mongoconfigs:
+                strio.write( f"    * {mc[0]}, or set env var {mc[2]}\n" )
+            strio.write( f"Missing: {','.join( [ mc[0] for mc in missing ] ) }" )
+            self.logger.error( strio.getvalue () )
+            raise ValueError( "Incomplete mongo config" )
 
         self.logger.info( f"Writing broker messages to monogdb {self.mongodb_dbname} "
                           f"collection {self.mongodb_collection}" )
@@ -188,7 +201,7 @@ class BrokerConsumer:
 
     def create_connection( self, reset=False ):
         countdown = 5
-        if self._reset:
+        if reset:
             self.countlogger.info( "*************** Resetting to start of broker kafka stream ***************" )
         else:
             self.countlogger.info( "*************** Connecting to kafka stream without reset  ***************" )
@@ -235,6 +248,7 @@ class BrokerConsumer:
         messagebatch = []
         self.countlogger.info( f"Handling {len(msgs)} messages; consumer has received "
                                f"{self.consumer.tot_handled} messages." )
+        now = datetime.datetime.now( tz=datetime.UTC )
         for msg in msgs:
             timestamptype, timestamp = msg.timestamp()
 
@@ -251,6 +265,7 @@ class BrokerConsumer:
             messagebatch.append( { 'topic': msg.topic(),
                                    'msgoffset': msg.offset(),
                                    'timestamp': timestamp,
+                                   'savetime': now,
                                    'msg': alert } )
 
         nadded = self.mongodb_store( messagebatch )
@@ -261,7 +276,7 @@ class BrokerConsumer:
     def mongodb_store(self, messagebatch=None):
         if messagebatch is None:
             return 0
-        connstr = ( f"mongodb://{self.mongousername}:{self.mongopassword}@{self.mongohost}:27017/"
+        connstr = ( f"mongodb://{self.mongodb_user}:{self.mongodb_password}@{self.mongodb_host}:27017/"
                     f"?authSource={self.mongodb_dbname}" )
         self.logger.debug( f"mongodb connection string {connstr}" )
         client = MongoClient( connstr )
@@ -271,27 +286,35 @@ class BrokerConsumer:
         return len( results.inserted_ids )
 
 
-    def poll( self, reset=False, restart_time=datetime.timedelta(minutes=30) ):
+    def poll( self, reset=False, restart_time=datetime.timedelta(minutes=30), max_restarts=None ):
         """Poll the server, saving consumed messages to the Mongo DB.
-
-        Will keep running indefinitely.
 
         Parameters
         ----------
           reset: bool, default False
-            If True, reset the topics the first time we connect to the
-            server.  Usually you want to pick up where you left off (as
-            specified by the groupid you gave at object construction.)
+            If True, reset the topics the first time we connect to the server.
+            Usually you want this to be False, so you will pick up where you
+            left off (with the server remembering where you were based on the
+            groupid you passed at object construction).
 
           restart_time: datetime.timedelta
             Only query the kafka server for this long before closing and
             reopening the connection.  This is just a standard "turn it
-            off and back on" cruft-cleaning mechanism.
+            off and back on" cruft-cleaning mechanism.  Make this None
+            to never restart.  (Which means you're very trusting
+            of a lack of a need to power cycle.)
+
+          max_restarts: int, default None
+            If not None, after this many restarts of the server (after a
+            restart_time timeout), exit the poll loop.  If this is None, the
+            poll loop runs indefinitely (or until a "die" message is sent
+            over the pipe).
 
         """
 
 
         self.create_connection( reset )
+        n_restarts = 0
         while True:
             if self._updatetopics:
                 self.update_topics()
@@ -303,12 +326,18 @@ class BrokerConsumer:
                 self.logger.info( f"Subscribed to topics: {self.consumer.topics}; starting poll loop." )
                 self.countlogger.info( f"Subscribed to topics: {self.consumer.topics}; starting poll loop." )
                 try:
-                    happy = self.consumer.poll_loop( handler=self.handle_message_batch,
-                                                     max_consumed=None, max_runtime=restart_time,
-                                                     pipe=self.pipe )
+                    happy = self.consumer.poll_loop( handler=self.handle_message_batch, pipe=self.pipe,
+                                                     stopafter=restart_time,
+                                                     stopafternmessages=None, stopafternsleeps=None )
                     if happy:
                         strio.write( f"Reached poll timeout for {self.server}; "
                                      f"handled {self.consumer.tot_handled} messages. " )
+                        if ( max_restarts is not None ) and ( n_restarts >= max_restarts ):
+                            strio.write( "Exiting after {n_restarts} restarts." )
+                            self.logger.info( strio.getvalue() )
+                            self.countlogger.info( strio.getvalue() )
+                            self.close_connection()
+                            return
                     else:
                         strio.write( f"Poll loop received die command after handling "
                                      f"{self.consumer.tot_handled} messages.  Exiting." )
@@ -322,23 +351,28 @@ class BrokerConsumer:
                     self.logger.warning( otherstrio.getvalue() )
                     strio.write( f"Exception polling: {str(e)}. " )
 
-            if self.pipe.poll():
+            if ( self.pipe is not None ) and ( self.pipe.poll() ):
                 msg = self.pipe.recv()
                 if ( 'command' in msg ) and ( msg['command'] == 'die' ):
-                    self.logger.info( "No topics, but also exiting broker poll due to die command." )
-                    self.countlogger.info( "No topics, but also existing broker poll due to die command." )
+                    if len( strio.getvalue() ) > 0:
+                        self.logger.info( strio.getvalue() )
+                        self.countlogger.info( strio.getvalue() )
+                    self.logger.info( "Exiting broker poll due to die command." )
+                    self.countlogger.info( "Exiting broker poll due to die command." )
                     self.close_connection()
                     return
             strio.write( "Reconnecting to server.\n" )
             self.logger.info( strio.getvalue() )
             self.countlogger.info( strio.getvalue() )
+            self.close_connection()
+            # TODO : think about automatic topic updating
+            # if self._updatetopics:
+            #     self.consumer.topics = None
             # Only want to reset the at most first time we connect!  If
             # we disconnect and reconnect in the loop below, we want to
             # pick up where we left off.
-            self.close_connection( reset=False )
-            if self._updatetopics:
-                self.topics = None
-            self.create_connection()
+            self.create_connection( reset=False )
+            n_restarts += 1
 
 
 # ======================================================================
@@ -444,6 +478,8 @@ class AlerceConsumer(BrokerConsumer):
         self.consumer.subscribe( self.topics )
 
 # =====================================================================
+# MAKE SURE TO UPDATE WHAT'S BELOW TO MATCK CHANGES TO BrokerConsumer
+# AS WELL AS WHAT'S NEEDE FOR Pitt-Google
 
 # class PittGoogleBroker(BrokerConsumer):
 #     _brokername = 'pitt-google'
@@ -489,7 +525,7 @@ class AlerceConsumer(BrokerConsumer):
 #                     broker_logger: logging.Logger, broker_countlogger: logging.Logger ):
 #
 
-    """Initializer for the ThreadPoolExecutor."""
+#    """Initializer for the ThreadPoolExecutor."""
 #         global countlogger
 #         global logger
 #         global schema
@@ -544,3 +580,218 @@ class AlerceConsumer(BrokerConsumer):
 #         # this blocks indefinitely or until a fatal error
 #         # use Control-C to exit
 #         self.consumer.stream( pipe=self.pipe, heartbeat=60 )
+
+
+class BrokerConsumerLauncher:
+    """Launch a bunch of BrokerConsumer (or subclass) processes to listen to brokers.
+
+    Make an object, and then call it as a function.  That will run them the
+    BrokerConsumers subprocesses so they can all run in parallel.
+
+    The subprocess will all send regular heartbeats back to the main process.
+    If the main process doesn't hear a heartbeat from a subprocess for 5
+    minutes, it will conclude that it's locked up or died, kill it, and start
+    a new one.
+
+    IMPORTANT : if you run this class directly, be aware that it futzes around
+    with the signal handlers of its process.  For that reason, you may want to
+    run BrokerConsumerLauncher itself in a multiprocessing subprocess; you can
+    send an INT or TERM signal to it to get it to (eventually) exit.  Normal
+    use of this class is from main() below.
+
+    """
+
+    def __init__( self, configfile, barf='', verbose=False ):
+        self.config = configfile
+        self.barf = barf
+        self.verbose = verbose
+
+
+    def _launch_broker( self, brokerinfo ):
+        # Ignore signals; the main process will tell us to die when we need to
+        signal.signal( signal.SIGTERM, lambda sig, stack: True )
+        signal.signal( signal.SIGINT, lambda sig, stack: True )
+
+        bc = brokerinfo['class']( brokerinfo['server'],
+                                  brokerinfo['groupid'],
+                                  topics=brokerinfo['topics'],
+                                  updatetopics=brokerinfo['updatetopics'],
+                                  extraconfig=brokerinfo['extraconfig'],
+                                  pipe=brokerinfo['childpipe'],
+                                  mongodb_collection=brokerinfo['collection'],
+                                  loggername=brokerinfo['loggername'],
+                                  loggername_prefix=brokerinfo['loggername_prefix']
+                                 )
+        bc.poll()
+
+
+    def __call__( self ):
+        """Only ever run this in a subprocess, or from main() below.
+
+        It will screw up your process' signal handlers otherwise.
+        """
+
+        logger = logging.getLogger( "BrokerConsumerLauncher" )
+        if not logger.hasHandlers():
+            logout = logging.StreamHandler( sys.stderr )
+            logger.addHandler( logout )
+            formatter = logging.Formatter( '[%(asctime)s - %(levelname)s] - %(message)s',
+                                           datefmt='%Y-%m-%d %H:%M:%S' )
+            logout.setFormatter( formatter )
+        logger.propagate = False
+        logger.setLevel( logging.DEBUG if self.verbose else logging.INFO )
+
+        config = yaml.safe_load( self.config )
+
+        schemafile = config[ 'schemafile' ]
+
+        brokers = []
+        clsmap = { 'BrokerConsumer': BrokerConsumer }
+
+        # Parse the config for all brokers before launching anything, so that if we get an exception
+        #   we won't have started subprocesses.
+        for broker in config[ 'brokers' ]:
+            cls = clsmap[ broker['class'] ]
+            name = broker['name']
+            server = broker['server'].replace( "{barf}", self.barf )
+            topics = [ t.replace("{barf}", self.barf) for t in broker['topics'] ]
+            groupid = broker['groupid'].replace( "{barf}", self.barf )
+            collection = broker['collection'] if 'collection' in broker else None
+            loggername = broker['loggername'].replace( "{barf}", self.barf )
+            loggername_prefix = broker['loggername_prefix'].replace( "{barf}", self.barf )
+            schm = schemafile if 'schemafile' not in broker else broker['schemafile']
+            updatetopics = False if 'updatetopics' not in broker else broker['updatetopics']
+            extraconfig = {} if 'extraconfig' not in broker else broker['extraconfig']
+            brokerinfo = { 'class': cls,
+                           'name': name,
+                           'server': server,
+                           'topics': topics,
+                           'groupid': groupid,
+                           'schemafile': schm,
+                           'updatetopics': updatetopics,
+                           'extraconfig': extraconfig,
+                           'collection': collection,
+                           'loggername': loggername,
+                           'loggername_prefix': loggername_prefix }
+            brokers.append( brokerinfo )
+
+        for broker in brokers:
+            logger.info( f"Launching a {broker['class']} looking at server {broker['server']} "
+                         f"with group id {broker['groupid']} listening to topics {broker['topics']}"
+                         f"{' (will be updated)' if updatetopics else ''}, "
+                         f"saving to collection {broker['collection']}" )
+            parentconn, childconn = multiprocessing.Pipe()
+            broker['pipe'] = parentconn
+            broker['childpipe'] = childconn
+            proc = multiprocessing.Process( target=lambda: self._launch_broker( brokerinfo ) )
+            broker['process'] = proc
+            broker['lastheartbeat'] = time.monotonic()
+            proc.start()
+
+        # Catch INT and TERM signals so we can try to shut down cleanly.
+        mustdie = False
+
+        def sigged( sig="TERM" ):
+            logger.warning( f"Got a {sig} signal, trying to die." )
+            mustdie = True   # noqa: F841
+
+        signal.signal( signal.SIGTERM, lambda sig, stack: sigged( "TERM" ) )
+        signal.signal( signal.SIGINT, lambda sig, stack: sigged( "INT" ) )
+
+        # Listen for a heartbeat from all processes.
+        # If we don't get a heartbeat for 5min, kill
+        # that process and restart it.
+
+        heartbeatwait = 2
+        toolongsilent = 300
+        while not mustdie:
+            try:
+                pipelist = [ b['pipe'] for b in brokers ]
+                _whichpipe = multiprocessing.connection.wait( pipelist, timeout=heartbeatwait )
+
+                brokerstorestart = set()
+                for broker in brokers:
+                    try:
+                        while broker['pipe'].poll():
+                            msg = broker['pipe'].recv()
+                            if ( 'message' not in msg ) or ( msg['message'] != 'ok' ):
+                                logger.error( f"Got unexpected message from {broker['name']}, will restart. "
+                                              f"(Message={msg}" )
+                                brokerstorestart.add( broker )
+                            else:
+                                logger.debug( f"Got heartbeat from {broker['name']}" )
+                                broker['lastheartbeat'] = time.monotonic()
+                    except Exception as ex:
+                        logger.error( f"Got exception listening for heartbeat from {broker['name']}; will restart." )
+                        logger.debug( str(ex) )
+                        brokerstorestart.add( broker )
+
+                for broker in brokers:
+                    dt = time.monotonic() - broker['lasthearbeat']
+                    if dt > toolongsilent:
+                        logger.error( f"It's been {dt:.0f} seconds since last heartbeat from {broker['name']}; "
+                                      f"will restart." )
+                        brokerstorestart.add( broker )
+
+                for broker in brokerstorestart:
+                    logger.warning( f"Killing and restarting process for {broker['name']}" )
+                    broker['process'].kill()
+                    broker['pipe'].close()
+                    del broker['process']
+                    parentconn, childconn = multiprocessing.Pipe()
+                    broker['pipe'] = parentconn
+                    broker['childpipe'] = childconn
+                    proc = multiprocessing.Process( target=lambda: self._launch_broker( broker ) )
+                    broker['process'] = proc
+                    broker['lastheartbeat'] = time.monotonic()
+                    proc.start()
+
+            except Exception as ex:
+                self.logger.exception( ex )
+                self.logger.error( "brokerconsumer main process got an exception, going to shut down" )
+                mustdie = True
+
+        # I chose 20s because (a) BrokerConsumer.poll() has a 10s sleep
+        # timeout waiting for topica, and (b) because kubernetes sends a TERM
+        # and then waits 30s before shutting things down.  We want our
+        # shutdown messages to have a chance to go through, but also we want
+        # to exit before they kill us.
+        logger.warning( "Shitting down.  Sending die to all processes and waiting 20s" )
+        for name, broker in brokers.itemns():
+            broker['pipe'].send( { "command": "die" } )
+        time.sleep( 20 )
+        logger.warning( "Exiting" )
+        return
+
+
+# ======================================================================
+def main():
+    parser = argparse.ArgumentParser( 'brokerconsumer',
+                                      description="Listen to broker streams and save broker messages",
+                                      formatter_class=argparse.ArgumentDefaultsHelpFormatter )
+    parser.add_argument( 'config', help='YAML file with config of brokers to listen to' )
+    parser.add_argument( 'collection', default=None,
+                         help="Collection in mongo database to store alerts; defaults to $MONGODB_DEFAULT_COLLECTION" )
+    parser.add_argument( '-b', '--barf', default='abcdef',
+                         help="String of random characters for group and topic names.  (Used in tests.)" )
+    parser.add_argument( '-v', '--verbose', default=False, action='store_true',
+                         help="Show a few more log messages in the main process." )
+    args = parser.parse_args()
+
+    mongodb_host = os.getenv( "MONGODB_HOST" )
+    mongodb_dbname = os.getenv( "MONGDB_DBNAME" )
+    mongodb_collection = args.collection if args.collection is not None else os.getenv( "MONGODB_DEFAULT_COLLECTION" )
+    mongodb_user = os.getenv( "MONGODB_ALERT_WRITER_USER" )
+    mongodb_password = os.getenv( "MONGODB_ALERT_WRITER_PASSWD" )
+    if any ( [ i is None for i in [ mongodb_host, mongodb_dbname, mongodb_collection,
+                                    mongodb_user, mongodb_password ] ] ):
+        raise ValueError( "Must set all the following env vars: MONGODB_HOST, MONGODB_DBNAME, MONGODB_COLLECTION, "
+                          "MONGODB_ALERT_WRITER_USER, MONGODB_ALERT_WRITER_PASSWD" )
+
+    bcl = BrokerConsumerLauncher( args.config, barf=args.barf, verbose=args.verbose )
+    bcl()
+
+
+# ======================================================================
+if __name__ == "__main__":
+    main()

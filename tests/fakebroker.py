@@ -14,17 +14,6 @@ from kafka_consumer import KafkaConsumer
 
 _rundir = pathlib.Path( __file__ ).parent
 
-_logger = logging.getLogger( "fakebroker" )
-_logger.propagate = False
-_logout = logging.StreamHandler( sys.stderr )
-_logger.addHandler( _logout )
-_formatter = logging.Formatter( '[%(asctime)s - fakebroker - %(levelname)s] - %(message)s',
-                                datefmt='%Y-%m-%d %H:%M:%S' )
-_logout.setFormatter( _formatter )
-# _logger.setLevel( logging.INFO )
-_logger.setLevel( logging.DEBUG )
-
-
 # This next thing is used as a default
 _schema_namespace = "fastdb_test_0.1"
 
@@ -34,7 +23,11 @@ _schema_namespace = "fastdb_test_0.1"
 class Classifier:
     def __init__( self, brokername, brokerversion, classifiername, classifierparams,
                   kafkaserver="brahms.lbl.gov:9092", topic="somebody-didnt-replace-a-default",
-                  alertschema=None, brokermessageschema=None ):
+                  alertschema=None, brokermessageschema=None, logger=None ):
+
+        if logger is None:
+            raise ValueError( "I need a logger." )
+        self.logger = logger
         self.brokername = brokername
         self.brokerversion = brokerversion
         self.classifiername = classifiername
@@ -71,7 +64,7 @@ class Classifier:
 
         self.nclassified += len(messages)
         if ( self.nclassified > self.nextlog ):
-            _logger.info( f"{self.classifiername} has classified {self.nclassified} alerts" )
+            self.logger.info( f"{self.classifiername} has classified {self.nclassified} alerts" )
             self.nextlog = self.logevery * ( math.floor( self.nclassified / self.logevery ) + 1 )
 
 
@@ -122,7 +115,20 @@ class FakeBroker:
                   alert_schema=f"/fastdb/share/avsc/{_schema_namespace}.Alert.avsc",
                   brokermessage_schema=f"/fastdb/share/avsc/{_schema_namespace}.BrokerMessage.avsc",
                   runtime=datetime.timedelta(minutes=10),
-                  reset=False ):
+                  notopic_sleeptime=10,
+                  reset=False,
+                  verbose=False ):
+
+        self.logger = logging.getLogger( "fakebroker" )
+        self.logger.propagate = False
+        if not self.logger.hasHandlers():
+            _logout = logging.StreamHandler( sys.stderr )
+            self.logger.addHandler( _logout )
+            _formatter = logging.Formatter( '[%(asctime)s - fakebroker - %(levelname)s] - %(message)s',
+                                            datefmt='%Y-%m-%d %H:%M:%S' )
+            _logout.setFormatter( _formatter )
+        self.logger.setLevel( logging.DEBUG if verbose else logging.INFO )
+
         self.source = source
         self.source_topics = source_topics
         self.dest = dest
@@ -130,14 +136,17 @@ class FakeBroker:
         self.group_id = group_id
         self.reset = reset
         self.runtime = runtime
+        self.notopic_sleeptime=notopic_sleeptime
 
         self.alert_schema = alert_schema
         alertschemaobj = fastavro.schema.load_schema( alert_schema )
         brokermsgschema = fastavro.schema.load_schema( brokermessage_schema )
         self.classifiers = [ NugentClassifier( kafkaserver=self.dest, topic=self.dest_topic,
-                                               alertschema=alertschemaobj, brokermessageschema=brokermsgschema ),
+                                               alertschema=alertschemaobj, brokermessageschema=brokermsgschema,
+                                               logger=self.logger ),
                              RandomSNType(  kafkaserver=self.dest, topic=self.dest_topic,
-                                            alertschema=alertschemaobj, brokermessageschema=brokermsgschema )
+                                            alertschema=alertschemaobj, brokermessageschema=brokermsgschema,
+                                            logger=self.logger )
                             ]
 
     def handle_message_batch( self, msgs ):
@@ -145,34 +154,36 @@ class FakeBroker:
             cfer.classify_alerts( msgs )
 
     def __call__( self ):
-        _logger.info( "Fakebroker starting, looking for source topics" )
+        self.logger.info( "Fakebroker starting, looking for source topics" )
         consumer = None
         while True:
             subbed = []
             if consumer is not None:
                 consumer.close()
             consumer = KafkaConsumer( self.source, self.group_id, self.alert_schema, consume_nmsgs=100,
-                                      logger=_logger )
+                                      logger=self.logger )
             # Wait for the topic to exist, and only then subscribe
             while len(subbed) == 0:
                 topics = consumer.topic_list()
-                _logger.debug( f"Topics seen on server: {topics}" )
+                self.logger.debug( f"Topics seen on server: {topics}" )
                 for topic in self.source_topics:
                     if topic in topics:
                         subbed.append( topic )
                 if len(subbed) > 0:
-                    _logger.debug( f"Subscribing to topics {subbed}" )
+                    self.logger.debug( f"Subscribing to topics {subbed}" )
                     if len(subbed) < len( self.source_topics ):
                         missing = [ i for i in self.source_topics if i not in subbed ]
-                        _logger.debug( f"(Didn't see topics: {missing})" )
+                        self.logger.debug( f"(Didn't see topics: {missing})" )
                     consumer.subscribe( subbed, reset=self.reset )
                 else:
-                    _logger.warning( f"No topics in {self.source_topics} exists, sleeping 10s and trying again." )
-                    time.sleep( 10 )
+                    self.logger.warning( f"No topics in {self.source_topics} exists, sleeping "
+                                     f"{self.notopic_sleeptime}s and trying again." )
+                    time.sleep( self.notopic_sleeptime )
 
-            _logger.info( "Fakebroker starting poll loop" )
+            self.logger.info( "Fakebroker starting poll loop" )
+            stopafternsleeps = 1 if len(subbed) < len(self.source_topics) else None
             consumer.poll_loop( handler=self.handle_message_batch,
-                                stoponnomessages=(len(subbed)<len(self.source_topics)),
+                                stopafternsleeps=stopafternsleeps,
                                 stopafter=self.runtime )
 
 
@@ -196,12 +207,15 @@ def main():
     parser.add_argument( "-b", "--brokermessage-schema",
                          default=f"/fastdb/share/avsc/{_schema_namespace}.BrokerMessage.avsc",
                          help="File with broker message alert schema" )
+    parser.add_argument( "-v", "--verbose", default=False, action="store_true",
+                         help="Show a lot of debug log messages" )
 
     args = parser.parse_args()
 
     broker = FakeBroker( args.source, args.source_topics, args.dest, args.dest_topic,
                          group_id=args.group_id, alert_schema=args.alert_schema,
-                         brokermessage_schema=args.brokermessage_schema, reset=args.reset )
+                         brokermessage_schema=args.brokermessage_schema, reset=args.resetl,
+                         verbose=args.verbose )
     broker()
 
 

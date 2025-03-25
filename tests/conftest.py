@@ -1,15 +1,22 @@
 import sys
+import os
 import pytest
 import pathlib
 import datetime
 import subprocess
-import multiprocessing
+
+from pymongo import MongoClient
 
 from db import ProcessingVersion, DiaObject, DiaSource, DiaForcedSource, Snapshot, DB, AuthUser
 from util import asUUID
 
 sys.path.insert( 0, pathlib.Path(__file__).parent )
-from fakebroker import FakeBroker
+# For cleanliness, a bunch of fixtures are broken
+#   out into their own files.  To be able to see
+#   them, put those files in this list below.
+#   (pytest is kind of a beast).  Those files
+#   should all live in the fixtures subdirectory.
+pytest_plugins = [ 'fixtures.alertcycle' ]
 
 
 @pytest.fixture
@@ -268,19 +275,21 @@ def snana_fits_ppdb_loaded():
             conn.commit()
 
 
-# Use this fixtured by calling next( fakebroker_factory( topic_barf ) )
 @pytest.fixture
-def fakebroker_factory():
-    def run_fakebroker( topic_barf, group_id='fakebroker' ):
-        broker = FakeBroker( "kafka-server:9092", [ f"alerts-{topic_barf}" ],
-                             "kafka-server:9092", f"classifications-{topic_barf}",
-                             group_id=group_id, reset=True )
-        proc = multiprocessing.Process( target=broker, daemon=True )
-        proc.start()
+def mongoclient():
+    host = os.getenv( 'MONGODB_HOST' )
+    dbname = os.getenv( 'MONGODB_DBNAME' )
+    user = os.getenv( "MONGODB_ALERT_READER_USER" )
+    password = os.getenv( "MONGODB_ALERT_READER_PASSWD" )
+    client = MongoClient( f"mongodb://{user}:{password}@{host}:27017/{dbname}?authSource={dbname}" )
+    return client
 
-        yield True
 
-        proc.terminate()
-        proc.join()
-
-    return run_fakebroker
+@pytest.fixture
+def mongoclient_rw():
+    host = os.getenv( 'MONGODB_HOST' )
+    dbname = os.getenv( 'MONGODB_DBNAME' )
+    user = os.getenv( "MONGODB_ALERT_WRITER_USER" )
+    password = os.getenv( "MONGODB_ALERT_WRITER_PASSWD" )
+    client = MongoClient( f"mongodb://{user}:{password}@{host}:27017/{dbname}?authSource={dbname}" )
+    return client

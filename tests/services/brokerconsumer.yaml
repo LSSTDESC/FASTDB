@@ -1,0 +1,14 @@
+schemafile: /fastdb/share/avsc/fastdb_test_0.1.BrokerMessage.avsc
+
+brokers:
+  - name: "test broker"
+    class: BrokerConsumer
+    server: kafka-server
+    topics: [ test-alert-{barf} ]
+    groupid: test-{barf}
+    collection: test_broker
+    loggername: TEST
+    loggername_prefix: ""
+    updatetopics: false
+    extraconfig: {}
+    

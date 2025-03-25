@@ -2,16 +2,15 @@ import sys
 import io
 import pytest
 import datetime
-import time
 import random
 import logging
 
-from kafka_consumer import KafkaConsumer
 import fastavro
 
-from services.projectsim import AlertReconstructor, AlertSender
+from kafka_consumer import KafkaConsumer
 import db
 import util
+from services.projectsim import AlertReconstructor, AlertSender
 
 _logger = logging.getLogger( __file__ )
 _logout = logging.StreamHandler( sys.stderr )
@@ -233,55 +232,6 @@ def test_send_all_alerts( snana_fits_ppdb_loaded ):
                             "LEFT JOIN ppdb_alerts_sent a ON s.diasourceid=a.diasourceid "
                             "WHERE a.diasourceid IS NULL" )
             assert len( cursor.fetchall() ) == 0
-
-    finally:
-        with db.DB() as con:
-            cursor = con.cursor()
-            cursor.execute( "DELETE FROM ppdb_alerts_sent" )
-            con.commit()
-
-
-def test_fakebroker( snana_fits_ppdb_loaded, fakebroker_factory ):
-    try:
-        schema = util.get_alert_schema()
-
-        barf = "".join( random.choices( 'abcdefghijklmnopqrstuvwzyx', k=6 ) )
-        alerttopic = f'alerts-{barf}'
-        brokertopic = f'classifications-{barf}'
-        next( fakebroker_factory( barf, f'fakebroker-{barf}' ) )
-
-        # Now that the fakebroker is running, send some alerts
-        sender = AlertSender( 'kafka-server', alerttopic )
-        nsent = sender( addeddays=30, reallysend=True )
-        assert nsent == 77
-
-        # Give the broker 15 seconds, because will be sleeping 10 seconds waiting for topics...
-        #   and there sometimes seem to be weird latencies.
-        # (I think it has to do with exiting subscriptions???)
-        _logger.info( "Sleeping 15 seconds to give fakebroker time to catch up" )
-        time.sleep( 15 )
-
-        # See if the fakebroker's messages are on the server
-        consumer = KafkaConsumer( 'kafka-server', f'test_fakebroker_{barf}', schema['brokermessage_schema_file'],
-                                  consume_nmsgs=20, logger=_logger )
-        assert brokertopic in consumer.topic_list()
-        consumer.subscribe( [ brokertopic ], reset=True )
-        msgs = []
-        consumer.poll_loop( handler=lambda m: msgs.extend( m ), stopafternsleeps=2 )
-        # Should be 77×2 messages, as there are two classifiers in the fake broker
-        assert len(msgs) == 154
-
-        # Make sure the broker messages can be parsed with the right schema, and that
-        #  they cover the right source ids
-        brokeralerts = [ fastavro.schemaless_reader( io.BytesIO(m.value()), schema['brokermessage'] )
-                         for m in msgs ]
-        with db.DB() as con:
-            cursor = con.cursor()
-            cursor.execute( "SELECT s.diasourceid "
-                            "FROM ppdb_diasource s "
-                            "INNER JOIN ppdb_alerts_sent a ON s.diasourceid=a.diasourceid" )
-            dbids = [ row[0] for row in cursor.fetchall() ]
-        assert set( a['diaSource']['diaSourceId'] for a in brokeralerts ) == set( dbids )
 
     finally:
         with db.DB() as con:

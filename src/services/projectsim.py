@@ -5,7 +5,7 @@ import datetime
 import time
 import uuid
 import multiprocessing
-import signal
+# import signal
 
 import confluent_kafka
 import fastavro
@@ -398,9 +398,6 @@ class AlertSender:
 
         """
 
-        signal.signal( signal.SIGINT, lambda signum, frame: self.interruptor( signum, frame ) )
-        signal.signal( signal.SIGTERM, lambda signum, frame: self.interruptor( signum, frame ) )
-
         self.procinfo = {}
         try:
             # TODO : tag a runningfile so that two jobs don't run at once
@@ -564,3 +561,15 @@ class AlertSender:
         finally:
             _logger.info( "I really hope cleanup gets called." )
             self.cleanup()
+
+# ROB
+#
+# When you make a main, have it instantiate the alertsender object,
+#   and then call the following:
+
+#     # Catch INT and TERM signals so that we can clean up our subprocess
+#     signal.signal( signal.SIGINT, lambda signum, frame: sender.interruptor( signum, frame ) )
+#     signal.signal( signal.SIGTERM, lambda signum, frame: sender.interruptor( signum, frame ) )
+
+# We *don't* want this in the AlertSender.__call__ method, because that method is called from
+#   tests, and it screws up the main process.

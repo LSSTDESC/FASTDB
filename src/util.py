@@ -1,7 +1,21 @@
+import sys
 import pathlib
+import logging
 import uuid
 
 import fastavro
+
+_schema_namespace = 'fastdb_test_0.1'
+
+logger = logging.getLogger( "FASTDB logger" )
+_logout = logging.StreamHandler( sys.stderr )
+logger.addHandler( _logout )
+_formatter = logging.Formatter( '[%(asctime)s - %(levelname)s] - %(message)s',
+                                datefmt='%Y-%m-%d %H:%M:%S' )
+_logout.setFormatter( _formatter )
+logger.propagate = False
+# logger.setLevel( logging.INFO )
+logger.setLevel( logging.DEBUG )
 
 
 def asUUID( id ):
@@ -16,9 +30,6 @@ def asUUID( id ):
 
 
 NULLUUID = asUUID( '00000000-0000-0000-0000-000000000000' )
-
-
-_schema_namespace = 'fastdb_test_0.1'
 
 
 def get_alert_schema( schemadir=None ):

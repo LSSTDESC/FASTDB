@@ -51,6 +51,9 @@ services:
     build:
       context: ./docker/mongodb
     environment:
+      - MONGODB_HOST=mongodb
+      - MONGODB_DBNAME=brokeralert
+      - MONGODB_COLLECTION=alerts
       - MONGODB_ADMIN_USER=admin
       - MONGODB_ADMIN_PASSWD=fragile
       - MONGODB_ALERT_READER_USER=alertreader
@@ -127,6 +130,16 @@ services:
     build:
       context: ./docker/webserver
       target: webserver
+    environment:
+      - MONGODB_HOST=mongodb
+      - MONGODB_DBNAME=brokeralert
+      - MONGODB_COLLECTION=alerts
+      - MONGODB_ADMIN_USER=admin
+      - MONGODB_ADMIN_PASSWD=fragile
+      - MONGODB_ALERT_READER_USER=alertreader
+      - MONGODB_ALERT_READER_PASSWD=reader
+      - MONGODB_ALERT_WRITER_USER=alertwriter
+      - MONGODB_ALERT_WRITER_PASSWD=writer
     user: ${USERID:-0}:${GROUPID:-0}
     ports:
       - "${WEBPORT:-8080}:8080"
@@ -147,10 +160,14 @@ services:
       - type: volume
         source: query_results
         target: /query_results
+      - type: volume
+        source: logs
+        target: /logs
     post_start:
       - command: /bin/bash -c "
                    chown -R ${USERID:-0}:${GROUPID:-0} /sessions
                    && chown -R ${USERID:-0}:${GROUPID:-0} /query_results
+                   && chown -R ${USERID:-0}:${GROUPID:-0} /logs
                    "
         privileged: true
         user: root
@@ -169,6 +186,16 @@ services:
     build:
       context: ./docker/webserver
       target: shell
+    environment:
+      - MONGODB_HOST=mongodb
+      - MONGODB_DBNAME=brokeralert
+      - MONGODB_COLLECTION=alerts
+      - MONGODB_ADMIN_USER=admin
+      - MONGODB_ADMIN_PASSWD=fragile
+      - MONGODB_ALERT_READER_USER=alertreader
+      - MONGODB_ALERT_READER_PASSWD=reader
+      - MONGODB_ALERT_WRITER_USER=alertwriter
+      - MONGODB_ALERT_WRITER_PASSWD=writer
     user: ${USERID:-0}:${GROUPID:-0}
     volumes:
       - type: bind
@@ -187,10 +214,14 @@ services:
       - type: volume
         source: query_results
         target: /query_results
+      - type: volume
+        source: logs
+        target: /logs
     post_start:
       - command: /bin/bash -c "
                    chown -R ${USERID:-0}:${GROUPID:-0} /sessions
                    && chown -R ${USERID:-0}:${GROUPID:-0} /query_results
+                   && chown -R ${USERID:-0}:${GROUPID:-0} /logs
                    "
         privileged: true
         user: root
@@ -206,6 +237,16 @@ services:
     build:
       context: ./docker/webserver
       target: shell
+    environment:
+      - MONGODB_HOST=mongodb
+      - MONGODB_DBNAME=brokeralert
+      - MONGODB_COLLECTION=alerts
+      - MONGODB_ADMIN_USER=admin
+      - MONGODB_ADMIN_PASSWD=fragile
+      - MONGODB_ALERT_READER_USER=alertreader
+      - MONGODB_ALERT_READER_PASSWD=reader
+      - MONGODB_ALERT_WRITER_USER=alertwriter
+      - MONGODB_ALERT_WRITER_PASSWD=writer
     user: ${USERID:-0}:${GROUPID:-0}
     volumes:
       - type: bind
@@ -224,10 +265,14 @@ services:
       - type: volume
         source: query_results
         target: /query_results
+      - type: volume
+        source: logs
+        target: /logs
     post_start:
       - command: /bin/bash -c "
                    chown -R ${USERID:-0}:${GROUPID:-0} /sessions
                    && chown -R ${USERID:-0}:${GROUPID:-0} /query_results
+                   && chown -R ${USERID:-0}:${GROUPID:-0} /logs
                    "
         privileged: true
         user: root
@@ -238,3 +283,4 @@ volumes:
   mongodb_data:
   query_results:
   sessions:
+  logs:

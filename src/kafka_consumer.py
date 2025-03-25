@@ -148,7 +148,7 @@ class KafkaConsumer:
             raise TypeError( f"topics must be either a string or a list, not a {type(topics)}" )
 
         self.logger.debug( "Asking server for topics" )
-        servertopics = self.get_topics()
+        servertopics = self.topic_list()
         self.logger.debug( f"Topics found on server: {servertopics}" )
         subtopics = []
         for topic in self.topics:
@@ -264,7 +264,7 @@ class KafkaConsumer:
             (Currently, the only message it will receive is a request to
             die.)
 
-          stopafter : datetime.timedelta, default datetime.timedelta( hours=1 )
+          stopafter : datetime.timedelta or None, default datetime.timedelta( hours=1 )
             Quit polling after this much time has elapsed.
 
           stopafternsleeps : int, default None
