@@ -15,7 +15,7 @@ def test_fakebroker( snana_fits_ppdb_loaded, alerts_30days_sent_and_classified_f
 
     barf = "".join( random.choices( 'abcdefghijklmnopqrstuvwzyx', k=6 ) )
     brokertopic = f'classifications-{barf}'
-    _sender, _broker = alerts_30days_sent_and_classified_factory( barf )
+    _sender, _broker = alerts_30days_sent_and_classified_factory( barf, group_id="fakebroker-{barf}" )
 
     # See if the fakebroker's messages are on the server
     consumer = KafkaConsumer( 'kafka-server', f'test_fakebroker_{barf}', schema['brokermessage_schema_file'],

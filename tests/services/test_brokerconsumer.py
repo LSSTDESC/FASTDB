@@ -13,7 +13,7 @@ def test_BrokerConsumer( alerts_30days_sent_and_classified_factory, mongoclient,
     assert dbname is not None
     collection = f'fastdb_{barf}'
 
-    _sender, _broker = alerts_30days_sent_and_classified_factory( barf )
+    _sender, _broker = alerts_30days_sent_and_classified_factory( barf, group_id='test_BrokerConsumer-{barf}' )
 
     try:
         bc = BrokerConsumer( 'kafka-server', f'test_BrokerConsumer_{barf}', topics=brokertopic,

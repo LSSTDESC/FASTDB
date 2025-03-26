@@ -57,22 +57,22 @@ def alerts_30days_sent_factory( snana_fits_ppdb_loaded ):
 @pytest.fixture
 def alerts_30days_sent_and_classified_factory( alerts_30days_sent_factory, fakebroker_factory ):
     def send_and_classify_alerts( topic_barf, group_id='fakebroker' ):
-        # Something I don't understand:
-        # If I start the broker first, it sometimes fails.  The broker
-        #   initially doesn't see the topic, because it starts before
-        #   the topic is created by sender.  Then the broker sees
-        #   the topic, but before the sender has fully flushed.
-        #   But the broker never gets messages from the topic.
-        #   Why?  It should work.  Latency?  Race condition about
-        #   stored topic offsets?   ... I bet it's that.  I need
-        #   to think about my resetting, perhaps.  Not a
-        #   big deal for the fakebroker, but for the
-        #   brokerconsumer.py I should worry about it.
-        # Note : test_fakebroker.py *still* fails if run
-        #   after all the other tests, even though in the logs
-        #   it looks like all messages are flushed before the
-        #   broker starts.  Something's up, not sure what.
-        
+        # Passing a group_id with a randomized string on it is strongly recommended.  Otherwise,
+        #   there are sometimes failures get failures.  By using a group_id that has been used in
+        #   the past, that group_id has subscriptions already on the kafka server.  Because topics
+        #   are randomized, I wouldn't think this would matter, but evidently it does?  It seems
+        #   that if there are existing subscriptions, changing them increses the latency... or
+        #   something.
+
+        # If I start the broker first, it sometimes fails.  The broker initially doesn't see the
+        #   topic, because it starts before the topic is created by sender.  Then the broker sees
+        #   the topic, but before the sender has fully flushed.  But the broker never gets messages
+        #   from the topic.  Why?  It should work.  Latency?  Race condition about stored topic
+        #   offsets?  ... I bet it's that.  I need to think about my resetting, perhaps.  Not a big
+        #   deal for the fakebroker, but for the brokerconsumer.py I should worry about it.
+
+        # Kafka is a bit mysterious.
+
         # Send the alerts
         sender = alerts_30days_sent_factory( topic_barf )
         # Start the fake broker
