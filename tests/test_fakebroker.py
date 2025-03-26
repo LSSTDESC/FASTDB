@@ -10,15 +10,13 @@ from kafka_consumer import KafkaConsumer
 
 # testception.  This is a test of something that lives in tests and exists for other tests.
 # But, we do want to make sure it works.  This also tests the alerts_30days_sent_and_classified_factory fixture.
-def test_fakebroker( snana_fits_ppdb_loaded, alerts_30days_sent_and_classified_factory ):
+def test_fakebroker( barf, snana_fits_ppdb_loaded, alerts_30days_sent_and_classified ):
     schema = util.get_alert_schema()
-
-    barf = "".join( random.choices( 'abcdefghijklmnopqrstuvwzyx', k=6 ) )
     brokertopic = f'classifications-{barf}'
-    _sender, _broker = alerts_30days_sent_and_classified_factory( barf, group_id=f"fakebroker-{barf}" )
+    private_barf = "".join( random.choices( 'abcdefghijklmnopqrstuvwzyx', k=6 ) )
 
     # See if the fakebroker's messages are on the server
-    consumer = KafkaConsumer( 'kafka-server', f'test_fakebroker_{barf}', schema['brokermessage_schema_file'],
+    consumer = KafkaConsumer( 'kafka-server', f'test_fakebroker_{private_barf}', schema['brokermessage_schema_file'],
                               consume_nmsgs=20, logger=util.logger )
     assert brokertopic in consumer.topic_list()
     consumer.subscribe( [ brokertopic ], reset=True )

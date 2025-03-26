@@ -19,6 +19,22 @@ sys.path.insert( 0, pathlib.Path(__file__).parent )
 pytest_plugins = [ 'fixtures.alertcycle' ]
 
 
+@pytest.fixture( scope='session' )
+def procver():
+    pv = ProcessingVersion( id=1, description='test_procesing_version',
+                            validity_start=datetime.datetime( 2025, 2, 14, 0, 0, 0 ),
+                            validity_end=datetime.datetime( 2999, 2, 14, 0, 0, 0 )
+                           )
+    pv.insert
+
+    yield pv
+    with DB() as con:
+        cursor = con.cursor()
+        cursor.execute( "DELETE FROM processing_version WHERE id=%(id)s",
+                        { 'id': pv.id } )
+        con.commit()
+
+
 @pytest.fixture
 def procver1():
     pv = ProcessingVersion( id=42,

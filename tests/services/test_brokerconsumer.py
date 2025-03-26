@@ -1,6 +1,5 @@
 import os
 import time
-import random
 import datetime
 import multiprocessing
 
@@ -43,28 +42,24 @@ def cleanup_mongodb( mongoclient_rw, dbname, collection ):
     assert collection not in brokermessages.list_collection_names()
 
 
-
-def test_BrokerConsumer( alerts_30days_sent_and_classified_factory, mongoclient, mongoclient_rw ):
-    barf = "".join( random.choices( 'abcdefghijklmnopqrstuvwxyz', k=6 ) )
+def test_BrokerConsumer( barf, alerts_30days_sent_and_classified, mongoclient, mongoclient_rw ):
     brokertopic = f'classifications-{barf}'
     dbname = os.getenv( 'MONGODB_DBNAME' )
     assert dbname is not None
     collection = f'fastdb_{barf}'
 
-    _sender, _broker = alerts_30days_sent_and_classified_factory( barf, group_id=f'test_BrokerConsumer-{barf}' )
-
     try:
         # First, make sure it times out properly if it never sees a topic
         t0 = time.perf_counter()
         bc = BrokerConsumer( 'kafka-server', f'test_BrokerConsumer_{barf}-0', topics='this_topic_does_not_exist',
-                             mongodb_collection=collection )
-        bc.poll( restart_time=datetime.timedelta(seconds=10), max_restarts=2, notopic_sleeptime=2 )
+                             mongodb_collection=collection, nomsg_sleeptime=1 )
+        bc.poll( restart_time=datetime.timedelta(seconds=3), max_restarts=2, notopic_sleeptime=2 )
         assert time.perf_counter() - t0 < 10
 
         # Now make sure it can really poll
         t0 = time.perf_counter()
         bc = BrokerConsumer( 'kafka-server', f'test_BrokerConsumer_{barf}-1', topics=brokertopic,
-                             mongodb_collection=collection )
+                             mongodb_collection=collection, nomsg_sleeptime=1 )
         bc.poll( restart_time=datetime.timedelta(seconds=10), max_restarts=0, notopic_sleeptime=2 )
         assert time.perf_counter() - t0 < 20
 
@@ -78,16 +73,12 @@ def test_BrokerConsumer( alerts_30days_sent_and_classified_factory, mongoclient,
 # This next test depends on the file brokerconsumer.yaml in this
 #   directory, and assumes that this directory at the location in the
 #   dockerfile created by docker-compose.yaml at the root of the
-#   checkin.
+#   git checkout.
 #   (i.e., it looks for file /code/tests/services/brokerconsumer.yaml).
-# With all the various sleeps, this test takes about a minute to run.
-def test_BrokerConsumerLauncher( alerts_30days_sent_and_classified_factory, mongoclient, mongoclient_rw ):
-    barf = "".join( random.choices( 'abcdefghijklmnopqrstuvwxyz', k=6 ) )
+def test_BrokerConsumerLauncher( barf, alerts_30days_sent_and_classified, mongoclient, mongoclient_rw ):
     dbname = os.getenv( 'MONGODB_DBNAME' )
     assert dbname is not None
     collection = f'fastdb_{barf}'
-
-    _sender, _broker = alerts_30days_sent_and_classified_factory( barf, group_id=f'test_BrokerConsumerLauncher-{barf}' )
 
     proc = None
     try:

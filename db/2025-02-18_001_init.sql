@@ -136,7 +136,7 @@ CREATE TABLE diaobject(
   pmdec real,
   pmdecerr real,
   pmdec_parallax_cov real,
-  pm_ra_dec_cov real,
+  pmra_pmdec_cov real,
 
   PRIMARY KEY (diaobjectid, processing_version)
 );

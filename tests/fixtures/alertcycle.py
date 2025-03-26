@@ -1,47 +1,80 @@
 import pytest
 import sys
+import os
 import pathlib
+import random
 import time
+import datetime
 import multiprocessing
 
 from services.projectsim import AlertSender
+from services.brokerconsumer import BrokerConsumer
 from util import logger
 import db
 
 sys.path.insert( 0, pathlib.Path(__file__).parent )
 from fakebroker import FakeBroker
 
-
-# This is a factory fixture.  Call
-# the returned object as a function
-# to spin up a fake broker.
-@pytest.fixture
-def fakebroker_factory():
-    storage = {}
-
-    def run_fakebroker( topic_barf, group_id='fakebroker' ):
-        broker = FakeBroker( "kafka-server:9092", [ f"alerts-{topic_barf}" ],
-                             "kafka-server:9092", f"classifications-{topic_barf}",
-                             group_id=group_id, notopic_sleeptime=1,
-                             reset=False, verbose=True )
-        storage['proc'] = multiprocessing.Process( target=broker, daemon=True )
-        storage['proc'].start()
-
-    yield run_fakebroker
-
-    storage['proc'].terminate()
-    storage['proc'].join()
+# IMPORTANT : note that these are module-scope fixtures.  Write your tests accordingly.
+#
+# In particular, if you're checking the state of the kafka server, or of the database,
+# it will be different based on which fixtures have run.  So, if you have a test
+# later in your module that includes an earlier fixture, and expects the database
+# to be what it is after just that earlier fixture, it will fail.  Do things
+# in order.
+#
+# (All of this was done for efficiency, because spinning up the alert
+# sender, fake broker, and consumer, and sleeping enough for them to all
+# do their thing, takes time.)
 
 
-# Another factory
-@pytest.fixture
-def alerts_30days_sent_factory( snana_fits_ppdb_loaded ):
-    def send_alerts( topic_barf ):
-        sender = AlertSender( 'kafka-server', f"alerts-{topic_barf}" )
-        nsent = sender( addeddays=30, reallysend=True )
-        assert nsent == 77
+# This fixture generates a random string of letters that should be used
+# for all Kafka topics and group ids.  Because it's not easy to clean
+# up the kafka server (remove topics, remove group ids), tests can't
+# really clean up after themselves.  Using randomized names for
+# topics and group ids should prevent repeated use of fixtures
+# from colliding with each other.  It does mean cruft will build
+# up on the kafka server, but hopefully the test docker compose
+# environment won't be up all that long anyway.
+#
+# ...this is maybe not a good fixture name given the global pytest
+# namespace for fixtures.  It should probably be alertcycle_barf.  Oh
+# well, hopefully I don't regret it.  If I need random barf somewhere
+# else, I'll need to use a longer fixture name.
+@pytest.fixture( scope='module' )
+def barf():
+    return "".join( random.choices( 'abcdefghijklmnopqrstuvwxyz', k=6 ) )
 
-    yield send_alerts
+
+@pytest.fixture( scope='module' )
+def fakebroker( barf ):
+    proc = None
+
+    try:
+        broker = FakeBroker( "kafka-server:9092", [ f"alerts-{barf}" ],
+                             "kafka-server:9092", f"classifications-{barf}",
+                             group_id=f"fakebroker-{barf}", notopic_sleeptime=1,
+                             reset=False, verbose=False )
+        proc = multiprocessing.Process( target=broker, daemon=True )
+        logger.info( "Starting fakebroker." )
+        proc.start()
+
+        yield True
+
+    finally:
+        if proc is not None:
+            logger.info( "Terminating fakebroker" )
+            proc.terminate()
+            proc.join()
+
+
+@pytest.fixture( scope='module' )
+def alerts_30days_sent( snana_fits_ppdb_loaded, barf ):
+    sender = AlertSender( 'kafka-server', f"alerts-{barf}" )
+    nsent = sender( addeddays=30, reallysend=True )
+    assert nsent == 77
+
+    yield True
 
     with db.DB() as con:
         cursor = con.cursor()
@@ -52,41 +85,47 @@ def alerts_30days_sent_factory( snana_fits_ppdb_loaded ):
         con.commit()
 
 
-# Another factory
 # This one is a bit slow because it has a built in sleep.
-@pytest.fixture
-def alerts_30days_sent_and_classified_factory( alerts_30days_sent_factory, fakebroker_factory ):
-    def send_and_classify_alerts( topic_barf, group_id='fakebroker' ):
-        # Passing a group_id with a randomized string on it is strongly recommended.  Otherwise,
-        #   there are sometimes failures get failures.  By using a group_id that has been used in
-        #   the past, that group_id has subscriptions already on the kafka server.  Because topics
-        #   are randomized, I wouldn't think this would matter, but evidently it does?  It seems
-        #   that if there are existing subscriptions, changing them increses the latency... or
-        #   something.
+@pytest.fixture( scope='module' )
+def alerts_30days_sent_and_classified( alerts_30days_sent, fakebroker ):
+    # Give the broker a few seconds to wake up from sleep,
+    # see the topic, pull the messages, and do its thing.
+    logger.info( "Sleeping 10 seconds to give fakebroker time to catch up..." )
+    time.sleep( 10 )
+    logger.info( "...I hope fakebroker did its stuff!" )
 
-        # If I start the broker first, it sometimes fails.  The broker initially doesn't see the
-        #   topic, because it starts before the topic is created by sender.  Then the broker sees
-        #   the topic, but before the sender has fully flushed.  But the broker never gets messages
-        #   from the topic.  Why?  It should work.  Latency?  Race condition about stored topic
-        #   offsets?  ... I bet it's that.  I need to think about my resetting, perhaps.  Not a big
-        #   deal for the fakebroker, but for the brokerconsumer.py I should worry about it.
+    yield True
 
-        # Kafka is a bit mysterious.
+    # ...I don't think I need to do cleanup here.  The fakebroker
+    # will have loaded up a kafka topic, but we can't clean up
+    # those anyway (which is why we use random barf).
 
-        # Send the alerts
-        sender = alerts_30days_sent_factory( topic_barf )
-        # Start the fake broker
-        broker = fakebroker_factory( topic_barf, group_id=group_id )
 
-        # Give the broker a few seconds to wake up from sleep,
-        # see the topic, pull the messages, and do its thing.
-        logger.info( "Sleeping 10 seconds to give fakebroker time to catch up..." )
-        time.sleep( 10 )
-        logger.info( "...I hope fakebroker did its stuff!" )
+# This one is slow because it includes the previous one, and has its own sleeps
+@pytest.fixture( scope='module' )
+def alerts_30days_sent_and_brokermessage_consumed( barf, alerts_30days_sent_and_classified ):
+    private_barf = "".join( random.choices( 'abcdefghijklmnopqrstuvwxyz', k=6 ) )
 
-        # Going to just assume they're there.  See
-        # tests/test_fakebroker.py for a test that includes this fixture
-        # and makes sure it worked right.
-        return sender, broker
+    mongodb_dbname = None
+    mongodb_collection = None
 
-    return send_and_classify_alerts
+    try:
+        brokertopic = f'classifications-{barf}'
+        mongodb_dbname = os.getenv( 'MONGODB_DBNAME' )
+        mongodb_collection = f'fastdb_{barf}'
+
+        bc = BrokerConsumer( 'kafka-server', f'BrokerConsumer-{private_barf}', topics=brokertopic,
+                             mongodb_collection=mongodb_collection, nomsg_sleeptime=1 )
+        bc.poll( restart_time=datetime.timedelta(seconds=3), max_restarts=1, notopic_sleeptime=2 )
+
+        yield True
+
+    finally:
+        # Clear out the mongodb collectoin that BrokerConsumer will have filled
+        if ( mongodb_dbname is not None ) and ( mongodb_collection is not None ):
+            with db.MG() as mongoclient:
+                brokermessages = getattr( mongoclient, mongodb_dbname )
+                if mongodb_collection in brokermessages.list_collection_names():
+                    coll = getattr( brokermessages, mongodb_collection )
+                    coll.drop()
+                assert mongodb_collection not in brokermessages.list_collection_names()

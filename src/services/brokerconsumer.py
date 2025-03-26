@@ -54,6 +54,7 @@ class BrokerConsumer:
 
     def __init__( self, server, groupid, topics=None, updatetopics=False, extraconfig={},
                   schemaless=True, schemafile=None, pipe=None, loggername="BROKER", loggername_prefix='',
+                  nomsg_sleeptime=5,
                   mongodb_host=None, mongodb_dbname=None, mongodb_collection=None,
                   mongodb_user=None, mongodb_password=None ):
         """Create a connection to a kafka server and consumer broker messages.
@@ -108,6 +109,11 @@ class BrokerConsumer:
 
           loggername_prefix : str, default ""
             Used in headers of log messages
+
+          nomsg_sleeptime : int, default 5
+            The KafkaConsumer (src/kafkaconsumer.py) will sleep this
+            many seconds between not finding any new messages and
+            polling again to ask for new messages.
 
           mongodb_host : str, default $MONGODB_HOST
             The host where Mongo is running
@@ -164,6 +170,7 @@ class BrokerConsumer:
         self.topics = topics
         self._updatetopics = updatetopics
         self.extraconfig = extraconfig
+        self.nomsg_sleeptime = nomsg_sleeptime
 
         self.schemaless = schemaless
         if not self.schemaless:
@@ -210,7 +217,8 @@ class BrokerConsumer:
                 self.consumer = KafkaConsumer( self.server, self.groupid, self.schemafile,
                                                self.topics, reset=reset,
                                                extraconsumerconfig=self.extraconfig,
-                                               consume_nmsgs=1000, consume_timeout=1, nomsg_sleeptime=5,
+                                               consume_nmsgs=1000, consume_timeout=1,
+                                               nomsg_sleeptime=self.nomsg_sleeptime,
                                                logger=self.logger )
                 countdown = -1
             except Exception as e:
@@ -491,8 +499,8 @@ class AlerceConsumer(BrokerConsumer):
         self.consumer.subscribe( self.topics )
 
 # =====================================================================
-# MAKE SURE TO UPDATE WHAT'S BELOW TO MATCK CHANGES TO BrokerConsumer
-# AS WELL AS WHAT'S NEEDE FOR Pitt-Google
+# MAKE SURE TO UPDATE WHAT'S BELOW TO MATCH CHANGES TO BrokerConsumer
+# AS WELL AS WHAT'S NEEDED FOR Pitt-Google
 
 # class PittGoogleBroker(BrokerConsumer):
 #     _brokername = 'pitt-google'
@@ -852,7 +860,8 @@ def main():
     parser.add_argument( 'collection', default=None,
                          help="Collection in mongo database to store alerts; defaults to $MONGODB_DEFAULT_COLLECTION" )
     parser.add_argument( '-b', '--barf', default='abcdef',
-                         help="String of random characters for group and topic names.  (Used in tests.)" )
+                         help=( "String of random characters for group and topic names.  (Used in tests.)"
+                                "Will have no effect if you never put {barf} in your config file." ) )
     parser.add_argument( '-v', '--verbose', default=False, action='store_true',
                          help="Show a few more log messages in the main process." )
     args = parser.parse_args()

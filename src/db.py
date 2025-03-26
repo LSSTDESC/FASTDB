@@ -6,7 +6,7 @@
 # WARNING : code assumes all column names are lowercase.  Don't mix case in column names.
 
 # import sys
-# import os
+import os
 import io
 import uuid
 import collections
@@ -17,6 +17,7 @@ import numpy as np
 import pandas
 import psycopg2
 import psycopg2.extras
+import pymongo
 
 import util
 
@@ -89,6 +90,49 @@ def DB( dbcon=None ):
         if conn is not None:
             conn.rollback()
             conn.close()
+
+
+# ======================================================================
+
+@contextmanager
+def MG( client=None ):
+    """Get a mongo client in a context manager.
+
+    It has read/write access to the broker message database (which is
+    configured in env var MONGODB_DBNAME).
+
+    Always call this as "with MongoClient() as ..."
+
+    Right now, this does not support Mongo transactions.  Hopefully we
+    won't need that in our case.
+
+    """
+
+    if client is not None:
+        yield client
+        return
+
+    try:
+        host = os.getenv( "MONGODB_HOST" )
+        dbname = os.getenv( "MONGODB_DBNAME" )
+        user = os.getenv( "MONGODB_ALERT_WRITER_USER" )
+        password = os.getenv( "MONGODB_ALERT_WRITER_PASSWD" )
+        if any( i is None for i in [ host, dbname, user, password ] ):
+            raise RuntimeError( "Failed to make mongo client; make sure all env vars are set: "
+                                "MONGODB_HOST, MONGODB_DBNAME, MONGODB_ALERT_WRITER_USER, MONGODB_ALERT_WRITER_PASSWD" )
+        client = pymongo.MongoClient( f"mongodb://{user}:{password}@{host}:27017/{dbname}?authSource={dbname}" )
+        yield client
+    finally:
+        if client is not None:
+            client.close()
+
+
+def get_mongo_collection( mongoclient, collection_name ):
+    """Get a pymongo.collection from the mongo db."""
+
+    mongodb = getattr( mongoclient, os.getenv( "MONGODB_DBNAME" ) )
+    collection = getattr( mongodb, collection_name )
+    return collection
 
 
 # ======================================================================
