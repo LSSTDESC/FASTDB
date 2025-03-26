@@ -101,6 +101,7 @@ class KafkaConsumer:
                            'group.id': groupid }
         consumerconfig.update( extraconsumerconfig )
         self.logger.debug( f"Initializing Kafka consumer with\n{json.dumps(consumerconfig, indent=4)}" )
+        self.logger.debug( f"Topics given at KafkaConsumer init: {self.topics}" )
         self.consumer = confluent_kafka.Consumer( consumerconfig )
         atexit.register( _close_kafka_consumer, self )
 

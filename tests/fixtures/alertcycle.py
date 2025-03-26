@@ -80,8 +80,9 @@ def alerts_30days_sent_and_classified_factory( alerts_30days_sent_factory, fakeb
 
         # Give the broker a few seconds to wake up from sleep,
         # see the topic, pull the messages, and do its thing.
-        logger.info( "Sleeping 10 seconds to give fakebroker time to catch up" )
+        logger.info( "Sleeping 10 seconds to give fakebroker time to catch up..." )
         time.sleep( 10 )
+        logger.info( "...I hope fakebroker did its stuff!" )
 
         # Going to just assume they're there.  See
         # tests/test_fakebroker.py for a test that includes this fixture

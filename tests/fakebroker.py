@@ -41,6 +41,8 @@ class Classifier:
         self.logevery = 10
         self.nextlog = self.logevery
 
+        logger.info( f"Classifier {self.__class__.__name__} sending to topic {self.topic} on {self.kafkaserver}" )
+
     def determine_types_and_probabilities( self, alert ):
         """Given an alert (a dict in the format of the fastdb test simulated AP alert schema), return a list of
         two-element tuples that is (classId, probability)."""

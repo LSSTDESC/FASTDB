@@ -412,7 +412,7 @@ class AlertSender:
                 return
 
             if reallysend:
-                _logger.info( "Creating kafka producer" )
+                _logger.info( f"Creating kafka producer, will send to topic {self.kafka_topic}" )
                 producer = confluent_kafka.Producer( { 'bootstrap.servers': self.kafka_server,
                                                        'batch.size': 131072,
                                                        'linger.ms': 50 } )

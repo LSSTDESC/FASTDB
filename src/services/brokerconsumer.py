@@ -156,7 +156,7 @@ class BrokerConsumer:
             #   though the version of the namespace will evolve.
             schemafile = "/fastdb/share/avsc/fastdb_test_0.1.BrokerMessage.avsc"
 
-        self.countlogger.info( f"************ Starting Brokerconsumer for {loggername} ****************" )
+        self.countlogger.info( f"************ Starting BrokerConsumer for {loggername} ****************" )
 
         self.pipe = pipe
         self.server = server
@@ -286,7 +286,8 @@ class BrokerConsumer:
         return len( results.inserted_ids )
 
 
-    def poll( self, reset=False, restart_time=datetime.timedelta(minutes=30), max_restarts=None ):
+    def poll( self, reset=False, restart_time=datetime.timedelta(minutes=30),
+              notopic_sleeptime=300, max_restarts=None ):
         """Poll the server, saving consumed messages to the Mongo DB.
 
         Parameters
@@ -297,18 +298,27 @@ class BrokerConsumer:
             left off (with the server remembering where you were based on the
             groupid you passed at object construction).
 
-          restart_time: datetime.timedelta
+          restart_time: datetime.timedelta, default 30 minutes
             Only query the kafka server for this long before closing and
             reopening the connection.  This is just a standard "turn it
             off and back on" cruft-cleaning mechanism.  Make this None
             to never restart.  (Which means you're very trusting
             of a lack of a need to power cycle.)
 
+          notopic_sleeptime : float, default 300
+            If the topic doesn't exist on the kafka server, sleep this
+            many seconds before checking again to see if the topic
+            exists.
+
           max_restarts: int, default None
             If not None, after this many restarts of the server (after a
             restart_time timeout), exit the poll loop.  If this is None, the
             poll loop runs indefinitely (or until a "die" message is sent
             over the pipe).
+
+        TODO : separate max_restarts from polling from max_restarts from
+        topic not existing, because the timeouts for the two are likely very
+        different.
 
         """
 
@@ -320,8 +330,8 @@ class BrokerConsumer:
                 self.update_topics()
             strio = io.StringIO("")
             if len(self.consumer.topics) == 0:
-                self.logger.info( "No topics, will wait 10s and reconnect." )
-                time.sleep(10)
+                self.logger.info( f"No topics, will wait {notopic_sleeptime}s and reconnect." )
+                time.sleep( notopic_sleeptime )
             else:
                 self.logger.info( f"Subscribed to topics: {self.consumer.topics}; starting poll loop." )
                 self.countlogger.info( f"Subscribed to topics: {self.consumer.topics}; starting poll loop." )
@@ -332,12 +342,6 @@ class BrokerConsumer:
                     if happy:
                         strio.write( f"Reached poll timeout for {self.server}; "
                                      f"handled {self.consumer.tot_handled} messages. " )
-                        if ( max_restarts is not None ) and ( n_restarts >= max_restarts ):
-                            strio.write( "Exiting after {n_restarts} restarts." )
-                            self.logger.info( strio.getvalue() )
-                            self.countlogger.info( strio.getvalue() )
-                            self.close_connection()
-                            return
                     else:
                         strio.write( f"Poll loop received die command after handling "
                                      f"{self.consumer.tot_handled} messages.  Exiting." )
@@ -345,6 +349,7 @@ class BrokerConsumer:
                         self.countlogger.info( strio.getvalue() )
                         self.close_connection()
                         return
+
                 except Exception as e:
                     otherstrio = io.StringIO("")
                     traceback.print_exc( file=otherstrio )
@@ -361,6 +366,14 @@ class BrokerConsumer:
                     self.countlogger.info( "Exiting broker poll due to die command." )
                     self.close_connection()
                     return
+
+            if ( max_restarts is not None ) and ( n_restarts >= max_restarts ):
+                strio.write( f"Exiting after {n_restarts} restarts." )
+                self.logger.info( strio.getvalue() )
+                self.countlogger.info( strio.getvalue() )
+                self.close_connection()
+                return
+
             strio.write( "Reconnecting to server.\n" )
             self.logger.info( strio.getvalue() )
             self.countlogger.info( strio.getvalue() )
@@ -593,18 +606,64 @@ class BrokerConsumerLauncher:
     minutes, it will conclude that it's locked up or died, kill it, and start
     a new one.
 
-    IMPORTANT : if you run this class directly, be aware that it futzes around
-    with the signal handlers of its process.  For that reason, you may want to
-    run BrokerConsumerLauncher itself in a multiprocessing subprocess; you can
+    IMPORTANT : if you run this class directly, be aware that it futzes
+    around with the signal handlers of its process, which can potentially
+    screw you up.  For that reason, you may want to run
+    BrokerConsumerLauncher itself in a multiprocessing subprocess; you can
     send an INT or TERM signal to it to get it to (eventually) exit.  Normal
     use of this class is from main() below.
 
     """
 
-    def __init__( self, configfile, barf='', verbose=False ):
+    def __init__( self, configfile, barf='', verbose=False, logtag=None, shutdown_graceperiod=20 ):
+        """Create a BrokerConsumerLauncher.
+
+        Parmaeters
+        ----------
+          configfile : Path or str
+            A yaml file with a configuration of the brokers to launch.  One
+            example is in tests/services/brokerconsumer.yaml.  TODO: Rob,
+            make a better example with better production defaults.
+
+          barf : str, default ''
+            A string of characters that will replace the string "{barf}" on
+            some of the lines of the config file.  Used in our tests; you can
+            probably ignore this.
+
+          verbose : bool, default False
+            If True, show debug log messages, otherwise just info.
+
+          logtag : str, default None
+            If not None, will be added to the header part of every log messag.e
+
+          shutdown_graceperiod : int, default 20
+            When a running BrokerConsumerLauncher receives a TERM or INT
+            signal, it tells all of its own subprocesses (one for each
+            broker) to die, and then waits this many seconds before exiting.
+            Ideally, this should be long enough that the subprocesses can be
+            relied upon to finish any sleeps and clean up, but not too long
+            that whatever launched the BrokerConsumerLauncher will kill it.
+
+            The 20s default comes from: (a) BrokerConsumer.poll() by default
+            has a 10s sleep timeout waiting for topics, and (b) kubernetes
+            (at least no NERSC) sends a TERM and then waits 30s before
+            shutting things down.  We want our shutdown messages to have a
+            chance to go through, but also we want to exit before they kill
+            us.
+
+        """
+
+
+
         self.config = configfile
         self.barf = barf
         self.verbose = verbose
+        self.logtag = logtag
+
+        # This is the grace period between when the main process tells launched broker to die and
+        #   when it returns.
+        # I chose 20s because (a)
+        self.shutdown_graceperiod=20
 
 
     def _launch_broker( self, brokerinfo ):
@@ -622,26 +681,37 @@ class BrokerConsumerLauncher:
                                   loggername=brokerinfo['loggername'],
                                   loggername_prefix=brokerinfo['loggername_prefix']
                                  )
-        bc.poll()
+        bc.poll( restart_time=brokerinfo['restart_time'],
+                 max_restarts=brokerinfo['max_restarts'],
+                 notopic_sleeptime=brokerinfo['notopic_sleeptime']
+                )
 
 
     def __call__( self ):
-        """Only ever run this in a subprocess, or from main() below.
+        """Run the BrokerConsumerLauncher.
 
+        IMPORTANT: Only ever run this in a subprocess, or from main() below.
         It will screw up your process' signal handlers otherwise.
+        See docstring on BrokerConsumerLauncher class for more info.
+
         """
 
-        logger = logging.getLogger( "BrokerConsumerLauncher" )
+        logger = logging.getLogger( f"BrokerConsumerLauncher{f'-{self.logtag}' if self.logtag is not None else ''}" )
+        logger.propagate = False
         if not logger.hasHandlers():
             logout = logging.StreamHandler( sys.stderr )
             logger.addHandler( logout )
-            formatter = logging.Formatter( '[%(asctime)s - %(levelname)s] - %(message)s',
-                                           datefmt='%Y-%m-%d %H:%M:%S' )
+            formatter = logging.Formatter( f'[%(asctime)s - {f"{self.logtag} - " if self.logtag is not None else ""}'
+                                           f'%(levelname)s] - %(message)s', datefmt='%Y-%m-%d %H:%M:%S' )
             logout.setFormatter( formatter )
-        logger.propagate = False
+        else:
+            logger.warning( "I am surprised, I already have handlers.  Logger is mysterious." )
         logger.setLevel( logging.DEBUG if self.verbose else logging.INFO )
 
-        config = yaml.safe_load( self.config )
+        config = yaml.safe_load( open( self.config ) )
+        # ****
+        # logger.debug( f"Loaded config: {config}" )
+        # ****
 
         schemafile = config[ 'schemafile' ]
 
@@ -656,11 +726,15 @@ class BrokerConsumerLauncher:
             server = broker['server'].replace( "{barf}", self.barf )
             topics = [ t.replace("{barf}", self.barf) for t in broker['topics'] ]
             groupid = broker['groupid'].replace( "{barf}", self.barf )
-            collection = broker['collection'] if 'collection' in broker else None
+            collection = broker['collection'].replace( "{barf}", self.barf ) if 'collection' in broker else None
             loggername = broker['loggername'].replace( "{barf}", self.barf )
             loggername_prefix = broker['loggername_prefix'].replace( "{barf}", self.barf )
             schm = schemafile if 'schemafile' not in broker else broker['schemafile']
             updatetopics = False if 'updatetopics' not in broker else broker['updatetopics']
+            restart_time = datetime.timedelta( minutes=(broker['restart_time_min'] if 'restart_time_min' in broker
+                                                        else 30 ) )
+            max_restarts = broker['max_restarts'] if 'max_restarts' in broker else None
+            notopic_sleeptime = broker['notopic_sleeptime_sec'] if 'notopic_sleeptime_sec' in broker else 10
             extraconfig = {} if 'extraconfig' not in broker else broker['extraconfig']
             brokerinfo = { 'class': cls,
                            'name': name,
@@ -669,6 +743,9 @@ class BrokerConsumerLauncher:
                            'groupid': groupid,
                            'schemafile': schm,
                            'updatetopics': updatetopics,
+                           'restart_time': restart_time,
+                           'max_restarts': max_restarts,
+                           'notopic_sleeptime': notopic_sleeptime,
                            'extraconfig': extraconfig,
                            'collection': collection,
                            'loggername': loggername,
@@ -689,11 +766,11 @@ class BrokerConsumerLauncher:
             proc.start()
 
         # Catch INT and TERM signals so we can try to shut down cleanly.
-        mustdie = False
+        self.mustdie = False
 
         def sigged( sig="TERM" ):
             logger.warning( f"Got a {sig} signal, trying to die." )
-            mustdie = True   # noqa: F841
+            self.mustdie = True
 
         signal.signal( signal.SIGTERM, lambda sig, stack: sigged( "TERM" ) )
         signal.signal( signal.SIGINT, lambda sig, stack: sigged( "INT" ) )
@@ -704,10 +781,13 @@ class BrokerConsumerLauncher:
 
         heartbeatwait = 2
         toolongsilent = 300
-        while not mustdie:
+        while not self.mustdie:
             try:
                 pipelist = [ b['pipe'] for b in brokers ]
                 _whichpipe = multiprocessing.connection.wait( pipelist, timeout=heartbeatwait )
+                # ****
+                # logger.debug( f"broker pipe wait timed out, got: {_whichpipe}" )
+                # ****
 
                 brokerstorestart = set()
                 for broker in brokers:
@@ -727,7 +807,11 @@ class BrokerConsumerLauncher:
                         brokerstorestart.add( broker )
 
                 for broker in brokers:
-                    dt = time.monotonic() - broker['lasthearbeat']
+                    # ****
+                    # logger.debug( f"At {time.monotonic()} broker {broker['name']} "
+                    #               f"heartbeat = {broker['lastheartbeat']}" )
+                    # ****
+                    dt = time.monotonic() - broker['lastheartbeat']
                     if dt > toolongsilent:
                         logger.error( f"It's been {dt:.0f} seconds since last heartbeat from {broker['name']}; "
                                       f"will restart." )
@@ -747,19 +831,14 @@ class BrokerConsumerLauncher:
                     proc.start()
 
             except Exception as ex:
-                self.logger.exception( ex )
-                self.logger.error( "brokerconsumer main process got an exception, going to shut down" )
-                mustdie = True
+                logger.exception( ex )
+                logger.error( "brokerconsumer main process got an exception, going to shut down" )
+                self.mustdie = True
 
-        # I chose 20s because (a) BrokerConsumer.poll() has a 10s sleep
-        # timeout waiting for topica, and (b) because kubernetes sends a TERM
-        # and then waits 30s before shutting things down.  We want our
-        # shutdown messages to have a chance to go through, but also we want
-        # to exit before they kill us.
-        logger.warning( "Shitting down.  Sending die to all processes and waiting 20s" )
-        for name, broker in brokers.itemns():
+        logger.warning( f"Shutting down.  Sending die to all processes and waiting {self.shutdown_graceperiod}s" )
+        for broker in brokers:
             broker['pipe'].send( { "command": "die" } )
-        time.sleep( 20 )
+        time.sleep( self.shutdown_graceperiod )
         logger.warning( "Exiting" )
         return
 

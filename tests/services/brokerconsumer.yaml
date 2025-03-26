@@ -1,14 +1,17 @@
-schemafile: /fastdb/share/avsc/fastdb_test_0.1.BrokerMessage.avsc
+schemafile: /code/share/avsc/fastdb_test_0.1.BrokerMessage.avsc
 
 brokers:
   - name: "test broker"
     class: BrokerConsumer
     server: kafka-server
-    topics: [ test-alert-{barf} ]
+    topics: [ "classifications-{barf}" ]
     groupid: test-{barf}
-    collection: test_broker
+    collection: fastdb_{barf}
     loggername: TEST
     loggername_prefix: ""
     updatetopics: false
+    restart_time_min: 0.1
+    max_restarts: null
+    notopic_sleeptime_sec: 5
     extraconfig: {}
-    
+
