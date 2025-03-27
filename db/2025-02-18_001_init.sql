@@ -280,7 +280,8 @@ CREATE INDEX idx_diasource_band ON diasource(band);
 CREATE INDEX idx_diasource_mjd ON diasource(midpointmjdtai);
 CREATE INDEX idx_diasource_diaobjectidpv ON diasource(diaobjectid,diaobject_procver);
 ALTER TABLE diasource ADD CONSTRAINT fk_diasource_diaobject
-  FOREIGN KEY (diaobjectid,diaobject_procver) REFERENCES diaobject(diaobjectid,processing_version) ON DELETE CASCADE;
+  FOREIGN KEY (diaobjectid,diaobject_procver) REFERENCES diaobject(diaobjectid,processing_version) ON DELETE CASCADE
+  DEFERRABLE INITIALLY IMMEDIATE;
 CREATE INDEX idx_diasource_procver ON diasource(processing_version);
 ALTER TABLE diasource ADD CONSTRAINT fk_diasource_procver
   FOREIGN KEY (processing_version) REFERENCES processing_version(id) ON DELETE RESTRICT;
@@ -321,7 +322,8 @@ CREATE INDEX idx_diaforcedsource_mjdtai ON diaforcedsource(midpointmjdtai);
 CREATE INDEX idx_diaforcedsource_band ON diaforcedsource(band);
 CREATE INDEX idx_diaforcedsource_diaobjectidpv ON diaforcedsource(diaobjectid,diaobject_procver);
 ALTER TABLE diaforcedsource ADD CONSTRAINT fk_diaforcedsource_diaobject
-  FOREIGN KEY (diaobjectid,diaobject_procver) REFERENCES diaobject(diaobjectid,processing_version) ON DELETE CASCADE;
+  FOREIGN KEY (diaobjectid,diaobject_procver) REFERENCES diaobject(diaobjectid,processing_version) ON DELETE CASCADE
+  DEFERRABLE INITIALLY IMMEDIATE;
 CREATE INDEX idx_diaforcedsource_procver ON diaforcedsource(processing_version);
 ALTER TABLE diaforcedsource ADD CONSTRAINT fk_diaforcedsource_procver
   FOREIGN KEY (processing_version) REFERENCES processing_version(id) ON DELETE RESTRICT;

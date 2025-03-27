@@ -345,14 +345,15 @@ class AlertSender:
                         raise RuntimeError( "There are no sources in ppdb_diasource" )
                 throughday = row[0] + addeddays
 
-            cursor.execute( "SELECT s.diasourceid "
+            cursor.execute( "SELECT s.diasourceid, s.midpointmjdtai "
                             "FROM ppdb_diasource s "
                             "LEFT JOIN ppdb_alerts_sent a ON a.diasourceid=s.diasourceid "
                             "WHERE a.id IS NULL "
                             "AND s.midpointmjdtai<%(maxmjd)s "
                             "ORDER BY s.midpointmjdtai ",
                             { "maxmjd": throughday } )
-            diasourceids = [ row[0] for row in cursor.fetchall() ]
+            rows = cursor.fetchall()
+            diasourceids = [ row[0] for row in rows ]
 
             return diasourceids
 

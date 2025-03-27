@@ -1,11 +1,18 @@
 import io
 import re
+import datetime
 
 import db
 
 
 class SourceImporter:
-    """Import sources from mongo into postgres."""
+    """Import sources from mongo into postgres.
+
+    Instantiate the object with the processing version (the key into the
+    processing_version table).  Then call .import(), passing it the
+    MongoDB collection (see db.py::get_mongo_collection) to import from.
+
+    """
 
     object_lcfields = [ 'diaObjectId', 'radecMjdTai', 'validityStart', 'validityEnd',
                         'ra', 'raErr', 'dec', 'decErr', 'ra_dec_Cov',
@@ -104,7 +111,7 @@ class SourceImporter:
           pqconn : psycopg2.Connection
 
           collection : pymongo.collection
-            You can get this with get_collection()
+            The PyMongo collection we're pulling from.
 
           t0, t1 : datetime.datetime or None
             Time limits.  Will import all objects with t0 < savetime ≤ t1
@@ -190,54 +197,151 @@ class SourceImporter:
                                  procver_fields=[ 'processing_version', 'diaobject_procver' ] )
 
 
-    def import_objects_from_collection( self, collection, t0=None, t1=None, batchsize=10000 ):
-        with db.DB() as pqconn:
+    def import_objects_from_collection( self, collection, t0=None, t1=None, batchsize=10000,
+                                        conn=None, commit=True ):
+        """Write docs.
+
+        Do.
+        """
+        with db.DB( conn ) as pqconn:
             self.read_mongo_objects( pqconn, collection, t0=t0, t1=t1, batchsize=batchsize )
 
             cursor = pqconn.cursor()
             cursor.execute( "INSERT INTO diaobject ( SELECT * FROM temp_diaobject_import ) ON CONFLICT DO NOTHING" )
-            pqconn.commit()
+            if commit:
+                pqconn.commit()
+
+            return cursor.rowcount
 
 
-    def import_sources_from_collection( self, collection, t0=None, t1=None, batchsize=10000 ):
+    def import_sources_from_collection( self, collection, t0=None, t1=None, batchsize=10000,
+                                        conn=None, commit=True ):
         """write docs
 
         Assumes all objects are already imported.
 
         """
-        with db.DB() as pqconn:
+        with db.DB( conn ) as pqconn:
             self.read_mongo_sources( pqconn, collection, t0=t0, t1=t1, batchsize=batchsize )
 
             cursor = pqconn.cursor()
             cursor.execute( "INSERT INTO diasource ( SELECT * FROM temp_diasource_import ) ON CONFLICT DO NOTHING" )
-            pqconn.commit()
+            if commit:
+                pqconn.commit()
+
+            return cursor.rowcount
 
 
-    def import_prvsources_from_collection( self, collection, t0=None, t1=None, batchsize=10000 ):
+    def import_prvsources_from_collection( self, collection, t0=None, t1=None, batchsize=10000,
+                                           conn=None, commit=True ):
         """Write docs.
 
         Do.
 
         """
-        with db.DB() as pqconn:
+        with db.DB( conn ) as pqconn:
             self.read_mongo_prvsources( pqconn, collection, t0=t0, t1=t1, batchsize=batchsize )
 
             cursor = pqconn.cursor()
             cursor.execute( "INSERT INTO diasource ( SELECT * FROM temp_prvdiasource_import ) ON CONFLICT DO NOTHING" )
-            pqconn.commit()
+            if commit:
+                pqconn.commit()
+
+            return cursor.rowcount
 
 
-    def import_prvforcedsources_from_collection( self, collection, t0=None, t1=None, batchsize=10000 ):
+    def import_prvforcedsources_from_collection( self, collection, t0=None, t1=None, batchsize=10000,
+                                                 conn=None, commit=True ):
         """Write docs.
 
         Do.
 
         """
-        with db.DB() as pqconn:
+        with db.DB( conn ) as pqconn:
             self.read_mongo_prvforcedsources( pqconn, collection, t0=t0, t1=t1, batchsize=batchsize )
 
             cursor = pqconn.cursor()
             cursor.execute( "INSERT INTO diaforcedsource "
                             "( SELECT * FROM temp_prvdiaforcedsource_import ) "
                             "ON CONFLICT DO NOTHING" )
+            if commit:
+                pqconn.commit()
+
+            return cursor.rowcount
+
+
+    # **********************************************************************
+    # This is the main method to call from outside
+    #
+    # It seems that python won't let you name a method "import"
+
+    def import_from_mongo( self, collection ):
+        """Import data from the mongodb database to PostgreSQL tables.
+
+        Will look at the desired collection.  Will find all broker
+        alerts saved to the collection between when the last time this
+        function ran and the current time.  Will impport all diaobject,
+        diasource, and diaforcedsource rows that are in the mongodb
+        collection but not yet in PostgreSQL.
+
+        Parameters
+        ----------
+          collection : pymongo.collection
+            You can get this with:
+                import db
+                with db.MG() as mgc:
+                    collection = db.get_mongo_collection( mgc, collection_name )
+            where collection_name is the name of the collection you want.  Make
+            sure to call the SoruceImporter object's .import method within the
+            same "with db.MG()" block.
+
+        Returns
+        -------
+          nobj, nsrc, nfrc
+
+          Number of objects, sources, and forced sources added to the PostgreSQL database.
+
+        """
+
+        # Everything happens in one transaction, until the commit() at the end
+        #   of this block.  Make sure that none of the functions called
+        #   end the transaction in pqconn.
+        with db.DB() as pqconn:
+            cursor = pqconn.cursor()
+            timestampexists = False
+            cursor.execute( "SELECT t FROM diasource_import_time WHERE collection=%(col)s",
+                            { 'col': collection.name } )
+            rows = cursor.fetchall()
+            if len(rows) == 0:
+                t0 = datetime.datetime( 1970, 1, 1, 0, 0, 0, tzinfo=datetime.UTC )
+            else:
+                timestampexists = True
+                t0 = rows[0][0]
+
+            t1 = datetime.datetime.now( tz=datetime.UTC )
+
+            # Make sure foreign key constraints aren't goign to trip us up
+            #   below, but that they're only checked at the end of the transaction.
+            cursor.execute( "SET CONSTRAINTS fk_diasource_diaobject DEFERRED" )
+            cursor.execute( "SET CONSTRAINTS fk_diaforcedsource_diaobject DEFERRED" )
+
+            nobj = self.import_objects_from_collection( collection, t0, t1, conn=pqconn, commit=False )
+            nsrc = self.import_sources_from_collection( collection, t0, t1, conn=pqconn, commit=False )
+            nprvsrc = self.import_prvsources_from_collection( collection, t0, t1, conn=pqconn, commit=False )
+            nprvfrc = self.import_prvforcedsources_from_collection( collection, t0, t1, conn=pqconn, commit=False )
+
+            if timestampexists:
+                cursor.execute( "UPDATE diasource_import_time SET t=%(t)s WHERE collection=%(col)s",
+                                { 't': t1, 'col': collection.name } )
+            else:
+                cursor.execute( "INSERT INTO diasource_import_time(collection,t) "
+                                "VALUES(%(col)s,%(t)s)",
+                                { 't': t1, 'col': collection.name } )
+
+            # Only commit once at the end.  That way, if anything goes wrong,
+            #   the database will be rolled back.  No objects or sources will
+            #   have been saved, and the timestamp will not have been updated.
+            # The timestamp will be updated if and only if everything imported.
             pqconn.commit()
+
+        return nobj, nsrc + nprvsrc, nprvfrc

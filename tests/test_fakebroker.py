@@ -8,8 +8,12 @@ import db
 from kafka_consumer import KafkaConsumer
 
 
-# testception.  This is a test of something that lives in tests and exists for other tests.
-# But, we do want to make sure it works.  This also tests the alerts_30days_sent_and_classified_factory fixture.
+# testception.  This is a test of something that lives in tests and
+# exists for other tests.  But, we do want to make sure it works.  This
+# also tests the alerts_30days_sent_and_classified_factory fixture.  (Of
+# course, all of these things are tested in other places, but if you
+# want to isloate down to just testing fakebroker and that fixture, this
+# test is here.)
 def test_fakebroker( barf, snana_fits_ppdb_loaded, alerts_30days_sent_and_classified ):
     schema = util.get_alert_schema()
     brokertopic = f'classifications-{barf}'

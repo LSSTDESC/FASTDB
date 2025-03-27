@@ -107,3 +107,6 @@ def test_BrokerConsumerLauncher( barf, alerts_30days_sent_and_classified, mongoc
         if proc is not None:
             proc.kill()
         cleanup_mongodb( mongoclient_rw, dbname, collection )
+
+
+# TODO : write tests that use the "60days" fixtures?
