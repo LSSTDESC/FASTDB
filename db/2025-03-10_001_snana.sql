@@ -169,6 +169,3 @@ CREATE TABLE ppdb_diaforcedsource (
 CREATE INDEX idx_ppdb_diaforcedsource_diaobjectid ON ppdb_diaforcedsource(diaobjectid);
 ALTER TABLE ppdb_diaforcedsource ADD CONSTRAINT fk_ppdb_diaforcedsource_diaobject
   FOREIGN KEY (diaobjectid) REFERENCES ppdb_diaobject(diaobjectid) ON DELETE CASCADE;
-
-
-INSERT INTO migrations_applied(filename) VALUES('2025-03-10_001_snana.sql');

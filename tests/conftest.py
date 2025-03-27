@@ -25,7 +25,7 @@ def procver():
                             validity_start=datetime.datetime( 2025, 2, 14, 0, 0, 0 ),
                             validity_end=datetime.datetime( 2999, 2, 14, 0, 0, 0 )
                            )
-    pv.insert
+    pv.insert()
 
     yield pv
     with DB() as con:

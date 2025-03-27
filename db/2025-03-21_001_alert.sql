@@ -9,5 +9,3 @@ CREATE TABLE ppdb_alerts_sent(
 CREATE INDEX idx_ppdb_alerts_sent_diasourceid ON ppdb_alerts_sent(diasourceid);
 ALTER TABLE ppdb_alerts_sent ADD CONSTRAINT fk_ppdb_alerts_sent_diasource
   FOREIGN KEY (diasourceid) REFERENCES ppdb_diasource(diasourceid) ON DELETE CASCADE;
-
-INSERT INTO migrations_applied(filename) VALUES('2025-03-21_001_alert.sql');

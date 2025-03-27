@@ -1,6 +1,8 @@
 import io
 import re
 
+import db
+
 
 class SourceImporter:
     """Import sources from mongo into postgres."""
@@ -25,6 +27,11 @@ class SourceImporter:
                         'ixx_ixy_Cov', 'ixx_iyy_Cov', 'iyy_ixy_Cov',
                         'ixxPsf', 'iyyPsf', 'ixyPsf' ]
 
+    forcedsource_lcfields = [ 'diaForcedSourceId', 'diaObjectId', 'visit', 'detector',
+                              'midpointMjdTai', 'band', 'ra', 'dec', 'psfFlux', 'psfFluxErr',
+                              'scienceFlux', 'scienceFluxErr', 'time_processed', 'time_withdrawn' ]
+
+
     def __init__( self, processing_version ):
         """Create a SourceImporter.
 
@@ -38,9 +45,8 @@ class SourceImporter:
         self.processing_version = processing_version
 
 
-    def _read_mongo_fields( self, pqconn, collection, savetimecut,
-                            temptable, liketable, fields, msgsub, idfield, batchsize=10000,
-                            procver_fields=['processing_version'] ):
+    def _read_mongo_fields( self, pqconn, collection, pipeline, fields, temptable, liketable,
+                            t0=None, t1=None, batchsize=10000, procver_fields=['processing_version'] ):
         if not re.search( "^[a-zA-Z0-9_]+$", temptable ):
             raise ValueError( f"Invalid temp table name {temptable}" )
         if not re.search( "^[a-zA-Z0-9_]+$", liketable ):
@@ -48,13 +54,16 @@ class SourceImporter:
         pqcursor = pqconn.cursor()
         pqcursor.execute( f"CREATE TEMP TABLE {temptable} (LIKE {liketable})" )
 
-        group = { "_id": f"${idfield}" }
-        group.update( { k: { "$first": f"${msgsub}.{k}" } for k in fields } )
-        mongocursor = collection.aggregate( [ { "$match": { "savetime": { "$lt": savetimecut } } },
-                                              { "$group": group } ] )
+        if ( t0 is not None ) or ( t1 is not None ):
+            if ( t0 is not None ) and ( t1 is not None ):
+                pipeline.insert( 0, { "$match": { "$and": [ { "savetime": { "$gt": t0 } },
+                                                            { "savetime": { "$lte": t1 } } ] } } )
+            elif t0 is not None:
+                pipeline.insert( 0, { "$match": { "savetime": { "$gt": t0 } } } )
+            else:
+                pipeline.insert( 0, { "$match": { "savetime": { "$lte": t1 } } } )
 
-        cursize = 0
-        strio = None
+        mongocursor = collection.aggregate( pipeline )
 
         def flush_to_db( sourceio ):
             sourceio.seek( 0 )
@@ -62,6 +71,8 @@ class SourceImporter:
             columns.extend( procver_fields )
             pqcursor.copy_from( sourceio, temptable, size=65536, columns=columns )
 
+        cursize = 0
+        strio = None
         for row in mongocursor:
             if strio is None:
                 strio = io.StringIO()
@@ -82,8 +93,11 @@ class SourceImporter:
             flush_to_db( strio )
 
 
-    def read_mongo_objects( self, pqconn, collection, savetimecut, batchsize=10000 ):
+    def read_mongo_objects( self, pqconn, collection, t0=None, t1=None, batchsize=10000 ):
         """Read all diaObject records from a mongo collection and stick them in a temp table.
+
+        Populates temp table temp_diaobject_import.  It will only live
+        as long as the pqconn session is open.
 
         Parameters
         ----------
@@ -92,8 +106,9 @@ class SourceImporter:
           collection : pymongo.collection
             You can get this with get_collection()
 
-          savetimecut : datetime.datetime
-            Import all objects whose savetime is *before* this time.
+          t0, t1 : datetime.datetime or None
+            Time limits.  Will import all objects with t0 < savetime ≤ t1
+            If either is None, that limit won't be included.
 
           batchsize : int, default 10000
             Read rows from the mongodb and copy them tothe postgres temp
@@ -101,31 +116,128 @@ class SourceImporter:
             have to get out of hand.
 
         """
-        self._read_mongo_fields( pqconn, collection, savetimecut,
-                                 'temp_diaobject_import', 'diaobject', self.object_lcfields,
-                                 'msg.diaObject','msg.diaObject.diaObjectId', batchsize=batchsize )
+
+        fields = self.object_lcfields
+        group = { "_id": "$msg.diaObject.diaObjectId" }
+        group.update( { k: { "$first": f"$msg.diaObject.{k}" } for k in fields } )
+        pipeline = [ { "$group": group } ]
+
+        self._read_mongo_fields( pqconn, collection, pipeline, fields, "temp_diaobject_import", "diaobject",
+                                 t0=t0, t1=t1, batchsize=batchsize )
 
 
-    def read_mongo_sources(  self, pqconn, collection, savetimecut, batchsize=10000 ):
+    def read_mongo_sources( self, pqconn, collection, t0=None, t1=None, batchsize=10000 ):
         """Read all top-level diaSource records from a mongo collection and stick them in a temp table.
 
-        Parmeters
-        ---------
-          pqconn : psycopg2.Connection
+        Populates temp table temp_diasource_import.  It will only live
+        as long as the pqconn session is open.
 
-          collection : pymongo.collection
-            You can get this with get_collection()
-
-          savetimecut : datetime.datetime
-            Import all objects whose savetime is *before* this time.
-
-          batchsize : int, default 10000
-            Read rows from the mongodb and copy them tothe postgres temp
-            table in batches of this size.  Here so that memory doesn't
-            have to get out of hand.
+        Parmeters are the same as read_mongo_objects.
 
         """
-        self._read_mongo_fields( pqconn, collection, savetimecut,
-                                 'temp_diasource_import', 'diasource', self.source_lcfields,
-                                 'msg.diaSource', 'msg.diaSource.diaSourceId', batchsize=batchsize,
+
+        fields = self.source_lcfields
+        group = { "_id": "$msg.diaSource.diaSourceId" }
+        group.update( { k: { "$first": f"$msg.diaSource.{k}" } for k in fields } )
+        pipeline = [ { "$group": group } ]
+
+        self._read_mongo_fields( pqconn, collection, pipeline, fields, "temp_diasource_import", "diasource",
+                                 t0=t0, t1=t1, batchsize=batchsize,
                                  procver_fields=[ 'processing_version', 'diaobject_procver' ] )
+
+
+    def read_mongo_prvsources( self, pqconn, collection, t0=None, t1=None, batchsize=10000 ):
+        """Read all prvDiaSource records from a mongo collection and stick them in a temp table.
+
+        Gets all prvDiaSources from all sources in the time range.
+        Deduplicates.  Populates temp_prvdiasource_import, which will
+        only live as long as the pqconn session is open.
+
+        Parameters are the same as read_mongo_objects.
+
+        """
+
+        fields = self.source_lcfields
+        group = { "_id": "$msg.prvDiaSources.diaSourceId" }
+        group.update( { k: { "$first": f"$msg.prvDiaSources.{k}" } for k in fields } )
+        pipeline = [ { "$unwind": "$msg.prvDiaSources" },
+                     { "$group": group } ]
+
+        self._read_mongo_fields( pqconn, collection, pipeline, fields, "temp_prvdiasource_import", "diasource",
+                                 t0=t0, t1=t1, batchsize=batchsize,
+                                 procver_fields=[ 'processing_version', 'diaobject_procver' ] )
+
+
+    def read_mongo_prvforcedsources( self, pqconn, collection, t0=None, t1=None, batchsize=10000 ):
+        """Read all prvForcedDiaSource records from a mongo collection and stick them in a temp table.
+
+        Gets all prvForcedDiaSources from all sources in the time range.
+        Deduplicates.  Populates temp_prvdiaforcedsource_import, which will
+        only live as long as the pqconn session is open.
+
+        Parameters are the same as read_mongo_objects.
+
+        """
+
+        fields = self.forcedsource_lcfields
+        group = { "_id": "$msg.prvDiaForcedSources.diaForcedSourceId" }
+        group.update( { k: { "$first": f"$msg.prvDiaForcedSources.{k}" } for k in fields } )
+        pipeline = [ { "$unwind": "$msg.prvDiaForcedSources" },
+                     { "$group": group } ]
+
+        self._read_mongo_fields( pqconn, collection, pipeline, fields, "temp_prvdiaforcedsource_import",
+                                 "diaforcedsource", t0=t0, t1=t1, batchsize=batchsize,
+                                 procver_fields=[ 'processing_version', 'diaobject_procver' ] )
+
+
+    def import_objects_from_collection( self, collection, t0=None, t1=None, batchsize=10000 ):
+        with db.DB() as pqconn:
+            self.read_mongo_objects( pqconn, collection, t0=t0, t1=t1, batchsize=batchsize )
+
+            cursor = pqconn.cursor()
+            cursor.execute( "INSERT INTO diaobject ( SELECT * FROM temp_diaobject_import ) ON CONFLICT DO NOTHING" )
+            pqconn.commit()
+
+
+    def import_sources_from_collection( self, collection, t0=None, t1=None, batchsize=10000 ):
+        """write docs
+
+        Assumes all objects are already imported.
+
+        """
+        with db.DB() as pqconn:
+            self.read_mongo_sources( pqconn, collection, t0=t0, t1=t1, batchsize=batchsize )
+
+            cursor = pqconn.cursor()
+            cursor.execute( "INSERT INTO diasource ( SELECT * FROM temp_diasource_import ) ON CONFLICT DO NOTHING" )
+            pqconn.commit()
+
+
+    def import_prvsources_from_collection( self, collection, t0=None, t1=None, batchsize=10000 ):
+        """Write docs.
+
+        Do.
+
+        """
+        with db.DB() as pqconn:
+            self.read_mongo_prvsources( pqconn, collection, t0=t0, t1=t1, batchsize=batchsize )
+
+            cursor = pqconn.cursor()
+            cursor.execute( "INSERT INTO diasource ( SELECT * FROM temp_prvdiasource_import ) ON CONFLICT DO NOTHING" )
+            pqconn.commit()
+
+
+    def import_prvforcedsources_from_collection( self, collection, t0=None, t1=None, batchsize=10000 ):
+        """Write docs.
+
+        Do.
+
+        """
+        with db.DB() as pqconn:
+            self.read_mongo_prvforcedsources( pqconn, collection, t0=t0, t1=t1, batchsize=batchsize )
+
+            cursor = pqconn.cursor()
+            cursor.execute( "INSERT INTO diaforcedsource "
+                            "( SELECT * FROM temp_prvdiaforcedsource_import ) "
+                            "ON CONFLICT DO NOTHING" )
+            pqconn.commit()

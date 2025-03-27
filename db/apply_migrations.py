@@ -2,6 +2,8 @@ import sys
 import io
 import argparse
 import pathlib
+import hashlib
+import uuid
 import subprocess
 
 import psycopg2
@@ -24,24 +26,38 @@ def main():
                            user=args.user, password=args.password ) as conn:
         cursor = conn.cursor()
         try:
-            cursor.execute( "SELECT filename,applied_time FROM migrations_applied ORDER BY filename" )
+            cursor.execute( "SELECT filename,md5sum,applied_time FROM migrations_applied ORDER BY filename" )
             rows = cursor.fetchall()
             applied = [ row[0] for row in rows ]
-            when = [ row[1] for row in rows ]
+            md5sums = [ row[1] for row in rows ]
+            when = [ row[2] for row in rows ]
         except psycopg2.errors.UndefinedTable:
+            conn.rollback()
+            cursor.execute( "CREATE TABLE migrations_applied( "
+                            "  filename text,"
+                            "  applied_time timestamp with time zone DEFAULT NOW(),"
+                            "  md5sum UUID"
+                            ")" )
+            conn.commit()
             applied = []
+            md5sums = []
             when = []
 
         strio = io.StringIO()
         strio.write( "Previously applied:\n" )
         for a, w in zip( applied, when ):
-            strio.write( f"   {a:32s}  ({w})\n" )
+            strio.write( f"   {a:48s}  ({w})\n" )
         sys.stderr.write( strio.getvalue() )
 
         for i, a in enumerate( applied ):
             if sqlfiles[i].name != a:
                 raise ValueError( f"Mismatch between applied and files at file {sqlfiles[i].name}, "
                                   f"applied logged {a}" )
+            filemd5 = hashlib.md5()
+            with open( sqlfiles[i], "rb" ) as ifp:
+                filemd5.update( ifp.read() )
+            if uuid.UUID( filemd5.hexdigest() ) != uuid.UUID( md5sums[i] ):
+                raise ValueError( f"Contents of migration file {a} md5sum does not match what was previously applied" )
 
         for i in range( len(applied), len(sqlfiles) ):
             sys.stderr.write( f"Applying {sqlfiles[i]}...\n" )
@@ -55,6 +71,16 @@ def main():
             if rval.returncode != 0:
                 sys.stderr.write( f"Error processing {sqlfiles[i]}:\n{rval.stderr.decode('utf-8')}\n" )
                 raise RuntimeError( "SQL error" )
+            filemd5 = hashlib.md5()
+            with open( sqlfiles[i], "rb" ) as ifp:
+                filemd5.update( ifp.read() )
+            md5sum = filemd5.hexdigest()
+
+            cursor = conn.cursor()
+            cursor.execute( "INSERT INTO migrations_applied(filename,md5sum) "
+                            "VALUES(%(fn)s,%(md5)s)",
+                            { 'fn': sqlfiles[i].name, 'md5': md5sum } )
+            conn.commit()
 
 
 # ======================================================================

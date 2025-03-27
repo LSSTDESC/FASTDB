@@ -289,6 +289,9 @@ CREATE TABLE diasource_default PARTITION OF diasource DEFAULT;
 
 
 -- Selected from DiaForcedSource APDB table
+-- NOTE : I would love to make the scienceflux and sciencefluxerr
+--   fields non-nullable, but for our tests we don't have this
+--   information from the SNANA files, so we need them to be nullable.
 CREATE TABLE diaforcedsource (
   diaforcedsourceid bigint NOT NULL,
   processing_version integer NOT NULL,
@@ -302,8 +305,8 @@ CREATE TABLE diaforcedsource (
   dec double precision NOT NULL,
   psfflux real NOT NULL,
   psffluxerr real NOT NULL,
-  scienceflux real NOT NULL,
-  sciencefluxerr real NOT NULL,
+  scienceflux real,
+  sciencefluxerr real,
   time_processed timestamp with time zone,
   time_withdrawn timestamp with time zone,
 
@@ -392,10 +395,3 @@ CREATE TABLE query_queue(
 CREATE INDEX ix_query_queue_userid ON query_queue(userid);
 ALTER TABLE query_queue ADD CONSTRAINT fk_query_queue_userid
   FOREIGN KEY (userid) REFERENCES authuser(id) ON DELETE CASCADE;
-
-
-CREATE TABLE migrations_applied(
-  filename text,
-  applied_time timestamp with time zone DEFAULT NOW()
-);
-INSERT INTO migrations_applied(filename) VALUES('2025-02-18_001_init.sql');
