@@ -318,7 +318,14 @@ class DBBase:
                         meta.pg_to_py = types.MethodType( _tmp_pg_to_py, meta )
 
 
-    def __init__( self, dbcon=None, cols=None, vals=None, _noinit=False, **kwargs):
+    def __init__( self, dbcon=None, cols=None, vals=None, _noinit=False, noconvert=True, **kwargs):
+        """Create an object based on a row returned from psycopg's cursor.fetch*.
+
+        You could probably use this also just to create an object fresh; in
+        that case, you *probably* want to set noconvert to True.
+
+        """
+
         if _noinit:
             return
 
@@ -352,12 +359,16 @@ class DBBase:
         self._set_self_from_fetch_cols_row( cols, vals )
 
 
-    def _set_self_from_fetch_cols_row( self, cols, fetchrow, dbcon=None ):
+    def _set_self_from_fetch_cols_row( self, cols, fetchrow, noconvert=False, dbcon=None ):
         if self._tablemeta is None:
             self.load_table_meta( dbcon=dbcon )
 
-        for col, val in zip( cols, fetchrow ):
-            setattr( self, col, self._tablemeta[col].pg_to_py( val ) )
+        if noconvert:
+            for col, val in zip( cols, fetchrow ):
+                setattr( self, col, val )
+        else:
+            for col, val in zip( cols, fetchrow ):
+                setattr( self, col, self._tablemeta[col].pg_to_py( val ) )
 
 
     def _build_subdict( self, columns=None ):
@@ -644,12 +655,6 @@ class DBBase:
               * a dict of lists
               * a list of objects of type cls
 
-            Note: passing a list of objects will not work on classes
-            whose table includes jsonb columns.  If using one of the
-            other forms, you cannot include the jsonb columns in the
-            dictionaries.  (Which means you can't fill jsonb columns
-            using this class method.)
-
           upsert: bool, default False
              If False, then objects whose primary key is already in the
              database will be ignored.  If True, then objects whose
@@ -670,7 +675,7 @@ class DBBase:
              really know what you're doing.  If this is True, not only
              will we not commit to the database, but we won't copy from
              the table temp_bulk_upsert to the table of interest.  It
-             doesn't makje sense to set this to True unless you also
+             doesn't make sense to set this to True unless you also
              pass a dbcon.  This is for things that want to do stuff to
              the temp table before copying it over to the main table, in
              which case it's the caller's responsibility to do that copy
