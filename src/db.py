@@ -115,8 +115,10 @@ def MG( client=None ):
         password = os.getenv( "MONGODB_ALERT_WRITER_PASSWD" )
         if any( i is None for i in [ host, dbname, user, password ] ):
             raise RuntimeError( "Failed to make mongo client; make sure all env vars are set: "
-                                "MONGODB_HOST, MONGODB_DBNAME, MONGODB_ALERT_WRITER_USER, MONGODB_ALERT_WRITER_PASSWD" )
-        client = pymongo.MongoClient( f"mongodb://{user}:{password}@{host}:27017/{dbname}?authSource={dbname}" )
+                                "MONGODB_HOST, MONGODB_DBNAME, MONGODB_ALERT_WRITER_USER, "
+                                "MONGODB_ALERT_WRITER_PASSWD" )
+        client = pymongo.MongoClient( f"mongodb://{user}:{password}@{host}:27017/"
+                                      "{dbname}?authSource={dbname}" )
         yield client
     finally:
         if client is not None:
@@ -173,7 +175,7 @@ class ColumnMeta:
     # If a function is "None", it means the identity function.  (So 0=1, P=NP, and Δs<0.)
 
     typeconverters = {
-        # 'uuid': ( str, util.asUUID ),
+        # 'uuid': ( str, util.asUUID ),      # Doesn't seem to be needed any more for psycopg3
         'jsonb': ( psycopg.types.json.Jsonb, None )
     }
 
