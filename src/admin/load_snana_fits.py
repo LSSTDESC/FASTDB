@@ -12,8 +12,8 @@ import queue
 import traceback
 
 import numpy as np
-import psycopg2
-import psycopg2.extras
+import psycopg
+import psycopg.rows
 
 import astropy.table
 
@@ -414,7 +414,7 @@ class FITSLoader( FastDBLoader ):
     def make_procver_and_snapshot( self ):
         with DB() as conn:
             try:
-                cursor = conn.cursor( cursor_factory=psycopg2.extras.RealDictCursor )
+                cursor = conn.cursor( row_factory=psycopg.rows.dict_row )
                 cursor.execute( "LOCK TABLE processing_version" )
                 cursor.execute( "SELECT * FROM processing_version WHERE description=%(pv)s",
                                 { 'pv': self.processing_version_name } )
@@ -434,7 +434,7 @@ class FITSLoader( FastDBLoader ):
                 conn.rollback()
 
             try:
-                cursor = conn.cursor( cursor_factory=psycopg2.extras.RealDictCursor )
+                cursor = conn.cursor( row_factory=psycopg.rows.dict_row )
                 cursor.execute( "LOCK TABLE snapshot ")
                 cursor.execute( "SELECT * FROM snapshot WHERE description=%(ss)s",
                                 { 'ss': self.snapshot_name } )

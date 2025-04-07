@@ -1,7 +1,7 @@
 import re
 
-import psycopg2
-import psycopg2.extras
+import psycopg
+import psycopg.rows
 
 from db import DB
 
@@ -53,7 +53,7 @@ class FastDBLoader:
         pkindexmatcher = re.compile( r' USING .* \((.*)\) *$' )
 
         with DB() as conn:
-            cursor = conn.cursor( cursor_factory=psycopg2.extras.RealDictCursor )
+            cursor = conn.cursor( row_factory=psycopg.rows.dict_row )
 
             # Find all constraints (including primary keys)
             for table in tables:
@@ -147,7 +147,7 @@ class FastDBLoader:
             commands = ifp.readlines()
 
         with DB() as conn:
-            cursor = conn.cursor( cursor_factory=psycopg2.extras.RealDictCursor )
+            cursor = conn.cursor( row_factory=psycopg.rows.dict_row )
             for command in commands:
                 self.logger.info( f"Running {command}" )
                 cursor.execute( command )

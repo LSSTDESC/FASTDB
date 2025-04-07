@@ -10,8 +10,8 @@ import multiprocessing
 from contextlib import contextmanager
 
 import pandas
-import psycopg2
-import psycopg2.extras
+import psycopg
+import psycopg.rows
 
 import config
 
@@ -48,8 +48,8 @@ class QueryRunner:
     @contextmanager
     def rwconn( self ):
         try:
-            conn = psycopg2.connect( host=self.dbhost, port=self.dbport, dbname=self.dbname,
-                                     user=self.dbuser, password=self.dbpswd )
+            conn = psycopg.connect( host=self.dbhost, port=self.dbport, dbname=self.dbname,
+                                    user=self.dbuser, password=self.dbpswd )
             yield conn
         finally:
             conn.rollback()
@@ -58,8 +58,8 @@ class QueryRunner:
     @contextmanager
     def conn( self ):
         try:
-            conn = psycopg2.connect( host=self.dbhost, port=self.dbport, dbname=self.dbname,
-                                     user=self.rodbuser, password=self.rodbpasswd )
+            conn = psycopg.connect( host=self.dbhost, port=self.dbport, dbname=self.dbname,
+                                    user=self.rodbuser, password=self.rodbpasswd )
             yield conn
         finally:
             conn.rollback()
@@ -91,7 +91,7 @@ class QueryRunner:
 
     def get_queued_query( self ):
         with self.rwconn() as conn:
-            cursor = conn.cursor( cursor_factory=psycopg2.extras.RealDictCursor )
+            cursor = conn.cursor( row_factory=psycopg.rows.dict_row )
             cursor.execute( "LOCK TABLE query_queue" )
             cursor.execute( "SELECT * FROM query_queue WHERE started IS NULL ORDER BY submitted" )
             rows = cursor.fetchall()
@@ -114,7 +114,7 @@ class QueryRunner:
         try:
             # Convert the subdict text entries into dictionaries.
             # Convert any lists in queryinfo subdict to tuples, because
-            #   psycopg2 is very particular.
+            #   psycopg is very particular.
             queries = queryinfo['queries']
             subdicts = []
             for i, subdict in enumerate( queryinfo['subdicts'] ):

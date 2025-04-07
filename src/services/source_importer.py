@@ -108,7 +108,7 @@ class SourceImporter:
 
         Parameters
         ----------
-          pqconn : psycopg2.Connection
+          pqconn : psycopg.Connection
 
           collection : pymongo.collection
             The PyMongo collection we're pulling from.

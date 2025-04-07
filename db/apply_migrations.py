@@ -6,7 +6,7 @@ import hashlib
 import uuid
 import subprocess
 
-import psycopg2
+import psycopg
 
 
 def main():
@@ -22,7 +22,7 @@ def main():
     sqlfiles = list( direc.glob( "*.sql" ) )
     sqlfiles.sort()
 
-    with psycopg2.connect( host=args.host, port=args.port, dbname=args.db,
+    with psycopg.connect( host=args.host, port=args.port, dbname=args.db,
                            user=args.user, password=args.password ) as conn:
         cursor = conn.cursor()
         try:
@@ -31,7 +31,7 @@ def main():
             applied = [ row[0] for row in rows ]
             md5sums = [ row[1] for row in rows ]
             when = [ row[2] for row in rows ]
-        except psycopg2.errors.UndefinedTable:
+        except psycopg.errors.UndefinedTable:
             conn.rollback()
             cursor.execute( "CREATE TABLE migrations_applied( "
                             "  filename text,"

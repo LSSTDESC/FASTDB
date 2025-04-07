@@ -402,7 +402,7 @@ class FASTDBClient:
         Parameters
         ----------
           query : str or list of str
-            The PostgreSQL query to send.  Will do standard psycopg2
+            The PostgreSQL query to send.  Will do standard psycopg
             cursor.execute() parameter substitution of strings like
             "%(var)s" using the "var" entry in subdict.  (Of course,
             "var" can be anything.)
