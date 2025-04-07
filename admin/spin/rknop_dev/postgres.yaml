@@ -34,6 +34,8 @@ spec:
       - name: volume-mount-hack
         image: busybox
         command: [ "sh", "-c", "chown 100:108 /pgdata" ]
+        securityContext:
+          allowPrivilegeEscalation: false
         volumeMounts:
         - name: postgres
           mountPath: /pgdata

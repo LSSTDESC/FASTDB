@@ -32,9 +32,52 @@ spec:
     spec:
       affinity: {}
       containers:
-      - image: registry.nersc.gov/m1727/raknop/fastdb-shell:rknop-dev
+      - name: shell
+        image: registry.nersc.gov/m1727/raknop/fastdb-shell:rknop-dev
+        env:
+        - name: MONGODB_HOST
+          value: mongodb
+        - name: MONGODB_DBNAME
+          value: brokeralert
+        - name: MONGODB_COLLECTION
+          value: alerts
+        - name: MONGODB_ADMIN_USER
+          valueFrom:
+            secretKeyRef:
+              key: mongodb_admin
+              name: secrets
+              optional: false
+        - name: MONGODB_ADMIN_PASSWD
+          valueFrom:
+            secretKeyRef:
+              key: mongodb_admin_passwd
+              name: secrets
+              optional: false
+        - name: MONGODB_ALERT_WRITER_USER
+          valueFrom:
+            secretKeyRef:
+              key: mongodb_alert_writer
+              name: secrets
+              optional: false
+        - name: MONGODB_ALERT_WRITER_PASSWD
+          valueFrom:
+            secretKeyRef:
+              key: mongodb_alert_writer_password
+              name: secrets
+              optional: false
+        - name: MONGODB_ALERT_READER_USER
+          valueFrom:
+            secretKeyRef:
+              key: mongodb_alert_reader
+              name: secrets
+              optional: false
+        - name: MONGODB_ALERT_READER_PASSWD
+          valueFrom:
+            secretKeyRef:
+              key: mongodb_alert_reader_password
+              name: secrets
+              optional: false
         imagePullPolicy: Always
-        name: shell
         resources: {}
         securityContext:
           allowPrivilegeEscalation: false
