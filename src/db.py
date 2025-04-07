@@ -249,6 +249,15 @@ class ColumnMeta:
 
 
 # ======================================================================
+# ogod, it's like I'm writing my own ORM, and I hate ORMs
+#
+# But, two things.  (1) I'm writing it, so I know actually what it's doing
+#   backend with the PostgreSQL queries, (2) I'm not trying to create a whole
+#   new language to learn in place of SQL, I still intend mostly to just use
+#   SQL, and (3) sometimes it's worth re-inventing the wheel so that you get
+#   just a wheel (and also so that you really get a wheel and not massive tank
+#   treads that you are supposed to think act like a wheel)
+
 class DBBase:
     """A base class from which all other table classes derive themselves.
 
