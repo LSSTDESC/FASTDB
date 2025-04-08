@@ -1,4 +1,3 @@
-import io
 import re
 import datetime
 
@@ -71,33 +70,16 @@ class SourceImporter:
                 pipeline.insert( 0, { "$match": { "savetime": { "$lte": t1 } } } )
 
         mongocursor = collection.aggregate( pipeline )
-
-        def flush_to_db( sourceio ):
-            sourceio.seek( 0 )
-            columns = [ i.lower() for i in fields ]
-            columns.extend( procver_fields )
-            pqcursor.copy_from( sourceio, temptable, size=65536, columns=columns )
-
-        cursize = 0
-        strio = None
-        for row in mongocursor:
-            if strio is None:
-                strio = io.StringIO()
-            # ... WORRY.  What if there's a TAB in one of the broker messages?
-            strio.write( "\t".join( ( r'\N' if row[f] is None else str(row[f]) ) for f in fields ) )
-            if len( procver_fields ) > 0:
-                strio.write( "\t" )
-                strprocver = str( self.processing_version )
-                strio.write( "\t".join( strprocver for f in procver_fields ) )
-            strio.write( "\n" )
-            cursize += 1
-            if cursize >= batchsize:
-                flush_to_db( strio )
-                strio = None
-                cursize = 0
-
-        if cursize > 0:
-            flush_to_db( strio )
+        writefields = list( fields )
+        writefields.extend( procver_fields )
+        procverextend = [ self.processing_version for i in procver_fields ]
+        with pqcursor.copy( f"COPY {temptable}({','.join(writefields)}) FROM STDIN" ) as pgcopy:
+            for row in mongocursor:
+                # This is probably inefficient.  Generator to list to tuple.  python makes
+                #   writing this easy, but it's probably doing multiple gratuitous memory copies
+                data = [ None if row[f] is None else str(row[f]) for f in fields ]
+                data.extend( procverextend )
+                pgcopy.write_row( tuple( data ) )
 
 
     def read_mongo_objects( self, pqconn, collection, t0=None, t1=None, batchsize=10000 ):

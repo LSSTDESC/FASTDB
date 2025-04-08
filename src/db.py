@@ -118,7 +118,7 @@ def MG( client=None ):
                                 "MONGODB_HOST, MONGODB_DBNAME, MONGODB_ALERT_WRITER_USER, "
                                 "MONGODB_ALERT_WRITER_PASSWD" )
         client = pymongo.MongoClient( f"mongodb://{user}:{password}@{host}:27017/"
-                                      "{dbname}?authSource={dbname}" )
+                                      f"{dbname}?authSource={dbname}" )
         yield client
     finally:
         if client is not None:

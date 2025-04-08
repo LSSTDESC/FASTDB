@@ -69,7 +69,7 @@ If the server is already running, remember to `KILL -HUP 1` on the webserver wor
 Upon initial installation, and after any database schema change, log into the spin workload running the shell and run:
 ```
 cd /code/db
-python apply_migrations.py
+python apply_migrations.py -H <host> -u <dbuser> -p <dbpasswd>
 ```
 
 (On initial install, probably need to do this before starting the query runner or query pruner.)
@@ -135,5 +135,6 @@ make install
 
 Should put lots of stuff underneath `install`.
 
+To run tests, remember to docker compose up all of `shell`, `webap`, and `query-runner`.
 
-            
+
