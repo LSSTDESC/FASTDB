@@ -216,7 +216,7 @@ def main():
 
     broker = FakeBroker( args.source, args.source_topics, args.dest, args.dest_topic,
                          group_id=args.group_id, alert_schema=args.alert_schema,
-                         brokermessage_schema=args.brokermessage_schema, reset=args.resetl,
+                         brokermessage_schema=args.brokermessage_schema, reset=args.reset,
                          verbose=args.verbose )
     broker()
 
