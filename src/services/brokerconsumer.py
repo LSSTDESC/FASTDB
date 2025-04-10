@@ -867,7 +867,7 @@ def main():
     args = parser.parse_args()
 
     mongodb_host = os.getenv( "MONGODB_HOST" )
-    mongodb_dbname = os.getenv( "MONGDB_DBNAME" )
+    mongodb_dbname = os.getenv( "MONGODB_DBNAME" )
     mongodb_collection = args.collection if args.collection is not None else os.getenv( "MONGODB_DEFAULT_COLLECTION" )
     mongodb_user = os.getenv( "MONGODB_ALERT_WRITER_USER" )
     mongodb_password = os.getenv( "MONGODB_ALERT_WRITER_PASSWD" )

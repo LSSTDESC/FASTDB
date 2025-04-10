@@ -1,7 +1,9 @@
 import re
 import datetime
+import argparse
 
 import db
+import psycopg.rows
 
 
 class SourceImporter:
@@ -327,3 +329,50 @@ class SourceImporter:
             pqconn.commit()
 
         return nobj, nsrc + nprvsrc, nprvfrc
+
+
+# ======================================================================
+
+def main():
+    parser = argparse.ArgumentParser( 'source_importer.py', description='Import sources from mongo to postgres',
+                                      formatter_class=argparse.ArgumentDefaultsHelpFormatter )
+    parser.add_argument( "-p", "--processing-version", required=True,
+                         help="Processing version (number or text) to tag imported sources with" )
+    parser.add_argument( "-c", "--collection", required=True,
+                         help="MongoDB collection to import from" )
+    args = parser.parse_args()
+
+    with db.DB() as con:
+        cursor = con.cursor( row_factory=psycopg.rows.dict_row )
+        subdict = {}
+        q = "SELECT * FROM processing_version WHERE "
+        pv = args.processing_version
+        q += "description=%(pv)s"
+        subdict['pv'] = pv
+        try:
+            ipv = int( pv )
+            q += " OR id=%(ipv)s"
+            subdict['ipv'] = ipv
+        except ValueError:
+            pass
+        # TODO : validity dates?
+        cursor.execute( q, subdict )
+        rows = cursor.fetchall()
+        if len(rows) == 0:
+            raise ValueError( f"Could not find processing version {pv}" )
+        if len(rows) > 1:
+            raise ValueError( f"More than one processing version matches {pv}, you're probably screwed." )
+
+        ipv = rows[0]['id']
+
+    si = SourceImporter( ipv )
+    with db.MG() as mg:
+        collection = db.get_mongo_collection( mg, args.collection )
+        nobj, nsrc, nfrc = si.import_from_mongo( collection )
+
+    print( f"Imported {nobj} objects, {nsrc} sources, {nfrc} forced sources" )
+
+
+# ======================================================================
+if __name__ == "__main__":
+    main()

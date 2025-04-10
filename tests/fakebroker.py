@@ -117,6 +117,7 @@ class FakeBroker:
                   alert_schema=f"/fastdb/share/avsc/{_schema_namespace}.Alert.avsc",
                   brokermessage_schema=f"/fastdb/share/avsc/{_schema_namespace}.BrokerMessage.avsc",
                   runtime=datetime.timedelta(minutes=10),
+                  consume_nmsgs=1000,
                   notopic_sleeptime=10,
                   reset=False,
                   verbose=False ):
@@ -138,6 +139,7 @@ class FakeBroker:
         self.group_id = group_id
         self.reset = reset
         self.runtime = runtime
+        self.consume_nmsgs = consume_nmsgs
         self.notopic_sleeptime=notopic_sleeptime
 
         self.alert_schema = alert_schema
@@ -162,8 +164,8 @@ class FakeBroker:
             subbed = []
             if consumer is not None:
                 consumer.close()
-            consumer = KafkaConsumer( self.source, self.group_id, self.alert_schema, consume_nmsgs=100,
-                                      logger=self.logger )
+            consumer = KafkaConsumer( self.source, self.group_id, self.alert_schema,
+                                      consume_nmsgs=self.consume_nmsgs, logger=self.logger )
             # Wait for the topic to exist, and only then subscribe
             while len(subbed) == 0:
                 topics = consumer.topic_list()
@@ -201,6 +203,8 @@ def main():
                          help="Group ID to use on source server" )
     parser.add_argument( "-r", "--reset", action='store_true', default=False,
                          help="Reset to beginning of source stream?" )
+    parser.add_argument( "-n", "--consume-nmsgs", type=int, default=1000,
+                         help="Number of LSST AP alerts to attempt to consume at once" )
     parser.add_argument( "--dest", default="brahms.lbl.gov:9092",
                          help="Server to push broker message alerts to" )
     parser.add_argument( "-u", "--dest-topic", required=True, help="Topic on dest server" )

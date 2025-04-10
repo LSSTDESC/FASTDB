@@ -36,8 +36,8 @@ spec:
         image: registry.nersc.gov/m1727/raknop/fastdb-shell:rknop-dev
         imagePullPolicy: Always
         command: [ "python" ]
-        args: [ "/code/tests/fakebroker.py", "--source", "kafka", "-t", "stress_apr2025_1",
-                "--dest", "kafka", "-u", "stress_apr2025_1_brokermsg" ]
+        args: [ "/code/tests/fakebroker.py", "--source", "kafka", "-t", "stress_apr2025_2",
+                "--dest", "kafka", "-u", "stress_apr2025_2_brokermsg" ]
         resources: {}
         securityContext:
           allowPrivilegeEscalation: false

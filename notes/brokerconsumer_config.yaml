@@ -1,0 +1,16 @@
+schemafile: /code/share/avsc/fastdb_test_0.1.BrokerMessage.avsc
+
+brokers:
+  - name: "fakebroker"
+    class: BrokerConsumer
+    server: kafka:9092
+    topics: [ "stress_apr2025_2_brokermsg" ]
+    groupid: test-5
+    collection: stress_apr2025_2
+    loggername: FAKEBROKER
+    loggername_prefix: ""
+    updatetopics: false
+    restart_time_min: 10
+    max_restarts: null
+    notopic_sleeptime_sec: 5
+    extraconfig: {}

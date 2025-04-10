@@ -30,3 +30,109 @@ Plan :
 OBSERVATIONS:
   * (PRELIMINARY) : project sim can send alerts at ~700Hz with 5
     reconstructor processes
+
+
+======================================================================
+
+BABY STEPS
+
+* servers running; fakebroker listening to topic stress_apr2025_1
+
+* Wipe out ppdb_alerts_sent table
+
+* Run projectsim.py to send 0.1 days of alerts
+   -> 17862 alerts in 24.14 seconds (740 Hz)
+   -> Fakebroker seems to have basically kept up
+
+* Run brokerconsumer under /fastdb with
+    LOGDIR=$PWD/logs python services/brokerconsumer.py /code/notes/brokerconsumer_config.yaml
+
+  ...something was up with my mongo install, not sure what, but when I
+  recreated it it worked.
+
+  Consumed 8724 messages, but then consumed no more.  Took about ~20
+  seconds, so reading them as fast as ppdb_alerts was producing them.
+  There are 35724 documents in the mongo collection, which is the expected
+  number.
+
+* Run python services/source_importer.py -p test -c fastdb_stress_4
+
+  Created 11921 objects, 17862 sources, 0 forced sources.  Went fast.
+
+  Ran a second time, created nothing.
+
+  (There were no forced sources because no alerts from the first day of
+  the survey would have had a chance to include any.)
+
+
+...I think I'm ready to try to bulk process this.
+
+Clean up by wiping out the mongodb collections, and cleaning out the
+diasource, diaobject, and ppdb_alerts_sent tables.  rm everything from
+/fastdb/logs
+
+
+======================================================================
+Full day stress test
+
+* Restart the fakebroker to read from stress_apr2025_2 and write to
+  stress_apr2025_2_brokermsg.
+
+* Edit brokerconsumer_config.yaml to read topic
+  stress_apr2025_2_brokermsg, write to collection
+  stress_apr2025_2, groupid test-5 (a new one)
+
+* On a shell, run
+
+    LOGDIR=$PWD/logs nohup python services/brokerconsumer.py /code/notes/brokerconsumer_config.yaml gratutious \
+         < /dev/null > logs/brokerconsumer.out 2>&1 &
+
+* On a different shell, run
+
+    nohup python services/projectsim.py -t stress_apr2025_2 -a 1 -l 1000 --do \
+        < /dev/null > logs/projectsim.out 2>&1 &
+
+* Watch
+    ...alert sender started at ~500Hz, after 75444 alerts claimed
+       700Hz.  Took 107 seconds to send it all
+
+    ...brokerconsumer seems to be keeping up with fakebroker.  (It tires
+       to consume 1000 messages each step, is semetimes timing out with
+       a few hundred.)  Took 252s to injest it all, but I think
+       fakebroker was the delay, not brokerconsumer.  (More
+       investigation needed.)
+     
+    ...!!!fakebroker seems to be getting more messages than were
+       originally sent out! ... no, wait, the count its giving
+       is the count of classifications its sent, not the count
+       of alerts it got.  Logging issue.
+      
+* Run
+     time python services/source_importer.py -p test -c stress_apr2025_2
+
+     Imported 36387 objects, 75444 sources, 0 forced sources in 20s.
+
+   ...need to put in some timings inside it to diagnose where it spends
+      its time.
+
+    
+SECOND DAY
+
+Run it all again (leave fakebroker running) to do the second day.
+
+  ...happily, brokerconsumer, when started, saw no messages, so kafka
+     topic offsets were remembered.
+
+  ...alert sending more like 300Hz.  Wait, going up.  Ended at 140s for
+     75606 alerts (540Hz).
+
+  ...brokerconsumer sleeps sometimes, indicates fakebroker is the one
+     not keeping up.  Brokerconsumer injested 151212 (right number)
+     messages over 525 seconds.
+
+  ...source_importer imported 22453 objects, 75606 sources, 33517 forced
+     sources in 30s.
+
+Basic functionality looks good.  Think about increasing the fakebroker's
+message chunk grab size thingy to see if it makes it go faster.  (Right
+now it tries to ingest 100 alerts at a time; try making it 1000.)
