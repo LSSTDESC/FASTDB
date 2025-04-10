@@ -141,8 +141,8 @@ class FakeBroker:
         self.notopic_sleeptime=notopic_sleeptime
 
         self.alert_schema = alert_schema
-        alertschemaobj = fastavro.schema.load_schema( alert_schema )
-        brokermsgschema = fastavro.schema.load_schema( brokermessage_schema )
+        alertschemaobj = fastavro.schema.parse_schema( fastavro.schema.load_schema( alert_schema ) )
+        brokermsgschema = fastavro.schema.parse_schema( fastavro.schema.load_schema( brokermessage_schema ) )
         self.classifiers = [ NugentClassifier( kafkaserver=self.dest, topic=self.dest_topic,
                                                alertschema=alertschemaobj, brokermessageschema=brokermsgschema,
                                                logger=self.logger ),
