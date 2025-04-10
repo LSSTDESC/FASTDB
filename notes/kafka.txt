@@ -1,0 +1,27 @@
+Basic check of kafka server:
+
+On the kafka server itself (or another pod that has the kafka code
+installed), cd /opt/kafka.
+
+Show what topics are on the server:
+
+  bin/kafka-topics.sh --bootstrap-server kafka:9092 --list
+
+Post a message to a topic:
+
+  echo "<message>" | bin/kafka-console-producer.sh --bootstrap-server kafka:9092 --topic <topic>
+
+Read messages from a topic:
+
+  bin/kafka-console-consumer.sh --bootstrap-server kafka:9092 \
+     --topic <topic> --group <group> --from-beginning [--max-messages <n>] [--timeout-ms <dt>]
+
+See information about groups and offsets:
+
+  bin/kafka-consumer-groups.sh --bootstrap-server kafka:9092 --list
+  bin/kafka-consumer-groups.sh --bootstrap-server kafka:9092 --describe --group <group>
+
+
+
+On the shell server, go into this directory (/code/notes) and use
+post_kafka_messages.py and read_kafka_messages.py

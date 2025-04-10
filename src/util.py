@@ -49,11 +49,11 @@ def get_alert_schema( schemadir=None ):
     brokermessage_schema = fastavro.schema.load_schema( schemadir / f"{_schema_namespace}.BrokerMessage.avsc",
                                                         named_schemas=named_schemas )
 
-    return { 'alert': alert_schema,
-             'diaobject': diaobject_schema,
-             'diasource': diasource_schema,
-             'diaforcedsource': diaforcedsource_schema,
-             'brokermessage': brokermessage_schema,
+    return { 'alert': fastavro.schema.parse_schema( alert_schema ),
+             'diaobject': fastavro.schema.parse_schema( diaobject_schema ),
+             'diasource': fastavro.schema.parse_schema( diasource_schema ),
+             'diaforcedsource': fastavro.schema.parse_schema( diaforcedsource_schema ),
+             'brokermessage': fastavro.schema.parse_schema( brokermessage_schema ),
              'alert_schema_file': schemadir / f"{_schema_namespace}.Alert.avsc",
              'brokermessage_schema_file': schemadir / f"{_schema_namespace}.BrokerMessage.avsc"
             }

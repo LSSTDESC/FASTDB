@@ -1,0 +1,32 @@
+Plan :
+  * Run kafka server in kubernetes namespace
+      --> Verify basic functionality with post_kafka_message.py and read_kafka_messages.py in this directory
+
+      (On the kafka server, or another workload that has the kafka
+      install, can check basic functionality with:
+      
+         echo "<message>" | /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server kafka:9092 --topic <topic>
+
+         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --list
+
+         /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server kafka:9092 \
+            --topic <topic> --group <group> --from-beginning [--max-messages <n>] [--timeout-ms <dt>]
+
+         /opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server kafka:9092 --list
+      )
+
+  * Start with ELAsTiCC2 loaded into ppdb tables
+
+  * Run a fakebroker that posts messages to stress_apr2025_n_brokermsg
+
+  * Run a shell with brokerconsumer
+
+  * Run a shell in which we'll run a projectsim alert sender to send out
+    n days worth of alerts to topic stress_apr2025_n
+
+
+
+
+OBSERVATIONS:
+  * (PRELIMINARY) : project sim can send alerts at ~700Hz with 5
+    reconstructor processes
