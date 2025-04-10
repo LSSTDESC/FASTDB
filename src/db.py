@@ -7,19 +7,18 @@
 
 # import sys
 import os
-import io
 import uuid
 import collections
+import types
 
 from contextlib import contextmanager
 
 import numpy as np
-import pandas
-import psycopg2
-import psycopg2.extras
+import psycopg
+import psycopg.rows
+import psycopg.types.json
 import pymongo
 
-import util
 
 # ======================================================================
 # Global config
@@ -31,9 +30,6 @@ dbhost = config.dbhost
 dbport = config.dbport
 dbuser = config.dbuser
 dbname = config.dbdatabase
-
-psycopg2.extensions.register_adapter(dict, psycopg2.extras.Json)
-
 
 # For multiprcoessing debugging
 # import pdb
@@ -65,7 +61,7 @@ def DB( dbcon=None ):
 
     Parameters
     ----------
-       dbcon: psycopg2.connection or None
+       dbcon: psycopg.connection or None
           If not None, just returns that.  (Doesn't check the type, so
           don't pass the wrong thing.)  Otherwise, makes a new
           connection, and then rolls back and closes that connection
@@ -73,7 +69,7 @@ def DB( dbcon=None ):
 
     Returns
     -------
-       psycopg2.connection
+       psycopg.connection
 
     """
 
@@ -84,7 +80,7 @@ def DB( dbcon=None ):
     try:
         global dbuser, dbpasswd, dbhost, dbport, dbname
         conn = None
-        conn = psycopg2.connect( dbname=dbname, user=dbuser, password=dbpasswd, host=dbhost, port=dbport )
+        conn = psycopg.connect( dbname=dbname, user=dbuser, password=dbpasswd, host=dbhost, port=dbport )
         yield conn
     finally:
         if conn is not None:
@@ -119,8 +115,10 @@ def MG( client=None ):
         password = os.getenv( "MONGODB_ALERT_WRITER_PASSWD" )
         if any( i is None for i in [ host, dbname, user, password ] ):
             raise RuntimeError( "Failed to make mongo client; make sure all env vars are set: "
-                                "MONGODB_HOST, MONGODB_DBNAME, MONGODB_ALERT_WRITER_USER, MONGODB_ALERT_WRITER_PASSWD" )
-        client = pymongo.MongoClient( f"mongodb://{user}:{password}@{host}:27017/{dbname}?authSource={dbname}" )
+                                "MONGODB_HOST, MONGODB_DBNAME, MONGODB_ALERT_WRITER_USER, "
+                                "MONGODB_ALERT_WRITER_PASSWD" )
+        client = pymongo.MongoClient( f"mongodb://{user}:{password}@{host}:27017/"
+                                      f"{dbname}?authSource={dbname}" )
         yield client
     finally:
         if client is not None:
@@ -136,18 +134,23 @@ def get_mongo_collection( mongoclient, collection_name ):
 
 
 # ======================================================================
-class DBBase:
-    """A base class from which all other table classes derive themselves.
+class ColumnMeta:
+    """Information about a table column.
 
-    All subclasses must include:
+    An object has properties:
+      column_name
+      data_type
+      column_default
+      is_nullable
+      element_type
+      pytype
 
-    __tablename__ = "<name of table in databse>"
-    _tablemeta = None
-    _pk = <list>
+    (They can also be read as if the object were a dictionary.)
 
-    _pk must be a list of strings with the names of the primary key
-    columns.  Uusally (but not always) this will be a single-element
-    list.
+    It has methods
+
+      py_to_pg( pyobj )
+      pg_to_py( pgobj )
 
     """
 
@@ -164,6 +167,112 @@ class DBBase:
         'double precision': np.float64
     }
 
+    # A dictionary of "<type">: <2-element tuple>
+    # The first elment is the data type as it shows up postgres-side.
+    # The second element is a two element tuple of functions:
+    #   first element : convert python object to what you need to send to postgres
+    #   second element : convert what you got from postgres to python type
+    # If a function is "None", it means the identity function.  (So 0=1, P=NP, and Δs<0.)
+
+    typeconverters = {
+        # 'uuid': ( str, util.asUUID ),      # Doesn't seem to be needed any more for psycopg3
+        'jsonb': ( psycopg.types.json.Jsonb, None )
+    }
+
+    def __init__( self, column_name=None, data_type=None, column_default=None,
+                  is_nullable=None, element_type=None ):
+        self.column_name = column_name
+        self.data_type = data_type
+        self.column_default = column_default
+        self.is_nullable = is_nullable
+        self.element_type = element_type
+
+
+    def __getitem__( self, key ):
+        return getattr( self, key )
+
+    @property
+    def pytype( self ):
+        return self.typedict[ self.data_type ]
+
+
+    def py_to_pg( self, pyobj ):
+        """Convert a python object to the corresponding postgres object for this column.
+
+        The "postgres object" is what would be fed to psycopg's
+        cursor.execute() in a substitution dictionary.
+
+        Most of the time, this is the identity function.
+
+        """
+        if ( ( self.data_type == "ARRAY" )
+             and ( self.element_type in self.typeconverters )
+             and ( self.typeconverters[self.element_type][0] is not None )
+            ):
+            return [ self.typeconverters[self.element_type][0](i) for i in pyobj ]
+
+        elif ( ( self.data_type in self.typeconverters )
+               and ( self.typeconverters[self.data_type][0] is not None )
+              ):
+            return self.typeconverters[self.data_type][0]( pyobj )
+
+        return pyobj
+
+
+    def pg_to_py( self, pgobj ):
+        """Convert a postgres object to python object for this column.
+
+        This "postgres object" is what you got back from a cursor.fetch* call.
+
+        Most of the time, this is the identity function.
+
+        """
+
+        if ( ( self.data_type == "ARRAY" )
+             and ( self.element_type in self.typeconverters )
+             and ( self.typeconverters[self.element_type][1] is not None )
+            ):
+            return [ self.typeconverters[self.element_type][1](i) for i in pgobj ]
+        elif ( ( self.data_type in self.typeconverters )
+               and ( self.typeconverters[self.data_type][1] is not None )
+              ):
+            return self.typeconverters[self.data_type][1]( pgobj )
+
+        return pgobj
+
+
+    def __repr__( self ):
+        if self.data_type == 'ARRAY':
+            return f"ColumnMeta({self.column_name} [ARRAY({self.element_type})]"
+        else:
+            return f"ColumnMeta({self.column_name} [{self.data_type}])"
+
+
+# ======================================================================
+# ogod, it's like I'm writing my own ORM, and I hate ORMs
+#
+# But, two things.  (1) I'm writing it, so I know actually what it's doing
+#   backend with the PostgreSQL queries, (2) I'm not trying to create a whole
+#   new language to learn in place of SQL, I still intend mostly to just use
+#   SQL, and (3) sometimes it's worth re-inventing the wheel so that you get
+#   just a wheel (and also so that you really get a wheel and not massive tank
+#   treads that you are supposed to think act like a wheel)
+
+class DBBase:
+    """A base class from which all other table classes derive themselves.
+
+    All subclasses must include:
+
+    __tablename__ = "<name of table in databse>"
+    _tablemeta = None
+    _pk = <list>
+
+    _pk must be a list of strings with the names of the primary key
+    columns.  Uusally (but not always) this will be a single-element
+    list.
+
+    """
+
     # A dictionary of "<colum name>": <2-element tuple>
     # The first element is the converter that converts a value into something you can throw to postgres.
     # The second element is the converter that takes what you got from postgres and turns it into what
@@ -171,17 +280,9 @@ class DBBase:
     # Often this can be left as is, but subclasses might want to override it.
     colconverters = {}
 
-    # A dictionary of "<type">: <2-element tuple>
-    # The first elment is the data type as it shows up postgres-side.
-    # The second element is the same as in colconverters.
-    # Usually, subclasses will not want to override this.
-    typeconverters = {
-        'uuid': ( str, util.asUUID ),
-        'jsonb': ( psycopg2.extras.Json, None )
-    }
-
     @property
     def tablemeta( self ):
+        """A dictionary of colum_name : ColumMeta."""
         if self._tablemeta is None:
             self._load_table_meta()
         return self._tablemeta
@@ -197,16 +298,43 @@ class DBBase:
             return
 
         with DB( dbcon ) as con:
-            cursor = con.cursor( cursor_factory=psycopg2.extras.RealDictCursor )
-            cursor.execute( "SELECT column_name,data_type,column_default,is_nullable "
-                            "FROM information_schema.columns WHERE table_name=%(table)s",
+            cursor = con.cursor( row_factory=psycopg.rows.dict_row )
+            cursor.execute( "SELECT c.column_name,c.data_type,c.column_default,c.is_nullable,"
+                            "       e.data_type AS element_type "
+                            "FROM information_schema.columns c "
+                            "LEFT JOIN information_schema.element_types e "
+                            "  ON ( (c.table_catalog, c.table_schema, c.table_name, "
+                            "        'TABLE', c.dtd_identifier) "
+                            "      =(e.object_catalog, e.object_schema, e.object_name, "
+                            "        e.object_type, e.collection_type_identifier) ) "
+                            "WHERE table_name=%(table)s",
                             { 'table': cls.__tablename__ } )
             cols = cursor.fetchall()
 
-            cls._tablemeta = { c['column_name']: c for c in cols }
+            cls._tablemeta = { c['column_name']: ColumnMeta(**c) for c in cols }
+
+            # See Issue #4!!!!
+            for col, meta in cls._tablemeta.items():
+                if col in cls.colconverters:
+                    if cls.colconverters[col][0] is not None:
+                        # Play crazy games because of the confusingness of python late binding
+                        def _tmp_py_to_pg( self, pyobj, col=col ):
+                            return cls.colconverters[col][0]( pyobj )
+                        meta.py_to_pg = types.MethodType( _tmp_py_to_pg, meta )
+                    if cls.colconverters[col][1] is not None:
+                        def _tmp_pg_to_py( self, pgobj, col=col ):
+                            return cls.colconverters[col][1]( pgobj )
+                        meta.pg_to_py = types.MethodType( _tmp_pg_to_py, meta )
 
 
-    def __init__( self, dbcon=None, cols=None, vals=None, _noinit=False, **kwargs):
+    def __init__( self, dbcon=None, cols=None, vals=None, _noinit=False, noconvert=True, **kwargs):
+        """Create an object based on a row returned from psycopg's cursor.fetch*.
+
+        You could probably use this also just to create an object fresh; in
+        that case, you *probably* want to set noconvert to True.
+
+        """
+
         if _noinit:
             return
 
@@ -224,7 +352,8 @@ class DBBase:
 
         if cols is not None:
             if len(kwargs) > 0:
-                raise ValueError( "Can only column values as named arguments if cols and vals are both None" )
+                raise ValueError( "Can only column values as named arguments "
+                                  "if cols and vals are both None" )
         else:
             cols = kwargs.keys()
             vals = kwargs.values()
@@ -239,27 +368,61 @@ class DBBase:
         self._set_self_from_fetch_cols_row( cols, vals )
 
 
-    def _set_self_from_fetch_cols_row( self, cols, fetchrow, dbcon=None ):
+    def _set_self_from_fetch_cols_row( self, cols, fetchrow, noconvert=False, dbcon=None ):
         if self._tablemeta is None:
             self.load_table_meta( dbcon=dbcon )
 
-        for col, val in zip( cols, fetchrow ):
-            dtyp = self._tablemeta[col]['data_type']
-            if ( col in self.colconverters ) and ( self.colconverters[col][1] is not None ):
-                setattr( self, col, self.colconverters[col][1]( val ) )
-            elif ( dtyp in self.typeconverters ) and ( self.typeconverters[dtyp][1] is not None ):
-                setattr( self, col, self.typeconverters[dtyp][1]( val ) )
-            else:
+        if noconvert:
+            for col, val in zip( cols, fetchrow ):
                 setattr( self, col, val )
+        else:
+            for col, val in zip( cols, fetchrow ):
+                setattr( self, col, self._tablemeta[col].pg_to_py( val ) )
 
 
-    def _build_subdict( self ):
-        """Create a substitution dictionary that could go into a cursor.execute() statement."""
+    def _build_subdict( self, columns=None ):
+        """Create a substitution dictionary that could go into a cursor.execute() statement.
+
+        The columns that are included in the dictionary interacts with default
+        columns in a potentially confusing way.
+
+        IF self does NOT have an attribute corresponding to a column, then
+        that column will not be in the returned dictionary.
+
+        IF self.{column} is None, and the table has a default that is *not*
+        None, that column will not be in the returned dictionary.
+
+        In other words, if self.{column} doesn't exist, or self.{column} is
+        None, it means that the actual table column will get the PostgreSQL
+        default value when this subdict is used (assuming the query is constructed
+        using only the keys of the subdict).
+
+        (It's not obvious that this is the best behavior; see comment in
+        method source.)
+
+        Paramters
+        ---------
+          columns : list of str, optional
+            If given, include these columns in the returned subdict; by
+            default, include all columns from the table.  (But, not not all
+            columns may actually be in the returned subdict; see above.)  If
+            the list includes any columns that don't actually exist for the
+            table, an exception will be raised.
+
+        Returns
+        -------
+          dict of { column_name: value }
+
+        """
 
         subdict = {}
-        for colinfo in self.tablemeta.values():
-            col = colinfo['column_name']
-            typ = colinfo['data_type']
+        if columns is not None:
+            if any( c not in self.tablemeta for c in columns ):
+                raise ValueError( f"Not all of the columns in {columns} are in the table" )
+        else:
+            columns = self.tablemeta.keys()
+
+        for col in columns:
             if hasattr( self, col ):
                 val = getattr( self, col )
                 if val is None:
@@ -271,16 +434,13 @@ class DBBase:
                     #     get the default value.
                     # How to know which is the case?  Assume that if the column_default is None,
                     # then we're in case (1), but if it's not None, we're in case (2).
-                    if colinfo['column_default'] is None:
+                    if self.tablemeta[col]['column_default'] is None:
                         subdict[ col ] = None
                 else:
-                    if ( col in self.colconverters ) and ( self.colconverters[col][0] is not None ):
-                        val = self.colconverters[col][0]( val )
-                    elif ( typ in self.typeconverters ) and ( self.typeconverters[typ][0] is not None ):
-                        val = self.typeconverters[typ][0]( val )
-                    subdict[ col ] = val
+                    subdict[ col ] = self.tablemeta[ col ].py_to_pg( val )
 
         return subdict
+
 
     @classmethod
     def _construct_pk_query_where( cls, *args, me=None ):
@@ -299,12 +459,8 @@ class DBBase:
         _and = ""
         subdict = {}
         for k, v in zip( cls._pk, args ):
-            if k in cls.colconverters:
-                v = cls.colconverters[k][0]( v )
-            elif cls._tablemeta[k]['data_type'] in cls.typeconverters:
-                v = cls.typeconverters[cls._tablemeta[k]['data_type']][0]( v )
             q += f"{_and} {k}=%({k})s "
-            subdict[k] = v
+            subdict[k] = cls._tablemeta[k].py_to_pg( v )
             _and = "AND"
 
         return q, subdict
@@ -338,7 +494,7 @@ class DBBase:
         ---------
           pks : list of lists
             Each element of the list must be a list whose length matches
-            the length lf self._pk.
+            the length of self._pk.
 
         Returns
         -------
@@ -363,14 +519,9 @@ class DBBase:
                 raise ValueError( f"{pk} doesn't have {len(cls._pk)} elements, should match {cls._pk}" )
             mess += f"{comma}("
             subcomma=""
-            for subdex, ( pkval, pkcol, pktyp ) in enumerate( zip( pk, cls._pk, pktypes ) ):
+            for subdex, ( pkval, pkcol ) in enumerate( zip( pk, cls._pk ) ):
                 mess += f"{subcomma}%(pk_{dex}_{subdex})s"
-                if ( pkcol in cls.colconverters ) and ( cls.colconverters[pkcol][0] is not None ):
-                    subdict[f'pk_{dex}_{subdex}'] = cls.colconverters[pkcol][0]( pkval )
-                elif ( pktyp in cls.typeconverters ) and ( cls.typeconverters[pktyp][0] is not None ):
-                    subdict[f'pk_{dex}_{subdex}'] = cls.typeconverters[pktyp][0]( pkval )
-                else:
-                    subdict[f'pk_{dex}_{subdex}'] = pkval
+                subdict[ f'pk_{dex}_{subdex}' ] = cls._tablemeta[pkcol].py_to_pg( pkval )
                 subcomma = ","
             mess += ")"
             comma = ","
@@ -380,14 +531,14 @@ class DBBase:
         onlist = ""
         for subdex, ( pk, pktyp ) in enumerate( zip( cls._pk, pktypes ) ):
             collist += f"{comma}{pk}"
-            # SCARY.  Specific coding for uuid.  Really I probably ought to
-            #   do something with a converter dictionary to make this more
-            #   general, but I know that the only case I'll need it (at leasdt
-            #   as of this writing) is with uuids.
-            if pktyp == 'uuid':
-                onlist += f"{_and} CAST( t.{pk} AS uuid)={cls.__tablename__}.{pk} "
-            else:
-                onlist += f"{_and} t.{pk}={cls.__tablename__}.{pk} "
+            # # SCARY.  Specific coding for uuid.  Really I probably ought to
+            # #   do something with a converter dictionary to make this more
+            # #   general, but I know that the only case I'll need it (at least
+            # #   as of this writing) is with uuids.
+            # if pktyp == 'uuid':
+            #     onlist += f"{_and} CAST( t.{pk} AS uuid)={cls.__tablename__}.{pk} "
+            # else:
+            onlist += f"{_and} t.{pk}={cls.__tablename__}.{pk} "
             _and = "AND"
             comma = ","
 
@@ -410,15 +561,13 @@ class DBBase:
     def getbyattrs( cls, dbcon=None, **attrs ):
         if cls._tablemeta is None:
             cls.load_table_meta( dbcon )
-        types = [ cls._tablemeta[k]['data_type'] for k in attrs.keys() ]
 
+        # WORRY : when we edit attrs below, will that also affect anything outside
+        #   this function?  E.g. if it's called with a ** itself.
         q = f"SELECT * FROM {cls.__tablename__} WHERE "
         _and = ""
-        for k, typ in zip( attrs.keys(), types ):
-            if ( k in cls.colconverters ) and ( cls.colconverters[k][0] is not None ):
-                attrs[k] = cls.colconverters[k][0]( attrs[k] )
-            elif ( typ in cls.typeconverters ) and ( cls.typeconverters[typ][0] is not None ):
-                attrs[k] = cls.typeconverters[typ][0]( attrs[k] )
+        for k in attrs.keys():
+            attrs[k] = cls._tablemeta[k].py_to_pg( attrs[k] )
             q += f"{_and} {k}=%({k})s "
             _and = "AND"
 
@@ -447,10 +596,10 @@ class DBBase:
             rows = cursor.fetchall()
 
         if len(rows) > 1:
-            raise ValueError( f"Found more than one row in {self.__tablename__} with primary keys {self.pks}; "
-                              f"this probably shouldn't happen." )
+            raise RuntimeError( f"Found more than one row in {self.__tablename__} with primary keys "
+                                f"{self.pks}; this probably shouldn't happen." )
         if len(rows) == 0:
-            raise RuntimeError( f"Failed to find row in {self.__tablename__} with primary keys {self.pks}" )
+            raise ValueError( f"Failed to find row in {self.__tablename__} with primary keys {self.pks}" )
 
         self._set_self_from_fetch_cols_row( cols, rows[0] )
 
@@ -501,24 +650,19 @@ class DBBase:
                     self.refresh( con )
 
     @classmethod
-    def bulk_insert_or_upsert( cls, data, upsert=False, assume_no_conflict=False, dbcon=None, nocommit=False ):
+    def bulk_insert_or_upsert( cls, data, upsert=False, assume_no_conflict=False,
+                               dbcon=None, nocommit=False ):
         """Try to efficiently insert a bunch of data into the database.
+
+        ROB TODO DOCUMENT QUIRKS
 
         Parmeters
         ---------
           data: dict or list
             Can be one of:
-              * a dict of { kw: iterable }.  All of the iterables must
-                have the same length, and must be something that
-                pandas.DataFrame could handle
-              * a list of dicts.  The keys in all dicts must be the same
+              * a list of dicts.  The keys in all dicts (including order!) must be the same
+              * a dict of lists
               * a list of objects of type cls
-
-            Note: passing a list of objects will not work on classes
-            whose table includes jsonb columns.  If using one of the
-            other forms, you cannot include the jsonb columns in the
-            dictionaries.  (Which means you can't fill jsonb columns
-            using this class method.)
 
           upsert: bool, default False
              If False, then objects whose primary key is already in the
@@ -540,7 +684,7 @@ class DBBase:
              really know what you're doing.  If this is True, not only
              will we not commit to the database, but we won't copy from
              the table temp_bulk_upsert to the table of interest.  It
-             doesn't makje sense to set this to True unless you also
+             doesn't make sense to set this to True unless you also
              pass a dbcon.  This is for things that want to do stuff to
              the temp table before copying it over to the main table, in
              which case it's the caller's responsibility to do that copy
@@ -560,18 +704,36 @@ class DBBase:
         if len(data) == 0:
             return
 
+        if isinstance( data, list ) and isinstance( data[0], dict ):
+            columns = data[0].keys()
+            # Alas, psycopg's copy seems to index the thing it's passed,
+            #   so we can't just pass it d.values()
+            values = [ list( d.values() ) for d in data ]
+        elif isinstance( data, dict ):
+            columns = list( data.keys() )
+            values = [ [ data[c][i] for c in columns ] for i in range(len(data[columns[0]])) ]
+        elif isinstance( data, list ) and isinstance( data[0], cls ):
+            # This isn't entirely satisfying.  But, we're going
+            #   to assume that things that are None because they
+            #   want to use database defaults are going to be
+            #   the same in every object.
+            sd0 = data[0]._build_subdict()
+            columns = sd0.keys()
+            data = [ d._build_subdict( columns=columns ) for d in data ]
+            # Alas, psycopg's copy seems to index the thing it's passed,
+            #   so we can't just pass it d.values()
+            values = [ list( d.values() ) for d in data ]
+        else:
+            raise TypeError( f"data must be something other than a {cls.__name__}" )
+
         with DB( dbcon ) as con:
             cursor = con.cursor()
             cursor.execute( "DROP TABLE IF EXISTS temp_bulk_upsert" )
             cursor.execute( f"CREATE TEMP TABLE temp_bulk_upsert (LIKE {cls.__tablename__})" )
-            if isinstance( data, list ) and isinstance( data[0], cls ):
-                data = [ obj._build_subdict() for obj in data ]
-            df = pandas.DataFrame( data )
-            strio = io.StringIO()
-            df.to_csv( strio, index=False, header=False, sep='\t', na_rep='\\N' )
-            strio.seek(0)
-            columns = df.columns.values
-            cursor.copy_from( strio, "temp_bulk_upsert", columns=columns, size=1048576 )
+            with cursor.copy( f"COPY temp_bulk_upsert({','.join(columns)}) FROM STDIN" ) as copier:
+                for v in values:
+                    copier.write_row( v )
+
             if not assume_no_conflict:
                 if not upsert:
                     conflict = f"ON CONFLICT ({','.join(cls._pk)}) DO NOTHING"
@@ -733,33 +895,6 @@ class QueryQueue( DBBase ):
     _tablemeta = None
     _pk = [ 'queryid' ]
 
-    # Need some special handling of array of json attributes, until such a time
-    #   as I build that into DBBase (which probably isn't worth the effort).
-
-    def insert( self, dbcon=None, refresh=True, nocommit=False ):
-        if refresh and nocommit:
-            raise RuntimeError( "Can't refresh with nocommit" )
-
-        subdict = self._build_subdict()
-
-        q = f"INSERT INTO {self.__tablename__}({','.join(subdict.keys())}) VALUES ("
-        comma = ""
-        for k in subdict.keys():
-            q += comma
-            comma = ","
-            if k == 'subdicts':
-                q += "%(subdicts)s::json[]"
-            else:
-                q += f"%({k})s"
-        q += ")"
-
-        with DB( dbcon ) as con:
-            cursor = con.cursor()
-            cursor.execute( q, subdict )
-            if not nocommit:
-                con.commit()
-                if refresh:
-                    self.refresh( con )
-
+    # Think... would it be OK to let this update?
     def update( self, dbcon=None, refresh=False, nocommit=False ):
         raise NotImplementedError( "update not implemented for QueryQueue" )

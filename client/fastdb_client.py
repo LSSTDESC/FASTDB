@@ -197,6 +197,7 @@ class FASTDBClient:
         previous_fail = False
         t0 = time.perf_counter()
         for tries in range( self.retries + 1 ):
+            res = None
             try:
                 if method == 'post':
                     res = self.req.post( url, data=data, json=json, verify=self.verify )
@@ -213,21 +214,23 @@ class FASTDBClient:
                     raise RuntimeError( errmsg )
                 if previous_fail:
                     dt = time.perf_counter() - t0
-                    self.logger.info( f"Connection to {url} succeeded after {tries} retries over {dt:.2f} seconds." )
+                    self.logger.info( f"Connection to {url} succeeded after {tries} retries "
+                                      f"over {dt:.2f} seconds." )
                 return res
             except Exception:
                 previous_fail = True
                 dt = time.perf_counter() - t0
                 if tries < self.retries:
-                    self.logger.warning( f"Failed to connect to {url} after {tries+1} tries over {dt:.2f} seconds, "
-                                         f"got status {res.status_code}; "
+                    status_code = "<unknown>" if res is None else res.status_code
+                    self.logger.warning( f"Failed to connect to {url} after {tries+1} tries "
+                                         f"Over {dt:.2f} seconds, got status {status_code}; "
                                          f"sleeping {sleeptime} seconds and retrying" )
                     time.sleep( sleeptime )
                     sleeptime += self.retrysleepinc
                 else:
-                    self.logger.error( f"Failed to connect to {url} after {self.retries} tries, over {dt:.2f} "
-                                       f"seconds.  Giving up." )
-                    if res.status_code == 500:
+                    self.logger.error( f"Failed to connect to {url} after {self.retries} tries "
+                                       f"over {dt:.2f} seconds.  Giving up." )
+                    if ( res is not None ) and ( res.status_code == 500 ):
                         self.logger.debug( f"Body of 500 return: {res.text}" )
                     raise
 
@@ -264,7 +267,8 @@ class FASTDBClient:
                 enc_privkey = binascii.a2b_base64( data['privkey'] )
                 salt = binascii.a2b_base64( data['salt'] )
                 iv = binascii.a2b_base64( data['iv'] )
-                aeskey = PBKDF2( self.password.encode('utf-8'), salt, 32, count=100000, hmac_hash_module=SHA256 )
+                aeskey = PBKDF2( self.password.encode('utf-8'), salt, 32, count=100000,
+                                 hmac_hash_module=SHA256 )
                 aescipher = AES.new( aeskey, AES.MODE_GCM, nonce=iv )
                 # When javascript created the encrypted AES key, it appended
                 #   a 16-byte auth tag to the end of the ciphertext. (Python's
@@ -402,7 +406,7 @@ class FASTDBClient:
         Parameters
         ----------
           query : str or list of str
-            The PostgreSQL query to send.  Will do standard psycopg2
+            The PostgreSQL query to send.  Will do standard psycopg
             cursor.execute() parameter substitution of strings like
             "%(var)s" using the "var" entry in subdict.  (Of course,
             "var" can be anything.)
@@ -562,7 +566,8 @@ class FASTDBClient:
                              f"or 'application/octet-stream'" )
 
 
-    def synchronous_long_sql_query( self, query, subdict=None, return_format='csv', checkeach=300, maxwait=3600 ):
+    def synchronous_long_sql_query( self, query, subdict=None, return_format='csv',
+                                    checkeach=300, maxwait=3600 ):
         """Get the result of an SQL query to FASDB.
 
         If the query will take less than 5 minutes, use submit_short_sql_query() instead.
@@ -610,7 +615,8 @@ class FASTDBClient:
                 raise RuntimeError( strio.getvalue() )
 
             elif data['status'] == 'finished':
-                self.logger.info( f"Long query started at {data['started']} and finished at {data['finished']}" )
+                self.logger.info( f"Long query started at {data['started']} "
+                                  f"and finished at {data['finished']}" )
                 done = True
 
             elif data['status'] == 'started':

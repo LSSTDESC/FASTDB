@@ -3,7 +3,7 @@ import uuid
 import datetime
 
 import flask
-import psycopg2
+import psycopg
 
 import db
 from util import asUUID
@@ -61,7 +61,7 @@ def _dbcon():
     with open( pwfile ) as ifp:
         password = ifp.readline().strip()
 
-    conn = psycopg2.connect( dbname=db.dbname, host=db.dbhost, port=db.dbport, user=dbuser, password=password )
+    conn = psycopg.connect( dbname=db.dbname, host=db.dbhost, port=db.dbport, user=dbuser, password=password )
 
     return conn
 

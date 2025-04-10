@@ -10,7 +10,7 @@ Development of the Fast Access to Survey Transients Database (FASTDB).
 
 ## Overview
 
-FASTDB runs with two database backends, a PostgreSQL server and a Mongodb server.  Neither database server is directly accessible; rather, you access FASTDB through a webserver.  As of this writing, only one instance of FASTDB exists at https://fastdb-rknop-dev exists; that is Rob's development server, so it's state is always subject to radical change.
+FASTDB runs with two database backends, a PostgreSQL server and a Mongodb server.  Neither database server is directly accessible; rather, you access FASTDB through a webserver.  As of this writing, only one instance of FASTDB exists at https://fastdb-rknop-dev exists; that is Rob's development server, so its state is always subject to radical change.
 
 While there will be an interactive UI on the webserver, the primary way you connect to FASTDB is using the web API.  To simplify this, there is a [python client library](#using-the-fastdb-client) that handles logging in and sending requests to the web server.  As of this writing, the only web API endpoints defined are ones that allow you to send raw SQL to the PostgreSQL web server.  (It's a readonly connection, so you can only read the database, not modify it.)
 
@@ -69,7 +69,7 @@ If the server is already running, remember to `KILL -HUP 1` on the webserver wor
 Upon initial installation, and after any database schema change, log into the spin workload running the shell and run:
 ```
 cd /code/db
-python apply_migrations.py
+python apply_migrations.py -H <host> -u <dbuser> -p <dbpasswd>
 ```
 
 (On initial install, probably need to do this before starting the query runner or query pruner.)
@@ -135,5 +135,6 @@ make install
 
 Should put lots of stuff underneath `install`.
 
+To run tests, remember to docker compose up all of `shell`, `webap`, and `query-runner`.
 
-            
+

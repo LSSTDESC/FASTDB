@@ -6,7 +6,7 @@ import hashlib
 import uuid
 import subprocess
 
-import psycopg2
+import psycopg
 
 
 def main():
@@ -22,16 +22,18 @@ def main():
     sqlfiles = list( direc.glob( "*.sql" ) )
     sqlfiles.sort()
 
-    with psycopg2.connect( host=args.host, port=args.port, dbname=args.db,
+    with psycopg.connect( host=args.host, port=args.port, dbname=args.db,
                            user=args.user, password=args.password ) as conn:
         cursor = conn.cursor()
         try:
-            cursor.execute( "SELECT filename,md5sum,applied_time FROM migrations_applied ORDER BY filename" )
+            cursor.execute( "SELECT filename,md5sum,applied_time "
+                            "FROM migrations_applied "
+                            "ORDER BY filename" )
             rows = cursor.fetchall()
             applied = [ row[0] for row in rows ]
             md5sums = [ row[1] for row in rows ]
             when = [ row[2] for row in rows ]
-        except psycopg2.errors.UndefinedTable:
+        except psycopg.errors.UndefinedTable:
             conn.rollback()
             cursor.execute( "CREATE TABLE migrations_applied( "
                             "  filename text,"
@@ -56,8 +58,9 @@ def main():
             filemd5 = hashlib.md5()
             with open( sqlfiles[i], "rb" ) as ifp:
                 filemd5.update( ifp.read() )
-            if uuid.UUID( filemd5.hexdigest() ) != uuid.UUID( md5sums[i] ):
-                raise ValueError( f"Contents of migration file {a} md5sum does not match what was previously applied" )
+            if uuid.UUID( filemd5.hexdigest() ) != md5sums[i]:
+                raise ValueError( f"Contents of migration file {a} md5sum does not match "
+                                  f"what was previously applied" )
 
         for i in range( len(applied), len(sqlfiles) ):
             sys.stderr.write( f"Applying {sqlfiles[i]}...\n" )

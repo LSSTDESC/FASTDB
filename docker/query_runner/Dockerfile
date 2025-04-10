@@ -38,7 +38,7 @@ RUN source /venv/bin/activate && \
     pip --no-cache install \
        numpy \
        pandas \
-       psycopg2
+       psycopg==3.2.6
 
 # ======================================================================
 FROM base AS queryrunner

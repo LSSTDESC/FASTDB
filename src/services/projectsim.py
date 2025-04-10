@@ -3,7 +3,6 @@ import io
 import logging
 import datetime
 import time
-import uuid
 import multiprocessing
 import signal
 import argparse
@@ -432,15 +431,12 @@ class AlertSender:
 
 
     def update_alertssent( self, sourceids ):
-        now = datetime.datetime.now( tz=datetime.UTC ).isoformat()
-        strio = io.StringIO()
-        for sourceid in sourceids:
-            strio.write( f"{uuid.uuid4()}\t{sourceid}\t{now}\n" )
-        strio.seek( 0 )
+        now = datetime.datetime.now( tz=datetime.UTC ) # .isoformat()
         with db.DB() as con:
             cursor = con.cursor()
-            cursor.copy_from( strio, 'ppdb_alerts_sent', size=65536,
-                              columns=['id', 'diasourceid', 'senttime' ] )
+            with cursor.copy( "COPY ppdb_alerts_sent(diasourceid,senttime) FROM stdin" ) as curcopy:
+                for sourceid in sourceids:
+                    curcopy.write_row( ( sourceid, now ) )
             con.commit()
 
 

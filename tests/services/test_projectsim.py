@@ -75,8 +75,8 @@ def test_alertsender_find_alerts( snana_fits_ppdb_loaded ):
             cursor = con.cursor()
             cursor.execute( "SELECT MIN(midpointmjdtai) FROM ppdb_diasource" )
             minmjd = cursor.fetchone()[0]
-            cursor.execute( "SELECT midpointmjdtai FROM ppdb_diasource WHERE diasourceid IN %(ids)s",
-                            { 'ids': tuple(sourceids) } )
+            cursor.execute( "SELECT midpointmjdtai FROM ppdb_diasource WHERE diasourceid=ANY(%(ids)s)",
+                            { 'ids': sourceids } )
             sourcemjds = [ row[0] for row in cursor.fetchall() ]
             assert len( sourcemjds ) == len( sourceids )
             assert len( sourcemjds ) == 77
@@ -92,8 +92,8 @@ def test_alertsender_find_alerts( snana_fits_ppdb_loaded ):
             cursor = con.cursor()
             cursor.execute( ( "SELECT diasourceid,midpointmjdtai "
                               "FROM ppdb_diasource "
-                              "WHERE diasourceid IN %(ids)s "
-                              "ORDER BY midpointmjdtai" ), { 'ids': tuple(sourceids) } )
+                              "WHERE diasourceid=ANY(%(ids)s) "
+                              "ORDER BY midpointmjdtai" ), { 'ids': sourceids } )
             rows = cursor.fetchall()
             early_sourceids = [ row[0] for row in rows ]
             sourcemjds = [ row[1] for row in rows ]
@@ -121,8 +121,8 @@ def test_alertsender_find_alerts( snana_fits_ppdb_loaded ):
             cursor = con.cursor()
             cursor.execute( ( "SELECT diasourceid,midpointmjdtai "
                               "FROM ppdb_diasource "
-                              "WHERE diasourceid IN %(ids)s "
-                              "ORDER BY midpointmjdtai" ), { 'ids': tuple(sourceids) } )
+                              "WHERE diasourceid=ANY(%(ids)s) "
+                              "ORDER BY midpointmjdtai" ), { 'ids': sourceids } )
             rows = cursor.fetchall()
             new_sourceids = [ row[0] for row in rows ]
             sourcemjds = [ row[1] for row in rows ]

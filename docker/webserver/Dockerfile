@@ -73,7 +73,7 @@ RUN source /venv/bin/activate && \
        gunicorn==23.0.0 \
        numpy==2.2.4 \
        pandas==2.2.3 \
-       psycopg2==2.9.10 \
+       psycopg==3.2.6 \
        pycryptodome==3.22.0 \
        pymongo==4.11.3 \
        pytest==8.3.5 \

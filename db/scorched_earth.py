@@ -7,14 +7,14 @@ all_tables = [ 'authuser', 'passwordlink',
                'query_queue', 'migrations_applied' ]
 
 import sys
-import psycopg2
+import psycopg
 import config
 
 with open ( config.dbpasswdfile ) as ifp:
     dbpasswd = ifp.read().strip()
 
-conn = psycopg2.connect( host=config.dbhost, port=config.dbport, dbname=config.dbdatabase,
-                         user=config.dbuser, password=dbpasswd )
+conn = psycopg.connect( host=config.dbhost, port=config.dbport, dbname=config.dbdatabase,
+                        user=config.dbuser, password=dbpasswd )
 try:
     cursor = conn.cursor()
     for table in all_tables:

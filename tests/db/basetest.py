@@ -1,8 +1,7 @@
 import pytest
 import uuid
 
-import psycopg2
-import psycopg2.extras
+import psycopg
 
 from db import DB
 
@@ -239,7 +238,7 @@ class BaseTestDB:
             d = dict( self.dict3 )
             d[unique] = self.dict1[unique]
             obj = self.cls( **d )
-            with pytest.raises( psycopg2.errors.UniqueViolation,
+            with pytest.raises( psycopg.errors.UniqueViolation,
                                 match="duplicate key value violates unique constraint" ):
                 obj.insert()
 
