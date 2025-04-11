@@ -98,7 +98,7 @@ class KafkaConsumer:
 
         self.consume_time = 0
         self.handle_time = 0
-        
+
         consumerconfig = { 'bootstrap.servers': server,
                            'auto.offset.reset': 'earliest',
                            'group.id': groupid }
@@ -342,7 +342,7 @@ class KafkaConsumer:
                 self.logger.warning( "Calling maint_func" )
                 maint_func()
                 next_maint_timeout += maint_timeout
-                
+
             if pipe is not None:
                 pipe.send( { "message": "ok", "nconsumed": nconsumed,
                              "tot_handled": self.tot_handled, "runtime": runtime } )

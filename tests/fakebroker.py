@@ -7,6 +7,8 @@ import argparse
 import time
 import datetime
 import functools
+import signal
+import multiprocessing
 import numpy
 import confluent_kafka
 import fastavro
@@ -49,7 +51,7 @@ class Classifier:
         self.flushtime = 0.
         self.runtime = 0.
         self.last_classify_time = None
-        
+
         logger.info( f"Classifier {self.__class__.__name__} sending to topic {self.topic} on {self.kafkaserver}" )
 
     def determine_types_and_probabilities( self, alert ):
@@ -80,7 +82,7 @@ class Classifier:
                                                'linger.ms': 50 } )
         t1 = time.perf_counter()
         for msg in messages:
-            alert = fastavro.schemaless_reader( io.BytesIO(msg.value()), self.alertschema )
+            alert = fastavro.schemaless_reader( io.BytesIO(msg), self.alertschema )
             alert['classifications'] = []
             t3 = time.perf_counter()
             probs = self.determine_types_and_probabilities( alert )
@@ -95,7 +97,7 @@ class Classifier:
 
             self.determineprobstime += t4 - t3
             self.producetime += t5 - t4
-            
+
         t6 = time.perf_counter()
         producer.flush()
         t7 = time.perf_counter()
@@ -105,7 +107,7 @@ class Classifier:
         self.flushtime += t7 - t6
         self.runtime += t7 - t0
         self.last_classify_time = datetime.datetime.now()
-        
+
         self.nclassified += len(messages)
         if ( self.nclassified > self.nextlog ):
             self.log_status()
@@ -178,7 +180,6 @@ class FakeBroker:
                   notopic_sleeptime=10,
                   reset=False,
                   verbose=False ):
-
         self.logger = logging.getLogger( "fakebroker" )
         self.logger.propagate = False
         if not self.logger.hasHandlers():
@@ -201,7 +202,7 @@ class FakeBroker:
 
         self.consumer_consume_time_offset = 0
         self.consumer_handle_time_offset = 0
-        
+
         self.alert_schema = alert_schema
         alertschemaobj = fastavro.schema.parse_schema( fastavro.schema.load_schema( alert_schema ) )
         brokermsgschema = fastavro.schema.parse_schema( fastavro.schema.load_schema( brokermessage_schema ) )
@@ -215,9 +216,21 @@ class FakeBroker:
         self.classifier_procs = []
         self.classifier_pipes = []
 
-    # def handle_message_batch( self, msgs ):
-    #     for cfer in self.classifiers:
-    #         cfer.classify_alerts( msgs )
+    def handle_message_batch( self, msgs ):
+        # I'm a bad person, I'm not looking at error flags or anything
+        msgs = [ m.value() for m in msgs ]
+        for pipe in self.classifier_pipes:
+            pipe.send( { "command": "handle", "msgs": msgs } )
+
+        ndids = 0
+        while ndids < len( self.classifier_pipes ):
+            readies = multiprocessing.connection.wait( self.classifier_pipes )
+            for ready in readies:
+                msg = ready.recv()
+                if msg != "did":
+                    self.logger.error( f"Got unexpected message from subprocess: {msg}" )
+                    self.shutdown()
+                ndids += 1
 
     def log_cfer_status( self, consumer ):
         self.logger.info( f"FakeBroker consume time = {self.consumer_consume_time_offset+consumer.consume_time:.2f}, "
@@ -231,26 +244,50 @@ class FakeBroker:
             pipe.poll()
             msg = pipe.recv()
             if not isinstance( msg, dict ) or ( 'command' not in msg ):
-                self.logger.error( f"Subprocess for {classifier.classifier_name} got misunderstood message {msg}" )
+                self.logger.error( f"Subprocess for {classifier.classifiername} got misunderstood message {msg}" )
                 continue
             if msg['command'] == 'die':
                 done = True
             elif msg['command'] == 'handle':
                 classifier.classify_alerts( msg['msgs'] )
+                pipe.send( "did" )
             else:
-                self.logger.error( f"Subprocess for {classifier.classifier_name} got unknown command "
+                self.logger.error( f"Subprocess for {classifier.classifiername} got unknown command "
                                    f"{msg['command']}" )
-        self.logger.info( f"Subprocess for {classifier.classifier_name} exiting." )
-            
+        self.logger.info( f"Subprocess for {classifier.classifiername} exiting." )
+
+    def shutdown( self ):
+        self.logger.info( "FakeBroker shutting down." )
+        for pipe in self.classifier_pipes:
+            pipe.send( { "command": "die" } )
+        for proc in self.classifier_procs:
+            proc.join()
+        self.classifier_pipes = []
+        self.classifier_procs = []
+        self.logger.info( "Fakebroker done." )
+        # This is a little bit scary, because the kafka loop might
+        #   be in the middle of consuming messages.  Scary athread
+        #   stuff.  Maybe I need more subproesses within
+        #   subprocesses.
+        sys.exit( 0 )
+
     def __call__( self ):
         # Launch the handler processes
+        # WARNING.  Will call sys.exit(0) when done!  Normal usage
+        #   is to run FakeBroker either from a subproces,
+        #   or from the command line where the last
+        #   thing main() (below) does is call this function.
         for cfer in self.classifiers:
             mypipe, theirpipe = multiprocessing.Pipe()
             crun = functools.partial( self.classifier_runner, cfer, theirpipe )
             proc = multiprocessing.Process( target=crun )
+            proc.start()
             self.classifier_procs.append( proc )
             self.classifier_pipes.append( mypipe )
-            
+
+        signal.signal( signal.SIGTERM, lambda sig, stack: self.shutdown() )
+        signal.signal( signal.SIGINT, lambda sig, stack: self.shutdown() )
+
         self.logger.info( "Fakebroker starting, looking for source topics" )
         consumer = None
         while True:

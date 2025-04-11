@@ -55,7 +55,7 @@ def fakebroker( barf ):
                              "kafka-server:9092", f"classifications-{barf}",
                              group_id=f"fakebroker-{barf}", notopic_sleeptime=1,
                              reset=False, verbose=False )
-        proc = multiprocessing.Process( target=broker, daemon=True )
+        proc = multiprocessing.Process( target=broker )
         logger.info( "Starting fakebroker." )
         proc.start()
 
