@@ -4,9 +4,9 @@ brokers:
   - name: "fakebroker"
     class: BrokerConsumer
     server: kafka:9092
-    topics: [ "stress_apr2025_2_brokermsg" ]
-    groupid: test-5
-    collection: stress_apr2025_2
+    topics: [ "stress_apr2025_3_brokermsg" ]
+    groupid: test-6
+    collection: stress_apr2025_3
     loggername: FAKEBROKER
     loggername_prefix: ""
     updatetopics: false

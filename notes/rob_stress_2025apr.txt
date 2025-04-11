@@ -136,3 +136,129 @@ Run it all again (leave fakebroker running) to do the second day.
 Basic functionality looks good.  Think about increasing the fakebroker's
 message chunk grab size thingy to see if it makes it go faster.  (Right
 now it tries to ingest 100 alerts at a time; try making it 1000.)
+
+
+THIRD DAY
+
+Increase fakebroker batch size to 1000 (from 100).  Point it at topic
+stress_apr2025_3, have it write to stress_apr2025_3_brokermsg.  Edit
+brokerconsumer_config.yaml to look at this brokermsg topic, use mongodb
+collection stress_apr2025_3, and change
+groupid to test-6.
+
+  ...higher broker batch sizes seems to have helped its throughput,
+     the broker consumer now usually has something to do.  It's working
+     in 1000-message batches, and *usually* there are 1000 there.
+     Somtimes fewer.
+
+  ...alert sender sent 92416 alerts in 181s ( 511Hz )
+
+  ...fakebroker's two classifiers classified them in 188s
+
+  ...broker consumer consumed them all in 191s
+
+  ...I failed to time it right, but source_importer took ~40s for:
+       Imported 31246 objects, 92416 sources, 72226 forced sources
+
+
+TEN MORE DAYS
+
+Keep everything as is, run the following alert sender:
+
+   nohup python services/projectsim.py -t stress_apr2025_3 -a 10 -l 1000 --do < /dev/null > logs/projectsim.out 2>&1 &
+
+  ...the fake broker seemed to start out a bit slow (send_alerts
+     producing at ~500Hz, each fakebroker classifier processed 4912
+     alerts in ~98s, or ~50Hz.  Looks like the RandomSN classifier
+     was taking more time... weird?  But then the fake broker hit
+     the 10min timeout and server reconnect.  Since then, has
+     classified 21000 alerts in 56s (375Hz).
+
+  ...alert sender sent 589832 in 982s (601Hz)
+
+  ...fake broker took ~2520s to classify them all
+
+  ...broker consumer kept up with fake broker
+
+  ...source_importer took 392s (6.5min) for:
+        Imported 79440 objects, 589832 sources, 892983 forced sources
+
+It occurs to me that I should separate the two classifiers of fakebroker
+and have them both ingest the streams separately and send
+classifications separately.  That way, the really fast one
+(NugentClassifier) would keep up.  But, for now, try to make the random
+classifier a bit faster by using a single numpy call to make all
+necessary random numbers instead of repeated calls to python's
+random.random.  (Still need a for loop to do all the calculations I was
+doing.  I guess, since it's all BS anyway, I could change the
+calculations to something faster.)  ...is it possible that this is
+overhead in creating the Producer?  Hmm.
+
+Or I could write them in C
+
+
+
+ONE MORE DAY
+
+Restart fakebroker with some changes, including time measurements.
+Otherwise, keep everyting the same.  Send 1 more day of alerts:
+
+   nohup python services/projectsim.py -t stress_apr2025_3 -a 1 -l 1000 --do < /dev/null > logs/projectsim.out 2>&1 &
+
+   ...only 5705 alerts to go out, oh well.
+
+   ...some huge lag getting alert sending started, first 1000 took 94
+      sec, rest took antoher 10 sec
+
+   ...DEBUG : error in fakebroker.  This means that some alerts will be
+      dropped on the floor and not classified.  Oh well, this is all
+      just timing tests anyway.
+
+
+ONE MORE DAY
+
+Restart fakebroker with some more changes, and run:
+
+   nohup python services/projectsim.py -t stress_apr2025_3 -a 1 -l 1000 --do < /dev/null > logs/projectsim.out 2>&1 &
+
+   ...had to do modify it to -a 3, because the first two days had no
+      sources.  3rd day had 91333.  Sent them over 170s (538Hz).
+
+   ...fake broker handled everything over 445s
+
+   ...broker consumer got everything over 450s
+
+   ...looks like everything I was worring about for the RandomSN
+      classifier was all wrong.  The time doing the calculations is
+      tiny.  Fakebroker is spending most of its time on the combination
+      of fastrvro writing and confluent_kafka production, and
+      (secondarily) fastavro reading.  fakebroker is running at ~400Hz
+      as of right now.  Or so it claims.  I don't belelieve it, my
+      numbers suggest it's more like 200Hz.  Does this mean that its
+      actually spending half its time consuming the alerts it
+      classifies?  Possible.  No, consume time is a tiny fraction of
+      everything.  DUH.  No.  I'm stupid.  The classifiers are run
+      serially, so of course each one has half the rate of the total!
+      Now I'm tempted to use multiprocessing in my fake broker....  In
+      any event, I suspect right now that most of the time is spent
+      on avro parsing and unparsing.
+
+  ...forgot to run source_importer, so the next one will have more to do
+
+
+
+ONE MORE DAY
+
+More logging to fakebroker.  Restart, run
+
+   nohup python services/projectsim.py -t stress_apr2025_3 -a 1 -l 1000 --do < /dev/null > logs/projectsim.out 2>&1 &
+
+   ...94414 alerts to send, going at ~500Hz again, took 177s.
+
+   ...fakebroker took about 506 sec to do its thing, broker consumer
+      kept up with fakebroker
+
+   ...source_importer, which includes the sources from the previous day
+      I forgot, 
+
+

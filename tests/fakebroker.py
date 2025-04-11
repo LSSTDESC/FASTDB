@@ -6,7 +6,8 @@ import logging
 import argparse
 import time
 import datetime
-import random
+import functools
+import numpy
 import confluent_kafka
 import fastavro
 
@@ -41,6 +42,14 @@ class Classifier:
         self.logevery = 10
         self.nextlog = self.logevery
 
+        self.makeproducertime = 0.
+        self.classifytime = 0.
+        self.determineprobstime = 0.
+        self.producetime = 0.
+        self.flushtime = 0.
+        self.runtime = 0.
+        self.last_classify_time = None
+        
         logger.info( f"Classifier {self.__class__.__name__} sending to topic {self.topic} on {self.kafkaserver}" )
 
     def determine_types_and_probabilities( self, alert ):
@@ -48,25 +57,58 @@ class Classifier:
         two-element tuples that is (classId, probability)."""
         raise RuntimeError( "Need to implement this function in a subclass!" )
 
+
+    def log_status( self ):
+        strio = io.StringIO()
+        strio.write( f"{self.classifiername} has classified {self.nclassified} alerts" )
+        if self.last_classify_time is not None:
+            strio.write( f" as of {self.last_classify_time.isoformat(sep=' ',timespec='seconds')}" )
+        strio.write( "\n" )
+        strio.write( f"     Runtime (discounting pulling alerts): {self.runtime:.2f}\n" )
+        strio.write( f"        makeproducertime: {self.makeproducertime:.2f}\n" )
+        strio.write( f"        classifytime: {self.classifytime:.2f}\n" )
+        strio.write( f"           determineprobstime: {self.determineprobstime:.2f}\n" )
+        strio.write( f"           producetime: {self.producetime:.2f}\n" )
+        strio.write( f"        flushtime: {self.flushtime:.2f}" )
+        self.logger.info( strio.getvalue() )
+
+
     def classify_alerts( self, messages ):
+        t0 = time.perf_counter()
         producer = confluent_kafka.Producer( { 'bootstrap.servers': self.kafkaserver,
                                                'batch.size': 131072,
                                                'linger.ms': 50 } )
+        t1 = time.perf_counter()
         for msg in messages:
             alert = fastavro.schemaless_reader( io.BytesIO(msg.value()), self.alertschema )
             alert['classifications'] = []
+            t3 = time.perf_counter()
             probs = self.determine_types_and_probabilities( alert )
             for prob in probs:
                 alert['classifications'].append( { "classId": prob[0],
                                                    "probability": prob[1] } )
+            t4 = time.perf_counter()
             outdata = io.BytesIO()
             fastavro.write.schemaless_writer( outdata, self.brokermessageschema, alert )
             producer.produce( self.topic, outdata.getvalue() )
-        producer.flush()
+            t5 = time.perf_counter()
 
+            self.determineprobstime += t4 - t3
+            self.producetime += t5 - t4
+            
+        t6 = time.perf_counter()
+        producer.flush()
+        t7 = time.perf_counter()
+
+        self.makeproducertime += t1 - t0
+        self.classifytime += t6 - t1
+        self.flushtime += t7 - t6
+        self.runtime += t7 - t0
+        self.last_classify_time = datetime.datetime.now()
+        
         self.nclassified += len(messages)
         if ( self.nclassified > self.nextlog ):
-            self.logger.info( f"{self.classifiername} has classified {self.nclassified} alerts" )
+            self.log_status()
             self.nextlog = self.logevery * ( math.floor( self.nclassified / self.logevery ) + 1 )
 
 
@@ -85,7 +127,7 @@ class NugentClassifier(Classifier):
 class RandomSNType(Classifier):
     def __init__( self, *args, **kwargs ):
         super().__init__( "FakeBroker", "v1.0", "RandomSNType", "Perfect", **kwargs )
-        random.seed()
+        self.rng = numpy.random.default_rng()
 
     def determine_types_and_probabilities( self, alert ):
         totprob = 0.
@@ -95,13 +137,28 @@ class RandomSNType(Classifier):
                   2322, 2323, 2324, 2325, 2326,
                   2332 ]
         retval = []
-        random.shuffle( types )
-        for sntype in types:
-            thisprob = random.random() * ( 1 - totprob )
+        self.rng.shuffle( types )
+        ranprobs = self.rng.random( len(types) )
+        for prob, sntype in zip( ranprobs, types ):
+            # I am not clever enough to come up with a single numpy
+            #   operation to perform this calculation without a for
+            #   loop.  Even though it made me feel dirty, I asked
+            #   chatgpt... and what it gave me was wrong.  (The total
+            #   probability did not sum to 1.)  That made me feel good,
+            #   because there's nothing like the dopamine hit of having
+            #   your biases superficially confirmed.
+            # I tried CBorg, the AI portal thingy that LBNL has and it
+            #   wrote a whole long mess that gave the wrong answer, but
+            #   recognized it was wrong (wrapping the code in comments
+            #   about "for educational purposes"), and ended up just
+            #   saying I had to use my for loop.  (WELL!  It thought it
+            #   was helping by suggesting I put the for loop in a
+            #   function.  Great.  Thanks.)
+            thisprob = prob * ( 1. - totprob )
             totprob += thisprob
             retval.append( ( sntype, thisprob ) )
         # SLSN seems to be the default type....
-        retval.append( ( 2242, 1-totprob ) )
+        retval.append( ( 2242, 1.-totprob ) )
         return retval
 
 
@@ -142,6 +199,9 @@ class FakeBroker:
         self.consume_nmsgs = consume_nmsgs
         self.notopic_sleeptime=notopic_sleeptime
 
+        self.consumer_consume_time_offset = 0
+        self.consumer_handle_time_offset = 0
+        
         self.alert_schema = alert_schema
         alertschemaobj = fastavro.schema.parse_schema( fastavro.schema.load_schema( alert_schema ) )
         brokermsgschema = fastavro.schema.parse_schema( fastavro.schema.load_schema( brokermessage_schema ) )
@@ -152,12 +212,45 @@ class FakeBroker:
                                             alertschema=alertschemaobj, brokermessageschema=brokermsgschema,
                                             logger=self.logger )
                             ]
+        self.classifier_procs = []
+        self.classifier_pipes = []
 
-    def handle_message_batch( self, msgs ):
+    # def handle_message_batch( self, msgs ):
+    #     for cfer in self.classifiers:
+    #         cfer.classify_alerts( msgs )
+
+    def log_cfer_status( self, consumer ):
+        self.logger.info( f"FakeBroker consume time = {self.consumer_consume_time_offset+consumer.consume_time:.2f}, "
+                          f"handle time = {self.consumer_handle_time_offset+consumer.handle_time:.2f}" )
         for cfer in self.classifiers:
-            cfer.classify_alerts( msgs )
+            cfer.log_status()
 
+    def classifier_runner( self, classifier, pipe ):
+        done = False
+        while not done:
+            pipe.poll()
+            msg = pipe.recv()
+            if not isinstance( msg, dict ) or ( 'command' not in msg ):
+                self.logger.error( f"Subprocess for {classifier.classifier_name} got misunderstood message {msg}" )
+                continue
+            if msg['command'] == 'die':
+                done = True
+            elif msg['command'] == 'handle':
+                classifier.classify_alerts( msg['msgs'] )
+            else:
+                self.logger.error( f"Subprocess for {classifier.classifier_name} got unknown command "
+                                   f"{msg['command']}" )
+        self.logger.info( f"Subprocess for {classifier.classifier_name} exiting." )
+            
     def __call__( self ):
+        # Launch the handler processes
+        for cfer in self.classifiers:
+            mypipe, theirpipe = multiprocessing.Pipe()
+            crun = functools.partial( self.classifier_runner, cfer, theirpipe )
+            proc = multiprocessing.Process( target=crun )
+            self.classifier_procs.append( proc )
+            self.classifier_pipes.append( mypipe )
+            
         self.logger.info( "Fakebroker starting, looking for source topics" )
         consumer = None
         while True:
@@ -186,9 +279,13 @@ class FakeBroker:
 
             self.logger.info( "Fakebroker starting poll loop" )
             stopafternsleeps = 1 if len(subbed) < len(self.source_topics) else None
+            maint_func = functools.partial( self.log_cfer_status, consumer )
             consumer.poll_loop( handler=self.handle_message_batch,
                                 stopafternsleeps=stopafternsleeps,
-                                stopafter=self.runtime )
+                                stopafter=self.runtime,
+                                maint_func=maint_func, maint_timeout=60 )
+            self.consumer_consume_time_offset += consumer.consume_time
+            self.consumer_handle_time_offset += consumer.handle_time
 
 
 # ======================================================================

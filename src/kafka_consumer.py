@@ -96,6 +96,9 @@ class KafkaConsumer:
         self.consume_timeout = consume_timeout
         self.nomsg_sleeptime = nomsg_sleeptime
 
+        self.consume_time = 0
+        self.handle_time = 0
+        
         consumerconfig = { 'bootstrap.servers': server,
                            'auto.offset.reset': 'earliest',
                            'group.id': groupid }
@@ -244,7 +247,7 @@ class KafkaConsumer:
         ofp.close()
 
     def poll_loop( self, handler=None, timeout=None, pipe=None, stopafter=datetime.timedelta(hours=1),
-                   stopafternmessages=None, stopafternsleeps=None ):
+                   stopafternmessages=None, stopafternsleeps=None, maint_func=None, maint_timeout=60 ):
         """Calls handler with batches of messages.
 
         Parameters
@@ -282,6 +285,12 @@ class KafkaConsumer:
             0 to immediately exit after getting no messages from the
             server.
 
+          maint_func : callable, default None
+            A maintenance function that is called approximately every
+            maint_timeout seconds.
+
+          maint_timeout : int, default 60
+            How often to call maint_func.  Ignored if maint_func is None.
 
         Returns
         -------
@@ -293,6 +302,7 @@ class KafkaConsumer:
         timeout = timeout if timeout is not None else self.consume_timeout
         handler = handler if handler is not None else self.default_handle_message_batch
         t0 = datetime.datetime.now()
+        next_maint_timeout = time.monotonic() + maint_timeout
         nsleeps = 0
         nconsumed = 0
         keepgoing = True
@@ -300,6 +310,7 @@ class KafkaConsumer:
         while keepgoing:
             self.logger.debug( f"Trying to consume {self.consume_nmsgs} messages "
                                f"with timeout {timeout} sec...\n" )
+            tperf0 = time.perf_counter()
             msgs = self.consumer.consume( self.consume_nmsgs, timeout=timeout )
             if len(msgs) == 0:
                 if ( stopafternsleeps is not None ) and ( nsleeps >= stopafternsleeps ):
@@ -310,11 +321,15 @@ class KafkaConsumer:
                     time.sleep( self.nomsg_sleeptime )
                     nsleeps += 1
             else:
+                tperf1 = time.perf_counter()
                 self.logger.debug( f"...got {len(msgs)} messages" )
                 nsleeps = 0
                 handler( msgs )
                 self.tot_handled += len( msgs )
                 nconsumed += len( msgs )
+                tperf2 = time.perf_counter()
+                self.consume_time += tperf1 - tperf0
+                self.handle_time += tperf2 - tperf1
 
             runtime = datetime.datetime.now() - t0
             if ( ( ( stopafternmessages is not None ) and ( nconsumed > stopafternmessages ) )
@@ -323,6 +338,11 @@ class KafkaConsumer:
                 ):
                 keepgoing = False
 
+            if ( maint_func is not None ) and ( time.monotonic() > next_maint_timeout ):
+                self.logger.warning( "Calling maint_func" )
+                maint_func()
+                next_maint_timeout += maint_timeout
+                
             if pipe is not None:
                 pipe.send( { "message": "ok", "nconsumed": nconsumed,
                              "tot_handled": self.tot_handled, "runtime": runtime } )
