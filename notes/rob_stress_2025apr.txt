@@ -259,6 +259,46 @@ More logging to fakebroker.  Restart, run
       kept up with fakebroker
 
    ...source_importer, which includes the sources from the previous day
-      I forgot, 
+      I forgot.  3m26s for:
+        Imported 24561 objects, 191174 sources, 779011 forced sources
+
+
+
+ONE MORE DAY
+
+Made fakebroker multiprocessing.  Launch projectsim.py as before.
+
+   ...27279 alerts to send.  Fakebroker seems to be keeping up, but I
+      want to futz with it, so no full data here.
+
+   ...did run source importer.  35s for:
+            Imported 1523 objects, 27317 sources, 56582 forced sources
+
+
+ONE MORE DAY
+
+Had to do -a 2 in projectsim.py to get alerts to send
+
+   ...23621 alerts to send.  Took 186.6s (632Hz)
+
+   ...fakebroker handled them all in 40s.  (I started it after alerts
+      were already going because of a crash bug the first time.)  So it
+      kept up!
+
+   ..source importer 20.3s for
+       Imported 4387 objects, 23621 sources, 45389 forced sources
+
+
+
+ONE MORE DAY
+
+
+fakebroker error
+
+107445 sources to send. after it was ~15000 in, I noticed it slowed down
+for a bit.  fakebroker (once error fixed) no longer seems to be keeping
+up.  I am perplexed.  Going to add more time granularity.
+
+...off to do other things, shutting down.
 
 
