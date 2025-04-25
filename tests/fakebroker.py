@@ -45,8 +45,10 @@ class Classifier:
         self.nextlog = self.logevery
 
         self.makeproducertime = 0.
+        self.avreadtime = 0.
         self.classifytime = 0.
         self.determineprobstime = 0.
+        self.avwritetime = 0.
         self.producetime = 0.
         self.flushtime = 0.
         self.runtime = 0.
@@ -69,7 +71,9 @@ class Classifier:
         strio.write( f"     Runtime (discounting pulling alerts): {self.runtime:.2f}\n" )
         strio.write( f"        makeproducertime: {self.makeproducertime:.2f}\n" )
         strio.write( f"        classifytime: {self.classifytime:.2f}\n" )
+        strio.write( f"           avreadtime: {self.avreadtime:.2f}\n" )
         strio.write( f"           determineprobstime: {self.determineprobstime:.2f}\n" )
+        strio.write( f"           avwritetime: {self.avwritetime:.2f}\n" )
         strio.write( f"           producetime: {self.producetime:.2f}\n" )
         strio.write( f"        flushtime: {self.flushtime:.2f}" )
         self.logger.info( strio.getvalue() )
@@ -82,6 +86,7 @@ class Classifier:
                                                'linger.ms': 50 } )
         t1 = time.perf_counter()
         for msg in messages:
+            t2 = time.perf_counter()
             alert = fastavro.schemaless_reader( io.BytesIO(msg), self.alertschema )
             alert['classifications'] = []
             t3 = time.perf_counter()
@@ -92,20 +97,23 @@ class Classifier:
             t4 = time.perf_counter()
             outdata = io.BytesIO()
             fastavro.write.schemaless_writer( outdata, self.brokermessageschema, alert )
-            producer.produce( self.topic, outdata.getvalue() )
             t5 = time.perf_counter()
+            producer.produce( self.topic, outdata.getvalue() )
+            t6 = time.perf_counter()
 
+            self.avreadtime += t3 - t2
             self.determineprobstime += t4 - t3
-            self.producetime += t5 - t4
+            self.avwritetime += t5 - t4
+            self.producet5ime += t6 - t5
 
-        t6 = time.perf_counter()
-        producer.flush()
         t7 = time.perf_counter()
+        producer.flush()
+        t8 = time.perf_counter()
 
         self.makeproducertime += t1 - t0
-        self.classifytime += t6 - t1
-        self.flushtime += t7 - t6
-        self.runtime += t7 - t0
+        self.classifytime += t7 - t1
+        self.flushtime += t8 - t7
+        self.runtime += t8 - t0
         self.last_classify_time = datetime.datetime.now()
 
         self.nclassified += len(messages)
@@ -235,8 +243,8 @@ class FakeBroker:
     def log_cfer_status( self, consumer ):
         self.logger.info( f"FakeBroker consume time = {self.consumer_consume_time_offset+consumer.consume_time:.2f}, "
                           f"handle time = {self.consumer_handle_time_offset+consumer.handle_time:.2f}" )
-        for cfer in self.classifiers:
-            cfer.log_status()
+        for pipe in self.classifier_pipes:
+            pipe.send( { "command": "log" } )
 
     def classifier_runner( self, classifier, pipe ):
         done = False
@@ -248,6 +256,8 @@ class FakeBroker:
                 continue
             if msg['command'] == 'die':
                 done = True
+            elif msg['command'] == 'log':
+                classifier.log_status()
             elif msg['command'] == 'handle':
                 classifier.classify_alerts( msg['msgs'] )
                 pipe.send( "did" )
