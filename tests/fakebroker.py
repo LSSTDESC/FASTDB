@@ -235,8 +235,8 @@ class FakeBroker:
     def log_cfer_status( self, consumer ):
         self.logger.info( f"FakeBroker consume time = {self.consumer_consume_time_offset+consumer.consume_time:.2f}, "
                           f"handle time = {self.consumer_handle_time_offset+consumer.handle_time:.2f}" )
-        for cfer in self.classifiers:
-            cfer.log_status()
+        for cfer in self.classifier_pipes:
+            pipe.send( "log" )
 
     def classifier_runner( self, classifier, pipe ):
         done = False
@@ -248,6 +248,8 @@ class FakeBroker:
                 continue
             if msg['command'] == 'die':
                 done = True
+            elif msg['command'] == 'log':
+                classifier.log_status()
             elif msg['command'] == 'handle':
                 classifier.classify_alerts( msg['msgs'] )
                 pipe.send( "did" )
