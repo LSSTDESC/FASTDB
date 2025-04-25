@@ -56,6 +56,23 @@ class AlertReconstructor:
         self.diasource_schema = schema[ 'diasource' ]
         self.diaforcedsource_schema = schema[ 'diaforcedsource' ]
 
+        self._reset_timings()
+
+
+    def _reset_timings( self ):
+        self.reconstructtime = 0
+        self.connecttime = 0
+        self.findsourcetime = 0
+        self.sourcetodicttime = 0
+        self.prevsourcetime = 0
+        self.prevforcedsourcetime = 0
+        self.prevforcedsourcequerytime = 0
+        self.prevforcedsourcetodicttime = 0
+        self.objtime = 0
+        self.avrowritetime = 0
+        self.commtime = 0
+        self.tottime = 0
+
 
     def object_data_to_dicts( self, rows, columns ):
         allfields = [ f['name'] for f in self.diaobject_schema['fields'] ]
@@ -243,21 +260,9 @@ class AlertReconstructor:
         # logger.setLevel( logging.INFO )
         logger.setLevel( logging.DEBUG )
 
+        self._reset_timings()
         logger.info( "Subprocess starting." )
         overall_t0 = time.perf_counter()
-
-        self.reconstructtime = 0
-        self.connecttime = 0
-        self.findsourcetime = 0
-        self.sourcetodicttime = 0
-        self.prevsourcetime = 0
-        self.prevforcedsourcetime = 0
-        self.prevforcedsourcequerytime = 0
-        self.prevforcedsourcetodicttime = 0
-        self.objtime = 0
-        self.avrowritetime = 0
-        self.commtime = 0
-        self.tottime = 0
 
         done = False
         with db.DB() as con:

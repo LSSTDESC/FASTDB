@@ -104,7 +104,7 @@ class Classifier:
             self.avreadtime += t3 - t2
             self.determineprobstime += t4 - t3
             self.avwritetime += t5 - t4
-            self.producet5ime += t6 - t5
+            self.producetime += t6 - t5
 
         t7 = time.perf_counter()
         producer.flush()
