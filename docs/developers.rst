@@ -60,6 +60,17 @@ and then retry the ``./configure`` command above.
 Local Test Environment
 =======================
 
+Setup Docker on an ARM Mac (those with Apple Silicon)
+-----------------------------------------------------
+
+It is recommended to use the Docker Desktop application for ARM Macs. You can download it from https://www.docker.com/products/docker-desktop/ . In the settings deselect Rosetta2:
+
+.. image:: _static/images/docker_settings.png
+   :alt: Docker settings
+
+Build and run the Docker services
+----------------------------------
+
 The file ``docker-compose.yaml`` in the top-level directory contains (almost) everything necessary to bring up a test FASTDB environment on your local machine.  Make sure you have the docker container runtime and the docker compose extensions installed, make sure that your current working directory is the top-level directory of your git checkout, and run::
 
   docker compose build
@@ -95,7 +106,7 @@ Ideally, at this point you're done setting up your test/dev environment.  When y
   docker compose down -v
 
 (This must be run on the host system, *not* inside one of the containers.)  That command will remove all of the started servers, and wipe out all disk space allocated for databases and such.  (You will probably want to ``exit`` any shells you have running on containers before doing this.)
-  
+
 It's possible the shell server won't start, usually because the ``createdb`` step failed.  The first thing you should do is::
 
   docker compose logs createdb
@@ -110,12 +121,6 @@ Please Don't Docker Push
 ------------------------
 
 The `docker-compose.yaml` file will build docker images set up so that they can easily be pushed to Perlmutter's container image registrly.  Please do *not* run any docker push commands to push those images, unless you've tagged them differently and know what you're doing.  (If you really know what you're doing, you're always allowed to do *anything*.)
-
-
-Architecture Note
------------------
-
-FASTDB is developed on, and expected to be run on, a Linux system running the ``x86_64`` architecture.  If you're on a different system (either OS or CPU architecture (e.g. ``ARM``)), it's possible you will have trouble building the Docker images, as some things needed may not be available for your system.
 
 
 Working With the Test Installation
@@ -177,7 +182,7 @@ If you're inside the container, you can exit with ``exit`` (just like any other 
   docker compose down -v
 
 This will completely tear down the environment.  All containers will be stopped, all volumes created for the environment (such as the backend storage for the test databases) will be wiped clean.  This is what you do if you want to make sure you're starting fresh.
-  
+
 
 
 Running the tests
@@ -225,7 +230,7 @@ or run::
   pytest -v --trace services/test_sourceimporter.py::test_import_30days_60days
 
 Both of these start tests with test fixtures that create a database user and load data into the database.  The ``--trace`` command tells pytest to stop at the begining of a test, after the fixture has run.  The shell where you run this will dump you into a ``(Pdb)`` prompt.  Just leave that shell sitting there.  At this point, you have a loaded database.  You can look at ``localhost:8080`` in your web browser to see the web ap, and log in with user ``test`` and password ``test_password``.
-  
+
 The ``test_object_search`` command takes about 10 seconds to run, and loads up the main postgres tables with the test data.  It does *not* load anyting into the mongo database.  The ``test_import_30days_60days`` command takes up to a minute to run, because what it's really doing is testing a whole bunhch of different servers, an there are built in sleeps so that each step of the test can be sure that other servers have had time to do their stuff.  This one loads the full test data set into the "ppdb" tables, and runs a 90 simulated days of alerts through some test brokers.  When it's done, the sources from those 90 simulated days will be in the main postgrest ables, and the mongo database will be populated with  the test broker messages.  (The test brokers aren't doing anything real, but are just assigning random classifications for purposes of testing the plubming.)
 
 When you're done futzing around with the web ap, go to the shee where you ran ``pytest ...`` and just press ``c`` and hit Enter at the ``(Pdb)`` prompt.  The test will compete, exit, and (ideally) clean up after itself.
