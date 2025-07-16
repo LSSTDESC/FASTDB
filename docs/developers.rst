@@ -65,7 +65,7 @@ Setup Docker on an ARM Mac (those with Apple Silicon)
 
 It is recommended to use the Docker Desktop application for ARM Macs. You can download it from https://www.docker.com/products/docker-desktop/ . In the settings deselect Rosetta2:
 
-.. image:: _static/images/docker_settings.png
+.. image:: _static/images/docker_settings.jpg
    :alt: Docker settings
 
 Build and run the Docker services
