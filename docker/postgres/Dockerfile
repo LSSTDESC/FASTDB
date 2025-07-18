@@ -13,8 +13,9 @@ SHELL ["/bin/bash", "-c"]
 RUN apt-get update \
   && DEBIAN_FRONTEND="nointeractive" apt-get -y upgrade \
   && DEBIAN_FRONTEND="noninteractive" TZ="UTC" apt-get -y install -y --no-install-recommends \
-      postgresql-15 postgresql-client-15 pgtop libssl3 libreadline8 zlib1g tmux netcat-openbsd \
+      postgresql-15 postgresql-client-15 pgtop libssl3 libreadline8 zlib1g netcat-openbsd \
       libzstd1 liblz4-1 \
+      tmux emacs-nox less top \
   && apt-get clean \
   && rm -rf /var/lib/apt/lists/*
 
