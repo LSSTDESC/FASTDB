@@ -26,7 +26,11 @@ class GetLtcv( BaseView ):
 
         with db.DB( dbcon ) as dbcon:
             cursor = dbcon.cursor()
-            q = "SELECT * FROM diaobject WHERE diaobjectid=%(id)s AND processing_version=%(pv)s "
+            # Converting bigints to strings because Javscript will read from JSON as if they're doubles
+            # TODO : return nearby object info?
+            q = ( "SELECT diaobjectid::text,processing_version,radecmjdtai,"
+                  "ra,dec,raerr,decerr,ra_dec_cov FROM diaobject "
+                  "WHERE diaobjectid=%(id)s AND processing_version=%(pv)s " )
             cursor.execute( q, { 'id': objid, 'pv': procverint } )
             columns = [ d[0] for d in cursor.description ]
             row = cursor.fetchone()

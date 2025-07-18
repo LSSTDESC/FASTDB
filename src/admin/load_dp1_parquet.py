@@ -11,6 +11,7 @@ import traceback
 
 import nested_pandas
 import pandas
+import numpy as np
 
 from fastdb_loader import FastDBLoader, ColumnMapper
 from db import ( DB, HostGalaxy, DiaObject, DiaSource, DiaForcedSource,
@@ -137,6 +138,14 @@ class ParquetFileHandler():
             DP1ColumnMapper.diasource_map_columns( sourcedf )
             DP1ColumnMapper.diaforcedsource_map_columns( forceddf )
 
+            # HORRENDOUS HACK ALERT REMOVE THIS
+            # This is here so that we can load a single file from DP1
+            # which has duplicated diaforcedsourceid values
+            # REMOVE THIS HACK OMG REMOVE IT
+            sourcedf.diasourceid = np.arange( len(sourcedf) )
+            forceddf.diaforcedsourceid = np.arange( len(forceddf) )
+            # END OF HORRENDOUS HACK
+
             if not self.ppdb:
                 df['processing_version'] = self.processing_version
                 sourcedf['processing_version'] = self.processing_version
@@ -209,15 +218,13 @@ class DP1ParquetLoader( FastDBLoader ):
 
     def recursive_find_files( self, direc , files=[] ):
         filematch = re.compile( "^Npix=\d+\.parquet$" )
-        newfiles = []
-        for f in direc.glob( "*" ):
-            if f.is_dir():
-                files = self.recursive_find_files( f, files )
+        if not direc.is_dir():
+            if filematch.search( direc.name ):
+                return files + [ direc.resolve() ]
             else:
-                if filematch.search( f.name ):
-                    newfiles.append( f.resolve() )
-        return files + newfiles
-
+                return files
+        for f in direc.glob( "*" ):
+            return self.recursive_find_files( f, files )
 
     def __call__( self ):
         # Find all the parquet files to laod

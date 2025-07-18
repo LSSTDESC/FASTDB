@@ -145,7 +145,19 @@ class ObjectSearch( BaseView ):
             raise TypeError( "POST data was not JSON; send search criteria as a JSON dict" )
         searchdata = flask.request.json
 
-        return ltcv.object_search( processing_version, return_format='json', **searchdata )
+        rval = ltcv.object_search( processing_version, return_format='json', **searchdata )
+
+        # JSON dysfunctionality... convert to strings and back,
+        # javascript may decide to interpret bigints as doubles, thereby
+        # losing necessary precision.  Convert all bigints to strings.
+        # Right now, that means listing the possible columns here.  There
+        # must be a better way... but if I want to interpret it in javascriptlk
+        # there probably isn't.
+        bigints = [ 'diaobjectid' ]
+        for k in bigints:
+            rval[k] = [ str(v) for v in rval[k] ]
+        
+        return rval
 
 
 # **********************************************************************

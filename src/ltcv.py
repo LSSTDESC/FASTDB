@@ -1,5 +1,6 @@
 import datetime
 import numbers
+import json
 
 import numpy
 import pandas
@@ -330,10 +331,14 @@ def object_search( processing_version, return_format='json', **kwargs ):
         util.logger.debug( f"object_search returning {len(rows)} objects in format {return_format}" )
 
     if return_format == 'json':
-        return { c: [ r[colummap[c]] for r in rows ] for c in columns }
+        rval = { c: [ r[colummap[c]] for r in rows ] for c in columns }
+        util.logger.debug( f"returning json\n{json.dumps(rval,indent=4)}" )
+        return rval
 
     elif return_format == 'pandas':
-        return pandas.DataFrame( rows, columns=columns )
+        df = pandas.DataFrame( rows, columns=columns )
+        # util.logger.debug( f"object_search pandas dataframe: {df}" )
+        return df
 
     else:
         raise RuntimeError( "This should never happen." )
