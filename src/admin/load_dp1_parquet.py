@@ -34,7 +34,7 @@ class DP1ColumnMapper( ColumnMapper ):
 
         tab.rename( renames, axis='columns', inplace=True )
         tab.drop( yanks, axis='columns', inplace=True )
-        
+
 
     @classmethod
     def diaobject_map_columns( cls, tab ):
@@ -76,7 +76,7 @@ class DP1ColumnMapper( ColumnMapper ):
         lcs = { 'diaObjectId', 'visit', 'detector', 'midpointMjdTai',
                 'band' }
         cls._map_columns( tab, mapper, lcs )
-            
+
 
 
 # ======================================================================
@@ -126,25 +126,11 @@ class ParquetFileHandler():
 
             # There must be a faster way to do this.  This is really slow
             self.logger.info( f"Concatenating sources from {len(df)} objects..." )
-            sourcedf = None
-            for row in df.itertuples():
-                srcs = row.diaSource
-                srcs['diaObjectId'] = row.diaObjectId
-                if sourcedf is None:
-                    sourcedf = srcs
-                else:
-                    sourcedf = pandas.concat( [ sourcedf, srcs ] )
+            sourcedf = df.diaSource.nest.to_flat().join( df.diaObjectId )
             self.logger.info( f"...concatenated to {len(sourcedf)} sources" )
 
             self.logger.info( f"Concatenating forcedsources from {len(df)} objects..." )
-            forceddf = None
-            for row in df.itertuples():
-                frc = row.diaObjectForcedSource
-                frc['diaObjectId'] = row.diaObjectId
-                if forceddf is None:
-                    forceddf = frc
-                else:
-                    forceddf = pandas.concat( [ forceddf, frc ] )
+            forceddf = df.diaObjectForcedSource.nest.to_flat().join( df.diaObjectId )
             self.logger.info( f"...concatenated to {len(forceddf)} foreced sources" )
 
             DP1ColumnMapper.diaobject_map_columns( df )
@@ -170,7 +156,7 @@ class ParquetFileHandler():
             sourcedf.drop( ['index'], axis='columns', inplace=True )
             forceddf.reset_index( inplace=True )
             forceddf.drop( ['index'], axis='columns', inplace=True )
-                
+
             # TODO snapshot table
 
             self.logger.info( f"Going to try to load {len(df)} objects, {len(sourcedf)} sources, "
@@ -199,7 +185,7 @@ class ParquetFileHandler():
         except Exception:
             self.logger.error( f"Exception loading {filepath}: {traceback.format_exc()}" )
             return { "ok": False, "msg": traceback.format_exc() }
-                
+
 
 # ======================================================================
 
@@ -232,7 +218,7 @@ class DP1ParquetLoader( FastDBLoader ):
                     newfiles.append( f.resolve() )
         return files + newfiles
 
-    
+
     def __call__( self ):
         # Find all the parquet files to laod
         files = self.recursive_find_files( pathlib.Path( self.basedir ) )
@@ -253,14 +239,14 @@ class DP1ParquetLoader( FastDBLoader ):
         # Do the long stuff
         try:
             self.logger.info( f"Launching {self.nprocs} procesess to load {len(files)} parquet files" )
-            
+
             def launchDP1FileHandler( pipe ):
                 hndlr = ParquetFileHandler( self, pipe )
                 hndlr.listener()
 
             donefiles = set()
             errfiles = set()
-                
+
             freeprocs = set()
             busyprocs = set()
             procinfo = {}
