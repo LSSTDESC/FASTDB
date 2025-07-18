@@ -37,8 +37,8 @@ fastdbap.ObjectList = class
                 data.maglast.push( -2.5 * Math.log10( data.lastdetflux[i] ) + 31.4 );
                 data.maglasterr.push( 2.5 / Math.log(10.) * data.lastdetfluxerr[i] / data.lastdetflux[i] );
             } else {
-                data.magmax.push( -99 );
-                data.magmaxerr.push( -99 );
+                data.maglast.push( -99 );
+                data.maglasterr.push( -99 );
             }
             if ( data.lastforcedflux[i] > 0 ) {
                 data.magforcedlast.push( -2.5 * Math.log10( data.lastforcedflux[i] ) + 31.4 );
@@ -135,7 +135,8 @@ fastdbap.ObjectList = class
                                             "classes": [ "borderleft" ] } );
             table.prepend( tr );
         }
-
+        this.fields = fields;
+        this.data = data;
         this.objtable = new rkWebUtil.SortableTable(
             data,
             fields,
@@ -150,6 +151,9 @@ fastdbap.ObjectList = class
 
         // TODO: info about search criteria
         this.topdiv.appendChild( this.objtable.table );
+
+        let bdiv = rkWebUtil.elemaker( 'div', this.topdiv );
+        rkWebUtil.button( bdiv, 'Download CSV', () => { self.download_csv(); } );
     }
 
 
@@ -173,6 +177,26 @@ fastdbap.ObjectList = class
     {
         let info = new fastdbap.ObjectInfo( data, this.context, this.context.objectinfodiv );
         info.render_page();
+    }
+
+    download_csv()
+    {
+        let rows = [];
+        rows.push( this.fields.join(',') );
+        for ( let i in this.data[ this.fields[0] ] ) {
+            let row = [];
+            for ( let f of this.fields ) {
+                row.push( this.data[f][i] );
+            }
+            rows.push( row.join(',') );
+        }
+        let blob = new Blob( [ rows.join('\n') ], { type: 'text/csv;charset=utf-8' } );
+        let url = URL.createObjectURL( blob );
+        let a = rkWebUtil.elemaker( 'a', document.body,
+                                    { 'attributes': { 'href': url, 'download': 'object_list.csv' } } );
+        a.click();
+        document.body.removeChild( a );
+        URL.revokeObjectURL( url );
     }
 
 }

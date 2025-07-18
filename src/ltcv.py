@@ -88,7 +88,7 @@ def object_ltcv( processing_version, diaobjectid, return_format='json', bands=No
                "FROM diasource "
                "WHERE diaobjectid=%(id)s AND processing_version=%(pv)s " )
         if bands is not None:
-            q += "AND bands=ANY(%(bands)s) "
+            q += "AND band=ANY(%(bands)s) "
         q += "ORDER BY mjd "
         cursor.execute( q, { 'id': diaobjectid, 'pv': pv, 'bands': bands } )
         columns = [ d[0] for d in cursor.description ]
@@ -98,7 +98,7 @@ def object_ltcv( processing_version, diaobjectid, return_format='json', bands=No
                   "FROM diaforcedsource "
                   "WHERE diaobjectid=%(id)s AND processing_version=%(pv)s " )
             if bands is not None:
-                q += "AND bands=ANY(%(bands)s) "
+                q += "AND band=ANY(%(bands)s) "
             q += "ORDER BY mjd "
             cursor.execute( q, { 'id': diaobjectid, 'pv': pv, 'bands': bands } )
             columns = [ d[0] for d in cursor.description ]
@@ -177,7 +177,7 @@ def object_search( processing_version, return_format='json', **kwargs ):
     util.logger.debug( f"In object_search : kwargs = {kwargs}" )
     knownargs = { 'ra', 'dec', 'radius',
                   'mint_firstdetection', 'maxt_firstdetection',
-                  'mint_lastdetection', 'maxt_lastdetection'
+                  'mint_lastdetection', 'maxt_lastdetection',
                   'min_numdetections', 'mindt_firstlastdetection','maxdt_firstlastdetection',
                   'min_bandsdetected', 'min_lastmag', 'max_lastmag',
                   'statbands' }
@@ -240,7 +240,7 @@ def object_search( processing_version, return_format='json', **kwargs ):
         mint_firstdet = util.mjd_or_none_from_dict_mjd_or_timestring( kwargs, 'mint_firstdetection' )
         maxt_firstdet = util.mjd_or_none_from_dict_mjd_or_timestring( kwargs, 'maxt_firstdetection' )
         mint_lastdet = util.mjd_or_none_from_dict_mjd_or_timestring( kwargs, 'mint_lastdetection' )
-        maxt_lastdet = util.mjd_or_none_from_dict_mjd_or_timestring( kwargs, 'mint_lastdetection' )
+        maxt_lastdet = util.mjd_or_none_from_dict_mjd_or_timestring( kwargs, 'maxt_lastdetection' )
         if any( i is not None for i in [ mint_firstdet, maxt_firstdet, mint_lastdet, maxt_lastdet ] ):
             raise NotImplementedError( "Filtering by detection times not yet implemented" )
 
