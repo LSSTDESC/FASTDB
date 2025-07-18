@@ -1,3 +1,4 @@
+import datetime
 import re
 
 import psycopg
@@ -5,6 +6,12 @@ import psycopg.rows
 
 from db import DB
 from util import logger
+
+
+class ColumnMapper:
+    # D'oh... thought I could share stuff, but I was using
+    # astropy tables for SNANA, pandas for DP1 Parquet
+    pass
 
 
 class FastDBLoader:
@@ -25,7 +32,7 @@ class FastDBLoader:
 
     """
 
-    def __init__( self ):
+    def __init__( self, processing_version=None, snapshot=None ):
         self._all_tables = [ 'wantedspectra', 'plannedspectra', 'spectruminfo',
                              'host_galaxy', 'root_diaobject', 'diaobject', 'diaobject_root_map',
                              'diasource', 'diaforcedsource',
@@ -34,6 +41,59 @@ class FastDBLoader:
                              'ppdb_alerts_sent', 'ppdb_diaobject', 'ppdb_diaforcedsource', 'ppdb_diasource',
                              'ppdb_host_galaxy',
                             ]
+
+        self.processing_version = None
+        self.processing_version_name = processing_version
+        if self.processing_version_name is None:
+            raise ValueError( "processing_version may not be None" )
+        self.snapshot = None
+        self.snapshot_name = None
+
+
+    def make_procver_and_snapshot( self ):
+        with DB() as conn:
+            try:
+                cursor = conn.cursor( row_factory=psycopg.rows.dict_row )
+                cursor.execute( "LOCK TABLE processing_version" )
+                cursor.execute( "SELECT * FROM processing_version WHERE description=%(pv)s",
+                                { 'pv': self.processing_version_name } )
+                rows = cursor.fetchall()
+                if len(rows) >= 1:
+                    self.processing_version = rows[0]['id']
+                else:
+                    cursor.execute( "SELECT MAX(id) AS maxid FROM processing_version" )
+                    row = cursor.fetchone()
+                    self.processing_version = row['maxid'] + 1 if row['maxid'] is not None else 0
+                    cursor.execute( "INSERT INTO processing_version(id,description,validity_start) "
+                                    "VALUES (%(id)s, %(pv)s, %(now)s)",
+                                    { 'id': self.processing_version, 'pv': self.processing_version_name,
+                                      'now': datetime.datetime.now(tz=datetime.UTC) } )
+                    conn.commit()
+            finally:
+                conn.rollback()
+
+
+            if self.snapshot_name is None:
+                return
+
+            try:
+                cursor = conn.cursor( row_factory=psycopg.rows.dict_row )
+                cursor.execute( "LOCK TABLE snapshot ")
+                cursor.execute( "SELECT * FROM snapshot WHERE description=%(ss)s",
+                                { 'ss': self.snapshot_name } )
+                rows = cursor.fetchall()
+                if len(rows) >= 1:
+                    self.snapshot = rows[0]['id']
+                else:
+                    cursor.execute( "SELECT MAX(id) AS maxid FROM snapshot" )
+                    row = cursor.fetchone()
+                    self.snapshot = row['maxid'] + 1 if row['maxid'] is not None else 0
+                    cursor.execute( "INSERT INTO snapshot(id,description) VALUES (%(id)s, %(ss)s)",
+                                    { 'id': self.snapshot, 'ss': self.snapshot_name } )
+                    conn.commit()
+            finally:
+                conn.rollback()
+        
 
     def disable_indexes_and_fks( self ):
         """This is scary.  It disables all indexes and foreign keys on the tables to be loaded.

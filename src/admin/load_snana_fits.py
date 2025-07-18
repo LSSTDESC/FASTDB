@@ -17,7 +17,7 @@ import psycopg.rows
 
 import astropy.table
 
-from fastdb_loader import FastDBLoader
+from fastdb_loader import FastDBLoader, ColumnMapper
 from util import NULLUUID
 from db import ( DB, HostGalaxy, DiaObject, DiaSource, DiaForcedSource,
                  DiaObjectSnapshot, DiaSourceSnapshot, DiaForcedSourceSnapshot,
@@ -26,7 +26,26 @@ from db import ( DB, HostGalaxy, DiaObject, DiaSource, DiaForcedSource,
 
 # ======================================================================
 
-class ColumnMapper:
+class SNANAColumnMapper( ColumnMapper )
+    @classmethod
+    def _map_columns( cls, tab, mapper, lcs ):
+        yanks = []
+        renames = {}
+        for col in tab.columns:
+            if col in mapper:
+                renames[ col ] = mapper[ col ]
+            elif col in lcs:
+                renames[ col ] = col.lower()
+            else:
+                yanks.append( col )
+                next
+
+        for oldname, newname in renames.items():
+            tab.rename_column( oldname, newname )
+
+        for yank in yanks:
+            tab.remove_column( yank )
+
     @classmethod
     def diaobject_map_columns( cls, tab ):
         """Map from the HEAD.FITS.gz files to the diaobject table"""
@@ -78,29 +97,11 @@ class ColumnMapper:
         cls._map_columns( tab, mapper, lcs )
 
 
-    @classmethod
-    def _map_columns( cls, tab, mapper, lcs ):
-        yanks = []
-        renames = {}
-        for col in tab.columns:
-            if col in mapper:
-                renames[ col ] = mapper[ col ]
-            elif col in lcs:
-                renames[ col ] = col.lower()
-            else:
-                yanks.append( col )
-                next
-
-        for oldname, newname in renames.items():
-            tab.rename_column( oldname, newname )
-
-        for yank in yanks:
-            tab.remove_column( yank )
 
 
 # ======================================================================
 
-class FITSFileHandler( ColumnMapper ):
+class FITSFileHandler( SNANAColumnMapper ):
     def __init__( self, parent, pipe ):
         super().__init__()
 
@@ -435,68 +436,24 @@ class FITSLoader( FastDBLoader ):
     def __init__( self, nprocs, directories, files=[],
                   max_sources_per_object=100000, photflag_detect=4096,
                   snana_zeropoint=27.5,
-                  processing_version=None, snapshot=None,
                   really_do=False, verbose=False, dont_disable_indexes_fks=False,
                   ppdb=False,
-                  logger=logging.getLogger( "load_snana_fits") ):
-        super().__init__()
+                  logger=logging.getLogger( "load_snana_fits"),
+                  **kwargs
+                 ):
+        super().__init__( **kwargs )
         self.nprocs = nprocs
         self.directories = directories
         self.files = files
         self.max_sources_per_object=max_sources_per_object
         self.photflag_detect = photflag_detect
         self.snana_zeropoint = snana_zeropoint
-        self.processing_version = None
-        self.processing_version_name = processing_version
-        self.snapshot = None
-        self.snapshot_name = snapshot
         self.really_do = really_do
         self.logger = logger
         self.sublogger = None
         self.verbose = verbose
         self.dont_disable_indexes_fks = dont_disable_indexes_fks
         self.ppdb = ppdb
-
-
-    def make_procver_and_snapshot( self ):
-        with DB() as conn:
-            try:
-                cursor = conn.cursor( row_factory=psycopg.rows.dict_row )
-                cursor.execute( "LOCK TABLE processing_version" )
-                cursor.execute( "SELECT * FROM processing_version WHERE description=%(pv)s",
-                                { 'pv': self.processing_version_name } )
-                rows = cursor.fetchall()
-                if len(rows) >= 1:
-                    self.processing_version = rows[0]['id']
-                else:
-                    cursor.execute( "SELECT MAX(id) AS maxid FROM processing_version" )
-                    row = cursor.fetchone()
-                    self.processing_version = row['maxid'] + 1 if row['maxid'] is not None else 0
-                    cursor.execute( "INSERT INTO processing_version(id,description,validity_start) "
-                                    "VALUES (%(id)s, %(pv)s, %(now)s)",
-                                    { 'id': self.processing_version, 'pv': self.processing_version_name,
-                                      'now': datetime.datetime.now(tz=datetime.UTC) } )
-                    conn.commit()
-            finally:
-                conn.rollback()
-
-            try:
-                cursor = conn.cursor( row_factory=psycopg.rows.dict_row )
-                cursor.execute( "LOCK TABLE snapshot ")
-                cursor.execute( "SELECT * FROM snapshot WHERE description=%(ss)s",
-                                { 'ss': self.snapshot_name } )
-                rows = cursor.fetchall()
-                if len(rows) >= 1:
-                    self.snapshot = rows[0]['id']
-                else:
-                    cursor.execute( "SELECT MAX(id) AS maxid FROM snapshot" )
-                    row = cursor.fetchone()
-                    self.snapshot = row['maxid'] + 1 if row['maxid'] is not None else 0
-                    cursor.execute( "INSERT INTO snapshot(id,description) VALUES (%(id)s, %(ss)s)",
-                                    { 'id': self.snapshot, 'ss': self.snapshot_name } )
-                    conn.commit()
-            finally:
-                conn.rollback()
 
 
     def __call__( self ):
