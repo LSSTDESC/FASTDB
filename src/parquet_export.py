@@ -3,51 +3,37 @@ from psycopg import sql
 from db import DB
 
 
-def dump_to_parquet(filehandler, connection=None):
-    with DB(connection) as conn, conn.cursor() as cursor:
-        # Looks like a bug in pg_parquet
-        # https://github.com/CrunchyData/pg_parquet/issues/68
-        cursor.execute("""
-            DROP EXTENSION pg_parquet;
-            CREATE EXTENSION pg_parquet;
-        """)
-        with cursor.copy(
-            "COPY diasource TO STDOUT WITH (format 'parquet', compression 'zstd')"
-        ) as data:
-            for chunk in data:
-                filehandler.write(chunk)
-
-        conn.commit()
-
-def create_diaobject_sources_view(cursor):
+def create_diaobject_sources_view(connection, procver):
     """Create a materialized view joining ``diaobject`` and ``diasource``."""
 
-    cursor.execute(
-        "DROP MATERIALIZED VIEW IF EXISTS diaobject_with_sources"
-    )
-    cursor.execute(
-        sql.SQL(
-            """
-            CREATE MATERIALIZED VIEW diaobject_with_sources AS
-                SELECT o.*, ds.diasources
-                FROM diaobject o
-                LEFT JOIN (
-                    SELECT diaobjectid, diaobject_procver,
-                        array_agg(s ORDER BY s.midpointmjdtai) AS diasources
-                    FROM diasource s
-                    GROUP BY diaobjectid, diaobject_procver
-                ) ds
-                ON ds.diaobjectid = o.diaobjectid
-               AND ds.diaobject_procver = o.processing_version
-            """
+    # cursor.execute(
+    #     "DROP MATERIALIZED VIEW IF EXISTS diaobject_with_sources"
+    # )
+    with connection.cursor() as cursor:
+        cursor.execute(
+            sql.SQL(
+                """
+                CREATE TEMPORARY TABLE diaobject_with_sources AS
+                    SELECT o.*, ds.diasources
+                    FROM diaobject AS o
+                    LEFT JOIN (
+                        SELECT diaobjectid,
+                            array_agg(s ORDER BY s.midpointmjdtai) AS diasources
+                        FROM diasource AS s
+                        WHERE s.diaobject_procver = {procver} AND s.processing_version = {procver}
+                        GROUP BY diaobjectid
+                    ) AS ds
+                    ON ds.diaobjectid = o.diaobjectid
+                    WHERE o.processing_version = {procver}
+                """
+            ).format(procver=procver)
         )
-    )
 
-def dump_objects_with_sources(filehandler, connection=None):
+def dump_to_parquet(filehandler, *, procver, connection=None):
     """Dump joined ``diaobject`` and ``diasource`` rows to a Parquet file."""
 
     with DB(connection) as conn, conn.cursor() as cursor:
-        create_diaobject_sources_view(cursor)
+        create_diaobject_sources_view(connection, procver=procver)
         cursor.execute(
             """
             DROP EXTENSION IF EXISTS pg_parquet;
