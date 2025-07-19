@@ -15,7 +15,7 @@ ENV TZ="UTC"
 RUN  apt-get update \
     && apt-get -y upgrade \
     && apt-get -y install -y \
-         python3 postgresql-client tmux emacs-nox less top \
+         python3 postgresql-client tmux emacs-nox less procps \
     && apt-get -y autoremove \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
