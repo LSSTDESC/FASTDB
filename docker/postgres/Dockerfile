@@ -71,6 +71,14 @@ COPY --from=build /usr/lib/postgresql/15/lib/bitcode/pg_hint_plan /usr/share/pos
 COPY --from=build /usr/lib/postgresql/15/lib/bitcode/pg_hint_plan.index.bc /usr/share/postgresql/lib/bitcode/pg_hint_plan.index.bc
 COPY --from=build /usr/share/postgresql/15/extension/pg_hint_plan* /usr/share/postgresql/15/extension/
 
+# https://github.com/CrunchyData/pg_parquet
+RUN apt-get update \
+  && DEBIAN_FRONTEND="nointeractive" apt-get -y upgrade \
+  && DEBIAN_FRONTEND="noninteractive" TZ="UTC" apt-get -y install -y --no-install-recommends \
+      build-essential curl ca-certificates pkg-config libssl-dev postgresql-server-dev-15 \
+  && apt-get clean \
+  && rm -rf /var/lib/apt/lists/*
+
 # Make sure this matches what is in the config file (created just above)
 # (There is some futzing about here to make sure the right permissions are
 # on the file regardless of the permissions as it exists on the machine
@@ -79,7 +87,31 @@ COPY --from=build /usr/share/postgresql/15/extension/pg_hint_plan* /usr/share/po
 COPY run_postgres.sh /tmp/run_postgres.sh
 RUN cp /tmp/run_postgres.sh /run_postgres.sh && chmod 755 /run_postgres.sh
 
+ENV CARGO_HOME=/opt/rust
+ENV RUSTUP_HOME=/opt/rust
+ENV PATH="${PATH}:/opt/rust/bin"
+RUN mkdir -p /opt/rust \
+  && chown postgres -R /opt/rust
+
+RUN chown postgres -R /usr/share/postgresql/ \
+  && chown postgres -R /usr/lib/postgresql
+
 USER postgres
+
+ENV PG_PARQUET_VERSION=0.4.0
+ENV PGRX_VERSION=0.14.1
+RUN curl https://sh.rustup.rs -sSf | sh -s -- --no-modify-path --profile minimal --default-toolchain stable -y
+RUN cargo install --locked cargo-pgrx --version ${PGRX_VERSION}
+RUN cargo pgrx init --pg15 $(which pg_config)
+
+RUN mkdir -p ~/.pgrx/data-15 \
+  && echo "shared_preload_libraries = 'pg_parquet'" >> ~/.pgrx/data-15/postgresql.conf
+RUN cd /opt/rust \
+  && curl -LOJ https://github.com/CrunchyData/pg_parquet/archive/refs/tags/v${PG_PARQUET_VERSION}.tar.gz \
+  && tar -xvzf pg_parquet-${PG_PARQUET_VERSION}.tar.gz \
+  && cd pg_parquet-${PG_PARQUET_VERSION} \
+  && cargo pgrx install --release
+
 CMD ["bash", "/run_postgres.sh"]
 
 # ======================================================================
