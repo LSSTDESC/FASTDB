@@ -10,6 +10,7 @@ FASTDB — DESC's time-domain database
    overview
    usage
    developers
+   pg_healpix
              
 
 Indices and tables

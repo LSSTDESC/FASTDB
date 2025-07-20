@@ -832,6 +832,7 @@ class DiaObject( DBBase ):
     __tablename__ = "diaobject"
     _tablemeta = None
     _pk = [ 'diaobjectid', 'processing_version' ]
+    npix_order29 = None
 
 
 # ======================================================================

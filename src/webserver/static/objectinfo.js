@@ -100,7 +100,7 @@ fastdbap.ObjectInfo = class
                                                        } )
             curset.abs.undetected = new SVGPlot.Dataset( { 'x': this.ltcvs[b].undetected.mjd,
                                                            'y': this.ltcvs[b].undetected.flux,
-                                                           'dy': this.ltcvs[b].undetected.flux,
+                                                           'dy': this.ltcvs[b].undetected.dflux,
                                                            'marker': this.ltcvs[b].nondetmarker,
                                                            'linewid': 0,
                                                            'color': this.ltcvs[b].color

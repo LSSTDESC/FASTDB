@@ -1,3 +1,6 @@
 [submodule "extern/rkwebutil"]
 	path = extern/rkwebutil
 	url = https://github.com/rknop/rkwebutil.git
+[submodule "extern/pg_healpix"]
+	path = extern/pg_healpix
+	url = https://github.com/segasai/pg_healpix.git
