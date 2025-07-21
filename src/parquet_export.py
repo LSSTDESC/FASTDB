@@ -6,8 +6,9 @@ from db import DB
 def create_diaobject_sources_view(connection, procver):
     """Create a temporary view joining objects with sources and forced sources."""
 
-    # We select the same procver for both object and source, but this should be changed when the provinance
+    # We select the same procver for both object and source, but this should be changed when the provenance
     # system matures.
+    # https://github.com/LSSTDESC/FASTDB/issues/47
     # We generally want all the columns to be there, and probably join with more tables, but for now we keep
     # it simple. Also, there is a bug in pg_parquet, which prevents us from using UUID columns:
     # https://github.com/CrunchyData/pg_parquet/issues/140
