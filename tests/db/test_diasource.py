@@ -11,12 +11,10 @@ class TestDiaSource( BaseTestDB ):
     def basetest_setup( self, procver1, obj1 ):
         self.cls = DiaSource
         self.columns = {
-            'diasourceid',
             'processing_version',
             'diaobjectid',
-            'diaobject_procver',
-            'ssobjectid',
             'visit',
+            'ssobjectid',
             'detector',
             'x',
             'y',
@@ -66,7 +64,6 @@ class TestDiaSource( BaseTestDB ):
             'pixelflags',
         }
         self.safe_to_modify = [
-            'visit',
             'detector',
             'x',
             'y',
@@ -117,10 +114,8 @@ class TestDiaSource( BaseTestDB ):
         ]
         self.uniques = []
 
-        self.obj1 = DiaSource( diasourceid=1,
-                               processing_version=procver1.id,
+        self.obj1 = DiaSource( processing_version=procver1.id,
                                diaobjectid=obj1.diaobjectid,
-                               diaobject_procver=obj1.processing_version,
                                visit=1,
                                detector=1,
                                band='r',
@@ -131,10 +126,8 @@ class TestDiaSource( BaseTestDB ):
                                psffluxerr=5.6,
                               )
         self.dict1 = { k: getattr( self.obj1, k ) for k in self.columns }
-        self.obj2 = DiaSource( diasourceid=2,
-                               processing_version=procver1.id,
+        self.obj2 = DiaSource( processing_version=procver1.id,
                                diaobjectid=obj1.diaobjectid,
-                               diaobject_procver=obj1.processing_version,
                                visit=2,
                                detector=2,
                                band='i',
@@ -145,10 +138,8 @@ class TestDiaSource( BaseTestDB ):
                                psffluxerr=8.0
                               )
         self.dict2 = { k: getattr( self.obj2, k ) for k in self.columns }
-        self.dict3 = { 'diasourceid': 3,
-                       'processing_version': procver1.id,
+        self.dict3 = { 'processing_version': procver1.id,
                        'diaobjectid': obj1.diaobjectid,
-                       'diaobject_procver': obj1.processing_version,
                        'visit': 3,
                        'detector': 3,
                        'band': 'g',

@@ -19,6 +19,16 @@ import psycopg.rows
 import psycopg.types.json
 import pymongo
 
+# The tables here should be in the order they safe to drop.
+# (Insofar as it's safe to drop all your tables....)
+all_table_names = [ 'query_queue',
+                    'spectruminfo', 'plannedspectra', 'wantedspectra',
+                    'ppdb_alerts_sent', 'ppdb_diaforcedsource', 'ppdb_diasource', 'ppdb_diaobject', 'ppdb_host_galaxy',
+                    'diaforcedsource', 'diasource', 'diaobject', 'root_diaobject','host_galaxy',
+                    'diasource_import_time',
+                    'processing_version_alias', 'processing_version',
+                    'passwordlink', 'authuser',
+                    'migrations_applied' ]
 
 # ======================================================================
 # Global config
@@ -804,14 +814,6 @@ class ProcessingVersionAlias( DBBase ):
 
 # ======================================================================
 
-class Snapshot( DBBase ):
-    __tablename__ = "snapshot"
-    _tablemeta = None
-    _pk = [ 'id' ]
-
-
-# ======================================================================
-
 class HostGalaxy( DBBase ):
     __tablename__ = "host_galaxy"
     _tablemeta = None
@@ -836,18 +838,10 @@ class DiaObject( DBBase ):
 
 # ======================================================================
 
-class DiaObjectRootMap( DBBase ):
-    __tablename__ = "diaobject_root_map"
-    _tablemeta = None
-    _pk = [ 'rootid', 'diaobjectid', 'processing_version' ]
-
-
-# ======================================================================
-
 class DiaSource( DBBase ):
     __tablename__ = "diasource"
     _tablemeta = None
-    _pk = [ 'diasourceid', 'processing_version' ]
+    _pk = [ 'processing_version', 'diaobjectid', 'visit' ]
 
 
 # ======================================================================
@@ -855,31 +849,7 @@ class DiaSource( DBBase ):
 class DiaForcedSource( DBBase ):
     __tablename__ = "diaforcedsource"
     _tablemeta = None
-    _pk = [ 'diaforcedsourceid', 'processing_version' ]
-
-
-# ======================================================================
-
-class DiaObjectSnapshot( DBBase ):
-    __tablename__ = "diaobject_snapshot"
-    _tablemeta = None
-    _pk = [ 'diaobjectid', 'processing_vesion', 'snapshot' ]
-
-
-# ======================================================================
-
-class DiaSourceSnapshot( DBBase ):
-    __tablename__ = "diasource_snapshot"
-    _tablemeta = None
-    _pk = [ 'diasourceid', 'processing_version', 'snapshot' ]
-
-
-# ======================================================================
-
-class DiaForcedSourceSnapshot( DBBase ):
-    __tablename__ = "diaforcedsource_snapshot"
-    _tablemeta = None
-    _pk = [ 'diaforcedsourceid', 'processing_version', 'snapshot' ]
+    _pk = [ 'processing_version', 'diaobjectid', 'visit' ]
 
 
 # ======================================================================
@@ -921,13 +891,13 @@ class PPDBDiaObject( DBBase ):
 class PPDBDiaSource( DBBase ):
     __tablename__ = "ppdb_diasource"
     _tablemeta = None
-    _pk = [ 'diasourceid' ]
+    _pk = [ 'diaobjectid', 'visit' ]
 
 
 class PPDBDiaForcedSource( DBBase ):
     __tablename__ = "ppdb_diaforcedsource"
     _tablemeta = None
-    _pk = [ 'diaforcedsourceid' ]
+    _pk = [ 'diaobjectid', 'visit' ]
 
 
 # ======================================================================

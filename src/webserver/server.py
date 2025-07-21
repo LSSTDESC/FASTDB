@@ -156,7 +156,7 @@ class ObjectSearch( BaseView ):
         bigints = [ 'diaobjectid' ]
         for k in bigints:
             rval[k] = [ str(v) for v in rval[k] ]
-        
+
         return rval
 
 

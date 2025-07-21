@@ -2,7 +2,6 @@ import sys
 import os
 import re
 import time
-import datetime
 import pathlib
 import multiprocessing
 import logging
@@ -10,13 +9,11 @@ import argparse
 import traceback
 
 import nested_pandas
-import pandas
 import numpy as np
 
 from fastdb_loader import FastDBLoader, ColumnMapper
-from db import ( DB, HostGalaxy, DiaObject, DiaSource, DiaForcedSource,
-                 DiaObjectSnapshot, DiaSourceSnapshot, DiaForcedSourceSnapshot,
-                 PPDBDiaObject, PPDBHostGalaxy, PPDBDiaSource,PPDBDiaForcedSource )
+from db import ( DiaObject, DiaSource, DiaForcedSource, #, HostGalaxy
+                 PPDBDiaObject, PPDBDiaSource,PPDBDiaForcedSource ) # PPDBHostGalaxy,
 
 
 
@@ -82,7 +79,7 @@ class DP1ColumnMapper( ColumnMapper ):
 
 # ======================================================================
 
-class ParquetFileHandler():
+class ParquetFileHandler:
     def __init__( self, parent, pipe ):
         self.pipe = pipe
 
@@ -217,7 +214,7 @@ class DP1ParquetLoader( FastDBLoader ):
             raise NotImplementedError( "Loading snapshots not yet implemented" )
 
     def recursive_find_files( self, direc , files=[] ):
-        filematch = re.compile( "^Npix=\d+\.parquet$" )
+        filematch = re.compile( r"^Npix=\d+\.parquet$" )
         if not direc.is_dir():
             if filematch.search( direc.name ):
                 return files + [ direc.resolve() ]
