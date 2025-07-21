@@ -4,7 +4,7 @@ from db import DB
 
 
 def create_diaobject_sources_view(connection, procver):
-    """Create a materialized view joining ``diaobject`` and ``diasource``."""
+    """Create a temporary view joining objects with sources and forced sources."""
 
     # We select the same procver for both object and source, but this should be changed when the provinance
     # system matures.
@@ -15,22 +15,30 @@ def create_diaobject_sources_view(connection, procver):
         cursor.execute(
             sql.SQL(
                 """
-                CREATE TEMPORARY TABLE diaobject_with_sources AS
+                CREATE TEMPORARY VIEW diaobject_with_sources AS
                     SELECT o.diaobjectid, o.processing_version, o.radecmjdtai, o.validitystart, o.validityend,
                            o.ra, o.raerr, o.dec, o.decerr, o.ra_dec_cov, o.nearbyextobj1, o.nearbyextobj1sep,
                            o.nearbyextobj2, o.nearbyextobj2sep, o.nearbyextobj3, o.nearbyextobj3sep,
                            o.nearbylowzgal, o.nearbylowzgalsep, o.parallax, o.parallaxerr, o.pmra, o.pmraerr,
                            o.pmra_parallax_cov, o.pmdec, o.pmdecerr, o.pmdec_parallax_cov,
-                           ds.diasources
+                           ds.diasource, dfs.diaforcedsource
                     FROM diaobject AS o
                     LEFT JOIN (
                         SELECT diaobjectid,
-                            array_agg(s ORDER BY s.midpointmjdtai) AS diasources
+                            array_agg(s ORDER BY s.midpointmjdtai) AS diasource
                         FROM diasource AS s
                         WHERE s.diaobject_procver = {procver} AND s.processing_version = {procver}
                         GROUP BY diaobjectid
                     ) AS ds
                     ON ds.diaobjectid = o.diaobjectid
+                    LEFT JOIN (
+                        SELECT diaobjectid,
+                            array_agg(s ORDER BY s.midpointmjdtai) AS diaforcedsource
+                        FROM diaforcedsource AS s
+                        WHERE s.diaobject_procver = {procver} AND s.processing_version = {procver}
+                        GROUP BY diaobjectid
+                    ) AS dfs
+                    ON dfs.diaobjectid = o.diaobjectid
                     WHERE o.processing_version = {procver}
                 """
             ).format(procver=procver)
@@ -48,7 +56,11 @@ def dump_to_parquet(filehandler, *, procver, connection=None):
             """
         )        
         with cursor.copy(
-            "COPY diaobject_with_sources TO STDOUT WITH (format 'parquet', compression 'zstd')"
+            """
+            COPY (SELECT * FROM diaobject_with_sources)
+                TO STDOUT
+                WITH (format 'parquet', compression 'zstd')
+            """
         ) as data:
             for chunk in data:
                 filehandler.write(chunk)

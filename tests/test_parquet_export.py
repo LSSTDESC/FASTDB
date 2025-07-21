@@ -10,4 +10,5 @@ def test_dump_to_parquet(alerts_90days_sent_received_and_imported, tmp_path):
         dump_to_parquet(fp, procver=1, connection=conn)
     nf = npd.read_parquet(filepath)
     assert nf.shape[0] == 37
-    assert nf["diasources"].nest.flat_length == 181
+    assert nf["diasource"].nest.flat_length == 181
+    assert nf["diaforcedsource"].nest.flat_length == 855
