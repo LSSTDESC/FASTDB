@@ -71,6 +71,7 @@ RUN source /venv/bin/activate && \
        flask-sock==0.7.0 \
        gevent==24.11.1 \
        gunicorn==23.0.0 \
+       nested-pandas==0.4.6 \
        numpy==2.2.4 \
        pandas==2.2.3 \
        polars==1.29.0 \
@@ -83,8 +84,7 @@ RUN source /venv/bin/activate && \
        pytz==2025.1 \
        remote-pdb==2.1.0 \
        requests==2.32.3 \
-       simplejson==3.20.1 \
-       nested-pandas==0.4.6
+       simplejson==3.20.1
 
 # ======================================================================
 # This is for the test webserver.  It installs crappy keys so you
