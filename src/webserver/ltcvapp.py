@@ -254,7 +254,7 @@ class GetHotTransients( BaseView ):
         if len(df) > 0:
             objids = df['rootid'].unique()
             logger.debug( f"GetHotSNEView: got {len(objids)} objects in a df of length {len(df)}" )
-            df.set_index( [ 'rootid', 'sourceid' ], inplace=True )
+            df.set_index( [ 'rootid', 'visit' ], inplace=True )
             if hostdf is not None:
                 hostdf.set_index( 'rootid', inplace=True )
 
