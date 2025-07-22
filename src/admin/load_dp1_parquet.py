@@ -2,6 +2,7 @@ import sys
 import os
 import re
 import time
+import uuid
 import pathlib
 import multiprocessing
 import logging
@@ -11,7 +12,7 @@ import traceback
 import nested_pandas
 
 from fastdb_loader import FastDBLoader, ColumnMapper
-from db import ( DiaObject, DiaSource, DiaForcedSource, #, HostGalaxy
+from db import ( RootDiaObject, DiaObject, DiaSource, DiaForcedSource, #, HostGalaxy
                  PPDBDiaObject, PPDBDiaSource,PPDBDiaForcedSource ) # PPDBHostGalaxy,
 
 
@@ -137,8 +138,6 @@ class ParquetFileHandler:
                 df['processing_version'] = self.processing_version
                 sourcedf['processing_version'] = self.processing_version
                 forceddf['processing_version'] = self.processing_version
-                sourcedf['diaobject_procver'] = self.processing_version
-                forceddf['diaobject_procver'] = self.processing_version
 
             # Not sure where the index came from.  There was lots of
             #   redundancy.  This may be something nested_pandas did?
@@ -153,8 +152,6 @@ class ParquetFileHandler:
             forceddf.reset_index( inplace=True )
             forceddf.drop( ['index'], axis='columns', inplace=True )
 
-            # TODO snapshot table
-
             self.logger.info( f"Going to try to load {len(df)} objects, {len(sourcedf)} sources, "
                               f"{len(forceddf)} forced" )
             if self.really_do:
@@ -164,6 +161,10 @@ class ParquetFileHandler:
                     nsrc = PPDBDiaSource.bulk_insert_or_upsert( sourcedf.to_dict(), assume_no_conflict=True )
                     nfrc = PPDBDiaForcedSource.bulk_insert_or_upsert( forceddf.to_dict(), assume_no_conflict=True )
                 else:
+                    # Have to set root ids for the objects
+                    df['rootid'] = [ str(uuid.uuid4()) for i in range(len(df)) ]
+                    _nroot = RootDiaObject.bulk_insert_or_upsert( { 'id': list( df.rootid ) },
+                                                                  assume_no_conflict=True )
                     nobj = DiaObject.bulk_insert_or_upsert( df.to_dict(), assume_no_conflict=True )
                     nsrc = DiaSource.bulk_insert_or_upsert( sourcedf.to_dict(), assume_no_conflict=True )
                     nfrc = DiaForcedSource.bulk_insert_or_upsert( forceddf.to_dict(), assume_no_conflict=True )
@@ -200,9 +201,6 @@ class DP1ParquetLoader( FastDBLoader ):
         self.ppdb = ppdb
         self.logger = logger
 
-        if self.snapshot is not None:
-            raise NotImplementedError( "Loading snapshots not yet implemented" )
-
     def recursive_find_files( self, direc , files=[] ):
         filematch = re.compile( r"^Npix=\d+\.parquet$" )
         if not direc.is_dir():
@@ -211,16 +209,19 @@ class DP1ParquetLoader( FastDBLoader ):
             else:
                 return files
         for f in direc.glob( "*" ):
-            return self.recursive_find_files( f, files )
+            files = self.recursive_find_files( f, files )
+        return files
+
 
     def __call__( self ):
         # Find all the parquet files to laod
+        import pdb; pdb.set_trace()
         files = self.recursive_find_files( pathlib.Path( self.basedir ) )
 
-        # Get the ids of the processing version and snapshot
-        #  (and load them into the database if they're not there already)
+        # Get the id of the processing version
+        #  (and load it into the database if it's not there already)
         if ( not self.ppdb ) and ( self.really_do ):
-            self.make_procver_and_snapshot()
+            self.make_procver()
 
         # Strip all indexes and fks for insert efficiency.
         # Writes a file load_snana_fits_reconstruct_indexes_constraints.sql
@@ -328,8 +329,7 @@ def main():
 
 Trolls the given directory for all files named "Npix=<number>.parqet".  Loads
 diaobject, diasource, diaforcedsource, or, if --ppdb is given, ppdb_diaobject,
-ppdb_diasource, and ppdb_diaforcedsource.  Does not currently support snapshots.
-May add a processing_version row.
+ppdb_diasource, and ppdb_diaforcedsource.  May add a processing_version row.
 
 Does *not* load root_diaobject!
 """
