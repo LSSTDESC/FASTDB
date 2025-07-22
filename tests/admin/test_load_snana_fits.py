@@ -46,7 +46,7 @@ def test_load_snana_fits():
         with db.DB() as conn:
             cursor = conn.cursor()
             for tab in [ 'processing_version', 'host_galaxy',
-                         'diaobject', 'diasource', 'diaforcedsource', ]:
+                         'diaobject', 'diasource', 'diaforcedsource', 'root_diaobject' ]:
                 cursor.execute( f"TRUNCATE TABLE {tab} CASCADE" )
             conn.commit()
 

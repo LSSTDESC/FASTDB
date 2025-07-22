@@ -398,8 +398,6 @@ def get_hot_ltcvs( processing_version, detected_since_mjd=None, detected_in_last
 
         The first one has the lightcurves.  It has columns:
            rootid -- the object root ID from the database.  (TODO: document.)
-           sourceid -- either the diaforcedsourceid or the diasourceid
-                        from the database (see below)
            ra -- the ra of the *object* (interpretation complicated).
                    Will be the same for all rows with the same rootid.
                    Decimal degrees, J2000.
@@ -414,10 +412,7 @@ def get_hot_ltcvs( processing_version, detected_since_mjd=None, detected_in_last
                           will be False for all rows.  Otherwise, it's
                           True for rows pulled from the diasource table,
                           and False for rows pulled from the
-                          diaforcedsource table.  If is_source is True,
-                          then sourceid is the diasourceid; if is_source
-                          is False, then sourceid is the
-                          diaforcedsourceid.
+                          diaforcedsource table.
 
        The second member of the tuple will be None unless you specified
        include_hostinfo.  If include_hostinfo is true, then it's a
@@ -493,11 +488,10 @@ def get_hot_ltcvs( processing_version, detected_since_mjd=None, detected_in_last
 
             q = ( "/*+ NoBitmapScan(elasticc2_diasource)\n"
                   "*/\n"
-                  "SELECT DISTINCT ON(dorm.rootid) rootid "
+                  "SELECT DISTINCT ON(o.rootid) rootid "
                   "INTO TEMP TABLE tmp_objids "
-                  "FROM diaobject_root_map dorm "
-                  "INNER JOIN diasource s ON (s.diaobjectid=dorm.diaobjectid AND "
-                  "                           s.processing_version=dorm.processing_version )"
+                  "FROM diaobject o "
+                  "INNER JOIN diasource s ON s.diaobjectid=o.diaobjectid "
                   "WHERE s.processing_version=%(procver)s AND s.midpointmjdtai>=%(t0)s" )
             if mjd_now is not None:
                 q += "  AND midpointmjdtai<=%(t1)s"
@@ -508,18 +502,16 @@ def get_hot_ltcvs( processing_version, detected_since_mjd=None, detected_in_last
             # make it configurable to get up to all three.
             hostdf = None
             if include_hostinfo:
-                q = "SELECT DISTINCT ON (r.rootid) r.rootid,"
+                q = "SELECT DISTINCT ON (o.rootid) o.rootid,"
                 for bandi in range( len(bands)-1 ):
                     q += ( f"h.stdcolor_{bands[bandi]}_{bands[bandi+1]},"
                            f"h.stdcolor_{bands[bandi]}_{bands[bandi+1]}_err," )
                 q += ( "h.petroflux_r,h.petroflux_r_err,o.nearbyextobj1sep,h.pzmean,h.pzstd "
-                       "FROM diaobject_root_map r "
-                       "INNER JOIN diaobject o ON ( r.diaobjectid=o.diaobjectid AND "
-                       "                            r.processing_version=o.processing_version ) "
+                       "FROM diaobject o "
                        "INNER JOIN host_galaxy h ON o.nearbyextobj1id=h.id "
-                       "WHERE r.rootid IN (SELECT rootid FROM tmp_objids) "
+                       "WHERE o.rootid IN (SELECT rootid FROM tmp_objids) "
                        "  AND o.processing_version=%(procver)s "
-                       "ORDER BY r.rootid" )
+                       "ORDER BY o.rootid" )
                 cursor.execute( q, { 'procver': procver} )
                 columns = [ cursor.description[i][0] for i in range( len(cursor.description) ) ]
                 hostdf = pandas.DataFrame( cursor.fetchall(), columns=columns )
@@ -534,19 +526,16 @@ def get_hot_ltcvs( processing_version, detected_since_mjd=None, detected_in_last
             q = ( "/*+ IndexScan(f idx_diaforcedsource_diaobjectidpv)\n"
                   "    IndexScan(o)\n"
                   "*/\n"
-                  "SELECT r.rootid AS rootid, o.ra AS ra, o.dec AS dec,"
-                   "     f.diaforcedsourceid AS sourceid,f.visit,f.detector,f.midpointmjdtai,f.band,"
+                  "SELECT o.rootid AS rootid, o.ra AS ra, o.dec AS dec,"
+                   "     f.visit,f.detector,f.midpointmjdtai,f.band,"
                    "     f.psfflux,f.psffluxerr "
                    "FROM diaforcedsource f "
-                   "INNER JOIN diaobject o ON (f.diaobjectid=o.diaobjectid AND "
-                   "                           f.diaobject_procver=o.processing_version) "
-                   "INNER JOIN diaobject_root_map r ON (o.diaobjectid=r.diaobjectid AND "
-                   "                                    o.processing_version=r.processing_version) "
-                   "WHERE r.rootid IN (SELECT rootid FROM tmp_objids) "
+                   "INNER JOIN diaobject o ON f.diaobjectid=o.diaobjectid  "
+                   "WHERE o.rootid IN (SELECT rootid FROM tmp_objids) "
                    "  AND f.processing_version=%(procver)s" )
             if mjd_now is not None:
                 q += "  AND f.midpointmjdtai<=%(t1)s "
-            q += "ORDER BY r.rootid,f.midpointmjdtai"
+            q += "ORDER BY o.rootid,f.midpointmjdtai"
             cursor.execute( q, { "procver": procver, "t1": mjd_now } )
             columns = [ cursor.description[i][0] for i in range( len(cursor.description) ) ]
             forceddf = pandas.DataFrame( cursor.fetchall(), columns=columns )
@@ -562,23 +551,19 @@ def get_hot_ltcvs( processing_version, detected_since_mjd=None, detected_in_last
                       "    IndexScan(f idx_diaforcedsource_diaobjectidpv)\n"
                       "    IndexScan(o)\n"
                       "*/\n"
-                      "SELECT r.rootid,o.ra,o.dec,s.diasourceid AS sourceid,s.visit,s.detector,"
+                      "SELECT o.rootid,o.ra,o.dec,s.visit,s.detector,"
                       "       s.midpointmjdtai,s.band,s.psfflux,s.psffluxerr "
                       "FROM diasource s "
-                      "INNER JOIN diaobject o ON (s.diaobjectid=o.diaobjectid AND "
-                      "                           s.diaobject_procver=o.processing_version) "
-                      "INNER JOIN diaobject_root_map r ON (o.diaobjectid=r.diaobjectid AND "
-                      "                                    o.processing_version=r.processing_version) "
+                      "INNER JOIN diaobject o ON s.diaobjectid=o.diaobjectid "
                       "LEFT JOIN diaforcedsource f ON (f.diaobjectid=s.diaobjectid AND "
-                      "                                f.diaobject_procver=s.diaobject_procver AND "
-                      "                                f.visit=s.visit AND "
-                      "                                f.detector=s.detector) "
-                      "WHERE r.rootid IN (SELECT rootid FROM tmp_objids) "
+                      "                                f.processing_version=s.processing_version AND "
+                      "                                f.visit=s.visit) "
+                      "WHERE o.rootid IN (SELECT rootid FROM tmp_objids) "
                       "  AND s.processing_version=%(procver)s "
                       "  AND f.diaobjectid IS NULL " )
                 if mjd_now is not None:
                     q += "  AND s.midpointmjdtai<=%(t1)s "
-                q += "ORDER BY r.rootid,s.midpointmjdtai"
+                q += "ORDER BY o.rootid,s.midpointmjdtai"
                 cursor.execute( q, { "procver": procver, "t1": mjd_now } )
                 columns = [ cursor.description[i][0] for i in range( len(cursor.description) ) ]
                 sourcedf = pandas.DataFrame( cursor.fetchall(), columns=columns )

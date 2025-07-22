@@ -9,7 +9,6 @@ import argparse
 import traceback
 
 import nested_pandas
-import numpy as np
 
 from fastdb_loader import FastDBLoader, ColumnMapper
 from db import ( DiaObject, DiaSource, DiaForcedSource, #, HostGalaxy
@@ -51,19 +50,18 @@ class DP1ColumnMapper( ColumnMapper ):
     def diasource_map_columns( cls, tab ):
         mapper = {}
         # TODO : flags, pixelflags (outside column mapper)
-        lcs = { 'diaSourceId', 'diaObjectId', 'ssObjectId', 'visit', 'detector',
+        lcs = { 'diaObjectId', 'ssObjectId', 'visit', 'detector',
                 'x', 'y', 'xErr', 'yErr', 'band', 'midpointMjdTai',
                 'ra', 'dec', 'raErr', 'decErr', 'ra_dec_Cov',
                 'psfFlux', 'psfFluxErr', 'psfNdata', 'snr',
-                'scienceFlux', 'scienceFluxErr', 'parentDiaSourceId',
+                'scienceFlux', 'scienceFluxErr',
                 'extendedness', 'reliability', 'ixx', 'iyy', 'ixy',
                 'ixxPSF', 'ixyPSF', 'iyyPSF' }
         cls._map_columns( tab, mapper, lcs )
 
     @classmethod
     def diaforcedsource_map_columns( cls, tab ):
-        mapper = { 'forcedSourceOnDiaObjectId': 'diaforcedsourceid',
-                   'coord_ra': 'ra',
+        mapper = { 'coord_ra': 'ra',
                    'coord_dec': 'dec',
                    'psfDiffFlux': 'psfflux',
                    'psfDiffFluxErr': 'psffluxerr',
@@ -134,14 +132,6 @@ class ParquetFileHandler:
             DP1ColumnMapper.diaobject_map_columns( df )
             DP1ColumnMapper.diasource_map_columns( sourcedf )
             DP1ColumnMapper.diaforcedsource_map_columns( forceddf )
-
-            # HORRENDOUS HACK ALERT REMOVE THIS
-            # This is here so that we can load a single file from DP1
-            # which has duplicated diaforcedsourceid values
-            # REMOVE THIS HACK OMG REMOVE IT
-            sourcedf.diasourceid = np.arange( len(sourcedf) )
-            forceddf.diaforcedsourceid = np.arange( len(forceddf) )
-            # END OF HORRENDOUS HACK
 
             if not self.ppdb:
                 df['processing_version'] = self.processing_version

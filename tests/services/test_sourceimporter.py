@@ -32,9 +32,8 @@ def import_first30days_objects( barf, alerts_30days_sent_and_brokermessage_consu
         with db.DB() as conn:
             cursor = conn.cursor()
             # We can be cavalier here becasue diaobject was supposed to be empty when we started
-            cursor.execute( "DELETE FROM diaobject_root_map" )
-            cursor.execute( "DELETE FROM root_diaobject" )
             cursor.execute( "DELETE FROM diaobject" )
+            cursor.execute( "DELETE FROM root_diaobject" )
             conn.commit()
 
 
@@ -132,9 +131,8 @@ def import_next60days_noprv( barf, procver,
             cursor = conn.cursor()
             cursor.execute( "DELETE FROM diaforcedsource" )
             cursor.execute( "DELETE FROM diasource" )
-            cursor.execute( "DELETE FROM diaobject_root_map" )
-            cursor.execute( "DELETE FROM root_diaobject" )
             cursor.execute( "DELETE FROM diaobject" )
+            cursor.execute( "DELETE FROM root_diaobject" )
             conn.commit()
 
 
@@ -291,15 +289,16 @@ def test_read_mongo_previous_sources( barf, alerts_30days_sent_and_brokermessage
         # Check that the mongo aggregation stuff in read_mongo_provsources is
         #   right by doing it long-form in python
 
-        pulledsourceids = set( row[coldex['diasourceid']] for row in rows )
+        pulledsourceids = set( f"{row[coldex['diaobjectid']]}_{row[coldex['visit']]}" for row in rows )
         assert len( pulledsourceids ) == len(rows)
         prvsources = {}
 
         for src in collection.find( {} ):
             if src['msg']['prvDiaSources'] is not None:
                 for prvsrc in src['msg']['prvDiaSources']:
-                    if prvsrc['diaSourceId'] not in prvsources:
-                        prvsources[ prvsrc['diaSourceId'] ] = prvsrc
+                    prvsrcid = f"{prvsrc['diaObjectId']}_{prvsrc['visit']}"
+                    if prvsrcid not in prvsources:
+                        prvsources[ prvsrcid ] = prvsrc
 
         assert set( prvsources.keys() ) == pulledsourceids
 
@@ -324,15 +323,16 @@ def test_read_mongo_previous_forced_sources( barf, alerts_30days_sent_and_broker
         # Check that the mongo aggregation stuff in read_mongo_provsources is
         #   right by doing it long-form in python
 
-        pulledsourceids = set( row[coldex['diaforcedsourceid']] for row in rows )
+        pulledsourceids = set( f"{row[coldex['diaobjectid']]}_{row[coldex['visit']]}" for row in rows )
         assert len( pulledsourceids ) == len(rows)
         prvsources = {}
 
         for src in collection.find( {} ):
             if src['msg']['prvDiaForcedSources'] is not None:
                 for prvsrc in src['msg']['prvDiaForcedSources']:
-                    if prvsrc['diaForcedSourceId'] not in prvsources:
-                        prvsources[ prvsrc['diaForcedSourceId'] ] = prvsrc
+                    prvsrcid = f"{prvsrc['diaObjectId']}_{prvsrc['visit']}"
+                    if prvsrcid not in prvsources:
+                        prvsources[ prvsrcid ] = prvsrc
 
         assert set( prvsources.keys() ) == pulledsourceids
 
@@ -350,15 +350,12 @@ def test_import_objects( import_first30days_objects ):
         objcols = { cursor.description[i].name: i for i in range( len(cursor.description) ) }
         assert len(objrows) == 12
 
-        cursor.execute( "SELECT COUNT(*) FROM root_diaobject" )
-        assert cursor.fetchone()[0] == 12
+        cursor.execute( "SELECT id FROM root_diaobject" )
+        rootids = [ r[0] for r in cursor.fetchall() ]
+        assert len(rootids) == 12
 
-        cursor.execute( "SELECT * FROM diaobject_root_map" )
-        drmrows = cursor.fetchall()
-        drmcols = { cursor.description[i].name: i for i in range( len(cursor.description) ) }
-
-        assert set( r[drmcols['diaobjectid']] for r in drmrows ) == set( r[objcols['diaobjectid']] for r in objrows )
-        assert all( r[drmcols['processing_version']] == objrows[0][objcols['processing_version']] for r in drmrows )
+        # Make sure that all the object rootids are distinct
+        assert set( r[objcols['rootid']] for r in objrows ) == set( rootids )
 
     # TODO : look at more?  Compare ppdb_diaobject to diaobject?
 
@@ -454,11 +451,10 @@ class TestImport:
                 cursor = conn.cursor()
                 cursor.execute( "DELETE FROM diaforcedsource" )
                 cursor.execute( "DELETE FROM diasource" )
-                cursor.execute( "DELETE FROM diaobject_root_map" )
-                cursor.execute( "DELETE FROM root_diaobject" )
-                cursor.execute( "DELETE FROM diaobject" )
                 cursor.execute( "DELETE FROM diasource_import_time WHERE collection=%(col)s",
                                 { 'col': collection_name} )
+                cursor.execute( "DELETE FROM diaobject" )
+                cursor.execute( "DELETE FROM root_diaobject" )
                 conn.commit()
 
 
@@ -505,20 +501,34 @@ class TestImport:
                                 { 'col': collection_name } )
                 t30stamp = cursor.fetchone()[0]
 
+                cursor.execute( "SELECT rootid FROM diaobject" )
+                objrootids30 = set( r[0] for r in cursor.fetchall() )
+                cursor.execute( "SELECT id FROM root_diaobject" )
+                rootids30 = set( r[0] for r in cursor.fetchall() )
+
             with db.MG() as mongoclient:
                 collection = db.get_mongo_collection( mongoclient, collection_name )
                 si = SourceImporter( procver.id )
                 nobj, nroot, nsrc, nfrc = si.import_from_mongo( collection )
             t1 = datetime.datetime.now( tz=datetime.UTC )
 
+            with db.DB() as conn:
+                cursor = conn.cursor()
+                cursor.execute( "SELECT rootid FROM diaobject" )
+                objrootids = set( r[0] for r in cursor.fetchall() )
+                cursor.execute( "SELECT id FROM root_diaobject" )
+                rootids = set( r[0] for r in cursor.fetchall() )
+
             assert nobj30 == 12
             assert nroot30 == 12
             assert nsrc30 == 77
             assert nfrc30 == 148
+            assert objrootids30 == rootids30
             assert nobj == 25
             assert nroot == 25
             assert nsrc == 104
             assert nfrc == 707
+            assert objrootids == rootids
 
             with db.DB() as conn:
                 cursor = conn.cursor()
@@ -534,10 +544,16 @@ class TestImport:
                                 { 'col': collection_name } )
                 t60 = cursor.fetchone()[0]
 
+                cursor.execute( "SELECT rootid FROM diaobject" )
+                totobjrootids = set( r[0] for r in cursor.fetchall() )
+                cursor.execute( "SELECT id FROM root_diaobject" )
+                totrootids = set( r[0] for r in cursor.fetchall() )
+
             assert totobj == 37
             assert totroot == 37
             assert totsrc == 181
             assert totfrc == 855
+            assert totobjrootids == totrootids
             assert totobj == nobj + nobj30
             assert totsrc == nsrc + nsrc30
             assert totfrc == nfrc + nfrc30
@@ -578,14 +594,11 @@ def test_import_next60days( import_next60days_noprv ):
         objects = cursor.fetchall()
         cursor.execute( "SELECT * FROM root_diaobject" )
         roots = cursor.fetchall()
-        cursor.execute( "SELECT * FROM diaobject_root_map" )
-        objectmaps = cursor.fetchall()
         cursor.execute( "SELECT * FROM diaforcedsource" )
         forced = cursor.fetchall()
 
     assert len(objects) == 29
     assert len(roots) == 29
-    assert len(objectmaps) == 29
     assert len(sources) == 104
     assert len(forced) == 0
     # The min mjd should be greater than the max mjd from test_import_sources
@@ -612,13 +625,10 @@ def test_import_next60days_with_prev( import_next60days_prv ):
         sources = cursor.fetchall()
         cursor.execute( "SELECT * FROM diaobject" )
         objects = cursor.fetchall()
-        cursor.execute( "SELECT * FROM diaobject_root_map" )
-        objrootmap = cursor.fetchall()
         cursor.execute( "SELECT * FROM diaforcedsource" )
         forced = cursor.fetchall()
 
     assert len(objects) == 29
-    assert len(objrootmap) == 29
     # len(sources) is not the same as nprvsources because nprvsources are only the sources added from
     #   previousDiaSource in all the alerts.
     assert len(sources) == 152
@@ -656,23 +666,23 @@ def test_import_30days_60days( import_30days_60days, test_user ):
         sources = cursor.fetchall()
         cursor.execute( "SELECT * FROM diaobject" )
         objects = cursor.fetchall()
-        cursor.execute( "SELECT * FROM diaobject_root_map" )
-        objrootmap = cursor.fetchall()
         cursor.execute( "SELECT * FROM diaforcedsource" )
         forced = cursor.fetchall()
         cursor.execute( "SELECT * FROM host_galaxy" )
         hosts = cursor.fetchall()
+        cursor.execute( "SELECT * FROM root_diaobject" )
+        roots = cursor.fetchall()
 
     # nobj, nrsc, nprvsrc, nprvfrc above are affected row counts returned
     #   from the import of days 60-90, so are lower than the total numbers
     #   in the tables below.
     assert len(objects) == 37
-    assert len(objrootmap) == 37
     assert len(sources) == 181
     assert len(forced) == 855
     assert len(hosts) == 42
     assert min( r['midpointmjdtai'] for r in sources ) == pytest.approx( 60278.029, abs=0.01 )
     assert max( r['midpointmjdtai'] for r in sources ) == pytest.approx( 60362.3266, abs=0.01 )
+    assert set( r['id'] for r in roots ) == set( o['rootid'] for o in objects )
 
     # Make sure hosts loaded match the hosts we thought should be loaded
     hostids = set( [ h['id'] for h in hosts ] )

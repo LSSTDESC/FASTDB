@@ -347,24 +347,8 @@ def snana_fits_maintables_loaded_module( procver ):
             cursor.execute( "SELECT COUNT(*) FROM host_galaxy" )
             nhost = cursor.fetchone()[0]
             assert nhost == 356
-
-            # Build the root diaobject; kind of a hack, but whatever.  Might be slow
-            #   for lots of objects, but our test set is small
-            cursor.execute( "INSERT INTO root_diaobject ( SELECT gen_random_uuid() FROM diaobject )" )
-            dbcon.commit()
-            cursor.execute( "INSERT INTO diaobject_root_map(rootid, diaobjectid, processing_version) "
-                            "SELECT q1.id, q2.diaobjectid, q2.processing_version "
-                            "FROM ( SELECT r.id, ROW_NUMBER() OVER () as rownum "
-                            "       FROM root_diaobject r ) AS q1 "
-                            "INNER JOIN ( SELECT o.diaobjectid, o.processing_version, "
-                            "             ROW_NUMBER() OVER () AS rownum "
-                            "             FROM diaobject o ) AS q2 "
-                            "  ON q1.rownum=q2.rownum" )
             cursor.execute( "SELECT COUNT(*) FROM root_diaobject" )
             assert cursor.fetchone()[0] == 346
-            cursor.execute( "SELECT COUNT(*) FROM diaobject_root_map" )
-            assert cursor.fetchone()[0] == 346
-            dbcon.commit()
 
         yield nobj, nsrc, nfrc, nhost
 
