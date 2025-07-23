@@ -13,8 +13,9 @@ SHELL ["/bin/bash", "-c"]
 RUN apt-get update \
   && DEBIAN_FRONTEND="nointeractive" apt-get -y upgrade \
   && DEBIAN_FRONTEND="noninteractive" TZ="UTC" apt-get -y install -y --no-install-recommends \
-      postgresql-15 postgresql-client-15 pgtop libssl3 libreadline8 zlib1g tmux netcat-openbsd \
+      postgresql-15 postgresql-client-15 pgtop libssl3 libreadline8 zlib1g netcat-openbsd \
       libzstd1 liblz4-1 \
+      tmux emacs-nox less procps \
   && apt-get clean \
   && rm -rf /var/lib/apt/lists/*
 
@@ -45,7 +46,7 @@ WORKDIR /build
 RUN apt-get update \
   && DEBIAN_FRONTEND="noninteractive" TZ="UTC" apt-get -y install -y --no-install-recommends \
       make git gcc libssl-dev libreadline-dev zlib1g-dev libzstd-dev liblz4-dev curl \
-      postgresql-server-dev-15 ca-certificates
+      postgresql-server-dev-15 ca-certificates pkg-config
 
 RUN git clone https://github.com/segasai/q3c.git
 RUN cd q3c \
@@ -59,33 +60,6 @@ RUN curl -L https://github.com/ossc-db/pg_hint_plan/archive/refs/tags/REL15_1_5_
   && make \
   && make install
 
-# ======================================================================
-FROM base AS postgres
-
-COPY --from=build /usr/lib/postgresql/15/lib/q3c.so /usr/lib/postgresql/15/lib/q3c.so
-COPY --from=build /usr/lib/postgresql/15/lib/bitcode/q3c /usr/share/postgresql/lib/bitcode/q3c
-COPY --from=build /usr/lib/postgresql/15/lib/bitcode/q3c.index.bc /usr/share/postgresql/lib/bitcode/q3c.index.bc
-COPY --from=build /usr/share/postgresql/15/extension/q3c* /usr/share/postgresql/15/extension/
-COPY --from=build /usr/lib/postgresql/15/lib/pg_hint_plan.so usr/lib/postgresql/15/lib/pg_hint_plan.so
-COPY --from=build /usr/lib/postgresql/15/lib/bitcode/pg_hint_plan /usr/share/postgresql/lib/bitcode/pg_hint_plan
-COPY --from=build /usr/lib/postgresql/15/lib/bitcode/pg_hint_plan.index.bc /usr/share/postgresql/lib/bitcode/pg_hint_plan.index.bc
-COPY --from=build /usr/share/postgresql/15/extension/pg_hint_plan* /usr/share/postgresql/15/extension/
-
-# https://github.com/CrunchyData/pg_parquet
-RUN apt-get update \
-  && DEBIAN_FRONTEND="nointeractive" apt-get -y upgrade \
-  && DEBIAN_FRONTEND="noninteractive" TZ="UTC" apt-get -y install -y --no-install-recommends \
-      build-essential curl ca-certificates pkg-config libssl-dev postgresql-server-dev-15 \
-  && apt-get clean \
-  && rm -rf /var/lib/apt/lists/*
-
-# Make sure this matches what is in the config file (created just above)
-# (There is some futzing about here to make sure the right permissions are
-# on the file regardless of the permissions as it exists on the machine
-# where the docker image is built.  I don't know why a simple ADD
-# followed by CHMOD didn't work.)
-COPY run_postgres.sh /tmp/run_postgres.sh
-RUN cp /tmp/run_postgres.sh /run_postgres.sh && chmod 755 /run_postgres.sh
 
 ENV CARGO_HOME=/opt/rust
 ENV RUSTUP_HOME=/opt/rust
@@ -95,8 +69,6 @@ RUN mkdir -p /opt/rust \
 
 RUN chown postgres -R /usr/share/postgresql/ \
   && chown postgres -R /usr/lib/postgresql
-
-USER postgres
 
 ENV PG_PARQUET_VERSION=0.4.0
 ENV PGRX_VERSION=0.14.1
@@ -112,6 +84,30 @@ RUN cd /opt/rust \
   && cd pg_parquet-${PG_PARQUET_VERSION} \
   && cargo pgrx install --release
 
+
+# ======================================================================
+FROM base AS postgres
+
+COPY --from=build /usr/lib/postgresql/15/lib/q3c.so /usr/lib/postgresql/15/lib/q3c.so
+COPY --from=build /usr/lib/postgresql/15/lib/bitcode/q3c /usr/share/postgresql/lib/bitcode/q3c
+COPY --from=build /usr/lib/postgresql/15/lib/bitcode/q3c.index.bc /usr/share/postgresql/lib/bitcode/q3c.index.bc
+COPY --from=build /usr/share/postgresql/15/extension/q3c* /usr/share/postgresql/15/extension/
+COPY --from=build /usr/lib/postgresql/15/lib/pg_hint_plan.so usr/lib/postgresql/15/lib/pg_hint_plan.so
+COPY --from=build /usr/lib/postgresql/15/lib/bitcode/pg_hint_plan /usr/share/postgresql/lib/bitcode/pg_hint_plan
+COPY --from=build /usr/lib/postgresql/15/lib/bitcode/pg_hint_plan.index.bc /usr/share/postgresql/lib/bitcode/pg_hint_plan.index.bc
+COPY --from=build /usr/share/postgresql/15/extension/pg_hint_plan* /usr/share/postgresql/15/extension/
+COPY --from=build /usr/lib/postgresql/15/lib/pg_parquet.so /usr/lib/postgresql/15/lib/
+COPY --from=build /usr/share/postgresql/15/extension/pg_parquet* /usr/share/postgresql/15/extension/
+
+# Make sure this matches what is in the config file (created just above)
+# (There is some futzing about here to make sure the right permissions are
+# on the file regardless of the permissions as it exists on the machine
+# where the docker image is built.  I don't know why a simple ADD
+# followed by CHMOD didn't work.)
+COPY run_postgres.sh /tmp/run_postgres.sh
+RUN cp /tmp/run_postgres.sh /run_postgres.sh && chmod 755 /run_postgres.sh
+
+USER postgres
 CMD ["bash", "/run_postgres.sh"]
 
 # ======================================================================
