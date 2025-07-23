@@ -215,7 +215,6 @@ class DP1ParquetLoader( FastDBLoader ):
 
     def __call__( self ):
         # Find all the parquet files to laod
-        import pdb; pdb.set_trace()
         files = self.recursive_find_files( pathlib.Path( self.basedir ) )
 
         # Get the id of the processing version
