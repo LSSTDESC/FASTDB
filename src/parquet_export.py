@@ -45,6 +45,7 @@ def create_diaobject_sources_view(connection, procver):
             ).format(procver=procver)
         )
 
+
 def dump_to_parquet(filehandler, *, procver, connection=None):
     """Dump joined ``diaobject`` and ``diasource`` rows to a Parquet file."""
 
@@ -55,7 +56,7 @@ def dump_to_parquet(filehandler, *, procver, connection=None):
             DROP EXTENSION IF EXISTS pg_parquet;
             CREATE EXTENSION pg_parquet;
             """
-        )        
+        )
         with cursor.copy(
             """
             COPY (SELECT * FROM diaobject_with_sources)

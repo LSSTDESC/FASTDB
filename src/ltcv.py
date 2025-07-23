@@ -173,7 +173,117 @@ def object_ltcv( processing_version, diaobjectid, return_format='json', bands=No
         raise RuntimeError( "This should never happen." )
 
 
-def object_search( processing_version, return_format='json', **kwargs ):
+def object_search( processing_version, return_format='json', just_objids=False, **kwargs ):
+    """Search for objects
+
+    For parameters that define the search, if they are None, they are
+    not considered in the search.  (I.e. that filter will be skipped.)
+
+    Parameters
+    ----------
+      processing_version : string or int
+         The processing version you're looking at
+
+      return format : string
+         Either "json" or "pandas".  (TODO: pyarrow? polars?)
+
+      just_objids : bool, default False
+         See "Returns" below.
+
+      ra, dec : float, default None
+         RA and Dec for the center of a cone search, in J2000 degrees.
+         If None, won't filter on RA/Dec.  (Doesn't make sense to
+         specify only one and not the other, or to specify this and not radius.)
+
+      center : float, default None
+         Radius of the cone search in arcseconds.  Doesn't make sense to
+         specfiy this without both ra and dec.  TODO : make a maximum supported
+         value based on what's sane with Q3C.  Right now, accepts any number
+         and merrily passes that number on to PostgreSQL.
+
+      mint_firsdtdetection : float, default None
+         Only return objects whose first detection is on this MJD or later.
+
+      maxt_firstdetection : float, default None
+         Only return objects whose first detection is on this MJD or earlier.
+
+      mint_lastdetection : float, default None
+         Only return objects whose last detection is on this MJD or later.
+
+      maxt_lastdetection : float, default None
+         Only return objects whose last detection is on this MJD or later.
+
+      min_numdetections : int, default None
+         Only return objects with at least this many detections.
+
+      mindt_firstlastdetection : float, default None
+         Only return objects that have at least this many days between the first and last detection.
+
+      maxdt_firstlastdetection : float, default None
+         Only return objects that have at most this many days between the first and last detection.
+
+      min_bandsdetected : int, default None
+         Only return objects that have been detected in at least this many different  bnads.
+
+      min_lastmag : float, default None
+         The most recent measurement (not detection! includes forced
+         sources) must have a magnitude that is at least this.  (Use
+         this to filter out things that are too bright.)
+
+      max_lastmag : float, default None
+         The most recent measurement (not detection! includes forced
+         sources) must have a magnitude that is at most this.  (Use this
+         to filter out things that are too dim.)
+
+      statbands : list of string, default None
+         Normally, all of the cuts based on detection dates, detection
+         counts, magnitudes, etc. consider all bands equally.  If you
+         only want to consider some bands, list those here.  For
+         instance, if you're only interested in cutting on
+         measurements of the g, r, and i bands, pass ['g', 'r', 'i']
+         here.
+
+         This parameter also effects what is included in the returned
+         array; it will ignroe any measurements of bands that aren't
+         included in this list.
+
+    Returns
+     --------
+      A table of data.  If just_objids is true, this will have a single
+      column, "diaobjectid" that has the object ids within the specified
+      processing verison of objects that match the search.  Otherwise,
+      there will be additional columns:
+
+          ra — ra of the object (from the object table... *not* necessarily the best position)
+          dec — dec of the object
+          ndet — number of detedtions (within statbands if relevant)
+
+          maxfluxt — MJD of the maximum flux (within statbands, if relevant)
+          maxfluxband — band of the maximum flux
+          maxflux — maximum flux (in nJy)
+          maxdflux — undertainty on maximum flux
+
+          lastdetfluxt — MJD of most recent *detection* (i.e. source, not forcedsource) (within statbands if relevant)
+          lastdetfluxband — band of most recent detection
+          lastdetflux — flux (in nJy) of most recent detection
+          lastdetdflux — uncertaintly on lastdetflux
+
+          lastforcedfluxt — MJD of most recent *measurement* (forced source) (within statbands if relevant)
+          lastforcedfluxband — band of most recent measurement
+          lastforcedflux — flux (in nJy) of most recent detection
+          lastforceddflux — uncertaintly on lastforcedflux
+
+      If return_format is json, then the return is actually a
+      dictionary; the keys of the dictionary are the names listed above,
+      and the values are lists.  All lists have the same length.
+
+      If return_format is pandas, then the return is a pandas DataFrame
+      with those columns.  (Indexing of the DataFrame is... unclear.
+      Pandas sometimes does stuff automatically, and the author of this
+      code needs to pay more attention to know what's happening.)
+
+    """
+
     util.logger.debug( f"In object_search : kwargs = {kwargs}" )
     knownargs = { 'ra', 'dec', 'radius',
                   'mint_firstdetection', 'maxt_firstdetection',
@@ -191,7 +301,9 @@ def object_search( processing_version, return_format='json', **kwargs ):
 
     statbands = None
     if 'statbands' in kwargs:
-        if ( isinstance( kwargs['statbands'], str ) ) and ( len(kwargs['statbands'].strip()) == 0 ):
+        if ( ( ( isinstance( kwargs['statbands'], str ) ) and ( len(kwargs['statbands'].strip()) == 0 ) )
+             or
+             ( ( isinstance( kwargs['statbands'], list ) ) and ( len(kwargs['statbands']) == 0 ) ) ):
             statbands = None
         else:
             if isinstance( kwargs['statbands'], list ):
@@ -222,8 +334,10 @@ def object_search( processing_version, return_format='json', **kwargs ):
         # Filter by ra and dec if given
         ra = util.float_or_none_from_dict_float_or_hms( kwargs, 'ra' )
         dec = util.float_or_none_from_dict_float_or_dms( kwargs, 'dec' )
-        if ( ra is None ) != ( dec is None ):
-            raise ValueError( "Must give either both or neither of ra and dec, not just one." )
+        radius = util.float_or_none_from_dict( kwargs, 'radius' )
+        if ( any( [ ( ra is None ), ( dec is None ), ( radius is None ) ] )
+             and not all( [ ( ra is None ), ( dec is None ), ( radius is None ) ] ) ):
+            raise ValueError( "Must give either all or none of ra dec, radius, not just one or two" )
 
         nexttable = 'diaobject'
         if ra is not None:
@@ -306,7 +420,7 @@ def object_search( processing_version, return_format='json', **kwargs ):
         # Filter on number of detections
         if min_numdets is not None:
             cursor.execute( "DELETE FROM objsearch_srcstats WHERE ndet<%(n)s", { 'n': min_numdets } )
-        
+
         # For some reason, Postgres was deciding not to use the index on this next query, which
         #   raised the runtime by two orders of magnitude.  Hint fixed it.
         q = ( "/*+ IndexScan(f idx_diaforcedsource_diaobjectidpv ) */ "
