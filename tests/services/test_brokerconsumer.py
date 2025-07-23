@@ -20,15 +20,15 @@ def check_mongodb( mongoclient, dbname, collection ):
 
     # Pull out the diaSourceId from all the messages, make sure they're as expected
     # (Based on the Postgres ppdb_alerts_sent table.)
-    mgcursor = coll.find( {}, projection={ 'msg.diaSource.diaSourceId': 1 } )
-    srcids = [ c['msg']['diaSource']['diaSourceId'] for c in mgcursor ]
+    mgcursor = coll.find( {}, projection={ 'msg.diaSource.diaObjectId': 1, 'msg.diaSource.visit': 1 } )
+    srcids = [ f"{c['msg']['diaSource']['diaObjectId']}_{c['msg']['diaSource']['visit']}" for c in mgcursor ]
     assert len(srcids) == 154
     srcids = set( srcids )
     assert len(srcids) == 77
     with db.DB() as conn:
         cursor = conn.cursor()
-        cursor.execute( "SELECT diasourceid FROM ppdb_alerts_sent" )
-        alertssent = set( row[0] for row in cursor.fetchall() )
+        cursor.execute( "SELECT diaobjectid, visit FROM ppdb_alerts_sent" )
+        alertssent = set( f"{row[0]}_{row[1]}" for row in cursor.fetchall() )
     assert alertssent == srcids
 
     # TODO : more checks?

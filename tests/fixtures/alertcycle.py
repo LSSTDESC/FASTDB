@@ -204,9 +204,8 @@ def alerts_90days_sent_received_and_imported( procver ):
             cursor = conn.cursor()
             cursor.execute( "DELETE FROM diaforcedsource" )
             cursor.execute( "DELETE FROM diasource" )
-            cursor.execute( "DELETE FROM diaobject_root_map" )
-            cursor.execute( "DELETE FROM root_diaobject" )
             cursor.execute( "DELETE FROM diaobject" )
+            cursor.execute( "DELETE FROM root_diaobject" )
             cursor.execute( "DELETE FROM host_galaxy" )
             conn.commit()
 
@@ -223,7 +222,7 @@ def alerts_90days_sent_received_and_imported( procver ):
 #
 #    PGPASSWORD=fragile pg_dump -h postgres -U postgres fastdb -F c -a  \
 #       -f elasticc2_test_data/alerts_90days_sent_received_and_imported.pgdump \
-#       -t root_diaobject -t diaobject -t diaobject_root_map -t host_galaxy -t diasource -t diaforcedsource
+#       -t root_diaobject -t diaobject -t host_galaxy -t diasource -t diaforcedsource
 #
 # You will then also need to rebuild the elasticc2_test_data.tar.bz2 file!
 # @pytest.fixture( scope='module' )
@@ -244,9 +243,8 @@ def alerts_90days_sent_received_and_imported( procver ):
 #             cursor = conn.cursor()
 #             cursor.execute( "DELETE FROM diaforcedsource" )
 #             cursor.execute( "DELETE FROM diasource" )
-#             cursor.execute( "DELETE FROM diaobject_root_map" )
-#             cursor.execute( "DELETE FROM root_diaobject" )
 #             cursor.execute( "DELETE FROM diaobject" )
+#             cursor.execute( "DELETE FROM root_diaobject" )
 #             cursor.execute( "DELETE FROM host_galaxy" )
 #             cursor.execute( "DELETE FROM diasource_import_time WHERE collection=%(col)s",
 #                             { 'col': collection_name } )

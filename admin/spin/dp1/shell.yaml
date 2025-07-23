@@ -3,14 +3,14 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: shell
-  namespace: fastdb-rknop-dev-2
+  namespace: fastdb-dp1
 spec:
   progressDeadlineSeconds: 600
   replicas: 1
   revisionHistoryLimit: 10
   selector:
     matchLabels:
-      workload.user.cattle.io/workloadselector: deployment-fastdb-rknop-dev-2-shell
+      workload.user.cattle.io/workloadselector: deployment-fastdb-dp1-shell
   strategy:
     rollingUpdate:
       maxSurge: 1
@@ -28,12 +28,12 @@ spec:
         nersc.gov/username: raknop
       creationTimestamp: null
       labels:
-        workload.user.cattle.io/workloadselector: deployment-fastdb-rknop-dev-2-shell
+        workload.user.cattle.io/workloadselector: deployment-fastdb-dp1-shell
     spec:
       affinity: {}
       containers:
       - name: shell
-        image: registry.nersc.gov/m1727/raknop/fastdb-shell:rknop-dev
+        image: registry.nersc.gov/m1727/raknop/fastdb-shell:dp1
         env:
         - name: MONGODB_HOST
           value: mongodb
@@ -125,19 +125,19 @@ spec:
           optional: false
           secretName: secrets
       - hostPath:
-          path: /global/cfs/cdirs/desc-td/SOFTWARE/fastdb_deployment/rknop_dev_2/install
+          path: /global/cfs/cdirs/desc-td/SOFTWARE/fastdb_deployment/dp1/install
           type: Directory
         name: fastdb-install
       - hostPath:
-          path: /global/cfs/cdirs/desc-td/SOFTWARE/fastdb_deployment/rknop_dev_2/FASTDB
+          path: /global/cfs/cdirs/desc-td/SOFTWARE/fastdb_deployment/dp1/FASTDB
           type: Directory
         name: fastdb-checkout
       - hostPath:
-          path: /global/cfs/cdirs/desc-td/SOFTWARE/fastdb_deployment/rknop_dev_2/query_results
+          path: /global/cfs/cdirs/desc-td/SOFTWARE/fastdb_deployment/dp1/query_results
           type: Directory
         name: fastdb-query-results
       - hostPath:
-          path: /global/cfs/cdirs/desc-td/SOFTWARE/fastdb_deployment/rknop_dev_2/sessions
+          path: /global/cfs/cdirs/desc-td/SOFTWARE/fastdb_deployment/dp1/sessions
           type: Directory
         name: fastdb-sessions
       - hostPath:
@@ -153,7 +153,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: shell
-  namespace: fastdb-rknop-dev-2
+  namespace: fastdb-dp1
 spec:
   clusterIP: None
   clusterIPs:
@@ -164,7 +164,7 @@ spec:
     protocol: TCP
     targetPort: 42
   selector:
-    workload.user.cattle.io/workloadselector: deployment-fastdb-rknop-dev-2-shell
+    workload.user.cattle.io/workloadselector: deployment-fastdb-dp1-shell
   sessionAffinity: None
   type: ClusterIP
 status:

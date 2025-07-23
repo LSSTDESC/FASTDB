@@ -204,13 +204,11 @@ def what_spectra_are_wanted( procver=None, wantsince=None, requester=None, notcl
                   "  SELECT DISTINCT ON(t.root_diaobject_id,requester,priority) "
                   "    t.root_diaobject_id, requester, priority "
                   "  FROM tmp_wanted2 t "
-                  "  INNER JOIN diaobject_root_map dorm ON t.root_diaobject_id=dorm.rootid "
-                  "  INNER JOIN diasource s ON ( dorm.diaobjectid=s.diaobjectid AND "
-                  "                              dorm.processing_version=s.diaobject_procver " )
+                  "  INNER JOIN diaobject o ON t.root_diaobject_id=o.rootid "
+                  "  INNER JOIN diasource s ON o.diaobjectid=s.diaobjectid " )
             if procver is not None:
                 q += "                           AND s.processing_version=%(procver) "
-            q += ( "                                                                )"
-                   " WHERE s.midpointmjdtai>=%(detsince)s AND s.midpointmjdtai<=%(now)s"
+            q += ( " WHERE s.midpointmjdtai>=%(detsince)s AND s.midpointmjdtai<=%(now)s"
                    " ORDER BY root_diaobject_id,requester,priority )" )
             cursor.execute( q, { 'detsince': detsince, 'procver': procver, 'now': mjdnow } )
 
@@ -243,9 +241,8 @@ def what_spectra_are_wanted( procver=None, wantsince=None, requester=None, notcl
               "           s.band AS band, s.midpointmjdtai AS mjd, "
               "           CASE WHEN s.psfflux>0 THEN -2.5*LOG(s.psfflux)+31.4 ELSE 99 END AS mag "
               "    FROM tmp_wanted3 t "
-              "    INNER JOIN diaobject_root_map r ON t.root_diaobject_id=r.rootid "
-              "    INNER JOIN diasource s ON r.diaobjectid=s.diaobjectid "
-              "                           AND r.processing_version=s.diaobject_procver "
+              "    INNER JOIN diaobject o ON t.root_diaobject_id=o.rootid "
+              "    INNER JOIN diasource s ON o.diaobjectid=s.diaobjectid "
               "    WHERE s.midpointmjdtai<=%(now)s " )
         if procver is not None:
             q += "    AND s.processing_version=%(procver)s "
@@ -277,9 +274,8 @@ def what_spectra_are_wanted( procver=None, wantsince=None, requester=None, notcl
               "           f.band AS band, f.midpointmjdtai AS mjd, "
               "           CASE WHEN f.psfflux>0 THEN -2.5*LOG(f.psfflux)+31.4 ELSE 99 END AS mag "
               "    FROM tmp_wanted3 t "
-              "    INNER JOIN diaobject_root_map r ON t.root_diaobject_id=r.rootid "
-              "    INNER JOIN diaforcedsource f ON r.diaobjectid=f.diaobjectid "
-              "                                 AND r.processing_version=f.diaobject_procver "
+              "    INNER JOIN diaobject o ON t.root_diaobject_id=o.rootid "
+              "    INNER JOIN diaforcedsource f ON o.diaobjectid=f.diaobjectid "
               "    WHERE f.midpointmjdtai<=%(now)s " )
         if procver is not None:
             q += "      AND f.processing_version=%(procver)s "
@@ -311,9 +307,7 @@ def what_spectra_are_wanted( procver=None, wantsince=None, requester=None, notcl
               "                                           t.priority, o.diaobjectid, o.processing_version, "
               "                                           o.ra, o.dec "
               "  FROM tmp_wanted3 t "
-              "  INNER JOIN diaobject_root_map dorm ON dorm.rootid=t.root_diaobject_id "
-              "  INNER JOIN diaobject o ON dorm.diaobjectid=o.diaobjectid "
-              "                         AND dorm.processing_version=o.processing_version " )
+              "  INNER JOIN diaobject o ON o.rootid=t.root_diaobject_id " )
         if procver is not None:
             q += "  WHERE o.processing_version=%(procver)s "
         q += ")"

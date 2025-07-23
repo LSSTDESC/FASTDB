@@ -12,10 +12,8 @@ class TestDiaForcedSource( BaseTestDB ):
     def basetest_setup( self, procver1, obj1 ):
         self.cls = DiaForcedSource
         self.columns = {
-            'diaforcedsourceid',
             'processing_version',
             'diaobjectid',
-            'diaobject_procver',
             'visit',
             'detector',
             'midpointmjdtai',
@@ -30,7 +28,6 @@ class TestDiaForcedSource( BaseTestDB ):
             'time_withdrawn',
         }
         self.safe_to_modify = [
-            'visit',
             'detector',
             'midpointmjdtai',
             'band',
@@ -46,10 +43,8 @@ class TestDiaForcedSource( BaseTestDB ):
         self.uniques = []
 
         t0 = datetime.datetime.now( tz=datetime.UTC )
-        self.obj1 = DiaForcedSource( diaforcedsourceid=1,
-                                     processing_version=procver1.id,
+        self.obj1 = DiaForcedSource( processing_version=procver1.id,
                                      diaobjectid=obj1.diaobjectid,
-                                     diaobject_procver=obj1.processing_version,
                                      visit=1,
                                      detector=1,
                                      midpointmjdtai=60000.,
@@ -64,10 +59,8 @@ class TestDiaForcedSource( BaseTestDB ):
                                      time_withdrawn=None
                                     )
         self.dict1 = { k: getattr( self.obj1, k ) for k in self.columns }
-        self.obj2 = DiaForcedSource( diaforcedsourceid=2,
-                                     processing_version=procver1.id,
+        self.obj2 = DiaForcedSource( processing_version=procver1.id,
                                      diaobjectid=obj1.diaobjectid,
-                                     diaobject_procver=obj1.processing_version,
                                      visit=2,
                                      detector=2,
                                      midpointmjdtai=60001.,
@@ -82,10 +75,8 @@ class TestDiaForcedSource( BaseTestDB ):
                                      time_withdrawn=t0 + datetime.timedelta( days=365 )
                                     )
         self.dict2 = { k: getattr( self.obj2, k ) for k in self.columns }
-        self.dict3 = { 'diaforcedsourceid': 3,
-                       'processing_version': procver1.id,
+        self.dict3 = { 'processing_version': procver1.id,
                        'diaobjectid': obj1.diaobjectid,
-                       'diaobject_procver': obj1.processing_version,
                        'visit': 3,
                        'detector': 3,
                        'midpointmjdtai': 600002.,

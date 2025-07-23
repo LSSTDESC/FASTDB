@@ -40,7 +40,7 @@ def setup_wanted_spectra_etc( procver, alerts_90days_sent_received_and_imported,
     try:
         with db.DB() as con:
             cursor = con.cursor()
-            cursor.execute( "SELECT rootid,diaobjectid FROM diaobject_root_map "
+            cursor.execute( "SELECT rootid,diaobjectid FROM diaobject "
                             "WHERE diaobjectid=ANY(%(obj)s) AND processing_version=%(procver)s",
                             { 'obj': [ 1696949, 1981540, 191776, 1747042, 1173200 ],
                               'procver': procver.id } )

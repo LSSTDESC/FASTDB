@@ -8,7 +8,8 @@ WORKDIR /usr/src
 RUN apt-get update \
   && DEBIAN_FRONTEND="nointeractive" apt-get -y upgrade \
   && DEBIAN_FRONTEND="noninteractive" TZ="UTC" apt-get -y install -y --no-install-recommends \
-         ca-certificates sudo netcat-openbsd tmux locales \
+         ca-certificates sudo netcat-openbsd locales \
+         tmux emacs-nox less procps \
   && apt-get clean \
   && rm -rf /var/lib/apt/lists/*
 

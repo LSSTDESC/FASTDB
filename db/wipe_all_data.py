@@ -1,28 +1,21 @@
 # TODO : wrap this with --do and --really-do options
-
-# Empty out all data tables, don't remove users
-data_tables = [ 'processing_version', 'processing_version_alias', 'snapshot',
-               'host_galaxy', 'root_diaobject', 'diaobject', 'diasource', 'diaforcedsource',
-               'diaobject_root_map', 'diaobject_snapshot', 'diasource_snapshot', 'diaforcedsource_snapshot',
-               'diasource_import_time', 'query_queue', 'migrations_applied',
-               'spectruminfo', 'wantedspectra', 'plannedspectra',
-               'ppdb_alerts_sent', 'ppdb_diaforcedsource', 'ppdb_diaobject', 'ppdb_diasource', 'ppdb_host_galaxy' ]
+# TODO : add ability to also wipe users
+# TODO : add ability to also wipe migrations
 
 import sys
-import psycopg
-import config
+import db
 
-with open ( config.dbpasswdfile ) as ifp:
-    dbpasswd = ifp.read().strip()
+# By default, we don't want to drop users or migrations
+tablenames = db.all_table_names.copy()
+tablenames.remove( "authuser" )
+tablenames.remove( "migrations_applied" )
 
-conn = psycopg.connect( host=config.dbhost, port=config.dbport, dbname=config.dbdatabase,
-                        user=config.dbuser, password=dbpasswd )
-try:
-    cursor = conn.cursor()
-    for table in data_tables:
-        sys.stderr.write( f"Truncating table {table}...\n" )
-        cursor.execute( f"TRUNCATE TABLE {table} CASCADE" )
-    conn.commit()
-finally:
-    conn.rollback()
-    conn.close()
+with db.DB() as conn:
+    try:
+        cursor = conn.cursor()
+        for table in tablenames:
+            sys.stderr.write( f"Truncating table {table}...\n" )
+            cursor.execute( f"TRUNCATE TABLE {table} CASCADE" )
+        conn.commit()
+    finally:
+        conn.rollback()

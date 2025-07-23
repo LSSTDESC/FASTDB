@@ -160,7 +160,7 @@ class BrokerConsumer:
         if schemafile is None:
             # This is where the schema lives inside our docker images...
             #   though the version of the namespace will evolve.
-            schemafile = "/fastdb/share/avsc/fastdb_test_0.1.BrokerMessage.avsc"
+            schemafile = "/fastdb/share/avsc/fastdb_test_0.2.BrokerMessage.avsc"
 
         self.countlogger.info( f"************ Starting BrokerConsumer for {loggername} ****************" )
 

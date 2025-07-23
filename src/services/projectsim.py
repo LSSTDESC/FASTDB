@@ -103,13 +103,13 @@ class AlertReconstructor:
 
     def source_data_to_dicts( self, rows, columns ):
         allfields = [ f['name'] for f in self.diasource_schema['fields'] ]
-        lcfields = { 'diaSourceId', 'diaObjectId', 'ssObjectId', 'visit', 'detector',
+        lcfields = { 'diaObjectId', 'ssObjectId', 'visit', 'detector',
                      'x', 'y', 'xErr', 'yErr', 'x_y_Cov',
                      'band', 'midpointMjdTai', 'ra', 'raErr', 'dec', 'decErr', 'ra_dec_Cov',
                      'psfFlux', 'psfFluxErr', 'psfRa', 'psfRaErr', 'psfDec', 'psfDecErr', 'psfRa_psfDec_Cov',
                      'psfFlux_psfRa_cov', 'psfFlux_psfDec_cov', 'psfLnL', 'psfChi2', 'psfNdata', 'snr',
                      'scienceFlux', 'scienceFluxErr', 'fpBkgd', 'fpBkdgErr',
-                     'parentDiaSourceId', 'extendedness', 'reliability',
+                     'extendedness', 'reliability',
                      'ixx', 'ixxErr', 'iyy', 'iyyErr', 'ixy', 'ixx_ixy_Cov', 'ixx_iyy_Cov', 'iyy_ixy_Cov',
                      'ixxPSF', 'iyyPSF', 'ixyPSF' }
 
@@ -130,7 +130,7 @@ class AlertReconstructor:
 
     def forced_source_data_to_dicts( self, rows, columns ):
         allfields = [ f['name'] for f in self.diaforcedsource_schema['fields'] ]
-        lcfields = [ 'diaForcedSourceId', 'diaObjectId', 'visit', 'detector', 'midpointMjdTai',
+        lcfields = [ 'diaObjectId', 'visit', 'detector', 'midpointMjdTai',
                      'band', 'ra', 'dec', 'psfFlux', 'psfFluxErr', 'scienceFlux', 'sciencefluxErr', ]
         timefields = { 'time_processed': 'time_processed',
                        'time_withdrawn': 'time_withdrawn' }
@@ -156,9 +156,9 @@ class AlertReconstructor:
             cursor = con.cursor()
             q = ( "SELECT * FROM ppdb_diasource WHERE diaobjectid=%(objid)s "
                   "AND midpointmjdtai>=%(minmjd)s AND midpointmjdtai<%(maxmjd)s "
-                  "AND diasourceid!=%(srcid)s ORDER BY midpointmjdtai" )
+                  "AND visit!=%(visit)s ORDER BY midpointmjdtai" )
             cursor.execute( q, { 'objid': diasource['diaObjectId'],
-                                 'srcid': diasource['diaSourceId'],
+                                 'visit': diasource['visit'],
                                  'minmjd': diasource['midpointMjdTai'] - self.prevsrc,
                                  'maxmjd': diasource['midpointMjdTai'] } )
             columns = { col_desc[0]: i for i, col_desc in enumerate(cursor.description) }
@@ -190,18 +190,20 @@ class AlertReconstructor:
         return retval
 
 
-    def reconstruct( self, diasourceid, con=None ):
+    def reconstruct( self, diaobjectid, visit, con=None ):
         t0 = time.perf_counter()
         with db.DB( con ) as con:
             cursor = con.cursor()
             t1 = time.perf_counter()
-            cursor.execute( "SELECT * FROM ppdb_diasource WHERE diasourceid=%(id)s", { 'id': diasourceid } )
+            cursor.execute( "SELECT * FROM ppdb_diasource WHERE diaobjectid=%(id)s AND visit=%(v)s",
+                            { 'id': diaobjectid, 'v': visit } )
             columns = { col_desc[0]: i for i, col_desc in enumerate(cursor.description) }
             rows = cursor.fetchall()
             if len(rows) == 0:
-                raise ValueError( f"Unknown diasource {diasourceid}" )
+                raise ValueError( f"Unknown diasource diaobjectid={diaobjectid} visit={visit}" )
             if len(rows) > 1:
-                raise RuntimeError( f"diasource {diasourceid} is multiply defined, I don't know how to cope." )
+                raise RuntimeError( f"diasource w/ diaobjectid={diaobjectid} and visit={visit} is multiply defined, "
+                                    "I don't know how to cope." )
             t2 = time.perf_counter()
             diasource = self.source_data_to_dicts( rows, columns )[0]
             t3 = time.perf_counter()
@@ -214,7 +216,7 @@ class AlertReconstructor:
             columns = { col_desc[0]: i for i, col_desc in enumerate(cursor.description) }
             rows = cursor.fetchall()
             if len(rows) == 0:
-                raise ValueError( f"Unknown diaobject {diasource['diaObjectId']} for source {diasourceid}" )
+                raise ValueError( f"Unknown diaobject {diasource['diaObjectId']}" )
             if len(rows) > 1:
                 raise RuntimeError( f"diaobject {diasource['diaObjectId']} is multiply defined, I can't cope." )
             diaobject = self.object_data_to_dicts( rows, columns )[0]
@@ -227,7 +229,9 @@ class AlertReconstructor:
             self.prevforcedsourcetime += t5 - t4
             self.objtime += t6 - t5
 
-            alert = { "alertId": diasourceid,
+            # TODO : figure out a good unique alertid, right now this is bad!
+            # (See Issue #49)
+            alert = { "alertId": visit,
                       "diaSource": diasource,
                       "prvDiaSources": previous_sources if len(previous_sources) > 0 else None,
                       "prvDiaForcedSources": previous_forced_sources if len(previous_forced_sources) > 0 else None,
@@ -275,10 +279,11 @@ class AlertReconstructor:
 
                     elif msg['command'] == 'do':
                         t0 = time.perf_counter()
-                        sourceiddex = msg['sourceiddex']
-                        sourceid = msg['sourceid']
+                        sourcedex = msg['sourcedex']
+                        diaobjid = msg['diaobjid']
+                        visit = msg['visit']
 
-                        alert = self.reconstruct( sourceid, con=con )
+                        alert = self.reconstruct( diaobjid, visit, con=con )
 
                         t1 = time.perf_counter()
                         msgio = io.BytesIO()
@@ -286,8 +291,9 @@ class AlertReconstructor:
 
                         t2 = time.perf_counter()
                         pipe.send( { 'response': 'alert produced',
-                                     'sourceid': alert['diaSource']['diaSourceId'],
-                                     'sourceiddex': sourceiddex,
+                                     'diaobjectid': alert['diaSource']['diaObjectId'],
+                                     'visit': alert['diaSource']['visit'],
+                                     'sourcedex': sourcedex,
                                      'alert': msgio.getvalue() } )
 
                         t3 = time.perf_counter()
@@ -413,7 +419,8 @@ class AlertSender:
             if throughday is None:
                 cursor.execute( "SELECT MAX(s.midpointmjdtai) "
                                 "FROM ppdb_alerts_sent a "
-                                "INNER JOIN ppdb_diasource s ON a.diasourceid=s.diasourceid" )
+                                "INNER JOIN ppdb_diasource s ON a.diaobjectid=s.diaobjectid "
+                                "                           AND a.visit=s.visit" )
                 row = cursor.fetchone()
                 if row[0] is None:
                     cursor.execute( "SELECT MIN(midpointmjdtai) FROM ppdb_diasource" )
@@ -422,26 +429,27 @@ class AlertSender:
                         raise RuntimeError( "There are no sources in ppdb_diasource" )
                 throughday = row[0] + addeddays
 
-            cursor.execute( "SELECT s.diasourceid, s.midpointmjdtai "
+            cursor.execute( "SELECT s.diaobjectid, s.visit, s.midpointmjdtai "
                             "FROM ppdb_diasource s "
-                            "LEFT JOIN ppdb_alerts_sent a ON a.diasourceid=s.diasourceid "
+                            "LEFT JOIN ppdb_alerts_sent a ON a.diaobjectid=s.diaobjectid AND a.visit=s.visit "
                             "WHERE a.id IS NULL "
                             "AND s.midpointmjdtai<%(maxmjd)s "
                             "ORDER BY s.midpointmjdtai ",
                             { "maxmjd": throughday } )
             rows = cursor.fetchall()
-            diasourceids = [ row[0] for row in rows ]
+            diaobjids = [ row[0] for row in rows ]
+            visits = [ row[1] for row in rows ]
 
-            return diasourceids
+            return diaobjids, visits
 
 
-    def update_alertssent( self, sourceids ):
+    def update_alertssent( self, diaobjids_and_visits ):
         now = datetime.datetime.now( tz=datetime.UTC ) # .isoformat()
         with db.DB() as con:
             cursor = con.cursor()
-            with cursor.copy( "COPY ppdb_alerts_sent(diasourceid,senttime) FROM stdin" ) as curcopy:
-                for sourceid in sourceids:
-                    curcopy.write_row( ( sourceid, now ) )
+            with cursor.copy( "COPY ppdb_alerts_sent(diaobjectid,visit,senttime) FROM stdin" ) as curcopy:
+                for diaobjid, visit in diaobjids_and_visits:
+                    curcopy.write_row( ( diaobjid, visit, now ) )
             con.commit()
 
 
@@ -485,10 +493,10 @@ class AlertSender:
 
             # Get alerts to send
             _logger.info( "Figuring out which sources to send alerts for..." )
-            sourceids = self.find_alerts_to_send( addeddays=addeddays, throughday=throughday )
-            _logger.info( f"...got {len(sourceids)} diasource ids to send alerts for." )
+            diaobjids, visits = self.find_alerts_to_send( addeddays=addeddays, throughday=throughday )
+            _logger.info( f"...got {len(diaobjids)} diasources to send alerts for." )
 
-            if len( sourceids ) == 0:
+            if len( diaobjids ) == 0:
                 _logger.info( "No alerts to send, returning." )
                 return
 
@@ -533,16 +541,16 @@ class AlertSender:
                 signal.signal( signal.SIGINT, lambda signum, frame: self.interruptor( signum, frame ) )
                 signal.signal( signal.SIGTERM, lambda signum, frame: self.interruptor( signum, frame ) )
 
-            sourceiddex = 0
+            sourcedex = 0
             nextlog = 0
-            while ( sourceiddex < len(sourceids) ) or ( len(busyprocs) > 0 ):
-                if ( log_every > 0 ) and ( sourceiddex >= nextlog ):
-                    _logger.info( f"Have started {sourceiddex} of {len(sourceids)} sources, "
+            while ( sourcedex < len(diaobjids) ) or ( len(busyprocs) > 0 ):
+                if ( log_every > 0 ) and ( sourcedex >= nextlog ):
+                    _logger.info( f"Have started {sourcedex} of {len(diaobjids)} sources, "
                                   f"{totflushed} flushed." )
                     dt = time.perf_counter() - overall_t0
                     _logger.info( f"Timings:\n"
                                   f"               overall: {dt:.2f}  "
-                                  f"({sourceiddex/dt:.1f} or {totflushed/dt:.1f} Hz)\n"
+                                  f"({sourcedex/dt:.1f} or {totflushed/dt:.1f} Hz)\n"
                                   f"             _commtime: {_commtime:.2f}\n"
                                   f"            _flushtime: {_flushtime:.2f}\n"
                                   f"          _producetime: {_producetime:.2f}\n"
@@ -551,13 +559,14 @@ class AlertSender:
 
                 # Submit source ids to any free reconstructor process
                 t0 = time.perf_counter()
-                while ( sourceiddex < len(sourceids) ) and ( len(freeprocs) > 0 ):
+                while ( sourcedex < len(diaobjids) ) and ( len(freeprocs) > 0 ):
                     pid = freeprocs.pop()
                     busyprocs.add( pid )
                     self.procinfo[pid]['parentconn'].send( { 'command': 'do',
-                                                             'sourceiddex': sourceiddex,
-                                                             'sourceid': sourceids[ sourceiddex ] } )
-                    sourceiddex += 1
+                                                             'sourcedex': sourcedex,
+                                                             'diaobjid': diaobjids[ sourcedex ],
+                                                             'visit': visits[ sourcedex ] } )
+                    sourcedex += 1
                 _commtime += time.perf_counter() - t0
 
                 # Check for responses from busy reconstructor processes
@@ -572,7 +581,7 @@ class AlertSender:
                     if ( 'response' not in msg ) or ( msg['response'] != 'alert produced' ):
                         raise ValueError( f"Unexpected response from child process: {msg}" )
 
-                    didid = msg['sourceid']
+                    didid = ( msg['diaobjectid'], msg['visit'] )
                     if didid in donesources:
                         raise RuntimeError(  f'{didid} got processed more than once' )
                     donesources.add( didid )
@@ -602,7 +611,7 @@ class AlertSender:
                     busyprocs.remove( pid )
                     freeprocs.add( pid )
 
-                # end of while( sourceiddex < len(sourceids) ) or ( len(busyprocs) > 0 ):
+                # end of while( sourcedex < len(diaobjids) ) or ( len(busyprocs) > 0 ):
 
             if len( ids_produced ) > 0:
                 if reallysend:
@@ -632,11 +641,11 @@ class AlertSender:
 
             _tottime = time.perf_counter() - overall_t0
 
-            _logger.info( f"**** Done sending {len(sourceids)} alerts; {totflushed} flushed ****" )
+            _logger.info( f"**** Done sending {len(diaobjids)} alerts; {totflushed} flushed ****" )
             strio = io.StringIO()
             dt = time.perf_counter() - overall_t0
             strio.write( f"Timings:\n"
-                         f"               overall: {dt:.2f}  ({len(sourceids)/dt:.1f} or {totflushed/dt:.1f} Hz)\n"
+                         f"               overall: {dt:.2f}  ({len(diaobjids)/dt:.1f} or {totflushed/dt:.1f} Hz)\n"
                          f"             _commtime: {_commtime:.2f}\n"
                          f"            _flushtime: {_flushtime:.2f}\n"
                          f"          _producetime: {_producetime:.2f}\n"

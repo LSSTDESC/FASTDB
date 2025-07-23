@@ -2,15 +2,15 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: shell
-  namespace: fastdb-rknop-dev-2
+  name: webserver
+  namespace: fastdb-dp1
 spec:
   progressDeadlineSeconds: 600
   replicas: 1
   revisionHistoryLimit: 10
   selector:
     matchLabels:
-      workload.user.cattle.io/workloadselector: deployment-fastdb-rknop-dev-2-shell
+      workload.user.cattle.io/workloadselector: deployment-fastdb-dp1-webserver
   strategy:
     rollingUpdate:
       maxSurge: 1
@@ -28,12 +28,12 @@ spec:
         nersc.gov/username: raknop
       creationTimestamp: null
       labels:
-        workload.user.cattle.io/workloadselector: deployment-fastdb-rknop-dev-2-shell
+        workload.user.cattle.io/workloadselector: deployment-fastdb-dp1-webserver
     spec:
       affinity: {}
       containers:
-      - name: shell
-        image: registry.nersc.gov/m1727/raknop/fastdb-shell:rknop-dev
+      - name: webserver
+        image: registry.nersc.gov/m1727/raknop/fastdb-webap:dp1
         env:
         - name: MONGODB_HOST
           value: mongodb
@@ -103,12 +103,6 @@ spec:
           name: fastdb-query-results
         - mountPath: /sessions
           name: fastdb-sessions
-        - mountPath: /sample
-          name: fastdb-sample
-        - mountPath: /dp1
-          name: dp1-parquet
-        - mountPath: /code
-          name: fastdb-checkout
       dnsConfig: {}
       dnsPolicy: ClusterFirst
       restartPolicy: Always
@@ -125,48 +119,88 @@ spec:
           optional: false
           secretName: secrets
       - hostPath:
-          path: /global/cfs/cdirs/desc-td/SOFTWARE/fastdb_deployment/rknop_dev_2/install
+          path: /global/cfs/cdirs/desc-td/SOFTWARE/fastdb_deployment/dp1/install
           type: Directory
         name: fastdb-install
       - hostPath:
-          path: /global/cfs/cdirs/desc-td/SOFTWARE/fastdb_deployment/rknop_dev_2/FASTDB
-          type: Directory
-        name: fastdb-checkout
-      - hostPath:
-          path: /global/cfs/cdirs/desc-td/SOFTWARE/fastdb_deployment/rknop_dev_2/query_results
+          path: /global/cfs/cdirs/desc-td/SOFTWARE/fastdb_deployment/dp1/query_results
           type: Directory
         name: fastdb-query-results
       - hostPath:
-          path: /global/cfs/cdirs/desc-td/SOFTWARE/fastdb_deployment/rknop_dev_2/sessions
+          path: /global/cfs/cdirs/desc-td/SOFTWARE/fastdb_deployment/dp1/sessions
           type: Directory
         name: fastdb-sessions
-      - hostPath:
-          path: /global/cfs/cdirs/desc-td/ELASTICC2
-          type: Directory
-        name: fastdb-sample
-      - hostPath:
-          path: /global/cfs/cdirs/lsst/shared/rubin/DP1/HATS/dp1_full/hats/v29_0_0/dia_object_collection/dia_object_lc/dataset
-          type: Directory
-        name: dp1-parquet
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: shell
-  namespace: fastdb-rknop-dev-2
+  name: webserver
+  namespace: fastdb-dp1
 spec:
   clusterIP: None
   clusterIPs:
-  - None
+    - None
   ports:
   - name: default
     port: 42
     protocol: TCP
     targetPort: 42
   selector:
-    workload.user.cattle.io/workloadselector: deployment-fastdb-rknop-dev-2-shell
+    workload.user.cattle.io/workloadselector: deployment-fastdb-dp1-webserver
   sessionAffinity: None
   type: ClusterIP
 status:
   loadBalancer: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: webserver-ingress
+  namespace: fastdb-dp1
+spec:
+  ports:
+  - port: 8080
+    protocol: TCP
+    targetPort: 8080
+  selector:
+    workload.user.cattle.io/workloadselector: deployment-fastdb-dp1-webserver
+  sessionAffinity: None
+  type: ClusterIP
+status:
+  loadBalancer: {}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    nersc.gov/clustername: production
+    nginx.ingress.kubernetes.io/preserve-trailing-slash: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: 500m
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+  name: webserver
+  namespace: fastdb-dp1
+spec:
+  rules:
+  - host: webserver.fastdb-dp1.production.svc.spin.nersc.org
+    http:
+      paths:
+      - backend:
+          service:
+            name: webserver-ingress
+            port:
+              number: 8080
+        pathType: ImplementationSpecific
+  - host: fastdb-dp1.lbl.gov
+    http:
+      paths:
+      - backend:
+          service:
+            name: webserver-ingress
+            port:
+              number: 8080
+        pathType: ImplementationSpecific
+  tls:
+  - hosts:
+    - fastdb-dp1.lbl.gov
+    secretName: fastdb-dp1-cert
 ---

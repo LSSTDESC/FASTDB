@@ -1,0 +1,116 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: fastdb-dp1
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      workload.user.cattle.io/workloadselector: deployment-fastdb-dp1-postgres
+  strategy:
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+    type: RollingUpdate
+  template:
+    metadata:
+      annotations:
+        field.cattle.io/ports: '[[]]'
+        nersc.gov/collab_uids: "99895"
+        nersc.gov/gid: "95089"
+        nersc.gov/gids: 60152,57177,95089,96414,99895
+        nersc.gov/roles: user
+        nersc.gov/uid: "95089"
+        nersc.gov/username: raknop
+      creationTimestamp: null
+      labels:
+        workload.user.cattle.io/workloadselector: deployment-fastdb-dp1-postgres
+    spec:
+      initContainers:
+      - name: volume-mount-hack
+        image: busybox
+        command: [ "sh", "-c", "chown 100:108 /pgdata" ]
+        securityContext:
+          allowPrivilegeEscalation: false
+        volumeMounts:
+        - name: postgres
+          mountPath: /pgdata
+      containers:
+      - env:
+        - name: POSTGRES_DATA_DIR
+          value: /var/lib/postgresql/data
+        image: registry.nersc.gov/m1727/raknop/fastdb-postgres:dp1
+        imagePullPolicy: Always
+        name: postgres
+        resources: {}
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            add:
+            - CHOWN
+            - DAC_OVERRIDE
+            - FOWNER
+            - SETGID
+            - SETUID
+            drop:
+            - ALL
+          privileged: false
+          readOnlyRootFilesystem: false
+          runAsNonRoot: false
+        stdin: true
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        tty: true
+        volumeMounts:
+        - mountPath: /var/lib/postgresql/data
+          name: postgres
+        - mountPath: /secrets
+          name: secrets
+        - mountPath: /dev/shm
+          name: dshm
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      terminationGracePeriodSeconds: 30
+      imagePullSecrets:
+        - name: registry-nersc
+      volumes:
+      - name: postgres
+        persistentVolumeClaim:
+          claimName: fastdb-dp1-postgres-pvc-20250721
+      - name: secrets
+        secret:
+          defaultMode: 292
+          optional: false
+          secretName: secrets
+      - emptyDir:
+          medium: Memory
+          sizeLimit: 128Gi
+        name: dshm
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: fastdb-dp1
+spec:
+  clusterIP: None
+  clusterIPs:
+  - None
+  ports:
+  - name: default
+    port: 42
+    protocol: TCP
+    targetPort: 42
+  selector:
+    workload.user.cattle.io/workloadselector: deployment-fastdb-dp1-postgres
+  sessionAffinity: None
+  type: ClusterIP
+status:
+  loadBalancer: {}
+---

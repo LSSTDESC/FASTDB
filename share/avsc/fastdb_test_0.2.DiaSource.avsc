@@ -1,5 +1,5 @@
 { "type": "record",
-  "namespace": "fastdb_test_0.1",
+  "namespace": "fastdb_test_0.2",
   "name": "DiaSource",
   "fields": [
     { "name": "apFlux",
@@ -53,10 +53,6 @@
     { "name": "diaObjectId",
       "type": "long",
       "doc": "Id of the diaObject this source was associated with, if any. If not, it is set to NULL (each diaSource will be associated with either a diaObject or ssObject)."
-    },
-    { "name": "diaSourceId",
-      "type": "long",
-      "doc": "Unique identifier of this DiaSource."
     },
     { "name": "dipoleAngle",
       "type": [ "null", "float" ],
@@ -316,11 +312,6 @@
     { "name": "midpointMjdTai",
       "type": "double",
       "doc": "Effective mid-visit time for this diaSource, expressed as Modified Julian Date, International Atomic Time. (d)"
-    },
-    { "name": "parentDiaSourceId",
-      "type": [ "null", "long" ],
-      "default": null,
-      "doc": "Id of the parent diaSource this diaSource has been deblended from, if any."
     },
     { "name": "pixelFlags",
       "type": [ "null", "boolean" ],

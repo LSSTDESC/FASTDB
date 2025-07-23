@@ -1,0 +1,77 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: query-pruner
+  namespace: fastdb-dp1
+spec:
+  concurrencyPolicy: Forbid
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          annotations:
+            field.cattle.io/ports: '[[]]'
+            nersc.gov/collab_uids: "99895"
+            nersc.gov/gid: "95089"
+            nersc.gov/gids: 60152,57177,95089,96414,99895
+            nersc.gov/roles: user
+            nersc.gov/uid: "95089"
+            nersc.gov/username: raknop
+          creationTimestamp: null
+        spec:
+          containers:
+          - command: ['python']
+            args: ['/fastdb/services/long_query_runner.py', '-p', '7']
+            image: registry.nersc.gov/m1727/raknop/fastdb-webap:dp1
+            imagePullPolicy: Always
+            name: query-pruner
+            resources: {}
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                add:
+                - NET_BIND_SERVICE
+                drop:
+                - ALL
+              privileged: false
+              readOnlyRootFilesystem: false
+              runAsNonRoot: true
+              runAsUser: 95089
+            stdin: true
+            terminationMessagePath: /dev/termination-log
+            terminationMessagePolicy: File
+            tty: true
+            volumeMounts:
+              - mountPath: /secrets
+                name: secrets
+              - mountPath: /fastdb
+                name: fastdb-install
+              - mountPath: /query_results
+                name: fastdb-query-results
+            workingDir: /fastdb
+          dnsPolicy: ClusterFirst
+          restartPolicy: Never
+          schedulerName: default-scheduler
+          securityContext:
+            fsGroup: 57177
+          terminationGracePeriodSeconds: 30
+          imagePullSecrets:
+            - name: registry-nersc
+          volumes:
+          - name: secrets
+            secret:
+              defaultMode: 292
+              optional: false
+              secretName: secrets
+          - hostPath:
+              path: /global/cfs/cdirs/desc-td/SOFTWARE/fastdb_deployment/dp1/install
+              type: Directory
+            name: fastdb-install
+          - hostPath:
+              path: /global/cfs/cdirs/desc-td/SOFTWARE/fastdb_deployment/dp1/query_results
+              type: Directory
+            name: fastdb-query-results
+  schedule: 20 8 * * *
+  successfulJobsHistoryLimit: 3
+  suspend: false

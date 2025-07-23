@@ -1,10 +1,17 @@
+import datetime
 import re
 
 import psycopg
 import psycopg.rows
 
-from db import DB
+import db
 from util import logger
+
+
+class ColumnMapper:
+    # D'oh... thought I could share stuff, but I was using
+    # astropy tables for SNANA, pandas for DP1 Parquet
+    pass
 
 
 class FastDBLoader:
@@ -19,21 +26,44 @@ class FastDBLoader:
     with side-effects on
 
         processing_version
-        snapshot
-        diasource_snapshot
-        diaforcedsource_snapshot
 
     """
 
-    def __init__( self ):
-        self._all_tables = [ 'wantedspectra', 'plannedspectra', 'spectruminfo',
-                             'host_galaxy', 'root_diaobject', 'diaobject', 'diaobject_root_map',
-                             'diasource', 'diaforcedsource',
-                             'processing_version_alias', 'processing_version', 'snapshot',
-                             'diaobject_snapshot', 'diasource_snapshot', 'diaforcedsource_snapshot',
-                             'ppdb_alerts_sent', 'ppdb_diaobject', 'ppdb_diaforcedsource', 'ppdb_diasource',
-                             'ppdb_host_galaxy',
-                            ]
+    def __init__( self, processing_version=None ):
+        self._all_tables = db.all_table_names.copy()
+        self._all_tables.remove( "authuser" )
+        self._all_tables.remove( "passwordlink" )
+        self._all_tables.remove( "migrations_applied" )
+
+        self.processing_version = None
+        self.processing_version_name = processing_version
+
+
+    def make_procver( self ):
+        if self.processing_version_name is None:
+            return
+
+        with db.DB() as conn:
+            try:
+                cursor = conn.cursor( row_factory=psycopg.rows.dict_row )
+                cursor.execute( "LOCK TABLE processing_version" )
+                cursor.execute( "SELECT * FROM processing_version WHERE description=%(pv)s",
+                                { 'pv': self.processing_version_name } )
+                rows = cursor.fetchall()
+                if len(rows) >= 1:
+                    self.processing_version = rows[0]['id']
+                else:
+                    cursor.execute( "SELECT MAX(id) AS maxid FROM processing_version" )
+                    row = cursor.fetchone()
+                    self.processing_version = row['maxid'] + 1 if row['maxid'] is not None else 0
+                    cursor.execute( "INSERT INTO processing_version(id,description,validity_start) "
+                                    "VALUES (%(id)s, %(pv)s, %(now)s)",
+                                    { 'id': self.processing_version, 'pv': self.processing_version_name,
+                                      'now': datetime.datetime.now(tz=datetime.UTC) } )
+                    conn.commit()
+            finally:
+                conn.rollback()
+
 
     def disable_indexes_and_fks( self ):
         """This is scary.  It disables all indexes and foreign keys on the tables to be loaded.
@@ -57,7 +87,7 @@ class FastDBLoader:
         pkmatcher = re.compile( r'^ *PRIMARY KEY \((.*)\) *$' )
         pkindexmatcher = re.compile( r' USING .* \((.*)\) *$' )
 
-        with DB() as conn:
+        with db.DB() as conn:
             cursor = conn.cursor( row_factory=psycopg.rows.dict_row )
 
             # Find all constraints (including primary keys)
@@ -161,7 +191,7 @@ class FastDBLoader:
         with open( commandfile ) as ifp:
             commands = ifp.readlines()
 
-        with DB() as conn:
+        with db.DB() as conn:
             cursor = conn.cursor( row_factory=psycopg.rows.dict_row )
             for command in commands:
                 logger.info( f"Running {command}" )

@@ -1,5 +1,5 @@
 { "type": "record",
-  "namespace": "fastdb_test_0.1",
+  "namespace": "fastdb_test_0.2",
   "name": "DiaForcedSource",
   "fields": [
     { "name": "band",
@@ -10,18 +10,14 @@
       "type": "double",
       "doc": "Declination coordinate of the position of the DiaObject at time radecMjdTai. (deg)"
     },
+    { "name": "diaObjectId",
+      "type": "long",
+      "doc": "Id of the DiaObject that this DiaForcedSource was associated with."
+    },
     { "name": "detector",
       "type": [ "null", "int" ],
       "default": null,
       "doc": "Id of the detector where this forcedSource was measured. Datatype short instead of byte because of DB concerns about unsigned bytes."
-    },
-    { "name": "diaForcedSourceId",
-      "type": "long",
-      "doc": "Unique id."
-    },
-    { "name": "diaObjectId",
-      "type": "long",
-      "doc": "Id of the DiaObject that this DiaForcedSource was associated with."
     },
     { "name": "midpointMjdTai",
       "type": "double",

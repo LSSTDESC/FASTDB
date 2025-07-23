@@ -18,7 +18,7 @@ from kafka_consumer import KafkaConsumer
 _rundir = pathlib.Path( __file__ ).parent
 
 # This next thing is used as a default
-_schema_namespace = "fastdb_test_0.1"
+_schema_namespace = "fastdb_test_0.2"
 
 
 # ======================================================================
