@@ -181,6 +181,7 @@ def object_search( processing_version, return_format='json', **kwargs ):
                   'min_numdetections', 'mindt_firstlastdetection','maxdt_firstlastdetection',
                   'min_bandsdetected', 'min_lastmag', 'max_lastmag',
                   'statbands' }
+
     unknownargs = set( kwargs.keys() ) - knownargs
     if len( unknownargs ) != 0:
         raise ValueError( f"Unknown search keywords: {unknownargs}" )
@@ -244,10 +245,6 @@ def object_search( processing_version, return_format='json', **kwargs ):
         if any( i is not None for i in [ mint_firstdet, maxt_firstdet, mint_lastdet, maxt_lastdet ] ):
             raise NotImplementedError( "Filtering by detection times not yet implemented" )
 
-        min_numdets = util.int_or_none_from_dict( kwargs, 'min_numdetections' )
-        if min_numdets is not None:
-            raise NotImplementedError( "Filtering by number of detections not yet implemented" )
-
         mindt = util.float_or_none_from_dict( kwargs, 'mindt_firstlastdetection' )
         maxdt = util.float_or_none_from_dict( kwargs, 'maxdt_firstlastdetection' )
         if ( mindt is not None ) or ( maxdt is not None ):
@@ -306,6 +303,10 @@ def object_search( processing_version, return_format='json', **kwargs ):
         util.logger.debug( f"Sending query {q}" )
         cursor.execute( q )
 
+        # Filter on number of detections
+        if min_numdets is not None:
+            cursor.execute( "DELETE FROM objsearch_srcstats WHERE ndet<%(n)s", { 'n': min_numdets } )
+        
         # For some reason, Postgres was deciding not to use the index on this next query, which
         #   raised the runtime by two orders of magnitude.  Hint fixed it.
         q = ( "/*+ IndexScan(f idx_diaforcedsource_diaobjectidpv ) */ "
