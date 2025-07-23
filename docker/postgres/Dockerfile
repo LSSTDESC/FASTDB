@@ -45,7 +45,7 @@ WORKDIR /build
 
 RUN apt-get update \
   && DEBIAN_FRONTEND="noninteractive" TZ="UTC" apt-get -y install -y --no-install-recommends \
-      build-essential make git gcc libssl-dev libreadline-dev zlib1g-dev libzstd-dev liblz4-dev curl \
+      make git gcc libssl-dev libreadline-dev zlib1g-dev libzstd-dev liblz4-dev curl \
       postgresql-server-dev-15 ca-certificates pkg-config
 
 RUN git clone https://github.com/segasai/q3c.git
