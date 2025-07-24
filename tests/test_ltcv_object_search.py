@@ -19,8 +19,8 @@ def check_df_contents( df, procverid, statbands=None ):
             dbrow = cursor.fetchone()
             assert dbrow[0] == pytest.approx( row.maxdetflux, rel=1e-5 )
             assert dbrow[1] == pytest.approx( row.maxdetfluxerr, rel=1e-5 )
-            assert dbrow[2] == pytest.approx( row.maxdetfluxmjd, abs=1e-5 )
-            assert dbrow[3] == row.maxdetfluxband
+            assert dbrow[2] == pytest.approx( row.maxdetmjd, abs=1e-5 )
+            assert dbrow[3] == row.maxdetband
 
             q = ( "SELECT psfflux, psffluxerr, midpointmjdtai, band "
                   "FROM diasource "
@@ -32,8 +32,21 @@ def check_df_contents( df, procverid, statbands=None ):
             dbrow = cursor.fetchone()
             assert dbrow[0] == pytest.approx( row.lastdetflux, rel=1e-5 )
             assert dbrow[1] == pytest.approx( row.lastdetfluxerr, rel=1e-5 )
-            assert dbrow[2] == pytest.approx( row.lastdetfluxmjd, abs=1e-5 )
-            assert dbrow[3] == row.lastdetfluxband
+            assert dbrow[2] == pytest.approx( row.lastdetmjd, abs=1e-5 )
+            assert dbrow[3] == row.lastdetband
+
+            q = ( "SELECT psfflux, psffluxerr, midpointmjdtai, band "
+                  "FROM diasource "
+                  "WHERE diaobjectid=%(o)s AND processing_version=%(pv)s " )
+            if statbands is not None:
+                q += "AND band=ANY(%(bands)s) "
+            q += "ORDER BY midpointmjdtai LIMIT 1"
+            cursor.execute( q, { 'o': row.diaobjectid, 'pv': procverid, 'bands': statbands } )
+            dbrow = cursor.fetchone()
+            assert dbrow[0] == pytest.approx( row.firstdetflux, rel=1e-5 )
+            assert dbrow[1] == pytest.approx( row.firstdetfluxerr, rel=1e-5 )
+            assert dbrow[2] == pytest.approx( row.firstdetmjd, abs=1e-5 )
+            assert dbrow[3] == row.firstdetband
 
             q = ( "SELECT psfflux, psffluxerr, midpointmjdtai, band "
                   "FROM diaforcedsource "
@@ -45,8 +58,8 @@ def check_df_contents( df, procverid, statbands=None ):
             dbrow = cursor.fetchone()
             assert dbrow[0] == pytest.approx( row.lastforcedflux, rel=1e-5 )
             assert dbrow[1] == pytest.approx( row.lastforcedfluxerr, rel=1e-5 )
-            assert dbrow[2] == pytest.approx( row.lastforcedfluxmjd, abs=1e-5 )
-            assert dbrow[3] == row.lastforcedfluxband
+            assert dbrow[2] == pytest.approx( row.lastforcedmjd, abs=1e-5 )
+            assert dbrow[3] == row.lastforcedband
 
 
 # The test_user fixture is in this next test not becasue it's needed for
@@ -69,11 +82,11 @@ def test_object_search( procver, test_user, snana_fits_maintables_loaded_module 
     # Do an absurdly large radial query to see if we get more than one
     jsonresults = ltcv.object_search( procver.description, return_format='json',
                                       ra=185.45, dec=-34.95, radius=5.3*3600. )
-    assert set( jsonresults.keys() ) == { 'diaobjectid', 'ra', 'dec', 'ndet',
-                                          'maxdetflux', 'maxdetfluxerr', 'maxdetfluxmjd', 'maxdetfluxband',
-                                          'lastdetflux', 'lastdetfluxerr', 'lastdetfluxmjd', 'lastdetfluxband',
-                                          'lastforcedflux', 'lastforcedfluxerr', 'lastforcedfluxmjd',
-                                          'lastforcedfluxband' }
+    assert set( jsonresults.keys() ) == { 'diaobjectid', 'ra', 'dec', 'numdet', 'numdetinwindow',
+                                          'firstdetmjd', 'firstdetband', 'firstdetflux', 'firstdetfluxerr',
+                                          'lastdetmjd', 'lastdetband', 'lastdetflux', 'lastdetfluxerr',
+                                          'maxdetmjd', 'maxdetband', 'maxdetflux', 'maxdetfluxerr',
+                                          'lastforcedmjd', 'lastforcedband', 'lastforcedflux', 'lastforcedfluxerr' }
     assert set( jsonresults['diaobjectid']) == { 1340712, 1822149, 2015822 }
 
     # Also get the pandas response, make sure it's the same as json
@@ -93,9 +106,9 @@ def test_object_search( procver, test_user, snana_fits_maintables_loaded_module 
                                    ra=185.45, dec=-34.95, radius=5.3*3600.,
                                    statbands='r' )
     assert len(resultsr) == 3
-    assert all( r.maxdetfluxband == 'r' for r in resultsr.itertuples() )
-    assert all( r.lastdetfluxband == 'r' for r in resultsr.itertuples() )
-    assert all( r.lastforcedfluxband == 'r' for r in resultsr.itertuples() )
+    assert all( r.maxdetband == 'r' for r in resultsr.itertuples() )
+    assert all( r.lastdetband == 'r' for r in resultsr.itertuples() )
+    assert all( r.lastforcedband == 'r' for r in resultsr.itertuples() )
     check_df_contents( resultsr, procver.id, ['r'] )
 
     # Now try r- and g-band
@@ -106,9 +119,9 @@ def test_object_search( procver, test_user, snana_fits_maintables_loaded_module 
     # Because we searched more bands, at least one of the lightcurves should have more detections
     bigger = False
     for row in resultsrg.itertuples():
-        bigger = bigger or ( resultsr[resultsr.diaobjectid==row.diaobjectid].ndet.values[0] < row.ndet )
+        bigger = bigger or ( resultsr[resultsr.diaobjectid==row.diaobjectid].numdet.values[0] < row.numdet )
     assert bigger
-    assert all( r.maxdetfluxband in ('r', 'g') for r in resultsrg.itertuples() )
-    assert all( r.lastdetfluxband in ('r', 'g') for r in resultsrg.itertuples() )
-    assert all( r.lastforcedfluxband in  ('r', 'g') for r in resultsrg.itertuples() )
+    assert all( r.maxdetband in ('r', 'g') for r in resultsrg.itertuples() )
+    assert all( r.lastdetband in ('r', 'g') for r in resultsrg.itertuples() )
+    assert all( r.lastforcedband in  ('r', 'g') for r in resultsrg.itertuples() )
     check_df_contents( resultsrg, procver.id, ['r', 'g'] )

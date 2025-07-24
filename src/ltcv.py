@@ -1,6 +1,6 @@
 import datetime
 import numbers
-import json
+import json   # noqa: F401
 
 import numpy
 import pandas
@@ -174,7 +174,7 @@ def object_ltcv( processing_version, diaobjectid, return_format='json', bands=No
 
 
 def object_search( processing_version, return_format='json', just_objids=False, **kwargs ):
-    """Search for objects
+    """Search for objects.
 
     For parameters that define the search, if they are None, they are
     not considered in the search.  (I.e. that filter will be skipped.)
@@ -195,11 +195,23 @@ def object_search( processing_version, return_format='json', just_objids=False, 
          If None, won't filter on RA/Dec.  (Doesn't make sense to
          specify only one and not the other, or to specify this and not radius.)
 
-      center : float, default None
+      radius : float, default None
          Radius of the cone search in arcseconds.  Doesn't make sense to
          specfiy this without both ra and dec.  TODO : make a maximum supported
          value based on what's sane with Q3C.  Right now, accepts any number
          and merrily passes that number on to PostgreSQL.
+
+      window_t0, window_t1 : float, default None
+         If given, a pair of MJDs defining a "detection window" used for some filters.
+
+      min_window_numdetections : int, default None
+         Only return objects with at least this many detections between
+         window_t0 and window_t1.  Requires window_t0 and window_t1 to
+         be given.
+
+      # relwindow_t0, relwindow_t1 : float, default None
+      #    NOT IMPLEMENTED.  Intended to be a time window around maximum-flux detection.
+
 
       mint_firsdtdetection : float, default None
          Only return objects whose first detection is on this MJD or later.
@@ -207,14 +219,59 @@ def object_search( processing_version, return_format='json', just_objids=False, 
       maxt_firstdetection : float, default None
          Only return objects whose first detection is on this MJD or earlier.
 
+      minmag_firstdetection : float, default None
+         Only return objects whose first detection has at least this
+         magnitude.  (Filters out things that were bright when first
+         discovered.)
+
+      maxmag_firstdetection : float, default None
+         Only return objects whose first detection had at most this
+         magnitude.  It's hard to think of a reason why you'd want to use this,
+         as the brightest object in the world might have been just starting
+         when first discovered....
+
+
       mint_lastdetection : float, default None
          Only return objects whose last detection is on this MJD or later.
 
       maxt_lastdetection : float, default None
          Only return objects whose last detection is on this MJD or later.
 
+      minmag_lastdetection : float, default None
+         Only return objects whose last detection had at least this
+         magnitude.  Use this to filter out things that had gotten too
+         dim last time they were detected.  NOTE: min_lastmag is
+         probably more useful than this.
+
+      maxmag_lastdetection : float, default None
+         Only return things whose last detection had at most this
+         magnitude.  Probably max_lastmag is more useful if you're
+         trying to through out things that are too dim.
+
+
+      mint_maxdetection : float, default None
+         Only return objects whose highest-flux detection is on this MJD or later.
+
+      maxt_maxdetection : float, default None
+         Only return objects whose highest-flux detection i son this MJD or earlier.
+
+      minmag_maxdetection : float, default None
+         Only return objects whose highest-flux detection has at least
+         this magnitude.  Use to elimiate objects that were too bright
+         at peak.
+
+      maxmag_maxdetection : float, default None
+         Only return objects whose highest-flux detection has at most
+         this magnitude.  Use to eliminate obejcts that were too dim at
+         peak.
+
+
       min_numdetections : int, default None
          Only return objects with at least this many detections.
+
+      # min_bandsdetected : int, default None
+      #    Only return objects that have been detected in at least this many different  bnads.
+      #    (Not yet implemented.)
 
       mindt_firstlastdetection : float, default None
          Only return objects that have at least this many days between the first and last detection.
@@ -222,8 +279,6 @@ def object_search( processing_version, return_format='json', just_objids=False, 
       maxdt_firstlastdetection : float, default None
          Only return objects that have at most this many days between the first and last detection.
 
-      min_bandsdetected : int, default None
-         Only return objects that have been detected in at least this many different  bnads.
 
       min_lastmag : float, default None
          The most recent measurement (not detection! includes forced
@@ -234,6 +289,7 @@ def object_search( processing_version, return_format='json', just_objids=False, 
          The most recent measurement (not detection! includes forced
          sources) must have a magnitude that is at most this.  (Use this
          to filter out things that are too dim.)
+
 
       statbands : list of string, default None
          Normally, all of the cuts based on detection dates, detection
@@ -252,26 +308,37 @@ def object_search( processing_version, return_format='json', just_objids=False, 
       A table of data.  If just_objids is true, this will have a single
       column, "diaobjectid" that has the object ids within the specified
       processing verison of objects that match the search.  Otherwise,
-      there will be additional columns:
+      there will be additional columns.  (For all of these columns,
+      assume that there is a "within statbands" in the definition.)
+
+          ROB THIS IS WRONG FIX ALL OF THIS DOCUMENTATION BELOW
+
+          diaobjectid — object id (within the specified processing version)
 
           ra — ra of the object (from the object table... *not* necessarily the best position)
           dec — dec of the object
-          ndet — number of detedtions (within statbands if relevant)
+          numdet — number of detections
+          numdetinwindow — number of detections in [window_t0, window_t0].  (Null if window not given.)
 
-          maxfluxt — MJD of the maximum flux (within statbands, if relevant)
-          maxfluxband — band of the maximum flux
-          maxflux — maximum flux (in nJy)
-          maxdflux — undertainty on maximum flux
+          firstdetmjd — mjd of first detection
+          firstdetband — band of first detection
+          firstdetflux — flux (nJy) of first detection
+          firstdetfluxerr — uncertainty on firstdetflux
 
-          lastdetfluxt — MJD of most recent *detection* (i.e. source, not forcedsource) (within statbands if relevant)
-          lastdetfluxband — band of most recent detection
-          lastdetflux — flux (in nJy) of most recent detection
-          lastdetdflux — uncertaintly on lastdetflux
+          lastdetmjd — mjd of last detection
+          lastdetband — band of last detection
+          lastdetflux — flux (nJy) of last detection
+          lastdetfluxerr — uncertainty on lastdetflux
 
-          lastforcedfluxt — MJD of most recent *measurement* (forced source) (within statbands if relevant)
-          lastforcedfluxband — band of most recent measurement
-          lastforcedflux — flux (in nJy) of most recent detection
-          lastforceddflux — uncertaintly on lastforcedflux
+          maxdetmjd — mjd of max-flux detection
+          maxdetband — band of max-flux detection
+          maxdetflux — flux (nJy) of max-flux detection
+          maxdetfluxerr — uncertainty on maxdetflux
+
+          lastforcedmjd — mjd of last measurement
+          lastforcedband — band of last measurement
+          lastforcedflux — flux (nJy) of last forced detection
+          lastforcedfluxerr — uncertainty on lastforcedflux
 
       If return_format is json, then the return is actually a
       dictionary; the keys of the dictionary are the names listed above,
@@ -286,10 +353,13 @@ def object_search( processing_version, return_format='json', just_objids=False, 
 
     util.logger.debug( f"In object_search : kwargs = {kwargs}" )
     knownargs = { 'ra', 'dec', 'radius',
-                  'mint_firstdetection', 'maxt_firstdetection',
-                  'mint_lastdetection', 'maxt_lastdetection',
-                  'min_numdetections', 'mindt_firstlastdetection','maxdt_firstlastdetection',
-                  'min_bandsdetected', 'min_lastmag', 'max_lastmag',
+                  'window_t0', 'window_t1', 'min_window_numdetections',
+                  'mint_firstdetection', 'maxt_firstdetection', 'minmag_firstdetection', 'maxmag_firstdetection',
+                  'mint_lastdetection', 'maxt_lastdetection', 'minmag_lastdetection', 'maxmag_lastdetection',
+                  'mint_maxdetection', 'maxt_maxdetection', 'minmag_maxdetectin', 'maxmag_maxdetection',
+                  'min_numdetections', 'min_bandsdetected',
+                  'mindt_firstlastdetection','maxdt_firstlastdetection',
+                  'min_lastmag', 'max_lastmag',
                   'statbands' }
 
     unknownargs = set( kwargs.keys() ) - knownargs
@@ -299,6 +369,7 @@ def object_search( processing_version, return_format='json', just_objids=False, 
     if return_format not in [ 'json', 'pandas' ]:
         raise ValueError( f"Unknown return format {return_format}" )
 
+    # Parse out statbands, allowing either a single string or a list of strings
     statbands = None
     if 'statbands' in kwargs:
         if ( ( ( isinstance( kwargs['statbands'], str ) ) and ( len(kwargs['statbands'].strip()) == 0 ) )
@@ -313,145 +384,316 @@ def object_search( processing_version, return_format='json', just_objids=False, 
             if not all( isinstance(b, str) for b in statbands ):
                 return TypeError( 'statbands must be a str or a list of str' )
 
-    with db.DB() as con:
-        cursor = con.cursor()
+    # WARNING: hardcoding the 31.4 zeropoint for nJy fluxes here.  (The schema do define
+    #   flux as being in nJy.)
+    zp = 31.4
 
+    # Parse out (the rest of the) arguments to variables
+    ra = util.float_or_none_from_dict_float_or_hms( kwargs, 'ra' )
+    dec = util.float_or_none_from_dict_float_or_dms( kwargs, 'dec' )
+    radius = util.float_or_none_from_dict( kwargs, 'radius' )
+
+    window_t0 = util.float_or_none_from_dict( kwargs, 'window_t0' )
+    window_t1 = util.float_or_none_from_dict( kwargs, 'window_t1' )
+    min_window_numdetections = util.int_or_none_from_dict( kwargs, 'min_window_numdetections' )
+
+    mint_firstdetection = util.float_or_none_from_dict( kwargs, 'mint_firstdetection' )
+    maxt_firstdetection = util.float_or_none_from_dict( kwargs, 'maxt_firstdetection' )
+    minmag_firstdetection = util.float_or_none_from_dict( kwargs, 'minmag_firstdetection' )
+    maxmag_firstdetection = util.float_or_none_from_dict( kwargs, 'maxmag_firstdetection' )
+
+    mint_lastdetection = util.float_or_none_from_dict( kwargs, 'mint_lastdetection' )
+    maxt_lastdetection = util.float_or_none_from_dict( kwargs, 'maxt_lastdetection' )
+    minmag_lastdetection = util.float_or_none_from_dict( kwargs, 'minmag_lastdetection' )
+    maxmag_lastdetection = util.float_or_none_from_dict( kwargs, 'maxmag_lastdetection' )
+
+    mint_maxdetection = util.float_or_none_from_dict( kwargs, 'mint_maxdetection' )
+    maxt_maxdetection = util.float_or_none_from_dict( kwargs, 'maxt_maxdetection' )
+    minmag_maxdetection = util.float_or_none_from_dict( kwargs, 'minmag_maxdetection' )
+    maxmag_maxdetection = util.float_or_none_from_dict( kwargs, 'maxmag_maxdetection' )
+
+    min_numdetections = util.int_or_none_from_dict( kwargs, 'min_numdetections' )
+    min_bandsdetected = util.int_or_none_from_dict( kwargs, 'min_bandsdetected' )
+
+    mindt_firstlastdetection = util.float_or_none_from_dict( kwargs, 'mindt_firstlastdetection' )
+    maxdt_firstlastdetection = util.float_or_none_from_dict( kwargs, 'maxdt_firstlastdetection' )
+
+    min_lastmag = util.float_or_none_from_dict( kwargs, 'min_lastmag' )
+    max_lastmag = util.float_or_none_from_dict( kwargs, 'max_lastmag' )
+
+    # Stuff currently not implemented
+    if min_bandsdetected is not None:
+        raise NotImplementedError( "min_bandsdetected is not yet implemented" )
+
+
+    with db.DBCon() as con:
         # Figure out processing version
         try:
             procver = int( processing_version)
         except Exception:
-            cursor.execute( "SELECT id FROM processing_version WHERE description=%(procver)s",
-                            { 'procver': processing_version } )
-            rows = cursor.fetchall()
+            rows, _ = con.execute( "SELECT id FROM processing_version WHERE description=%(procver)s",
+                                   { 'procver': processing_version } )
             if len(rows) == 0:
-                cursor.execute( "SELECT id FROM processing_version_alias WHERE description=%(procver)s",
-                                { 'procver': processing_version } )
-                rows = cursor.fetchall()
+                rows, _ = con.execute( "SELECT id FROM processing_version_alias WHERE description=%(procver)s",
+                                       { 'procver': processing_version } )
                 if len(rows) == 0:
                     raise ValueError( f"Unknown processing version {processing_version}" )
             procver = rows[0][0]
 
-        # Filter by ra and dec if given
-        ra = util.float_or_none_from_dict_float_or_hms( kwargs, 'ra' )
-        dec = util.float_or_none_from_dict_float_or_dms( kwargs, 'dec' )
-        radius = util.float_or_none_from_dict( kwargs, 'radius' )
+
+        # Search criteria consistency checks
         if ( any( [ ( ra is None ), ( dec is None ), ( radius is None ) ] )
              and not all( [ ( ra is None ), ( dec is None ), ( radius is None ) ] ) ):
             raise ValueError( "Must give either all or none of ra dec, radius, not just one or two" )
 
+        if ( window_t0 is None ) != ( window_t1 is None ):
+            raise ValueError( "Must give both or neither of window_t0, window_t1, not just one" )
+        if ( min_window_numdetections is not None ) and ( window_t0 is None ):
+            raise ValueError( "min_window_numdetections requires window_t0 and window_t1" )
+        if ( ( window_t0 is not None ) and ( maxt_lastdetection is not None )
+             and ( maxt_lastdetection < window_t0 ) ):
+            raise ValueError( f"window_t0={window_t0} and maxt_lastdetection={maxt_lastdetection} inconsistent" )
+        if ( ( window_t1 is not None ) and ( mint_firstdetection is not None )
+             and ( mint_firstdetection > window_t1 ) ):
+            raise ValueError( f"window_t1={window_t1} and mint_firstdetection={mint_firstdetection} inconsistent" )
+
+        # TODO : compare max detection time to first and last detection time
+
         nexttable = 'diaobject'
+
+        # Filter by ra and dec if given
         if ra is not None:
             radius = util.float_or_none_from_dict( kwargs, 'radius' )
             radius = radius if radius is not None else 10.
-            q = ( "SELECT * INTO TEMP TABLE objsearch_tmp1 "
-                  "FROM diaobject "
-                  "WHERE processing_version=%(pv)s "
+            q = ( "SELECT diaobjectid,ra,dec INTO TEMP TABLE objsearch_radeccut\n"
+                  "FROM diaobject\n"
+                  "WHERE processing_version=%(pv)s\n"
                   "AND q3c_radial_query( ra, dec, %(ra)s, %(dec)s, %(rad)s )" )
             subdict = { 'pv': procver, 'ra': ra, 'dec': dec, 'rad': radius/3600. }
             util.logger.debug( f"Sending query: {q} with subdict {subdict}" )
-            cursor.execute( q, subdict )
-            nexttable = 'objsearch_tmp1'
+            con.execute_nofetch( q, subdict )
+            nexttable = 'objsearch_radeccut'
 
-        mint_firstdet = util.mjd_or_none_from_dict_mjd_or_timestring( kwargs, 'mint_firstdetection' )
-        maxt_firstdet = util.mjd_or_none_from_dict_mjd_or_timestring( kwargs, 'maxt_firstdetection' )
-        mint_lastdet = util.mjd_or_none_from_dict_mjd_or_timestring( kwargs, 'mint_lastdetection' )
-        maxt_lastdet = util.mjd_or_none_from_dict_mjd_or_timestring( kwargs, 'maxt_lastdetection' )
-        if any( i is not None for i in [ mint_firstdet, maxt_firstdet, mint_lastdet, maxt_lastdet ] ):
-            raise NotImplementedError( "Filtering by detection times not yet implemented" )
+        # Count (and maybe filter) by number of detections within the time window
+        # ROB TODO : use processing version index
+        if window_t0 is not None:
+            if nexttable != 'diaobject':
+                # Make a primary key so we can group by
+                con.execute_nofetch( f"ALTER TABLE {nexttable} ADD PRIMARY KEY (diaobjectid)" )
+            subdict = { 'pv': procver, 't0': window_t0, 't1': window_t1 }
+            q = ( f"/*+ IndexScan(s idx_diasource_diaobjectid) */\n"
+                  f"SELECT diaobjectid,ra,dec,COUNT(s.midpointmjdtai) AS numdetinwindow\n"
+                  f"INTO TEMP TABLE objsearch_windowdet\n"
+                  f"FROM ( SELECT o.*, s.midpointmjdtai FROM {nexttable} o\n"
+                  f"       INNER JOIN diasource s ON o.diaobjectid=s.diaobjectid\n"
+                  f"              AND s.processing_version=%(pv)s\n"
+                  f"       WHERE s.midpointmjdtai>=%(t0s) AND s.midpointmjdtai<=%(t1)s\n" )
+            if statbands is not None:
+                q += "          AND s.band=ANY(%(bands)s)\n"
+            q += ( "     ) subq\n"
+                   "GROUP BY o.diaobjectid\n" )
+            if min_window_numdetections is not None:
+                q += "WHERE numdetinwindow>=%(n)"
+                subdict['n'] = min_window_numdetections
+            con.execute_nofetch( q, subdict )
+            nexttable = 'objsearch_windowdet'
 
-        mindt = util.float_or_none_from_dict( kwargs, 'mindt_firstlastdetection' )
-        maxdt = util.float_or_none_from_dict( kwargs, 'maxdt_firstlastdetection' )
-        if ( mindt is not None ) or ( maxdt is not None ):
-            raise NotImplementedError( "Filtering by time between first and last detection not yet implemented" )
 
-        min_bands = util.int_or_none_from_dict( kwargs, 'min_bandsdetected' )
-        if min_bands is not None:
-            raise NotImplementedError( "Filtering by number of bands detected is not yet implemented" )
+        # First pass cut that has any detection with (min(minfirst,minlast) < t < max(maxfirst,maxlast)
+        #   to try to cut down the total size of stuff to think about in our next big join
+        # TODO : also thing about adding magnitude cuts here!  May not
+        #   be worth it since we don't have indexes on fluxes.  (Maybe we should?)
+        if any( i is not None for i in [ mint_firstdetection, maxt_firstdetection,
+                                         mint_lastdetection, maxt_lastdetection ] ):
+            if ( ( maxt_lastdetection is not None ) and ( mint_firstdetection is not None ) and
+                 ( mint_firstdetection < maxt_lastdetection ) ):
+                raise RuntimeError( "maxt_lastdetection > mint_firstdetection, which makes no sense." )
+            subdict = { 'pv': procver }
+            q = ( f"/*+ IndexScan(s idx_diasource_diaobjectid) */\n"
+                  f"SELECT o.* INTO TEMP TABLE objsearch_detcut FROM (\n"
+                  f"  SELECT DISTINCT ON (diaobjectid) diaobjectid FROM {nexttable} o\n"
+                  f"  INNER JOIN diasource s ON s.diaobjectid=o.diaobjectid\n"
+                  f"                        AND s.processing_version=%(pv)s\n" )
+            if ( mint_firstdetection is not None ) or ( mint_lastdetection is not None ):
+                q += "    AND midpointmjdtai>=%(mint)s\n"
+                subdict['mint'] = ( mint_firstdetection if mint_lastdetection is None
+                                    else mint_lastdetection if mint_firstdetection is None
+                                    else min( mint_firstdetection, mint_lastdetection ) )
+            if ( maxt_firstdetection is not None ) or ( maxt_lastdetection is not None ):
+                q += "    AND midpointmjdtai<=%(maxt)s\n"
+                subdict['maxt'] = ( maxt_firstdetection if maxt_lastdetection is None
+                                    else maxt_lastdetection if maxt_firstdetection is None
+                                    else max( maxt_firstdetection, maxt_lastdetection ) )
+            if statbands is not None:
+                q += "    AND s.band=ANY(%(bands)s) "
+                subdict['bands'] = statbands
+            con.execute_nofetch( q, subdict )
+            nexttable = "objsearch_detcut"
 
-        min_lastmag = util.float_or_none_from_dict( kwargs, 'min_lastmag' )
-        max_lastmag = util.float_or_none_from_dict( kwargs, 'max_lastmag' )
-        if ( min_lastmag is not None ) or ( max_lastmag is not None ):
-            raise NotImplementedError( "Filtering by last magnitude not yet implemented" )
-
-
-        if nexttable == 'diaobject':
-            raise RuntimeError( "Error, no search criterion given" )
-
-        q = ( f"SELECT o.diaobjectid, o.ra, o.dec, s.psfflux AS srcflux, s.psffluxerr AS srcdflux, "
-              f"       s.midpointmjdtai AS srct, s.band AS srcband "
-              f"INTO TEMP TABLE objsearch_sources "
-              f"FROM {nexttable} o "
-              f"INNER JOIN diasource s ON o.diaobjectid=s.diaobjectid AND s.processing_version=%(pv)s " )
+        # Make a temp table that has number of detections, and first, last, and max detections
+        # NOTE.  We're being cavalier here with INNER JOIN.  The assumption is that
+        #   there will ALWAYS be at least one diasource for any diaobject, otherwise
+        #   the diaobject would never have been defined in the first place.
+        # TODO THINK : what about when statbands is given?  ROB THINK A LOT.
+        subdict = { 'pv': procver }
+        q = ( f"/*+ IndexScan(s idx_diasource_diaobjectid) */\n"
+              f"SELECT * INTO TEMP TABLE objsearch_stattab FROM (\n"
+              f"  SELECT DISTINCT ON (diaobjectid)\n"
+              f"         o.*, NULL::integer as numdet,\n"
+              f"         s.midpointmjdtai AS firstdetmjd, s.band AS firstdetband,\n"
+              f"         s.psfflux AS firstdetflux, s.psffluxerr AS firstdetfluxerr,\n"
+              f"         NULL::double precision as lastdetmjd, NULL::text as lastdetband,\n"
+              f"         NULL::double precision as lastdetflux, NULL::double precision as lastdetfluxerr,\n"
+              f"         NULL::double precision as maxdetmjd, NULL::text as maxdetband,\n"
+              f"         NULL::double precision as maxdetflux, NULL::double precision as maxdetfluxerr\n"
+              f"  FROM {nexttable} o\n"
+              f"  INNER JOIN diasource s ON s.diaobjectid=o.diaobjectid\n"
+              f"                        AND s.processing_version=%(pv)s\n" )
         if statbands is not None:
-            q += "WHERE s.band=ANY(%(bands)s) "
-        q += "ORDER BY diaobjectid, srct"
-        subdict = { 'pv': procver, 'bands': statbands }
-        util.logger.debug( f"Sending query: {q} with subdict {subdict}" )
-        cursor.execute( q, subdict )
-        q = ( "SELECT diaobjectid, ra, dec, COUNT(srcflux) AS ndet, "
-              "        NULL::real AS maxflux, NULL::real AS maxdflux, "
-              "        NULL::double precision AS maxfluxt, NULL::character(1) AS maxfluxband, "
-              "        NULL::real as lastflux, NULL::real AS lastdflux, NULL::character(1) as lastfluxband, "
-              "        NULL::double precision as lastfluxt "
-              "INTO TEMP TABLE objsearch_srcstats "
-              "FROM objsearch_sources "
-              "GROUP BY diaobjectid, ra, dec" )
-        util.logger.debug( f"Sending query {q}" )
-        cursor.execute( q )
-        q = ( "UPDATE objsearch_srcstats oss "
-              "SET maxflux=subq.srcflux, maxdflux=subq.srcdflux, maxfluxt=subq.srct, "
-              "    maxfluxband=subq.srcband "
-              "FROM ( SELECT DISTINCT ON (diaobjectid) diaobjectid, srcflux, srcdflux, srct, srcband "
-              "       FROM objsearch_sources "
-              "       ORDER BY diaobjectid, srcflux DESC ) subq "
-              "WHERE oss.diaobjectid=subq.diaobjectid" )
-        util.logger.debug( f"Sending query {q}" )
-        cursor.execute( q )
-        q = ( "UPDATE objsearch_srcstats oss "
-              "SET lastflux=subq.srcflux, lastdflux=subq.srcdflux, lastfluxt=subq.srct, "
-              "    lastfluxband=subq.srcband "
-              "FROM ( SELECT DISTINCT ON (diaobjectid) diaobjectid, srcflux, srcdflux, srct, srcband "
-              "       FROM objsearch_sources "
-              "       ORDER BY diaobjectid, srct DESC ) subq "
-              "WHERE oss.diaobjectid=subq.diaobjectid" )
-        util.logger.debug( f"Sending query {q}" )
-        cursor.execute( q )
+            subdict['bands'] = statbands
+            q += ( "  WHERE s.band=ANY(%(bands)s)\n"
+                   "  ORDER BY o.diaobjectid, s.midpointmjdtai\n" )
+        q += ") subq"
+        con.execute_nofetch( q, subdict )
+        q = ( f"/*+ IndexScan(s idx_diasource_diaobjectid) */\n"
+              f"UPDATE objsearch_stattab o\n"
+              f"SET lastdetmjd=midpointmjdtai, lastdetband=band,\n"
+              f"    lastdetflux=psfflux, lastdetfluxerr=psffluxerr\n"
+              f"FROM ( SELECT DISTINCT ON (o.diaobjectid) o.diaobjectid,\n"
+              f"                                          s.midpointmjdtai, s.band,\n"
+              f"                                          s.psfflux, s.psffluxerr\n"
+              f"       FROM {nexttable} o\n"
+              f"       INNER JOIN diasource s ON s.diaobjectid=o.diaobjectid\n"
+              f"                             AND s.processing_version=%(pv)s\n" )
+        if statbands is not None:
+            q += "               AND s.band=ANY(%(bands)s)\n"
+        q += ( "      ORDER BY o.diaobjectid, s.midpointmjdtai DESC\n"
+               "     ) subq\n"
+               "WHERE subq.diaobjectid=o.diaobjectid" )
+        con.execute_nofetch( q, subdict )
+        q = ( f"/*+ IndexScan(s idx_diasource_diobjectid) */\n"
+              f"UPDATE objsearch_stattab o\n"
+              f"SET maxdetmjd=midpointmjdtai, maxdetband=band,\n"
+              f"    maxdetflux=psfflux, maxdetfluxerr=psffluxerr\n"
+              f"FROM ( SELECT DISTINCT ON (o.diaobjectid) o.diaobjectid,\n"
+              f"                                          s.midpointmjdtai, s.band,\n"
+              f"                                          s.psfflux, s.psffluxerr\n"
+              f"       FROM {nexttable} o\n"
+              f"       INNER JOIN diasource s ON s.diaobjectid=o.diaobjectid\n"
+              f"                             AND s.processing_version=%(pv)s\n" )
+        if statbands is not None:
+            q += "               AND s.band=ANY(%(bands)s)\n"
+        q += ( "       ORDER BY o.diaobjectid, s.psfflux DESC\n"
+               "      ) subq\n"
+               "WHERE subq.diaobjectid=o.diaobjectid" )
+        con.execute_nofetch( q, subdict )
+        q = ( f"/*+ IndexScan(s idx_diasource_diaobjectid) */\n"
+              f"UPDATE objsearch_stattab o\n"
+              f"SET numdet=n "
+              f"FROM ( SELECT o.diaobjectid, COUNT(s.midpointmjdtai) AS n\n"
+              f"       FROM {nexttable} o\n"
+              f"       INNER JOIN diasource s ON s.diaobjectid=o.diaobjectid\n"
+              f"                             AND s.processing_version=%(pv)s\n" )
+        if statbands is not None:
+            q += "               AND s.band=ANY(%(bands)s)\n"
+        q += ( "       GROUP BY o.diaobjectid "
+               "     ) subq\n"
+               "WHERE subq.diaobjectid=o.diaobjectid" )
+        con.execute_nofetch( q, subdict )
 
-        # Filter on number of detections
-        if min_numdets is not None:
-            cursor.execute( "DELETE FROM objsearch_srcstats WHERE ndet<%(n)s", { 'n': min_numdets } )
+        # Delete from this table based on numdet and detection time as appropriate
+        if min_numdetections is not None:
+            con.execute_nofetch( "DELETE FROM objsearch_stattab WHERE numdet<%(n)s",
+                                 { 'n': min_numdetections } )
+        if mint_firstdetection is not None:
+            con.execute_nofetch( "DELETE FROM objsearch_stattab WHERE firstdett<%(t)s",
+                                 { 't': mint_firstdetection } )
+        if maxt_firstdetection is not None:
+            con.execute_nofetch( "DELETE FROM objsearch_stattab WHERE firstdett>%(t)s",
+                                 { 't': maxt_firstdetection } )
+        if mint_lastdetection is not None:
+            con.execute_nofetch( "DELETE FROM objsearch_stattab WHERE lastdett<%(t)s",
+                                 { 't': mint_lastdetection } )
+        if maxt_lastdetection is not None:
+            con.execute_nofetch( "DELETE FROM objsearch_stattab WHERE lastdett>%(t)s",
+                                 { 't': maxt_lastdetection }  )
+        if mint_maxdetection is not None:
+            con.execute_nofetch( "DELETE FROM objsearch_stattab WHERE maxdett<%(t)s",
+                                 { 't': mint_maxdetection } )
+        if maxt_maxdetection is not None:
+            con.execute_nofetch( "DELETE FROM objsearch_stattab WHERE maxdett>%(t)s",
+                                 { 't': maxt_maxdetection }  )
+        if mindt_firstlastdetection is not None:
+            con.execute_nofetch( "DELETE FROM objsearch_stattab WHERE lastdett-firstdett<%(t)s",
+                                 { 't': mindt_firstlastdetection } )
+        if maxdt_firstlastdetection is not None:
+            con.execute_nofetch( "DELETE FROM objsearch_stattab WHERE lastdett-firstdett>%(t)s",
+                                 { 't': maxdt_firstlastdetection } )
 
+        # Delete from this table based on first/last/max detection magnitude cuts
+        if minmag_firstdetection is not None:
+            con.execute_nofetch( "DELETE FROM objsearch_stattab WHERE firstdetflux>%(f)s",
+                                 { 'f': 10**((minmag_firstdetection-zp)/-2.5) } )
+        if maxmag_firstdetection is not None:
+            con.execute_nofetch( "DELETE FROM objsearch_stattab WHERE firstdetflux<%(f)s",
+                                 { 'f': 10**((maxmag_firstdetection-zp)/-2.5) } )
+        if minmag_lastdetection is not None:
+            con.execute_nofetch( "DELETE FROM objsearch_stattab WHERE lastdetflux>%(f)s",
+                                 { 'f': 10**((minmag_lastdetection-zp)/-2.5) } )
+        if maxmag_lastdetection is not None:
+            con.execute_nofetch( "DELETE FROM objsearch_stattab WHERE lastdetflux<%(f)s",
+                                 { 'f': 10**((maxmag_lastdetection-zp)/-2.5) } )
+        if minmag_maxdetection is not None:
+            con.execute_nofetch( "DELETE FROM objsearch_stattab WHERE maxdetflux>%(f)s",
+                                 { 'f': 10**((minmag_maxdetection-zp)/-2.5) } )
+        if maxmag_maxdetection is not None:
+            con.execute_nofetch( "DELETE FROM objsearch_stattab WHERE maxdetflux<%(f)s",
+                                 { 'f': 10**((maxmag_maxdetection-zp)/-2.5) } )
+
+        nexttable = 'objsearch_stattab'
+
+        # Get the last forced source
         # For some reason, Postgres was deciding not to use the index on this next query, which
         #   raised the runtime by two orders of magnitude.  Hint fixed it.
-        q = ( "/*+ IndexScan(f idx_diaforcedsource_diaobjectidpv ) */ "
-              "SELECT DISTINCT ON (t.diaobjectid) t.diaobjectid, t.ra, t.dec, t.ndet, "
-              "    t.maxflux AS maxdetflux, t.maxdflux AS maxdetfluxerr, t.maxfluxt AS maxdetfluxmjd, "
-              "    t.maxfluxband as maxdetfluxband, "
-              "    t.lastflux AS lastdetflux, t.lastdflux AS lastdetfluxerr, t.lastfluxt AS lastdetfluxmjd, "
-              "    t.lastfluxband AS lastdetfluxband, "
-              "    f.psfflux AS lastforcedflux, f.psffluxerr AS lastforcedfluxerr, "
-              "    f.midpointmjdtai AS lastforcedfluxmjd, f.band AS lastforcedfluxband "
-              "FROM objsearch_srcstats t "
-              "INNER JOIN diaforcedsource f ON t.diaobjectid=f.diaobjectid AND f.processing_version=%(pv)s " )
+        subdict = { 'pv': procver }
+        q = ( f"/*+ IndexScan(f idx_diaforcedsource_diaobjectidpv ) */ "
+              f"SELECT * INTO TEMP TABLE objsearch_final FROM (\n"
+              f"  SELECT DISTINCT ON (t.diaobjectid) t.*,\n"
+              f"      f.psfflux AS lastforcedflux, f.psffluxerr AS lastforcedfluxerr,\n"
+              f"      f.midpointmjdtai AS lastforcedmjd, f.band AS lastforcedband\n"
+              f"  FROM {nexttable} t\n"
+              f"  INNER JOIN diaforcedsource f ON t.diaobjectid=f.diaobjectid AND f.processing_version=%(pv)s\n" )
         if statbands is not None:
-            q += "WHERE f.band=ANY(%(bands)s) "
-        q += "ORDER BY t.diaobjectid, f.midpointmjdtai DESC"
-        subdict = { 'pv': procver, 'bands': statbands }
-        util.logger.debug( f"Sending query: {q} with subdict {subdict}" )
-        cursor.execute( q, subdict )
-        columns = [ d[0] for d in cursor.description ]
-        colummap = { cursor.description[i][0]: i for i in range( len(cursor.description) ) }
-        rows = cursor.fetchall()
+            q += "  WHERE f.band=ANY(%(bands)s)\n"
+            subdict['bands'] = statbands
+        q += ( "  ORDER BY t.diaobjectid, f.midpointmjdtai DESC\n"
+               ") subq" )
+        con.execute_nofetch( q, subdict )
 
+        # Filter baesd on last magnitude
+        if min_lastmag is not None:
+            con.execute_nofetch( "DELETE FROM objsearch_stattab WHERE lastforcedflux>%(f)s",
+                                 { 'f': 10**((min_lastmag-zp)/-2.5) } )
+        if max_lastmag is not None:
+            con.execute_nofetch( "DELETE FROM objsearch_stattab WHERE lastforcedflux<%(f)s",
+                                 { 'f': 10**((max_lastmag-zp)/-2.5) } )
+
+        # Pull down the results
+        rows, columns = con.execute( "SELECT * FROM objsearch_final" )
+        colummap = { columns[i]: i for i in range(len(columns)) }
         util.logger.debug( f"object_search returning {len(rows)} objects in format {return_format}" )
 
     if return_format == 'json':
         rval = { c: [ r[colummap[c]] for r in rows ] for c in columns }
-        util.logger.debug( f"returning json\n{json.dumps(rval,indent=4)}" )
+        if 'numdetinwindow' not in rval:
+            rval['numdetinwindow'] = [ None for r in rows ]
+        # util.logger.debug( f"returning json\n{json.dumps(rval,indent=4)}" )
         return rval
 
     elif return_format == 'pandas':
         df = pandas.DataFrame( rows, columns=columns )
+        if 'numdetinwindow' not in df.columns:
+            df['numdetinwindow'] = None
         # util.logger.debug( f"object_search pandas dataframe: {df}" )
         return df
 
