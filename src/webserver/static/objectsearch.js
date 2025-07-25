@@ -17,7 +17,7 @@ fastdbap.ObjectSearch = class
     render_page()
     {
         let self = this;
-        let table, tr, td, div, p;
+        let table, tr, td, div, hbox, vbox, p;
 
         rkWebUtil.wipeDiv( this.topdiv );
 
@@ -34,8 +34,12 @@ fastdbap.ObjectSearch = class
 
         // search by ra/dec
 
-        div = rkWebUtil.elemaker( "div", this.topdiv, { "classes": [ "searchinner", "xmarginright", "maxwcontent" ] } );
-        table = rkWebUtil.elemaker( "table", div, { "classes": [ "borderless" ] } );
+        div = rkWebUtil.elemaker( "div", this.topdiv, { "classes": [ "maxwcontent", "hbox" ] } );
+        vbox = rkWebUtil.elemaker( "div", div, { "classes": [ "vbox", "xmarginright", "searchinner" ] } );
+        table = rkWebUtil.elemaker( "table", vbox, { "classes": [ "borderless" ] } );
+        tr = rkWebUtil.elemaker( "tr", table );
+        td = rkWebUtil.elemaker( "td", tr );
+        rkWebUtil.button( td, "Search", (e) => { self.object_search() } );
         tr = rkWebUtil.elemaker( "tr", table );
         td = rkWebUtil.elemaker( "td", tr, { "text": "RA:", "classes": [ "right" ] } );
         td = rkWebUtil.elemaker( "td", tr );
@@ -51,9 +55,110 @@ fastdbap.ObjectSearch = class
         td = rkWebUtil.elemaker( "td", tr );
         this.radius_widget = rkWebUtil.elemaker( "input", td, { "attributes": { "size": 10 } } );
         rkWebUtil.elemaker( "text", td, { "text": '"' } );
+
+        // statbands
+
+        vbox = rkWebUtil.elemaker( "div", div, { "classes": [ "vbox", "xmarginright", "searchinner" ] } );
+        hbox = rkWebUtil.elemaker( "div", vbox, { "classes": [ "hbox", "bold" ] } );
+        hbox.innerHTML = "Consider<br>bands:";
+        hbox = rkWebUtil.elemaker( "div", vbox, { "classes": [ "hbox" ] } );
+        this.u_checkbox = rkWebUtil.elemaker( "input", hbox, { "id": "u_statband_checkbox",
+                                                               "attributes": { "type": "checkbox",
+                                                                               "checked": 1 } } );
+        rkWebUtil.elemaker( "label", hbox, { "text": "u ", "attributes": { "for": "u_statband_checkbox" } } );
+        this.g_checkbox = rkWebUtil.elemaker( "input", hbox, { "id": "g_statband_checkbox",
+                                                               "attributes": { "type": "checkbox",
+                                                                               "checked": 1 } } );
+        rkWebUtil.elemaker( "label", hbox, { "text": "g ", "attributes": { "for": "g_statband_checkbox" } } );
+        hbox = rkWebUtil.elemaker( "div", vbox, { "classes": [ "hbox" ] } );
+        this.r_checkbox = rkWebUtil.elemaker( "input", hbox, { "id": "r_statband_checkbox",
+                                                               "attributes": { "type": "checkbox",
+                                                                               "checked": 1 } } );
+        rkWebUtil.elemaker( "label", hbox, { "text": "r ", "attributes": { "for": "r_statband_checkbox" } } );
+        this.i_checkbox = rkWebUtil.elemaker( "input", hbox, { "id": "i_statband_checkbox",
+                                                               "attributes": { "type": "checkbox",
+                                                                               "checked": 1 } } );
+        rkWebUtil.elemaker( "label", hbox, { "text": "i ", "attributes": { "for": "i_statband_checkbox" } } );
+        hbox = rkWebUtil.elemaker( "div", vbox, { "classes": [ "hbox" ] } );
+        this.z_checkbox = rkWebUtil.elemaker( "input", hbox, { "id": "z_statband_checkbox",
+                                                               "attributes": { "type": "checkbox",
+                                                                               "checked": 1 } } );
+        rkWebUtil.elemaker( "label", hbox, { "text": "z ", "attributes": { "for": "z_statband_checkbox" } } );
+        this.y_checkbox = rkWebUtil.elemaker( "input", hbox, { "id": "y_statband_checkbox",
+                                                               "attributes": { "type": "checkbox",
+                                                                               "checked": 1 } } );
+        rkWebUtil.elemaker( "label", hbox, { "text": "Y ", "attributes": { "for": "y_statband_checkbox" } } );
+        
+        
+        // search by first/max/last mjd/mag
+        
+        vbox = rkWebUtil.elemaker( "div", div, { "classes": [ "vbox", "xmarginright", "searchinner" ] } );
+        table = rkWebUtil.elemaker( "table", vbox, { "classes": [ "borderless"] } );
         tr = rkWebUtil.elemaker( "tr", table );
+        td = rkWebUtil.elemaker( "th", tr );
+        td = rkWebUtil.elemaker( "th", tr, { "text": "min" } );
+        td = rkWebUtil.elemaker( "th", tr, { "text": "max" } );
+        td = rkWebUtil.elemaker( "th", tr );
+        td = rkWebUtil.elemaker( "th", tr, { "text": "min" } );
+        td = rkWebUtil.elemaker( "th", tr, { "text": "max" } );
+        
+        tr = rkWebUtil.elemaker( "tr", table );
+        td = rkWebUtil.elemaker( "td", tr, { "text": "First detection mjd", "classes": [ "right" ] } );
         td = rkWebUtil.elemaker( "td", tr );
-        rkWebUtil.button( td, "Search", (e) => { self.object_search() } );
+        this.firstdetminmjd_widget = rkWebUtil.elemaker( "input", td, { "attributes": { "size": 6 } } );
+        td = rkWebUtil.elemaker( "td", tr );
+        this.firstdetmaxmjd_widget = rkWebUtil.elemaker( "input", td, { "attributes": { "size": 6 } } );
+        td = rkWebUtil.elemaker( "td", tr, { "text": "mag" } );
+        td = rkWebUtil.elemaker( "td", tr );
+        this.firstdetminmag_widget = rkWebUtil.elemaker( "input", td, { "attributes": { "size": 4 } } );
+        td = rkWebUtil.elemaker( "td", tr );
+        this.firstdetmaxmag_widget = rkWebUtil.elemaker( "input", td, { "attributes": { "size": 4 } } );
+
+        tr = rkWebUtil.elemaker( "tr", table );
+        td = rkWebUtil.elemaker( "td", tr, { "text": "Last detection mjd", "classes": [ "right" ] } );
+        td = rkWebUtil.elemaker( "td", tr );
+        this.lastdetminmjd_widget = rkWebUtil.elemaker( "input", td, { "attributes": { "size": 6 } } );
+        td = rkWebUtil.elemaker( "td", tr );
+        this.lastdetmaxmjd_widget = rkWebUtil.elemaker( "input", td, { "attributes": { "size": 6 } } );
+        td = rkWebUtil.elemaker( "td", tr, { "text": "mag" } );
+        td = rkWebUtil.elemaker( "td", tr );
+        this.lastdetminmag_widget = rkWebUtil.elemaker( "input", td, { "attributes": { "size": 4 } } );
+        td = rkWebUtil.elemaker( "td", tr );
+        this.lastdetmaxmag_widget = rkWebUtil.elemaker( "input", td, { "attributes": { "size": 4 } } );
+
+        tr = rkWebUtil.elemaker( "tr", table );
+        td = rkWebUtil.elemaker( "td", tr, { "text": "Max detection mjd", "classes": [ "right" ] } );
+        td = rkWebUtil.elemaker( "td", tr );
+        this.maxdetminmjd_widget = rkWebUtil.elemaker( "input", td, { "attributes": { "size": 6 } } );
+        td = rkWebUtil.elemaker( "td", tr );
+        this.maxdetmaxmjd_widget = rkWebUtil.elemaker( "input", td, { "attributes": { "size": 6 } } );
+        td = rkWebUtil.elemaker( "td", tr, { "text": "mag" } );
+        td = rkWebUtil.elemaker( "td", tr );
+        this.maxdetminmag_widget = rkWebUtil.elemaker( "input", td, { "attributes": { "size": 4 } } );
+        td = rkWebUtil.elemaker( "td", tr );
+        this.maxdetmaxmag_widget = rkWebUtil.elemaker( "input", td, { "attributes": { "size": 4 } } );
+
+        tr = rkWebUtil.elemaker( "tr", table );
+        td = rkWebUtil.elemaker( "td", tr, { "text": "Min n. detections:", "classes": [ "right" ] } );
+        td = rkWebUtil.elemaker( "td", tr );
+        this.minnumdet_widget = rkWebUtil.elemaker( "input", td, { "attributes": { "size": 6 } } );
+        td = rkWebUtil.elemaker( "td", tr, { "text": "Latest mag", "classes": [ "right" ],
+                                             "attributes": { "colspan": 2 } } );
+        td = rkWebUtil.elemaker( "td", tr );
+        this.minlastforcedmag_widget = rkWebUtil.elemaker( "input", td, { "attributes": { "size": 4 } } );
+        td = rkWebUtil.elemaker( "td", tr );
+        this.maxlastforcedmag_widget = rkWebUtil.elemaker( "input", td, { "attributes": { "size": 4 } } );
+
+        // Window
+
+        vbox = rkWebUtil.elemaker( "div", div, { "classes": [ "vbox", "xmarginright", "searchinner" ] } );
+        rkWebUtil.elemaker( "p", vbox, { "text": "Search window:", "classes": [ "bold" ] } );
+        hbox = rkWebUtil.elemaker( "div", vbox, { "classes": [ "hbox" ], "text": "MJD: " } );
+        this.window_mjd0_widget = rkWebUtil.elemaker( "input", hbox, { "attributes": { "size": 6 } } );
+        rkWebUtil.elemaker( "text", hbox, { "text": " to " } );
+        this.window_mjd1_widget = rkWebUtil.elemaker( "input", hbox, { "attributes": { "size": 6 } } );
+        hbox = rkWebUtil.elemaker( "div", vbox, { "classes": [ "hbox", "xmargintop" ], "text": "Min detections: " } );
+        this.dets_in_window_widget = rkWebUtil.elemaker( "input", hbox, { "attributes": { "size": 3 } } );
     }
 
 
@@ -75,6 +180,59 @@ fastdbap.ObjectSearch = class
         if ( this.radius_widget.value.trim().length > 0 )
             searchcriteria.radius = this.radius_widget.value.trim();
 
+        let statbands = [];
+        if ( this.u_checkbox.checked ) statbands.push( 'u' );
+        if ( this.g_checkbox.checked ) statbands.push( 'g' );
+        if ( this.r_checkbox.checked ) statbands.push( 'r' );
+        if ( this.i_checkbox.checked ) statbands.push( 'i' );
+        if ( this.z_checkbox.checked ) statbands.push( 'z' );
+        if ( this.y_checkbox.checked ) statbands.push( 'Y' );
+        // If all are checked, don't include it as a criterion
+        if ( statbands.length < 6 )
+            searchcriteria.statbands = statbands;
+        
+        if ( this.firstdetminmjd_widget.value.trim().length > 0 )
+            searchcriteria.mint_firstdetection = this.firstdetminmjd_widget.value.trim();
+        if ( this.firstdetmaxmjd_widget.value.trim().length > 0 )
+            searchcriteria.maxt_firstdetection = this.firstdetmaxmjd_widget.value.trim();
+        if ( this.firstdetminmag_widget.value.trim().length > 0 )
+            searchcriteria.minmag_firstdetection = this.firstdetminmag_widget.value.trim();
+        if ( this.firstdetmaxmag_widget.value.trim().length > 0 )
+            searchcriteria.maxmag_firstdetection = this.firstdetmaxmag_widget.value.trim();
+            
+        if ( this.lastdetminmjd_widget.value.trim().length > 0 )
+            searchcriteria.mint_lastdetection = this.lastdetminmjd_widget.value.trim();
+        if ( this.lastdetmaxmjd_widget.value.trim().length > 0 )
+            searchcriteria.maxt_lastdetection = this.lastdetmaxmjd_widget.value.trim();
+        if ( this.lastdetminmag_widget.value.trim().length > 0 )
+            searchcriteria.minmag_lastdetection = this.lastdetminmag_widget.value.trim();
+        if ( this.lastdetmaxmag_widget.value.trim().length > 0 )
+            searchcriteria.maxmag_lastdetection = this.lastdetmaxmag_widget.value.trim();
+            
+        if ( this.maxdetminmjd_widget.value.trim().length > 0 )
+            searchcriteria.mint_maxdetection = this.maxdetminmjd_widget.value.trim();
+        if ( this.maxdetmaxmjd_widget.value.trim().length > 0 )
+            searchcriteria.maxt_maxdetection = this.maxdetmaxmjd_widget.value.trim();
+        if ( this.maxdetminmag_widget.value.trim().length > 0 )
+            searchcriteria.minmag_maxdetection = this.maxdetminmag_widget.value.trim();
+        if ( this.maxdetmaxmag_widget.value.trim().length > 0 )
+            searchcriteria.maxmag_maxdetection = this.maxdetmaxmag_widget.value.trim();
+        
+        if ( this.minnumdet_widget.value.trim().length > 0 )
+            searchcriteria.min_numdetections = this.minnumdet_widget.value.trim();
+        if ( this.minlastforcedmag_widget.value.trim().length > 0 )
+            searchcriteria.min_lastmag = this.minlastforcedmag_widget.value.trim();
+        if ( this.maxlastforcedmag_widget.value.trim().length > 0 )
+            searchcriteria.max_lastmag = this.maxlastforcedmag_widget.value.trim();
+
+        if ( this.window_mjd0_widget.value.trim().length > 0 )
+            searchcriteria.window_t0 = this.window_mjd0_widget.value.trim();
+        if ( this.window_mjd1_widget.value.trim().length > 0 )
+            searchcriteria.window_t1 = this.window_mjd1_widget.value.trim();
+        if ( this.dets_in_window_widget.value.trim().length > 0 )
+            searchcriteria.min_window_numdetections = this.dets_in_window_widget.value.trim();
+        
+        
         rkWebUtil.wipeDiv( this.context.objectlistdiv );
         this.context.searchtabs.selectTab( "objectsearch" );
         rkWebUtil.elemaker( "p", this.context.objectlistdiv, { "text": "Searching for objects...",

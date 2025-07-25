@@ -143,6 +143,7 @@ div.objectinfohbox { display: flex;
 .xmargin { margin-left: 1ex; margin-right: 1ex }
 .mmargin { margin-left: 1em; margin-right: 1em }
 .xmarginright { margin-right: 1ex }
+.xmargintop { margin-top: 1ex }
 
 .right { text-align: right }
 .center { text-align: center }
