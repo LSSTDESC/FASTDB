@@ -482,18 +482,18 @@ def object_search( processing_version, return_format='json', just_objids=False, 
                 con.execute_nofetch( f"ALTER TABLE {nexttable} ADD PRIMARY KEY (diaobjectid)" )
             subdict = { 'pv': procver, 't0': window_t0, 't1': window_t1 }
             q = ( f"/*+ IndexScan(s idx_diasource_diaobjectid) */\n"
-                  f"SELECT diaobjectid,ra,dec,COUNT(s.midpointmjdtai) AS numdetinwindow\n"
-                  f"INTO TEMP TABLE objsearch_windowdet\n"
-                  f"FROM ( SELECT o.*, s.midpointmjdtai FROM {nexttable} o\n"
-                  f"       INNER JOIN diasource s ON o.diaobjectid=s.diaobjectid\n"
-                  f"              AND s.processing_version=%(pv)s\n"
-                  f"       WHERE s.midpointmjdtai>=%(t0s) AND s.midpointmjdtai<=%(t1)s\n" )
+                  f"SELECT * INTO TEMP TABLE objsearch_windowdet FROM (\n"
+                  f"  SELECT o.diaobjectid, o.ra, o.dec, COUNT(s.midpointmjdtai) AS numdetinwindow\n"
+                  f"  FROM {nexttable} o\n"
+                  f"  INNER JOIN diasource s ON o.diaobjectid=s.diaobjectid\n"
+                  f"         AND s.processing_version=%(pv)s\n"
+                  f"  WHERE s.midpointmjdtai>=%(t0)s AND s.midpointmjdtai<=%(t1)s\n" )
             if statbands is not None:
-                q += "          AND s.band=ANY(%(bands)s)\n"
-            q += ( "     ) subq\n"
-                   "GROUP BY o.diaobjectid\n" )
+                q += "     AND s.band=ANY(%(bands)s)\n"
+            q += ( "  GROUP BY o.diaobjectid, o.ra, o.dec\n"
+                   ") subq\n" )
             if min_window_numdetections is not None:
-                q += "WHERE numdetinwindow>=%(n)"
+                q += "WHERE numdetinwindow>=%(n)s\n"
                 subdict['n'] = min_window_numdetections
             con.execute_nofetch( q, subdict )
             nexttable = 'objsearch_windowdet'
@@ -673,10 +673,10 @@ def object_search( processing_version, return_format='json', just_objids=False, 
 
         # Filter baesd on last magnitude
         if min_lastmag is not None:
-            con.execute_nofetch( "DELETE FROM objsearch_stattab WHERE lastforcedflux>%(f)s",
+            con.execute_nofetch( "DELETE FROM objsearch_final WHERE lastforcedflux>%(f)s",
                                  { 'f': 10**((min_lastmag-zp)/-2.5) } )
         if max_lastmag is not None:
-            con.execute_nofetch( "DELETE FROM objsearch_stattab WHERE lastforcedflux<%(f)s",
+            con.execute_nofetch( "DELETE FROM objsearch_final WHERE lastforcedflux<%(f)s",
                                  { 'f': 10**((max_lastmag-zp)/-2.5) } )
 
         # Pull down the results
