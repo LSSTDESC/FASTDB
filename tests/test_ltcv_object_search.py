@@ -1,13 +1,33 @@
 import pytest
 
+import numpy as np
+
 import db
 import ltcv
 
 
 def check_df_contents( df, procverid, statbands=None ):
+    """Used in the test ltcv object test, to verify that the first, last, max fields match the databse.
+
+    Won't work with anything that uses numdetinwindow, because the
+    database searches here that match what's in the dataframe don't take the
+    window into account, but ltcv.py::object_search first does a filter
+    for only things captured within the window.
+
+    """
+
     with db.DB() as con:
         cursor = con.cursor()
 
+        assert all( df.lastdetmjd >= df.firstdetmjd )
+        assert all( df.lastforcedmjd >= df.lastdetmjd )
+
+        if statbands is not None:
+            assert all( i in statbands for i in df.firstdetband )
+            assert all( i in statbands for i in df.lastdetband )
+            assert all( i in statbands for i in df.maxdetband )
+            assert all( i in statbands for i in df.lastforcedband )
+        
         for row in df.itertuples():
             q = ( "SELECT psfflux, psffluxerr, midpointmjdtai, band "
                   "FROM diasource "
@@ -73,6 +93,8 @@ def check_df_contents( df, procverid, statbands=None ):
 
 # This is separated out from test_ltcv.py since it uses a different fixture... at least for now
 def test_object_search( procver, test_user, snana_fits_maintables_loaded_module ):
+    """This test tests lots of the keywords, but doesn't test every conceivable combination because n² is big."""
+    
     with pytest.raises( ValueError, match="Unknown search keywords: {'foo'}" ):
         ltcv.object_search( procver.description, foo=5 )
 
@@ -125,3 +147,138 @@ def test_object_search( procver, test_user, snana_fits_maintables_loaded_module 
     assert all( r.lastdetband in ('r', 'g') for r in resultsrg.itertuples() )
     assert all( r.lastforcedband in  ('r', 'g') for r in resultsrg.itertuples() )
     check_df_contents( resultsrg, procver.id, ['r', 'g'] )
+
+
+    # FIRST/MAX/LAST FLUX MJD TESTS
+
+    results = ltcv.object_search( procver.description, return_format='pandas',
+                                  mint_firstdetection=60400, maxt_firstdetection=60700 )
+    assert all( results.firstdetmjd >= 60400 )
+    assert all( results.firstdetmjd <= 60700 )
+    assert any( results.lastdetmjd > 60700 )
+    assert all( results.lastdetmjd >= results.firstdetmjd )
+    check_df_contents( results, procver.id )
+
+    results = ltcv.object_search( procver.description, return_format='pandas',
+                                  mint_firstdetection=60400, maxt_firstdetection=60700,
+                                  statbands=['g','r'] )
+    assert len(results) == 64
+    assert all( results.firstdetmjd >= 60400 )
+    assert all( results.firstdetmjd <= 60700 )
+    assert any( results.lastdetmjd > 60700 )
+    check_df_contents( results, procver.id, ['g', 'r'] )
+
+    results = ltcv.object_search( procver.description, return_format='pandas',
+                                  mint_firstdetection=60400, maxt_firstdetection=60700,
+                                  minmag_firstdetection=22, maxmag_firstdetection=24 )
+    assert len(results) == 57
+    assert all( results.firstdetmjd >= 60400 )
+    assert all( results.firstdetmjd <= 60700 )
+    assert all( results.firstdetflux >= 10**( (24-31.4) / -2.5 ) )
+    assert all( results.firstdetflux <= 10**( (22-31.4) / -2.5 ) )
+    assert any( results.lastdetmjd > 60700 )
+    check_df_contents( results, procver.id )
+
+    results = ltcv.object_search( procver.description, return_format='pandas',
+                                  mint_firstdetection=60400, maxt_firstdetection=60700,
+                                  minmag_firstdetection=22, maxmag_firstdetection=24,
+                                  statbands=['g', 'r'] )
+    assert len(results) == 36
+    assert all( results.firstdetmjd >= 60400 )
+    assert all( results.firstdetmjd <= 60700 )
+    assert all( results.firstdetflux >= 10**( (24-31.4) / -2.5 ) )
+    assert all( results.firstdetflux <= 10**( (22-31.4) / -2.5 ) )
+    assert any( results.lastdetmjd > 60700 )
+    check_df_contents( results, procver.id, ['g', 'r'] )
+
+    
+    results = ltcv.object_search( procver.description, return_format='pandas',
+                                  mint_lastdetection=60400, maxt_lastdetection=60700 )
+    assert len(results) == 90
+    assert all( results.lastdetmjd >= 60400 )
+    assert all( results.lastdetmjd <= 60700 )
+    assert any( results.firstdetmjd < 60400 )
+    check_df_contents( results, procver.id )
+
+    results = ltcv.object_search( procver.description, return_format='pandas',
+                                  mint_lastdetection=60400, maxt_lastdetection=60700,
+                                  statbands=['g', 'r'] )
+    assert len(results) == 66
+    assert all( results.lastdetmjd >= 60400 )
+    assert all( results.lastdetmjd <= 60700 )
+    assert any( results.firstdetmjd < 60400 )
+    check_df_contents( results, procver.id, ['g', 'r'] )
+
+    results = ltcv.object_search( procver.description, return_format='pandas',
+                                  mint_lastdetection=60400, maxt_lastdetection=60700,
+                                  minmag_lastdetection=22, maxmag_lastdetection=24 )
+    assert len(results) == 67
+    assert all( results.lastdetmjd >= 60400 )
+    assert all( results.lastdetmjd <= 60700 )
+    assert all( results.lastdetflux >= 10**( (24-31.4) / -2.5 ) )
+    assert all( results.lastdetflux <= 10**( (22-31.4) / -2.5 ) )
+    assert any( results.firstdetmjd < 60400 )
+    check_df_contents( results, procver.id )
+
+    results = ltcv.object_search( procver.description, return_format='pandas',
+                                  mint_lastdetection=60400, maxt_lastdetection=60700,
+                                  minmag_lastdetection=22, maxmag_lastdetection=24,
+                                  statbands=['g', 'r'] )
+    assert len(results) == 43
+    assert all( results.lastdetmjd >= 60400 )
+    assert all( results.lastdetmjd <= 60700 )
+    assert all( results.lastdetflux >= 10**( (24-31.4) / -2.5 ) )
+    assert all( results.lastdetflux <= 10**( (22-31.4) / -2.5 ) )
+    assert any( results.firstdetmjd < 60400 )
+    check_df_contents( results, procver.id, ['g', 'r'] )
+
+    
+    results = ltcv.object_search( procver.description, return_format='pandas',
+                                  mint_maxdetection=60400, maxt_maxdetection=60700 )
+    assert len(results) == 88
+    assert all( results.maxdetmjd >= 60400 )
+    assert all( results.maxdetmjd <= 60700 )
+    assert any( results.firstdetmjd < 60400 )
+    assert any( results.lastdetmjd > 60700 )
+    check_df_contents( results, procver.id )
+
+    results = ltcv.object_search( procver.description, return_format='pandas',
+                                  mint_maxdetection=60400, maxt_maxdetection=60700,
+                                  statbands=['g', 'r'] )
+    assert len(results) == 64
+    assert all( results.maxdetmjd >= 60400 )
+    assert all( results.maxdetmjd <= 60700 )
+    assert any( results.firstdetmjd < 60400 )
+    # assert any( results.lastdetmjd > 60700 )   #  Just didn't happen...
+    check_df_contents( results, procver.id, ['g', 'r'] )
+
+
+    results = ltcv.object_search( procver.description, return_format='pandas',
+                                  mint_maxdetection=60400, maxt_maxdetection=60700,
+                                  minmag_maxdetection=22, maxmag_lastdetection=24 )
+    assert len(results) == 57
+    assert all( results.maxdetmjd >= 60400 )
+    assert all( results.maxdetmjd <= 60700 )
+    assert any( results.firstdetmjd < 60400 )
+    assert any( results.lastdetmjd > 60700 )
+    assert all( results.maxdetflux >= 10**( (24-31.4) / -2.5 ) )
+    assert all( results.maxdetflux <= 10**( (22-31.4) / -2.5 ) )
+    check_df_contents( results, procver.id )
+
+    results = ltcv.object_search( procver.description, return_format='pandas',
+                                  mint_maxdetection=60400, maxt_maxdetection=60700,
+                                  minmag_maxdetection=22, maxmag_lastdetection=24,
+                                  statbands=['g', 'r'] )
+    assert len(results) == 39
+    assert all( results.maxdetmjd >= 60400 )
+    assert all( results.maxdetmjd <= 60700 )
+    assert any( results.firstdetmjd < 60400 )
+    # assert any( results.lastdetmjd > 60700 )   #  Just didn't happen...
+    assert all( results.maxdetflux >= 10**( (24-31.4) / -2.5 ) )
+    assert all( results.maxdetflux <= 10**( (22-31.4) / -2.5 ) )
+    check_df_contents( results, procver.id, ['g', 'r'] )
+
+    # TODO
+    #   * num detections
+    #   * window
+    #   * last measurement (forced) mag

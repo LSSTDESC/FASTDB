@@ -356,7 +356,7 @@ def object_search( processing_version, return_format='json', just_objids=False, 
                   'window_t0', 'window_t1', 'min_window_numdetections',
                   'mint_firstdetection', 'maxt_firstdetection', 'minmag_firstdetection', 'maxmag_firstdetection',
                   'mint_lastdetection', 'maxt_lastdetection', 'minmag_lastdetection', 'maxmag_lastdetection',
-                  'mint_maxdetection', 'maxt_maxdetection', 'minmag_maxdetectin', 'maxmag_maxdetection',
+                  'mint_maxdetection', 'maxt_maxdetection', 'minmag_maxdetection', 'maxmag_maxdetection',
                   'min_numdetections', 'min_bandsdetected',
                   'mindt_firstlastdetection','maxdt_firstlastdetection',
                   'min_lastmag', 'max_lastmag',
@@ -510,8 +510,8 @@ def object_search( processing_version, return_format='json', just_objids=False, 
                 raise RuntimeError( "maxt_lastdetection > mint_firstdetection, which makes no sense." )
             subdict = { 'pv': procver }
             q = ( f"/*+ IndexScan(s idx_diasource_diaobjectid) */\n"
-                  f"SELECT o.* INTO TEMP TABLE objsearch_detcut FROM (\n"
-                  f"  SELECT DISTINCT ON (diaobjectid) diaobjectid FROM {nexttable} o\n"
+                  f"SELECT * INTO TEMP TABLE objsearch_detcut FROM (\n"
+                  f"  SELECT DISTINCT ON (o.diaobjectid) o.diaobjectid,o.ra,o.dec FROM {nexttable} o\n"
                   f"  INNER JOIN diasource s ON s.diaobjectid=o.diaobjectid\n"
                   f"                        AND s.processing_version=%(pv)s\n" )
             if ( mint_firstdetection is not None ) or ( mint_lastdetection is not None ):
@@ -527,6 +527,7 @@ def object_search( processing_version, return_format='json', just_objids=False, 
             if statbands is not None:
                 q += "    AND s.band=ANY(%(bands)s) "
                 subdict['bands'] = statbands
+            q += ") subq"
             con.execute_nofetch( q, subdict )
             nexttable = "objsearch_detcut"
 
@@ -606,28 +607,28 @@ def object_search( processing_version, return_format='json', just_objids=False, 
             con.execute_nofetch( "DELETE FROM objsearch_stattab WHERE numdet<%(n)s",
                                  { 'n': min_numdetections } )
         if mint_firstdetection is not None:
-            con.execute_nofetch( "DELETE FROM objsearch_stattab WHERE firstdett<%(t)s",
+            con.execute_nofetch( "DELETE FROM objsearch_stattab WHERE firstdetmjd<%(t)s",
                                  { 't': mint_firstdetection } )
         if maxt_firstdetection is not None:
-            con.execute_nofetch( "DELETE FROM objsearch_stattab WHERE firstdett>%(t)s",
+            con.execute_nofetch( "DELETE FROM objsearch_stattab WHERE firstdetmjd>%(t)s",
                                  { 't': maxt_firstdetection } )
         if mint_lastdetection is not None:
-            con.execute_nofetch( "DELETE FROM objsearch_stattab WHERE lastdett<%(t)s",
+            con.execute_nofetch( "DELETE FROM objsearch_stattab WHERE lastdetmjd<%(t)s",
                                  { 't': mint_lastdetection } )
         if maxt_lastdetection is not None:
-            con.execute_nofetch( "DELETE FROM objsearch_stattab WHERE lastdett>%(t)s",
+            con.execute_nofetch( "DELETE FROM objsearch_stattab WHERE lastdetmjd>%(t)s",
                                  { 't': maxt_lastdetection }  )
         if mint_maxdetection is not None:
-            con.execute_nofetch( "DELETE FROM objsearch_stattab WHERE maxdett<%(t)s",
+            con.execute_nofetch( "DELETE FROM objsearch_stattab WHERE maxdetmjd<%(t)s",
                                  { 't': mint_maxdetection } )
         if maxt_maxdetection is not None:
-            con.execute_nofetch( "DELETE FROM objsearch_stattab WHERE maxdett>%(t)s",
+            con.execute_nofetch( "DELETE FROM objsearch_stattab WHERE maxdetmjd>%(t)s",
                                  { 't': maxt_maxdetection }  )
         if mindt_firstlastdetection is not None:
-            con.execute_nofetch( "DELETE FROM objsearch_stattab WHERE lastdett-firstdett<%(t)s",
+            con.execute_nofetch( "DELETE FROM objsearch_stattab WHERE lastdetmjd-firstdetmjd<%(t)s",
                                  { 't': mindt_firstlastdetection } )
         if maxdt_firstlastdetection is not None:
-            con.execute_nofetch( "DELETE FROM objsearch_stattab WHERE lastdett-firstdett>%(t)s",
+            con.execute_nofetch( "DELETE FROM objsearch_stattab WHERE lastdetmjd-firstdetmjd>%(t)s",
                                  { 't': maxdt_firstlastdetection } )
 
         # Delete from this table based on first/last/max detection magnitude cuts
