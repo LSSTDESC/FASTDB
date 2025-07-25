@@ -657,7 +657,7 @@ def object_search( processing_version, return_format='json', just_objids=False, 
         # For some reason, Postgres was deciding not to use the index on this next query, which
         #   raised the runtime by two orders of magnitude.  Hint fixed it.
         subdict = { 'pv': procver }
-        q = ( f"/*+ IndexScan(f idx_diaforcedsource_diaobjectidpv ) */ "
+        q = ( f"/*+ IndexScan(f idx_diaforcedsource_diaobjectid ) */ "
               f"SELECT * INTO TEMP TABLE objsearch_final FROM (\n"
               f"  SELECT DISTINCT ON (t.diaobjectid) t.*,\n"
               f"      f.psfflux AS lastforcedflux, f.psffluxerr AS lastforcedfluxerr,\n"
@@ -881,7 +881,7 @@ def get_hot_ltcvs( processing_version, detected_since_mjd=None, detected_in_last
             #   "data through this date" then don't stop a day early.  If you mean
             #   "simulate what we knew on this date"), then do stop a day early, because
             #   forced photometry will be coming out with a delay of a ~day.
-            q = ( "/*+ IndexScan(f idx_diaforcedsource_diaobjectidpv)\n"
+            q = ( "/*+ IndexScan(f idx_diaforcedsource_diaobjectid)\n"
                   "    IndexScan(o)\n"
                   "*/\n"
                   "SELECT o.rootid AS rootid, o.ra AS ra, o.dec AS dec,"
@@ -905,8 +905,8 @@ def get_hot_ltcvs( processing_version, detected_since_mjd=None, detected_in_last
             #   are big!
             sourcedf = None
             if source_patch:
-                q = ( "/*+ IndexScan(s idx_diasource_diaobjectidpv)\n"
-                      "    IndexScan(f idx_diaforcedsource_diaobjectidpv)\n"
+                q = ( "/*+ IndexScan(s idx_diasource_diaobjectid)\n"
+                      "    IndexScan(f idx_diaforcedsource_diaobjectid)\n"
                       "    IndexScan(o)\n"
                       "*/\n"
                       "SELECT o.rootid,o.ra,o.dec,s.visit,s.detector,"

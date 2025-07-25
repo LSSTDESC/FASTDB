@@ -11,13 +11,22 @@ fastdbap.ObjectList = class
     {
         this.context = context;
         this.topdiv = parentdiv;
+        this.scrolltorow = null;
     }
 
+    focus_page()
+    {
+        if ( this.scrolltorow != null )
+            this.scrolltorow.scrollIntoView();
+    }
+    
     render_page( data )
     {
         let self = this;
         let tr;
 
+        this.scrolltorow = null;
+        
         // Calculate magnitudes assuming zp=31.4 (flux is nJy)
         data[ 'magmax' ] = []
         data[ 'magmaxerr' ] = []
@@ -80,13 +89,20 @@ fastdbap.ObjectList = class
                      'magforcedlasterr': 'dmag' }
 
 
+        let tablerows = {};
         let rowrenderer = function( data, fields, i ) {
             let tr, td;
             tr = rkWebUtil.elemaker( "tr", null );
             let args = {
                 'diaobjectid':      [ "td", tr, { "text": data.diaobjectid[i],
                                                   "classes": [ "link" ],
-                                                  "click": (e) => { self.show_object_info( data.diaobjectid[i] ); }
+                                                  "click": (e) => {
+                                                      if ( self.scrolltorow != null ) {
+                                                          self.scrolltorow.classList.remove( "bold" );
+                                                      }
+                                                      tr.classList.add( "bold" );
+                                                      self.scrolltorow = tr;
+                                                      self.show_object_info( data.diaobjectid[i] ); }
                                                 } ],
                 'ra':               [ "td", tr, { "text": data.ra[i].toFixed(5) } ],
                 'dec':              [ "td", tr, { "text": data.dec[i].toFixed(5) } ],

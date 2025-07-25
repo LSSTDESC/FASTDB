@@ -148,10 +148,13 @@ fastdbap.Context = class
 
     object_search_results( data )
     {
+        let self = this;
+
         rkWebUtil.wipeDiv( this.objectlistdiv );
         this.maintabs.selectTab( "objectlist" );
         this.objectlist = new fastdbap.ObjectList( this, this.objectlistdiv );
         this.objectlist.render_page( data );
+        this.maintabs.focuscallbacks["objectlist"] = () => { self.objectlist.focus_page() };
     }
 }
 

@@ -144,6 +144,12 @@ div.objectinfohbox { display: flex;
 .mmargin { margin-left: 1em; margin-right: 1em }
 .xmarginright { margin-right: 1ex }
 .xmargintop { margin-top: 1ex }
+.hborder2px { border-top-width: 2px; border-bottom-width: 2px;
+              border-top-color: var(--main-color);
+              border-bottom-color: var(--main-color);
+            }
+.hbordernone { border-top-width: 0; border-bottom-width: 0; }
+
 
 .right { text-align: right }
 .center { text-align: center }
