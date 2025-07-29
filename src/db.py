@@ -21,6 +21,14 @@ import pymongo
 
 import util
 
+# These next two are for debugging.  They are used in DBCon.__init__.
+# For normal use, they should be False, as they bloat the logs a lot.
+# (They will only actually add things to the logs the debug level,
+# Set near the bottom of webserver/server.py, is DEBUG.)
+# We should replace them with configurable options.
+_echoqueries = True
+_alwaysexplain = False
+
 # The tables here should be in the order they safe to drop.
 # (Insofar as it's safe to drop all your tables....)
 all_table_names = [ 'query_queue',
@@ -148,8 +156,9 @@ class DBCon:
 
         # TODO : make these next two configurable rather than hardcoded
         # These are useful for debugging, but are profligate for production
-        self.echoqueries = True
-        self.alwaysexplain = True
+        global _echoqueries, _alwaysexplain
+        self.echoqueries = _echoqueries
+        self.alwaysexplain = _alwaysexplain
 
         self.dictcursor = dictcursor
 
@@ -209,12 +218,12 @@ class DBCon:
         self.remake_cursor( self, self.curcursorisdict )  # ...is this necessary?
 
 
-    def execute_nofetch( self, q, subdict={} ):
+    def execute_nofetch( self, q, subdict={}, silent=False):
         """Runs a query where you don't expect to fetch results."""
-        if self.echoqueries:
+        if self.echoqueries and not silent:
             util.logger.debug( f"Sending query\n{q}\nwith substitutions: {subdict}" )
 
-        if self.alwaysexplain:
+        if self.alwaysexplain and not silent:
             self.cursor.execute( f"EXPLAIN {q}", subdict )
             rows = self.cursor.fetchall()
             dex = 'QUERY PLAN' if self.curcursorisdict else 0
@@ -224,7 +233,7 @@ class DBCon:
         self.cursor.execute( q, subdict )
 
 
-    def execute( self, q, subdict={} ):
+    def execute( self, q, subdict={}, silent=False ):
         """Runs a query, and returns either (rows, columns) or just rows.
 
         Parmaeters
@@ -238,6 +247,9 @@ class DBCon:
             there must be a key "var" in this dictionary with the value to
             be substituted.  Extra keys are ignored.
 
+          silent : bool, default False
+            If True, don't echo the query or the explain even if we normally would.
+
         Returns
         -------
           If the current cursor is a dict cursor, returns a list of dictionaries.
@@ -247,7 +259,7 @@ class DBCon:
           dictionary.  The second is a list of column names.
 
         """
-        self.execute_nofetch( q, subdict )
+        self.execute_nofetch( q, subdict, silent=silent )
         if self.curcursorisdict:
             return self.cursor.fetchall()
         else:

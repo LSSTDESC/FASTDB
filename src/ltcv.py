@@ -173,6 +173,11 @@ def object_ltcv( processing_version, diaobjectid, return_format='json', bands=No
         raise RuntimeError( "This should never happen." )
 
 
+def debug_count_temp_table( con, table ):
+    res = con.execute( f"SELECT COUNT(*) FROM {table}" )
+    util.logger.debug( f"Table {table} has {res[0][0]} rows" )
+
+
 def object_search( processing_version, return_format='json', just_objids=False, **kwargs ):
     """Search for objects.
 
@@ -264,7 +269,6 @@ def object_search( processing_version, return_format='json', just_objids=False, 
          Only return objects whose highest-flux detection has at most
          this magnitude.  Use to eliminate obejcts that were too dim at
          peak.
-
 
       min_numdetections : int, default None
          Only return objects with at least this many detections.
@@ -472,6 +476,7 @@ def object_search( processing_version, return_format='json', just_objids=False, 
             subdict = { 'pv': procver, 'ra': ra, 'dec': dec, 'rad': radius/3600. }
             util.logger.debug( f"Sending query: {q} with subdict {subdict}" )
             con.execute_nofetch( q, subdict )
+            debug_count_temp_table( con, 'objsearch_radeccut' )
             nexttable = 'objsearch_radeccut'
 
         # Count (and maybe filter) by number of detections within the time window
@@ -496,6 +501,7 @@ def object_search( processing_version, return_format='json', just_objids=False, 
                 q += "WHERE numdetinwindow>=%(n)s\n"
                 subdict['n'] = min_window_numdetections
             con.execute_nofetch( q, subdict )
+            debug_count_temp_table( con, 'objsearch_windowdet' )
             nexttable = 'objsearch_windowdet'
 
 
@@ -529,6 +535,7 @@ def object_search( processing_version, return_format='json', just_objids=False, 
                 subdict['bands'] = statbands
             q += ") subq"
             con.execute_nofetch( q, subdict )
+            debug_count_temp_table( con, 'objsearch_detcut' )
             nexttable = "objsearch_detcut"
 
         # Make a temp table that has number of detections, and first, last, and max detections
@@ -601,55 +608,71 @@ def object_search( processing_version, return_format='json', just_objids=False, 
                "     ) subq\n"
                "WHERE subq.diaobjectid=o.diaobjectid" )
         con.execute_nofetch( q, subdict )
+        debug_count_temp_table( con, 'objsearch_stattab' )
 
         # Delete from this table based on numdet and detection time as appropriate
         if min_numdetections is not None:
             con.execute_nofetch( "DELETE FROM objsearch_stattab WHERE numdet<%(n)s",
                                  { 'n': min_numdetections } )
+            debug_count_temp_table( con, 'objsearch_stattab' )
         if mint_firstdetection is not None:
             con.execute_nofetch( "DELETE FROM objsearch_stattab WHERE firstdetmjd<%(t)s",
                                  { 't': mint_firstdetection } )
+            debug_count_temp_table( con, 'objsearch_stattab' )
         if maxt_firstdetection is not None:
             con.execute_nofetch( "DELETE FROM objsearch_stattab WHERE firstdetmjd>%(t)s",
                                  { 't': maxt_firstdetection } )
+            debug_count_temp_table( con, 'objsearch_stattab' )
         if mint_lastdetection is not None:
             con.execute_nofetch( "DELETE FROM objsearch_stattab WHERE lastdetmjd<%(t)s",
                                  { 't': mint_lastdetection } )
+            debug_count_temp_table( con, 'objsearch_stattab' )
         if maxt_lastdetection is not None:
             con.execute_nofetch( "DELETE FROM objsearch_stattab WHERE lastdetmjd>%(t)s",
                                  { 't': maxt_lastdetection }  )
+            debug_count_temp_table( con, 'objsearch_stattab' )
         if mint_maxdetection is not None:
             con.execute_nofetch( "DELETE FROM objsearch_stattab WHERE maxdetmjd<%(t)s",
                                  { 't': mint_maxdetection } )
+            debug_count_temp_table( con, 'objsearch_stattab' )
         if maxt_maxdetection is not None:
             con.execute_nofetch( "DELETE FROM objsearch_stattab WHERE maxdetmjd>%(t)s",
                                  { 't': maxt_maxdetection }  )
+            debug_count_temp_table( con, 'objsearch_stattab' )
         if mindt_firstlastdetection is not None:
             con.execute_nofetch( "DELETE FROM objsearch_stattab WHERE lastdetmjd-firstdetmjd<%(t)s",
                                  { 't': mindt_firstlastdetection } )
+            debug_count_temp_table( con, 'objsearch_stattab' )
         if maxdt_firstlastdetection is not None:
             con.execute_nofetch( "DELETE FROM objsearch_stattab WHERE lastdetmjd-firstdetmjd>%(t)s",
                                  { 't': maxdt_firstlastdetection } )
+            debug_count_temp_table( con, 'objsearch_stattab' )
 
         # Delete from this table based on first/last/max detection magnitude cuts
         if minmag_firstdetection is not None:
             con.execute_nofetch( "DELETE FROM objsearch_stattab WHERE firstdetflux>%(f)s",
                                  { 'f': 10**((minmag_firstdetection-zp)/-2.5) } )
+            debug_count_temp_table( con, 'objsearch_stattab' )
         if maxmag_firstdetection is not None:
             con.execute_nofetch( "DELETE FROM objsearch_stattab WHERE firstdetflux<%(f)s",
                                  { 'f': 10**((maxmag_firstdetection-zp)/-2.5) } )
+            debug_count_temp_table( con, 'objsearch_stattab' )
         if minmag_lastdetection is not None:
             con.execute_nofetch( "DELETE FROM objsearch_stattab WHERE lastdetflux>%(f)s",
                                  { 'f': 10**((minmag_lastdetection-zp)/-2.5) } )
+            debug_count_temp_table( con, 'objsearch_stattab' )
         if maxmag_lastdetection is not None:
             con.execute_nofetch( "DELETE FROM objsearch_stattab WHERE lastdetflux<%(f)s",
                                  { 'f': 10**((maxmag_lastdetection-zp)/-2.5) } )
+            debug_count_temp_table( con, 'objsearch_stattab' )
         if minmag_maxdetection is not None:
             con.execute_nofetch( "DELETE FROM objsearch_stattab WHERE maxdetflux>%(f)s",
                                  { 'f': 10**((minmag_maxdetection-zp)/-2.5) } )
+            debug_count_temp_table( con, 'objsearch_stattab' )
         if maxmag_maxdetection is not None:
             con.execute_nofetch( "DELETE FROM objsearch_stattab WHERE maxdetflux<%(f)s",
                                  { 'f': 10**((maxmag_maxdetection-zp)/-2.5) } )
+            debug_count_temp_table( con, 'objsearch_stattab' )
 
         nexttable = 'objsearch_stattab'
 
@@ -657,7 +680,7 @@ def object_search( processing_version, return_format='json', just_objids=False, 
         # For some reason, Postgres was deciding not to use the index on this next query, which
         #   raised the runtime by two orders of magnitude.  Hint fixed it.
         subdict = { 'pv': procver }
-        q = ( f"/*+ IndexScan(f idx_diaforcedsource_diaobjectid ) */ "
+        q = ( f"/*+ IndexScan(f idx_diaforcedsource_diaobjectid ) */\n"
               f"SELECT * INTO TEMP TABLE objsearch_final FROM (\n"
               f"  SELECT DISTINCT ON (t.diaobjectid) t.*,\n"
               f"      f.psfflux AS lastforcedflux, f.psffluxerr AS lastforcedfluxerr,\n"
@@ -670,14 +693,17 @@ def object_search( processing_version, return_format='json', just_objids=False, 
         q += ( "  ORDER BY t.diaobjectid, f.midpointmjdtai DESC\n"
                ") subq" )
         con.execute_nofetch( q, subdict )
+        debug_count_temp_table( con, 'objsearch_final' )
 
         # Filter baesd on last magnitude
         if min_lastmag is not None:
             con.execute_nofetch( "DELETE FROM objsearch_final WHERE lastforcedflux>%(f)s",
                                  { 'f': 10**((min_lastmag-zp)/-2.5) } )
+            debug_count_temp_table( con, 'objsearch_final' )
         if max_lastmag is not None:
             con.execute_nofetch( "DELETE FROM objsearch_final WHERE lastforcedflux<%(f)s",
                                  { 'f': 10**((max_lastmag-zp)/-2.5) } )
+            debug_count_temp_table( con, 'objsearch_final' )
 
         # Pull down the results
         rows, columns = con.execute( "SELECT * FROM objsearch_final" )

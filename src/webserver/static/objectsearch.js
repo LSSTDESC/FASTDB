@@ -10,7 +10,7 @@ fastdbap.ObjectSearch = class
     constructor( context, parentdiv )
     {
         this.context = context;
-        this.topdiv = rkWebUtil.elemaker( "div", parentdiv, { "classes": [ "hbox", "xscroll" ] } );
+        this.topdiv = rkWebUtil.elemaker( "div", parentdiv, { "classes": [ "hbox", "minwcontent" ] } );
     }
 
 

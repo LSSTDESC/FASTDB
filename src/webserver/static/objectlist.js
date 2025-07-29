@@ -11,6 +11,7 @@ fastdbap.ObjectList = class
     {
         this.context = context;
         this.topdiv = parentdiv;
+        this.tablerows = {};
         this.scrolltorow = null;
     }
 
@@ -19,14 +20,14 @@ fastdbap.ObjectList = class
         if ( this.scrolltorow != null )
             this.scrolltorow.scrollIntoView();
     }
-    
+
     render_page( data )
     {
         let self = this;
         let tr;
 
         this.scrolltorow = null;
-        
+
         // Calculate magnitudes assuming zp=31.4 (flux is nJy)
         data[ 'magmax' ] = []
         data[ 'magmaxerr' ] = []
@@ -89,20 +90,18 @@ fastdbap.ObjectList = class
                      'magforcedlasterr': 'dmag' }
 
 
-        let tablerows = {};
+        this.tablerows = {};
         let rowrenderer = function( data, fields, i ) {
             let tr, td;
             tr = rkWebUtil.elemaker( "tr", null );
+            self.tablerows[ data.diaobjectid[i] ] = tr;
             let args = {
                 'diaobjectid':      [ "td", tr, { "text": data.diaobjectid[i],
                                                   "classes": [ "link" ],
                                                   "click": (e) => {
-                                                      if ( self.scrolltorow != null ) {
-                                                          self.scrolltorow.classList.remove( "bold" );
-                                                      }
-                                                      tr.classList.add( "bold" );
-                                                      self.scrolltorow = tr;
-                                                      self.show_object_info( data.diaobjectid[i] ); }
+                                                      self.highlight_row_with_diaobjectid( data.diaobjectid[i] );
+                                                      self.show_object_info( data.diaobjectid[i] );
+                                                  }
                                                 } ],
                 'ra':               [ "td", tr, { "text": data.ra[i].toFixed(5) } ],
                 'dec':              [ "td", tr, { "text": data.dec[i].toFixed(5) } ],
@@ -174,6 +173,24 @@ fastdbap.ObjectList = class
     }
 
 
+    clear_row_highlight()
+    {
+        if ( this.scrolltorow != null ) {
+            this.scrolltorow.classList.remove( "selected" )
+            this.srolltorow = null;
+        }
+    }
+
+
+    highlight_row_with_diaobjectid( diaobjectid )
+    {
+        this.clear_row_highlight();
+        this.scrolltorow = this.tablerows[ diaobjectid ];
+        this.scrolltorow.scrollIntoView();
+        this.scrolltorow.classList.add( "selected" );
+    }
+
+
     show_object_info( objid )
     {
         let self = this;
@@ -184,7 +201,7 @@ fastdbap.ObjectList = class
                             { "text": "Loading object " + objid + " for processing version " + pv,
                               "classes": [ "warning", "bold", "italic" ] } );
         this.context.maintabs.selectTab( "objectinfo" );
-        
+
         this.context.connector.sendHttpRequest( "/ltcv/getltcv/" + pv + "/" + objid, {},
                                                 (data) => { self.actually_show_object_info( data ) } );
     }

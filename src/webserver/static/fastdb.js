@@ -78,8 +78,8 @@ fastdbap.Context = class
         
         // Object search
         
-        this.searchbox = rkWebUtil.elemaker( "div", this.topbox, { "classes": [ "searchbox" ] } );
-        this.searchtabs = new rkWebUtil.Tabbed( this.searchbox, {} );
+        // this.searchbox = rkWebUtil.elemaker( "div", this.topbox, { "classes": [ "searchbox" ] } );
+        this.searchtabs = new rkWebUtil.Tabbed( this.topbox, {} );
 
         this.objectsearchdiv = rkWebUtil.elemaker( "div", null );
         this.searchtabs.addTab( "objectsearch", "Object Search", this.objectsearchdiv, true );
@@ -99,7 +99,7 @@ fastdbap.Context = class
         this.objectlistdiv = rkWebUtil.elemaker( "div", null, { "classes": [ "yscroll" ] } );
         this.maintabs.addTab( "objectlist", "Object List", this.objectlistdiv, true );
 
-        this.objectinfodiv = rkWebUtil.elemaker( "div", null, { "classes": [ "maxh100" ] } );
+        this.objectinfodiv = rkWebUtil.elemaker( "div", null, { "classes": [ "objectinfohbox" ] } );
         this.maintabs.addTab( "objectinfo", "Object Info", this.objectinfodiv, false );
         
     };

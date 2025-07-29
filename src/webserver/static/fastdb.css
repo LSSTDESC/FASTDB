@@ -18,6 +18,8 @@
     --good-color: #006000;
     --bad-color: #c00000;
     --warning-color: #c06040;
+    --table-row-highlight-background: #aaeeff;
+    --table-row-highlight-foreground: #880000;
 }
 
 /* Basic layout created in fastdb.js */
@@ -28,6 +30,7 @@ html, body { height: 100%;
              border: 0;
            }
 
+/* bodydiv is a div that wraps the whole body */
 div.bodydiv { color: var(--main-color);
               background: var(--background-color);
               position: relative;
@@ -41,6 +44,7 @@ div.bodydiv { color: var(--main-color);
               flex-direction: column;
             }
 
+/* authdiv is small at the top for "Logged in as..." */
 div.authdiv { color: var(--some-faded-color);
               font-size: 75%;
               flex-basis: content;
@@ -48,14 +52,21 @@ div.authdiv { color: var(--some-faded-color);
               flex-shrink: 0;
             }
 
+/* (I'm not sure I actually u8se a foorter */
+div.footer { color: var(--some-faded-color);
+             font-size: 75%;
+             font-style: italic }
 
+/* Pagebody is everything that isn't authdiv */
 div.pagebody { flex-grow: 1;
                min-height: 0;
                display: flex;
                flex-direction: column;
              }
 
-
+/* topbox is the box at the top that has "FASTDB" and numbers
+   of objects/sources at the left ("basicstats"), and then the search criteria
+   in a wider box to the right ("searchbox") */
 div.topbox { flex-basis: content;
              flex-grow: 0;
              flex-shrink: 0;
@@ -63,10 +74,11 @@ div.topbox { flex-basis: content;
              flex-direction: row;
              border: 2px solid var(--main-color);
              padding: 0.5ex;
+             overflow-x: scroll;
            }
 
 div.basicstats { flex-basis: content;
-                 min-width: 0;
+                 min-width: fit-content;
                  flex-grow: 0;
                  flex-shrink: 1;
                  border: 2px solid var( --mostlyfull-color-border);
@@ -75,7 +87,7 @@ div.basicstats { flex-basis: content;
                }
 
 div.searchbox { flex-basis: content;
-                min-width: 0;
+                min-width: fit-content;
                 flex-grow: 1;
                 border: 2px solid var(--mostlyfull-color-border);
                 padding: 0.5ex;
@@ -85,8 +97,10 @@ div.searchbox { flex-basis: content;
 div.searchinner { flex-basis: content;
                   border: 2px solid var(--mid-color-border);
                   padding: 0.5ex;
+                  min-width: fit-content;
                 }
 
+/* maindiv is the div below the topbox that holds all found information */
 div.maindiv { flex-grow: 2;
               flex-shrink: 1;
               min-height: 0;
@@ -97,15 +111,20 @@ div.maindiv { flex-grow: 2;
               flex-direction: column;
             }
 
+
+/* A class used for the top-level div of the rkWebUtil.Tabbed in the maindiv */
 div.maintabdiv { max-height: 100%;
                  display: flex;
                  flex-direction: column;
                }
 
+/* Class for the actual tab buttons in the rkWebUtil.Tabbed in the maindiv */
 div.maintabbuttonbox { flex-grow: 0;
                        flex-shrink: 0;
                        flex-basis: content;
                      }
+
+/* Class for the content tabs of the main rkWebUtil.Tabbed in the maindiv */
 div.maintabcontentdiv { border: 2px solid var(--mostlyfull-color-border);
                         padding: 0.5ex;
                         flex-grow: 1;
@@ -114,12 +133,46 @@ div.maintabcontentdiv { border: 2px solid var(--mostlyfull-color-border);
                         max-height: 100%;
                         min-height: 0;
                       }
+
+/* Class for a hbox inside maintabcontentdiv used in objectinfo.js.
+   On the left is ltcvvalues, on the right is ltcvplots */
 div.objectinfohbox { display: flex;
                      flex-direction: row;
                      min-width: 0;
                      min-height: 0;
                      max-height: 100%;
                    }
+div.ltcvvalues { flex-basis: content;
+                 border: 2px solid var(--mid-color-border);
+                 padding: 0.5ex;
+                 overflow-y: scroll;
+                 margin-right: 1ex;
+                 max-width: fit-content;
+                 flex-grow: 0 }
+div.ltcvplots_separate { flex-basis: content;
+                         border: 2px solid var(--mid-color-border);
+                         padding: 0.5ex;
+                         overflow-y: scroll;
+                         min-width: 0;
+                         flex-grow: 1;
+                       }
+div.ltcvplots_combined { flex-basis: content;
+                         border: 2px solid var(--mid-color-border);
+                         padding: 0.5ex;
+                         min-width: 0;
+                         max-height: 100%;
+                         flex-grow: 1;
+                         display: flex;
+                         flex-direction: column;
+                       }
+/* This goes bewteen ltcvplots_* and the svgplot's topbox */
+div.svgplotwrapper { display: flex;
+                     flex-direction: row;
+                     flex-grow: 1;
+                     min-height: 0;
+                     max-height: 100%;
+                   }
+
 
 /* Generic formatting */
 
@@ -137,6 +190,13 @@ div.objectinfohbox { display: flex;
 .bgfade { background: var(--lots-faded-color) }
 .link { background: none; border: none; padding: 0;
         color: var(--link-color); text-decoration: var(--link-decoration); cursor: pointer; }
+a { color: var(--link-color); text-decoration: var(--link-decoration); cursor: pointer; }
+
+.right { text-align: right }
+.center { text-align: center }
+.vcenter { vertical-align: middle }
+
+/* Generic margins and borders */
 
 .padhalfex { padding: 0.5ex }
 .hmargin { margin-left: 0.5ex; margin-right: 0.5ex }
@@ -150,34 +210,31 @@ div.objectinfohbox { display: flex;
             }
 .hbordernone { border-top-width: 0; border-bottom-width: 0; }
 
-
-.right { text-align: right }
-.center { text-align: center }
-.vcenter { vertical-align: middle }
+/* Generic width and height controls */
 
 .minwid0 { min-width: 0 }
+.minwcontent { min-width: fit-content }
 .maxwcontent { max-width: fit-content }
+.maxhcontent { max-height: fit-content }
 .maxh100 { max-height: 100% }
 .flexgrow0 { flex-grow: 0 }
 .flexgrow1 { flex-grow: 1 }
 .xscroll { overflow-x: scroll }
 .yscroll { overflow-y: scroll }
 
-a { color: var(--link-color); text-decoration: var(--link-decoration); cursor: pointer; }
+/* Standard flex box divs */
 
 div.hbox { display: flex;
            flex-direction: row;
-           min-width: 0;
-           min-height: 0; }
+           /* min-width: 0; */
+           /* min-height: 0; */
+         }
 
 div.vbox { display: flex;
            flex-direction: column;
-           min-width: 0;
-           min-height: 0; }
-
-div.footer { color: var(--some-faded-color);
-             font-size: 75%;
-             font-style: italic }
+           /* min-width: 0; */
+           /* min-height: 0; */
+         }
 
 /* Tool tips */
 
@@ -196,27 +253,12 @@ div.footer { color: var(--some-faded-color);
 }
 .tooltipsource:hover .tooltiptext, .tooltipcolorlesssource:hover .tooltiptext { visibility: visible; }
 
-/* TODO-- do we really want all images like this? */
 
-img { image-rendering: pixelated }
+/* Use this for thumbnail images */
 
-/* rkwebutil tabbed */
+img.thumbnail { image-rendering: pixelated }
 
-.tabunsel { background: var(--most-faded-color);
-            border: 2px outset var(--full-color-border);
-            margin-left: 0.5ex;
-            margin-right: 0.5ex; }
-.tabsel { background: var(--half-faded-color);
-          border: 2px inset var(--full-color-border);
-          margin-left: 0.5ex;
-          margin-right: 0.5ex; }
-div.tabdiv {}
-div.buttonboxdiv {}
-div.tabcontentdiv { border: 2px solid var(--mostlyfull-color-border);
-                    padding: 0.5ex;
-                  }
-
-/* Table formatting options */
+/* Default table formatting */
 
 table { border: 2px solid var(--full-color-border); border-spacing: 2px }
 table th { border-bottom: 2px solid var(--full-color-border);
@@ -234,6 +276,9 @@ table td { border-bottom: 2px solid var(--half-faded-color);
            padding-top: 2px;
            padding-bottom: 2px;
          }
+
+/* Table formatting options */
+
 table th.borderleft { border-left: 2px solid var(--half-faded-color); }
 table td.borderleft { border-left: 2px solid var(--half-faded-color); }
 
@@ -244,30 +289,54 @@ table.borderedcells tr td { padding-left: 1ex;
 tr.greybg { background: var(--lots-faded-color); }
 tr.whitebg { background: var(--background-color); }
 
-table.exposurelist td { border: 2px solid var(--half-faded-color); }
-tr.heldexposure { font-style: italic; color: var(--some-faded-color); }
-
 table.borderless { border: 0; padding: 0; margin: 0 }
 table.borderless tr { border: 0 }
 table.borderless tr th { border: 0 }
 table.borderless tr td { border: 0 }
+
+tr.selected {}
+tr.selected td { background: var(--table-row-highlight-background);
+                 color: var(--table-row-highlight-foreground);
+                 border-top: 3px solid var(--main-color);
+                 border-bottom: 3px solid var(--main-color);
+               }
+
+/* rkwebutil tabbed */
+
+.tabunsel { background: var(--most-faded-color);
+            border: 2px outset var(--full-color-border);
+            margin-left: 0.5ex;
+            margin-right: 0.5ex; }
+.tabsel { background: var(--half-faded-color);
+          border: 2px inset var(--full-color-border);
+          margin-left: 0.5ex;
+          margin-right: 0.5ex; }
+div.tabdiv {}
+div.buttonboxdiv {}
+div.tabcontentdiv { border: 2px solid var(--mostlyfull-color-border);
+                    padding: 0.5ex;
+                  }
 
 /* SVGPlot classes */
 
 div.svgplottopdiv { position: relative;
                     display: flex;
                     flex-direction: column;
-                    flex-grow: 0;
+                    flex-grow: 1;
                     flex-shrink: 0;
                     min-width: 0;
-                    min-height: 0;
+                    min-height: fit-content;
+                    max-width: 100%;
+                    max-height: 100%;
                   }
 div.svgplotdiv { min-width: 0;
                  min-height: 0;
+                 max-height: 100%;
                  display: flex;
                  flex-direction: row;
-                 flex-grow: 0;
-                 flex-shrink: 0; }
+                 flex-grow: 1;
+                 flex-shrink: 1;
+               }
 
 svg.svgplotsvg { display: block;
                  flex-grow: 1;
@@ -294,8 +363,8 @@ div.svgplotdocbox { display: flex;
 div.svgplothbox { display: flex;
                   flex-direction: row;
                   justify-content: space-between;
-                  min-width: 0;
-                  min-height: 0;
+                  /* min-width: 0; */
+                  /* min-height: 0; */
                   margin-top: 0.5ex;
                   margin-bottom: 0.5ex;
                 }
