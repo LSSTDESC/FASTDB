@@ -155,6 +155,8 @@ div.ltcvplots_separate { flex-basis: content;
                          overflow-y: scroll;
                          min-width: 0;
                          flex-grow: 1;
+                         display: flex;
+                         flex-direction: column;
                        }
 div.ltcvplots_combined { flex-basis: content;
                          border: 2px solid var(--mid-color-border);
@@ -167,7 +169,7 @@ div.ltcvplots_combined { flex-basis: content;
                        }
 /* This goes bewteen ltcvplots_* and the svgplot's topbox */
 div.svgplotwrapper { display: flex;
-                     flex-direction: row;
+                     flex-direction: column;
                      flex-grow: 1;
                      min-height: 0;
                      max-height: 100%;
