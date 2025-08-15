@@ -47,7 +47,7 @@ jobs:
           
       - name: pull images
         run: |
-          docker compose pull kafka-server postgres mongodb mailhog queryrunner shell
+          docker compose pull kafka-server postgres mongodb mailhog queryrunner shell webap
 
       - name: unpack test data
         run: |
