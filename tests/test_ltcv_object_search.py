@@ -37,10 +37,10 @@ def check_df_contents( df, procverid, statbands=None ):
             q += "ORDER BY psfflux DESC LIMIT 1"
             cursor.execute( q, { 'o': row.diaobjectid, 'pv': procverid, 'bands': statbands } )
             dbrow = cursor.fetchone()
-            assert dbrow[0] == pytest.approx( row.maxdetflux, rel=1e-5 )
-            assert dbrow[1] == pytest.approx( row.maxdetfluxerr, rel=1e-5 )
             assert dbrow[2] == pytest.approx( row.maxdetmjd, abs=1e-5 )
             assert dbrow[3] == row.maxdetband
+            assert dbrow[0] == pytest.approx( row.maxdetflux, rel=1e-5 )
+            assert dbrow[1] == pytest.approx( row.maxdetfluxerr, rel=1e-5 )
 
             q = ( "SELECT psfflux, psffluxerr, midpointmjdtai, band "
                   "FROM diasource "
@@ -50,10 +50,10 @@ def check_df_contents( df, procverid, statbands=None ):
             q += "ORDER BY midpointmjdtai DESC LIMIT 1"
             cursor.execute( q, { 'o': row.diaobjectid, 'pv': procverid, 'bands': statbands } )
             dbrow = cursor.fetchone()
+            assert dbrow[3] == row.lastdetband
+            assert dbrow[2] == pytest.approx( row.lastdetmjd, abs=1e-5 )
             assert dbrow[0] == pytest.approx( row.lastdetflux, rel=1e-5 )
             assert dbrow[1] == pytest.approx( row.lastdetfluxerr, rel=1e-5 )
-            assert dbrow[2] == pytest.approx( row.lastdetmjd, abs=1e-5 )
-            assert dbrow[3] == row.lastdetband
 
             q = ( "SELECT psfflux, psffluxerr, midpointmjdtai, band "
                   "FROM diasource "
@@ -63,10 +63,10 @@ def check_df_contents( df, procverid, statbands=None ):
             q += "ORDER BY midpointmjdtai LIMIT 1"
             cursor.execute( q, { 'o': row.diaobjectid, 'pv': procverid, 'bands': statbands } )
             dbrow = cursor.fetchone()
+            assert dbrow[3] == row.firstdetband
+            assert dbrow[2] == pytest.approx( row.firstdetmjd, abs=1e-5 )
             assert dbrow[0] == pytest.approx( row.firstdetflux, rel=1e-5 )
             assert dbrow[1] == pytest.approx( row.firstdetfluxerr, rel=1e-5 )
-            assert dbrow[2] == pytest.approx( row.firstdetmjd, abs=1e-5 )
-            assert dbrow[3] == row.firstdetband
 
             q = ( "SELECT psfflux, psffluxerr, midpointmjdtai, band "
                   "FROM diaforcedsource "
@@ -76,10 +76,10 @@ def check_df_contents( df, procverid, statbands=None ):
             q += "ORDER BY midpointmjdtai DESC LIMIT 1"
             cursor.execute( q, { 'o': row.diaobjectid, 'pv': procverid, 'bands': statbands } )
             dbrow = cursor.fetchone()
+            assert dbrow[3] == row.lastforcedband
+            assert dbrow[2] == pytest.approx( row.lastforcedmjd, abs=1e-5 )
             assert dbrow[0] == pytest.approx( row.lastforcedflux, rel=1e-5 )
             assert dbrow[1] == pytest.approx( row.lastforcedfluxerr, rel=1e-5 )
-            assert dbrow[2] == pytest.approx( row.lastforcedmjd, abs=1e-5 )
-            assert dbrow[3] == row.lastforcedband
 
 
 # The test_user fixture is in this next test not becasue it's needed for

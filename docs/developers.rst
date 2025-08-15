@@ -328,6 +328,34 @@ Changing database structures
 If you change database sturctures (adding fields, etc.), it's possible that some of the tests will start failing because cached test data no longer matches what's expected.  This will happen (at least) to tests that use the ``alerts_90days_sent_received_and_imported`` fixture in ``tests/fixtures/alertcycle.py``.  If you're seeing something you think is this error, look at all the comments above and below that test in that file for information on rebuilding the cached test data.
 
 
+Pushing Branches and Pull Requests
+==================================
+
+TODO
+
+Updating Docker Images
+----------------------
+
+Hopefully you don't have to do this.  In the rare case where you do (which will be if you've edited anything in the ``docker`` subdirectory), you need to build and push new docker images for the automated tests on github to use.
+
+First, edit ``docker-compose.yaml`` and find all lines that start with ``image:`` (after several spaces).  At the end of that line you should see something like ``${DOCKER_VERSION:-test20250815}``.  Bump the date after ``test`` to the current date.  Make sure *not* to remove either the colon, or the dash right after the colon.  (We're assuming two people won't be doing this on the same day....)  Then, at the top level of your archive, run::
+
+  DOCKER_ARCHIVE=ghcr.io/LSSTDESC docker compose build
+
+when the build finishes, run all of the following, where ``<version>`` is what you replaced ``test20250815`` with above::
+
+  docker push ghcr.io/LSSTDESC/fastdb-kafka-test:<version>
+  docker push ghcr.io/LSSTDESC/fastdb-postgres:<version>
+  docker push ghcr.io/LSSTDESC/fastdb-mongodb:<version>
+  docker push ghcr.io/LSSTDESC/fastdb-shell:<version>
+  docker push ghcr.io/LSSTDESC/fastdb-query-runner:<version>
+  docker push ghcr.io/LSSTDESC/fastdb-webap:<version>
+
+Before running those, you may need to do::
+
+  docker login ghcr.io
+
+
 Note for Rob: Installing on Perlmutter
 ======================================
 

@@ -178,6 +178,7 @@ def debug_count_temp_table( con, table ):
     util.logger.debug( f"Table {table} has {res[0][0]} rows" )
 
 
+# TODO : allow different object processing_version from source processing_version
 def object_search( processing_version, return_format='json', just_objids=False, **kwargs ):
     """Search for objects.
 
@@ -431,19 +432,7 @@ def object_search( processing_version, return_format='json', just_objids=False, 
 
 
     with db.DBCon() as con:
-        # Figure out processing version
-        try:
-            procver = int( processing_version)
-        except Exception:
-            rows, _ = con.execute( "SELECT id FROM processing_version WHERE description=%(procver)s",
-                                   { 'procver': processing_version } )
-            if len(rows) == 0:
-                rows, _ = con.execute( "SELECT id FROM processing_version_alias WHERE description=%(procver)s",
-                                       { 'procver': processing_version } )
-                if len(rows) == 0:
-                    raise ValueError( f"Unknown processing version {processing_version}" )
-            procver = rows[0][0]
-
+        procver = procver_int( processing_version )
 
         # Search criteria consistency checks
         if ( any( [ ( ra is None ), ( dec is None ), ( radius is None ) ] )
@@ -559,9 +548,8 @@ def object_search( processing_version, return_format='json', just_objids=False, 
               f"                        AND s.processing_version=%(pv)s\n" )
         if statbands is not None:
             subdict['bands'] = statbands
-            q += ( "  WHERE s.band=ANY(%(bands)s)\n"
-                   "  ORDER BY o.diaobjectid, s.midpointmjdtai\n" )
-        q += ") subq"
+            q += "  WHERE s.band=ANY(%(bands)s)\n"
+        q += "  ORDER BY o.diaobjectid, s.midpointmjdtai\n ) subq"
         con.execute_nofetch( q, subdict )
         q = ( f"/*+ IndexScan(s idx_diasource_diaobjectid) */\n"
               f"UPDATE objsearch_stattab o\n"
