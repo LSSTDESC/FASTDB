@@ -9,7 +9,7 @@ import fastavro
 import astropy.time
 import rkwebutil
 
-_schema_namespace = 'fastdb_test_0.1'
+_schema_namespace = 'fastdb_test_0.2'
 
 logger = logging.getLogger( "FASTDB logger" )
 _logout = logging.StreamHandler( sys.stderr )
@@ -144,9 +144,9 @@ def get_alert_schema( schemadir=None ):
     diaobject_schema = fastavro.schema.load_schema( schemadir / f"{_schema_namespace}.DiaObject.avsc" )
     diasource_schema = fastavro.schema.load_schema( schemadir / f"{_schema_namespace}.DiaSource.avsc" )
     diaforcedsource_schema = fastavro.schema.load_schema( schemadir / f"{_schema_namespace}.DiaForcedSource.avsc" )
-    named_schemas = { 'fastdb_test_0.1.DiaObject': diaobject_schema,
-                      'fastdb_test_0.1.DiaSource': diasource_schema,
-                      'fastdb_test_0.1.DiaForcedSource': diaforcedsource_schema }
+    named_schemas = { f'{_schema_namespace}.DiaObject': diaobject_schema,
+                      f'{_schema_namespace}.DiaSource': diasource_schema,
+                      f'{_schema_namespace}.DiaForcedSource': diaforcedsource_schema }
     alert_schema = fastavro.schema.load_schema( schemadir / f"{_schema_namespace}.Alert.avsc",
                                                 named_schemas=named_schemas )
     brokermessage_schema = fastavro.schema.load_schema( schemadir / f"{_schema_namespace}.BrokerMessage.avsc",

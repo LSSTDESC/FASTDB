@@ -11,12 +11,22 @@ fastdbap.ObjectList = class
     {
         this.context = context;
         this.topdiv = parentdiv;
+        this.tablerows = {};
+        this.scrolltorow = null;
+    }
+
+    focus_page()
+    {
+        if ( this.scrolltorow != null )
+            this.scrolltorow.scrollIntoView();
     }
 
     render_page( data )
     {
         let self = this;
         let tr;
+
+        this.scrolltorow = null;
 
         // Calculate magnitudes assuming zp=31.4 (flux is nJy)
         data[ 'magmax' ] = []
@@ -52,59 +62,65 @@ fastdbap.ObjectList = class
         let fields = [ 'diaobjectid',
                        'ra',
                        'dec',
-                       'ndet',
-                       'lastdetfluxmjd',
-                       'lastdetfluxband',
+                       'numdet',
+                       'lastdetmjd',
+                       'lastdetband',
                        'maglast',
                        'maglasterr',
-                       'maxdetfluxmjd',
-                       'maxdetfluxband',
+                       'maxdetmjd',
+                       'maxdetband',
                        'magmax',
                        'magmaxerr',
-                       'lastforcedfluxmjd',
-                       'lastforcedfluxband',
+                       'lastforcedmjd',
+                       'lastforcedband',
                        'magforcedlast',
                        'magforcedlasterr' ]
         let hdrs = { 'lastdetfluxmjd': 'mjd',
                      'lastdetfluxband': 'band',
+                     'numdet': 'ndet',
                      'maglast': 'mag',
                      'maglasterr': 'dmag',
-                     'maxdetfluxmjd': 'mjd',
-                     'maxdetfluxband': 'band',
+                     'maxdetmjd': 'mjd',
+                     'maxdetband': 'band',
                      'magmax': 'mag',
                      'magmaxerr': 'dmag',
-                     'lastforcedfluxmjd': 'mjd',
-                     'lastforcedfluxband': 'band',
+                     'lastforcedmjd': 'mjd',
+                     'lastforcedband': 'band',
                      'magforcedlast': 'mag',
                      'magforcedlasterr': 'dmag' }
 
 
+        this.tablerows = {};
         let rowrenderer = function( data, fields, i ) {
             let tr, td;
             tr = rkWebUtil.elemaker( "tr", null );
+            self.tablerows[ data.diaobjectid[i] ] = tr;
             let args = {
-                'diaobjectid':        [ "td", tr, { "text": data.diaobjectid[i],
-                                                    "classes": [ "link" ],
-                                                    "click": (e) => { self.show_object_info( data.diaobjectid[i] ); }
-                                                  } ],
-                'ra':                 [ "td", tr, { "text": data.ra[i].toFixed(5) } ],
-                'dec':                [ "td", tr, { "text": data.dec[i].toFixed(5) } ],
-                'ndet':               [ "td", tr, { "text": data.ndet[i].toString() } ],
-                'lastdetfluxmjd':     [ "td", tr, { "text": data.lastdetfluxmjd[i].toFixed(2),
-                                                    "classes": [ "borderleft" ] } ],
-                'lastdetfluxband':    [ "td", tr, { "text": data.lastdetfluxband[i] } ],
-                'maglast':            [ "td", tr, { "text": data.maglast[i].toFixed(2) } ],
-                'maglasterr':         [ "td", tr, { "text": data.maglasterr[i].toFixed(2) } ],
-                'maxdetfluxmjd':      [ "td", tr, { "text": data.maxdetfluxmjd[i].toFixed(2),
-                                                    "classes": [ "borderleft" ] } ],
-                'maxdetfluxband':     [ "td", tr, { "text": data.maxdetfluxband[i] } ],
-                'magmax':             [ "td", tr, { "text": data.magmax[i].toFixed(2) } ],
-                'magmaxerr':          [ "td", tr, { "text": data.magmaxerr[i].toFixed(2) } ],
-                'lastforcedfluxmjd':  [ "td", tr, { "text": data.lastforcedfluxmjd[i].toFixed(2),
-                                                    "classes": [ "borderleft" ] } ],
-                'lastforcedfluxband': [ "td", tr, { "text": data.lastforcedfluxband[i] } ],
-                'magforcedlast':      [ "td", tr, { "text": data.magforcedlast[i].toFixed(2) } ],
-                'magforcedlasterr':   [ "td", tr, { "text": data.magforcedlasterr[i].toFixed(2) } ]
+                'diaobjectid':      [ "td", tr, { "text": data.diaobjectid[i],
+                                                  "classes": [ "link" ],
+                                                  "click": (e) => {
+                                                      self.highlight_row_with_diaobjectid( data.diaobjectid[i] );
+                                                      self.show_object_info( data.diaobjectid[i] );
+                                                  }
+                                                } ],
+                'ra':               [ "td", tr, { "text": data.ra[i].toFixed(5) } ],
+                'dec':              [ "td", tr, { "text": data.dec[i].toFixed(5) } ],
+                'numdet':           [ "td", tr, { "text": data.numdet[i].toString() } ],
+                'lastdetmjd':       [ "td", tr, { "text": data.lastdetmjd[i].toFixed(2),
+                                                  "classes": [ "borderleft" ] } ],
+                'lastdetband':      [ "td", tr, { "text": data.lastdetband[i] } ],
+                'maglast':          [ "td", tr, { "text": data.maglast[i].toFixed(2) } ],
+                'maglasterr':       [ "td", tr, { "text": data.maglasterr[i].toFixed(2) } ],
+                'maxdetmjd':        [ "td", tr, { "text": data.maxdetmjd[i].toFixed(2),
+                                                  "classes": [ "borderleft" ] } ],
+                'maxdetband':       [ "td", tr, { "text": data.maxdetband[i] } ],
+                'magmax':           [ "td", tr, { "text": data.magmax[i].toFixed(2) } ],
+                'magmaxerr':        [ "td", tr, { "text": data.magmaxerr[i].toFixed(2) } ],
+                'lastforcedmjd':    [ "td", tr, { "text": data.lastforcedmjd[i].toFixed(2),
+                                                  "classes": [ "borderleft" ] } ],
+                'lastforcedband':   [ "td", tr, { "text": data.lastforcedband[i] } ],
+                'magforcedlast':    [ "td", tr, { "text": data.magforcedlast[i].toFixed(2) } ],
+                'magforcedlasterr': [ "td", tr, { "text": data.magforcedlasterr[i].toFixed(2) } ]
             }
             for ( let f of fields ) {
                 if ( ! args.hasOwnProperty( f ) ) {
@@ -157,6 +173,24 @@ fastdbap.ObjectList = class
     }
 
 
+    clear_row_highlight()
+    {
+        if ( this.scrolltorow != null ) {
+            this.scrolltorow.classList.remove( "selected" )
+            this.srolltorow = null;
+        }
+    }
+
+
+    highlight_row_with_diaobjectid( diaobjectid )
+    {
+        this.clear_row_highlight();
+        this.scrolltorow = this.tablerows[ diaobjectid ];
+        this.scrolltorow.scrollIntoView();
+        this.scrolltorow.classList.add( "selected" );
+    }
+
+
     show_object_info( objid )
     {
         let self = this;
@@ -167,7 +201,7 @@ fastdbap.ObjectList = class
                             { "text": "Loading object " + objid + " for processing version " + pv,
                               "classes": [ "warning", "bold", "italic" ] } );
         this.context.maintabs.selectTab( "objectinfo" );
-        
+
         this.context.connector.sendHttpRequest( "/ltcv/getltcv/" + pv + "/" + objid, {},
                                                 (data) => { self.actually_show_object_info( data ) } );
     }

@@ -10,10 +10,8 @@ from pymongo import MongoClient
 from db import ( ProcessingVersion,
                  RootDiaObject,
                  DiaObject,
-                 DiaObjectRootMap,
                  DiaSource,
                  DiaForcedSource,
-                 Snapshot,
                  DB,
                  AuthUser )
 from util import asUUID, logger
@@ -80,38 +78,6 @@ def procver2():
 
 
 @pytest.fixture
-def snapshot1():
-    ss = Snapshot( id=23,
-                   description='ss23',
-                   creation_time=datetime.datetime( 2000, 1, 1, 0, 0, 0 )
-                  )
-    ss.insert()
-
-    yield ss
-    with DB() as con:
-        cursor = con.cursor()
-        cursor.execute( "DELETE FROM snapshot WHERE id=%(id)s",
-                        { 'id': ss.id } )
-        con.commit()
-
-
-@pytest.fixture
-def snapshot2():
-    ss = Snapshot( id=42,
-                   description='ss42',
-                   creation_time=datetime.datetime( 2001, 12, 31, 11, 59, 59 )
-                  )
-    ss.insert()
-
-    yield ss
-    with DB() as con:
-        cursor = con.cursor()
-        cursor.execute( "DELETE FROM snapshot WHERE id=%(id)s",
-                        { 'id': ss.id } )
-        con.commit()
-
-
-@pytest.fixture
 def rootobj1():
     objid = asUUID( '00f85226-c42f-4e1d-8adf-f18b9353a176' )
     obj = RootDiaObject( id=objid )
@@ -138,35 +104,41 @@ def rootobj2():
 
 
 @pytest.fixture
+def rootobj3():
+    objid = asUUID( '01c4fa2f-aa7d-487b-944c-67f05c57dbb7' )
+    obj = RootDiaObject( id=objid )
+    obj.insert()
+
+    yield obj
+    with DB() as con:
+        cursor = con.cursor()
+        cursor.execute( "DELETE FROM root_diaobject WHERE id=%(id)s", { 'id': objid } )
+        con.commit()
+
+
+@pytest.fixture
 def obj1( procver1, rootobj1 ):
     obj = DiaObject( diaobjectid=42,
                      processing_version=procver1.id,
                      radecmjdtai=60000.,
                      ra=42.,
-                     dec=13
+                     dec=13,
+                     rootid=rootobj1.id
                     )
     obj.insert()
-
-    rootmap = DiaObjectRootMap( rootid=rootobj1.id, diaobjectid=42, processing_version=procver1.id )
-    rootmap.insert()
 
     yield obj
     with DB() as con:
         cursor = con.cursor()
         subdict = { 'rootid': rootobj1.id, 'id': obj.diaobjectid, 'pv': procver1.id }
-        cursor.execute( ( "DELETE FROM diaobject_root_map "
-                          "WHERE rootid=%(rootid)s AND diaobjectid=%(id)s AND processing_version=%(pv)s" ),
-                        subdict )
-        cursor.execute( "DELETE FROM diaobject WHERE diaobjectid=%(id)s AND processing_Version=%(pv)s", subdict )
+        cursor.execute( "DELETE FROM diaobject WHERE diaobjectid=%(id)s AND processing_version=%(pv)s", subdict )
         con.commit()
 
 
 @pytest.fixture
 def src1( obj1, procver1 ):
-    src = DiaSource( diasourceid=42,
-                     processing_version=procver1.id,
+    src = DiaSource( processing_version=procver1.id,
                      diaobjectid=obj1.diaobjectid,
-                     diaobject_procver=obj1.processing_version,
                      visit=64,
                      detector=9,
                      band='r',
@@ -181,17 +153,16 @@ def src1( obj1, procver1 ):
     yield src
     with DB() as con:
         cursor = con.cursor()
-        cursor.execute( "DELETE FROM diasource WHERE diasourceid=%(id)s",
-                        { 'id': src.diasourceid } )
+        cursor.execute( "DELETE FROM diasource WHERE processing_version=%(pv)s "
+                        "                        AND diaobjectid=%(objid)s AND visit=%(visit)s",
+                        { 'pv': src.processing_version, 'objid': src.diaobjectid, 'visit': src.visit } )
         con.commit()
 
 
 @pytest.fixture
 def src1_pv2( obj1, procver2 ):
-    src = DiaSource( diasourceid=42,
-                     processing_version=procver2.id,
+    src = DiaSource( processing_version=procver2.id,
                      diaobjectid=obj1.diaobjectid,
-                     diaobject_procver=obj1.processing_version,
                      visit=64,
                      detector=9,
                      band='r',
@@ -206,17 +177,16 @@ def src1_pv2( obj1, procver2 ):
     yield src
     with DB() as con:
         cursor = con.cursor()
-        cursor.execute( "DELETE FROM diasource WHERE diasourceid=%(id)s",
-                        { 'id': src.diasourceid } )
+        cursor.execute( "DELETE FROM diasource WHERE processing_version=%(pv)s "
+                        "                        AND diaobjectid=%(objid)s AND visit=%(visit)s",
+                        { 'pv': src.processing_version, 'objid': src.diaobjectid, 'visit': src.visit } )
         con.commit()
 
 
 @pytest.fixture
 def forced1( obj1, procver1 ):
-    src = DiaForcedSource( diaforcedsourceid=42,
-                           processing_version=procver1.id,
+    src = DiaForcedSource( processing_version=procver1.id,
                            diaobjectid=obj1.diaobjectid,
-                           diaobject_procver=obj1.processing_version,
                            visit=128.,
                            detector=10.,
                            midpointmjdtai=59100.,
@@ -235,17 +205,16 @@ def forced1( obj1, procver1 ):
     yield src
     with DB() as con:
         cursor = con.cursor()
-        cursor.execute( "DELETE FROM diaforcedsource WHERE diaforcedsourceid=%(id)s",
-                        { 'id': src.diaforcedsourceid } )
+        cursor.execute( "DELETE FROM diaforcedsource WHERE processing_version=%(pv)s "
+                        "                              AND objectid=%(id)s AND visit=%(visit)s",
+                        { 'pv': src.processing_version, 'objid': src.diaobjectid, 'visit': src.visit } )
         con.commit()
 
 
 @pytest.fixture
 def forced1_pv2( obj1, procver2 ):
-    src = DiaForcedSource( diaforcedsourceid=42,
-                           processing_version=procver2.id,
+    src = DiaForcedSource( processing_version=procver2.id,
                            diaobjectid=obj1.diaobjectid,
-                           diaobject_procver=obj1.processing_version,
                            visit=128.,
                            detector=10.,
                            midpointmjdtai=59100.,
@@ -264,8 +233,9 @@ def forced1_pv2( obj1, procver2 ):
     yield src
     with DB() as con:
         cursor = con.cursor()
-        cursor.execute( "DELETE FROM diaforcedsource WHERE diaforcedsourceid=%(id)s",
-                        { 'id': src.diaforcedsourceid } )
+        cursor.execute( "DELETE FROM diaforcedsource WHERE processing_version=%(pv)s "
+                        "                              AND objectid=%(objid)s AND visit=%(visit)s",
+                        { 'pv': src.processing_version, 'objid': src.diaobjectid, 'visit': src.visit } )
         con.commit()
 
 
@@ -377,24 +347,8 @@ def snana_fits_maintables_loaded_module( procver ):
             cursor.execute( "SELECT COUNT(*) FROM host_galaxy" )
             nhost = cursor.fetchone()[0]
             assert nhost == 356
-
-            # Build the root diaobject; kind of a hack, but whatever.  Might be slow
-            #   for lots of objects, but our test set is small
-            cursor.execute( "INSERT INTO root_diaobject ( SELECT gen_random_uuid() FROM diaobject )" )
-            dbcon.commit()
-            cursor.execute( "INSERT INTO diaobject_root_map(rootid, diaobjectid, processing_version) "
-                            "SELECT q1.id, q2.diaobjectid, q2.processing_version "
-                            "FROM ( SELECT r.id, ROW_NUMBER() OVER () as rownum "
-                            "       FROM root_diaobject r ) AS q1 "
-                            "INNER JOIN ( SELECT o.diaobjectid, o.processing_version, "
-                            "             ROW_NUMBER() OVER () AS rownum "
-                            "             FROM diaobject o ) AS q2 "
-                            "  ON q1.rownum=q2.rownum" )
             cursor.execute( "SELECT COUNT(*) FROM root_diaobject" )
             assert cursor.fetchone()[0] == 346
-            cursor.execute( "SELECT COUNT(*) FROM diaobject_root_map" )
-            assert cursor.fetchone()[0] == 346
-            dbcon.commit()
 
         yield nobj, nsrc, nfrc, nhost
 

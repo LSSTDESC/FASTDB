@@ -35,8 +35,8 @@ def test_fakebroker( barf, snana_fits_ppdb_loaded, alerts_30days_sent_and_classi
                      for m in msgs ]
     with db.DB() as con:
         cursor = con.cursor()
-        cursor.execute( "SELECT s.diasourceid "
+        cursor.execute( "SELECT s.diaobjectid, s.visit "
                         "FROM ppdb_diasource s "
-                        "INNER JOIN ppdb_alerts_sent a ON s.diasourceid=a.diasourceid" )
-        dbids = [ row[0] for row in cursor.fetchall() ]
-    assert set( a['diaSource']['diaSourceId'] for a in brokeralerts ) == set( dbids )
+                        "INNER JOIN ppdb_alerts_sent a ON s.diaobjectid=a.diaobjectid AND s.visit=a.visit" )
+        dbids = [ f"{row[0]}_{row[1]}" for row in cursor.fetchall() ]
+    assert set( f"{a['diaSource']['diaObjectId']}_{a['diaSource']['visit']}" for a in brokeralerts ) == set( dbids )

@@ -3,7 +3,7 @@
 
 services:
   kafka-zookeeper:
-    image: ${DOCKER_ARCHIVE:-registry.nersc.gov/m1727/raknop}/fastdb-kafka-test:${DOCKER_VERSION:-latest}
+    image: ${DOCKER_ARCHIVE:-registry.nersc.gov/m1727/raknop}/fastdb-kafka-test:${DOCKER_VERSION:-test20250815}
     build:
       context: ./docker/kafka
     healthcheck:
@@ -17,7 +17,7 @@ services:
     depends_on:
        kafka-zookeeper:
          condition: service_healthy
-    image: ${DOCKER_ARCHIVE:-registry.nersc.gov/m1727/raknop}/fastdb-kafka-test:${DOCKER_VERSION:-latest}
+    image: ${DOCKER_ARCHIVE:-registry.nersc.gov/m1727/raknop}/fastdb-kafka-test:${DOCKER_VERSION:-test20250815}
     build:
       context: ./docker/kafka
     healthcheck:
@@ -28,7 +28,7 @@ services:
     entrypoint: [ "bin/kafka-server-start.sh", "config/server.properties" ]
 
   postgres:
-    image: ${DOCKER_ARCHIVE:-registry.nersc.gov/m1727/raknop}/fastdb-postgres:${DOCKER_VERSION:-latest}
+    image: ${DOCKER_ARCHIVE:-registry.nersc.gov/m1727/raknop}/fastdb-postgres:${DOCKER_VERSION:-test20250815}
     build:
       context: ./docker/postgres
       target: postgres
@@ -47,7 +47,7 @@ services:
       retries: 10
 
   mongodb:
-    image: ${DOCKER_ARCHIVE:-registry.nersc.gov/m1727/raknop}/fastdb-mongodb:${DOCKER_VERSION:-latest}
+    image: ${DOCKER_ARCHIVE:-registry.nersc.gov/m1727/raknop}/fastdb-mongodb:${DOCKER_VERSION:-test20250815}
     build:
       context: ./docker/mongodb
     environment:
@@ -74,7 +74,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    image: ${DOCKER_ARCHIVE:-registry.nersc.gov/m1727/raknop}/fastdb-shell:${DOCKER_VERSION:-latest}
+    image: ${DOCKER_ARCHIVE:-registry.nersc.gov/m1727/raknop}/fastdb-shell:${DOCKER_VERSION:-test20250815}
     build:
       context: ./docker/webserver
       target: shell
@@ -95,7 +95,7 @@ services:
     depends_on:
       createdb:
         condition: service_completed_successfully
-    image: ${DOCKER_ARCHIVE:-registry.nersc.gov/m1727/raknop}/fastdb-query-runner:${DOCKER_VERSION:-latest}
+    image: ${DOCKER_ARCHIVE:-registry.nersc.gov/m1727/raknop}/fastdb-query-runner:${DOCKER_VERSION:-test20250815}
     build:
       context: ./docker/query_runner
       target: queryrunner
@@ -126,7 +126,7 @@ services:
         condition: service_started
       queryrunner:
         condition: service_started
-    image: ${DOCKER_ARCHIVE:-registry.nersc.gov/m1727/raknop}/fastdb-webap:${DOCKER_VERSION:-latest}
+    image: ${DOCKER_ARCHIVE:-registry.nersc.gov/m1727/raknop}/fastdb-webap:${DOCKER_VERSION:-test20250815}
     build:
       context: ./docker/webserver
       target: webserver
@@ -182,7 +182,7 @@ services:
         condition: service_healthy
       createdb:
         condition: service_completed_successfully
-    image: ${DOCKER_ARCHIVE:-registry.nersc.gov/m1727/raknop}/fastdb-shell:${DOCKER_VERSION:-latest}
+    image: ${DOCKER_ARCHIVE:-registry.nersc.gov/m1727/raknop}/fastdb-shell:${DOCKER_VERSION:-test20250815}
     build:
       context: ./docker/webserver
       target: shell
@@ -233,7 +233,7 @@ services:
         condition: service_healthy
       mongodb:
         condition: service_healthy
-    image: ${DOCKER_ARCHIVE:-registry.nersc.gov/m1727/raknop}/fastdb-shell:${DOCKER_VERSION:-latest}
+    image: ${DOCKER_ARCHIVE:-registry.nersc.gov/m1727/raknop}/fastdb-shell:${DOCKER_VERSION:-test20250815}
     build:
       context: ./docker/webserver
       target: shell
@@ -278,6 +278,85 @@ services:
         user: root
     working_dir: /code
 
+  makeinstall:
+    image: ${DOCKER_ARCHIVE:-registry.nersc.gov/m1727/raknop}/fastdb-shell:${DOCKER_VERSION:-test20250815}
+    build:
+      context: ./docker/webserver
+      target: shell
+    user: ${USERID:-0}:${GROUPID:-0}
+    volumes:
+      - type: bind
+        source: .
+        target: /code
+      - type: bind
+        source: install
+        target: /fastdb
+    working_dir: /code
+    entrypoint: /bin/bash -c "
+                  touch aclocal.m4 configure
+                  && find . -name Makefile.am -exec touch \\{\\} \\;
+                  && find . -name Makefile.in -exec touch \\{\\} \\;
+                  && ./configure \
+                       --with-installdir=/fastdb \
+                       --with-smtp-server=mailhog \
+                       --with-smtp-port=1025 \
+                  && make install
+                  "
+
+  runtests:
+    depends_on:
+      kafka-server:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      createdb:
+        condition: service_completed_successfully
+      webap:
+        condition: service_started   # TODO : health test for webap
+      makeinstall:
+        condition: service_completed_successfully
+    image: ${DOCKER_ARCHIVE:-registry.nersc.gov/m1727/raknop}/fastdb-shell:${DOCKER_VERSION:-test20250815}
+    build:
+      context: ./docker/webserver
+      target: shell
+    environment:
+      - MONGODB_HOST=mongodb
+      - MONGODB_DBNAME=brokeralert
+      - MONGODB_COLLECTION=alerts
+      - MONGODB_ADMIN_USER=admin
+      - MONGODB_ADMIN_PASSWD=fragile
+      - MONGODB_ALERT_READER_USER=alertreader
+      - MONGODB_ALERT_READER_PASSWD=reader
+      - MONGODB_ALERT_WRITER_USER=alertwriter
+      - MONGODB_ALERT_WRITER_PASSWD=writer
+    user: ${USERID:-0}:${GROUPID:-0}
+    volumes:
+      - type: bind
+        source: tests/secrets
+        target: /secrets
+        read_only: true
+      - type: bind
+        source: .
+        target: /code
+      - type: bind
+        source: install
+        target: /fastdb
+      - type: volume
+        source: logs
+        target: /logs
+    post_start:
+      - command: /bin/bash -c "
+                   chown -R ${USERID:-0}:${GROUPID:-0} /sessions
+                   && chown -R ${USERID:-0}:${GROUPID:-0} /query_results
+                   && chown -R ${USERID:-0}:${GROUPID:-0} /logs
+                   "
+        privileged: true
+        user: root
+    working_dir: /code/tests
+    entrypoint: pytest -v
+    
 volumes:
   postgres_data:
   mongodb_data:

@@ -35,6 +35,14 @@ def server_test_processing_versions( procver ):
             con.commit()
 
 
+# If you've manually loaded your test database, but haven't
+#   manually inserted a user, from /code/tests run:
+#      pytest -v --trace webserver/test_server.py::test_just_make_a_user
+#   and, when you get to the Pdb() prompt, go look at the webap.
+def test_just_make_a_user( test_user ):
+    pass
+
+
 def test_getprocvers( server_test_processing_versions, test_user, fastdb_client ):
     res = fastdb_client.post( '/getprocvers' )
     assert isinstance( res, dict )

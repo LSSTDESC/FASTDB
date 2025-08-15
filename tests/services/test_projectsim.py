@@ -26,15 +26,16 @@ _logger.setLevel( logging.DEBUG )
 def test_reconstruct_alert( snana_fits_ppdb_loaded ):
     recon = AlertReconstructor()
 
-    alert = recon.reconstruct( 169694900014 )
+    alert = recon.reconstruct( 1696949, 1207427456 )
 
-    assert alert['alertId'] == 169694900014
+    # TODO: see issue #49
+    assert alert['alertId'] == 1207427456
 
     assert alert['diaObject']['diaObjectId'] == 1696949
     assert alert['diaObject']['ra'] == pytest.approx( 210.234375, abs=1e-5 )
     assert alert['diaObject']['dec'] == pytest.approx( 4.031936, abs=1e-5 )
-    assert alert['diaSource']['diaSourceId'] == 169694900014
     assert alert['diaSource']['diaObjectId'] == alert['diaObject']['diaObjectId']
+    assert alert['diaSource']['visit'] == 1207427456
     assert alert['diaSource']['ra'] == pytest.approx( alert['diaObject']['ra'], abs=1e-5 )
     assert alert['diaSource']['dec'] == pytest.approx( alert['diaObject']['dec'], abs=1e-5 )
     assert alert['diaSource']['midpointMjdTai'] == pytest.approx( 60371.3728, abs=0.0001 )
@@ -54,7 +55,7 @@ def test_reconstruct_alert( snana_fits_ppdb_loaded ):
     # Try reconstructing with a different lookback time
 
     recon = AlertReconstructor( prevsrc=10, prevfrced=17, prevfrced_gap=10 )
-    alert = recon.reconstruct( 169694900014 )
+    alert = recon.reconstruct( 1696949, 1207427456 )
 
     assert len( alert['prvDiaSources'] ) == 9
     assert len( alert['prvDiaForcedSources'] ) == 4
@@ -70,16 +71,31 @@ def test_alertsender_find_alerts( snana_fits_ppdb_loaded ):
         sender = AlertSender( 'kafka-server', 'null' )
 
         # First: no alerts sent, addeday = 30, should get first 30 days of alert
-        sourceids = sender.find_alerts_to_send( addeddays=30 )
+        diaobjids, visits = sender.find_alerts_to_send( addeddays=30 )
+        tosendids = [ (o,v) for o, v in zip( diaobjids, visits ) ]
         with db.DB() as con:
             cursor = con.cursor()
             cursor.execute( "SELECT MIN(midpointmjdtai) FROM ppdb_diasource" )
             minmjd = cursor.fetchone()[0]
-            cursor.execute( "SELECT midpointmjdtai FROM ppdb_diasource WHERE diasourceid=ANY(%(ids)s)",
-                            { 'ids': sourceids } )
-            sourcemjds = [ row[0] for row in cursor.fetchall() ]
-            assert len( sourcemjds ) == len( sourceids )
+            # BOBBY TABLES ALERT!!! I haven't figured out how to construct
+            # this query properly with psycopg, so I'm just doing string
+            # interpolation, which is the classic way to open yourself
+            # up to SQL injection attacks.  It's in a test, so the
+            # security danger is to the test database, so nobody cares.
+            q = ( "SELECT s.diaobjectid, s.visit, s.midpointmjdtai FROM ppdb_diasource s "
+                  "INNER JOIN ( SELECT * FROM ( VALUES " )
+            first = True
+            for o, v in tosendids:
+                q += f"{'' if first else ', '}({o},{v}) "
+                first = False
+            q += ") AS vtab(o,v) ) subq ON s.diaobjectid=subq.o AND s.visit=subq.v"
+            cursor.execute( q )
+            rows = cursor.fetchall()
+            sourceids = [ (row[0], row[1]) for row in rows ]
+            sourcemjds = [ row[2] for row in rows ]
+            assert len( sourcemjds ) == len( diaobjids )
             assert len( sourcemjds ) == 77
+            assert set( sourceids) == set( tosendids )
             assert all ( s >= minmjd for s in sourcemjds )
             assert all ( s <= minmjd + 30 for s in sourcemjds )
             # Turns out that the max of the 77 that are in the test test has mjd 60303.211,
@@ -87,20 +103,27 @@ def test_alertsender_find_alerts( snana_fits_ppdb_loaded ):
             assert max( sourcemjds ) - ( minmjd + 30 ) < 5
 
         # Second: no alert sent, throughday = 60288
-        sourceids = sender.find_alerts_to_send( throughday=60288 )
+        diaobjids, visits = sender.find_alerts_to_send( throughday=60288 )
+        tosendids = [ (o,v) for o, v in zip( diaobjids, visits ) ]
         with db.DB() as con:
             cursor = con.cursor()
-            cursor.execute( ( "SELECT diasourceid,midpointmjdtai "
-                              "FROM ppdb_diasource "
-                              "WHERE diasourceid=ANY(%(ids)s) "
-                              "ORDER BY midpointmjdtai" ), { 'ids': sourceids } )
+            # BOBBY TABLES ALERT!!!  See previous BTA
+            q = ( "SELECT s.diaobjectid,s.visit,s.midpointmjdtai "
+                  "FROM ppdb_diasource s "
+                  "INNER JOIN ( SELECT * FROM ( VALUES " )
+            first = True
+            for o, v in tosendids:
+                q += f"{'' if first else ', '}({o},{v}) "
+                first = False
+            q += ") AS vtab(o,v) ) subq ON s.diaobjectid=subq.o AND s.visit=subq.v"
+            cursor.execute( q )
             rows = cursor.fetchall()
-            early_sourceids = [ row[0] for row in rows ]
-            sourcemjds = [ row[1] for row in rows ]
+            early_srcids = [ ( row[0], row[1] ) for row in rows ]
+            sourcemjds = [ row[2] for row in rows ]
             maxmjd = max( sourcemjds )
-            assert len( sourcemjds ) == len( sourceids )
-            assert set( early_sourceids ) == set( sourceids )
+            assert len( sourcemjds ) == len( diaobjids )
             assert len( sourcemjds ) == 38
+            assert set( early_srcids ) == set( tosendids )
             assert all( s >= minmjd for s in sourcemjds )
             assert all( s <= 60288 for s in sourcemjds )
 
@@ -111,27 +134,34 @@ def test_alertsender_find_alerts( snana_fits_ppdb_loaded ):
         with db.DB() as con:
             cursor = con.cursor()
             now = datetime.datetime.now( tz=datetime.UTC )
-            for sid in early_sourceids[19:]:
-                cursor.execute( "INSERT INTO ppdb_alerts_sent(diasourceid,senttime) VALUES(%(id)s,%(t)s)",
-                                { 'id': sid, 't': now } )
+            for srcid in early_srcids[19:]:
+                cursor.execute( "INSERT INTO ppdb_alerts_sent(diaobjectid,visit,senttime) VALUES(%(id)s,%(v)s,%(t)s)",
+                                { 'id': srcid[0], 'v': srcid[1], 't': now } )
             con.commit()
 
-        sourceids = sender.find_alerts_to_send( addeddays=1 )
+        diaobjids, visits = sender.find_alerts_to_send( addeddays=1 )
+        tosendids = [ (o, v) for o, v in zip( diaobjids, visits ) ]
         with db.DB() as con:
             cursor = con.cursor()
-            cursor.execute( ( "SELECT diasourceid,midpointmjdtai "
-                              "FROM ppdb_diasource "
-                              "WHERE diasourceid=ANY(%(ids)s) "
-                              "ORDER BY midpointmjdtai" ), { 'ids': sourceids } )
+            # BOBBY TABLES ALERT!!!  See previous BTA
+            q = ( "SELECT s.diaobjectid,s.visit,s.midpointmjdtai "
+                  "FROM ppdb_diasource s "
+                  "INNER JOIN ( SELECT * FROM ( VALUES " )
+            first = True
+            for o, v in zip( diaobjids, visits ):
+                q += f"{'' if first else ', '}({o},{v}) "
+                first = False
+            q += ") AS vtab(o,v) ) subq ON s.diaobjectid=subq.o AND s.visit=subq.v"
+            cursor.execute( q )
             rows = cursor.fetchall()
-            new_sourceids = [ row[0] for row in rows ]
-            sourcemjds = [ row[1] for row in rows ]
-            assert len( new_sourceids ) == len( sourceids )
-            assert set( new_sourceids) == set( sourceids )
+            new_srcids = [ (row[0], row[1]) for row in rows ]
+            sourcemjds = [ row[2] for row in rows ]
+            assert len( new_srcids ) == len( diaobjids )
+            assert set( new_srcids ) == set( tosendids )
             assert all( s < maxmjd + 1 for s in sourcemjds )
-            assert all( s in new_sourceids for s in early_sourceids[:19] )
-            assert all( s not in new_sourceids for s in early_sourceids[19:] )
-            assert len( new_sourceids ) == 19 + 2
+            assert all( s in new_srcids for s in early_srcids[:19] )
+            assert all( s not in new_srcids for s in early_srcids[19:] )
+            assert len( new_srcids ) == 19 + 2
 
     finally:
         with db.DB() as con:
@@ -176,11 +206,12 @@ def test_send_alerts( snana_fits_ppdb_loaded ):
         assert len(msgs) == 77
 
         # Make sure that the "alerts sent" table matches what's in the messages
-        alertids = [ fastavro.schemaless_reader(io.BytesIO(m.value()), schema['alert'])['diaSource']['diaSourceId']
+        # see Issue #49
+        alertids = [ fastavro.schemaless_reader(io.BytesIO(m.value()), schema['alert'])['diaSource']['visit']
                      for m in msgs ]
         with db.DB() as con:
             cursor = con.cursor()
-            cursor.execute( "SELECT diasourceid FROM ppdb_alerts_sent" )
+            cursor.execute( "SELECT visit FROM ppdb_alerts_sent" )
             dbids = [ row[0] for row in cursor.fetchall() ]
         assert set( dbids ) == set( alertids )
 
@@ -217,20 +248,21 @@ def test_send_all_alerts( snana_fits_ppdb_loaded ):
         assert len(msgs) == 1862
 
         # Make sure all diasourceids show up
-        alertids = set( fastavro.schemaless_reader(io.BytesIO(m.value()), schema['alert'])['diaSource']['diaSourceId']
+        # See Issue #49
+        alertids = set( fastavro.schemaless_reader(io.BytesIO(m.value()), schema['alert'])['diaSource']['visit']
                         for m in msgs )
         with db.DB() as con:
             cursor = con.cursor()
-            cursor.execute( "SELECT diasourceid FROM ppdb_diasource" )
+            cursor.execute( "SELECT visit FROM ppdb_diasource" )
             dbids = set( row[0] for row in cursor.fetchall() )
         assert dbids == alertids
 
         # Make sure all alerts show up in the alerts_sent table
         with db.DB() as con:
             cursor = con.cursor()
-            cursor.execute( "SELECT s.diasourceid FROM ppdb_diasource s "
-                            "LEFT JOIN ppdb_alerts_sent a ON s.diasourceid=a.diasourceid "
-                            "WHERE a.diasourceid IS NULL" )
+            cursor.execute( "SELECT s.diaobjectid,s.visit FROM ppdb_diasource s "
+                            "LEFT JOIN ppdb_alerts_sent a ON s.diaobjectid=a.diaobjectid AND s.visit=a.visit "
+                            "WHERE a.diaobjectid IS NULL" )
             assert len( cursor.fetchall() ) == 0
 
     finally:

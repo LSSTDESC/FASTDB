@@ -28,7 +28,7 @@ def create_diaobject_sources_view(connection, procver):
                         SELECT diaobjectid,
                             array_agg(s ORDER BY s.midpointmjdtai) AS diasource
                         FROM diasource AS s
-                        WHERE s.diaobject_procver = {procver} AND s.processing_version = {procver}
+                        WHERE s.processing_version = {procver}
                         GROUP BY diaobjectid
                     ) AS ds
                     ON ds.diaobjectid = o.diaobjectid
@@ -36,7 +36,7 @@ def create_diaobject_sources_view(connection, procver):
                         SELECT diaobjectid,
                             array_agg(s ORDER BY s.midpointmjdtai) AS diaforcedsource
                         FROM diaforcedsource AS s
-                        WHERE s.diaobject_procver = {procver} AND s.processing_version = {procver}
+                        WHERE s.processing_version = {procver}
                         GROUP BY diaobjectid
                     ) AS dfs
                     ON dfs.diaobjectid = o.diaobjectid
@@ -44,6 +44,7 @@ def create_diaobject_sources_view(connection, procver):
                 """
             ).format(procver=procver)
         )
+
 
 def dump_to_parquet(filehandler, *, procver, connection=None):
     """Dump joined ``diaobject`` and ``diasource`` rows to a Parquet file."""
@@ -55,7 +56,7 @@ def dump_to_parquet(filehandler, *, procver, connection=None):
             DROP EXTENSION IF EXISTS pg_parquet;
             CREATE EXTENSION pg_parquet;
             """
-        )        
+        )
         with cursor.copy(
             """
             COPY (SELECT * FROM diaobject_with_sources)
