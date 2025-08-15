@@ -1,0 +1,60 @@
+name: Run Model Tests 1
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  tests:
+    name: run model tests 1
+    runs-on: ubuntu-latest
+    env:
+      DOCKER_ARCHIVE: ghcr.io/LSSTDESC
+
+    steps:
+      - name: Dump docker logs on failure
+        if: failure()
+        uses: jwalton/gh-docker-logs@v2
+
+      - name: checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: log into github container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: cleanup
+        run: |
+          # try to save HDD space on the runner by removing some unneeded stuff
+          # ref: https://github.com/actions/runner-images/issues/2840#issuecomment-790492173
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf "/usr/local/share/boost"
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+
+      - name: run ruff linter
+        uses: astral-sh/ruff-action@v3
+        with:
+          src: /home/runner/work/FASTDB
+          
+      - name: pull images
+        run: |
+          docker compose pull kafka-server postgres mongodb mailhog queryrunner shell
+
+      - name: unpack test data
+        run: |
+          cd /home/runner/work/FASTDB/tests
+          tar xf elasticc2_test_data.tar.bz2
+          
+      - name: run test
+        run: |
+          docker compose run --rm runtests
+          docker compose down -v
