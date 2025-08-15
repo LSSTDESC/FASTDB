@@ -6,15 +6,33 @@ from db import DB, PPDBHostGalaxy, PPDBDiaObject, PPDBDiaSource, PPDBDiaForcedSo
 
 from basetest import BaseTestDB
 
-
-# These fixture is much like one in conftest.py,but is specific to this file
+# NOTE.  If the PPDB db tests are run after the sanan_fits_ppdb_loaded
+# session fixture has been run (e.g. by running
+# admin/test_load_snana_fits.py), then there may be interactions here.
+# The db tests sort of assume that the database is empty when they
+# start, but in this case that won't be true for the PPDB tables.
+#
+# We can avoid collisions by making sure that the object IDs and
+# attributes don't show up in what gets loaded in the fixture.  For
+# object IDs, we're depending on none of the random numbers matching
+# what we have below.  For coordinates, we make sure to use a big
+# positive dec.  For mjd, we use absurdly small mjds (~50000) that we
+# know are before anything in the snana files that we test load.
+#
+# There was one other collision: one of the tests plays around with
+# inserting objects and searching based on fields.  We were getting a
+# test failure because the test_get_by_attrs was searching for a
+# PPDBDiaSource by band, and finding *lots* instead of one, because of
+# course there were lots of r-band sources loaded in the session fixture
+# That was worked around by moving 'band' to the end of the safe_to_modify
+# list in TdstPPDBDiaSource.
 
 @pytest.fixture
 def ppdbobj1():
     obj = PPDBDiaObject( diaobjectid=42,
-                         radecmjdtai=60000.,
-                         ra=42.,
-                         dec=13
+                         radecmjdtai=50000.,
+                         ra=137.,
+                         dec=42.
                         )
     obj.insert()
 
@@ -29,9 +47,9 @@ def ppdbobj1():
 @pytest.fixture
 def ppdbobj2():
     obj = PPDBDiaObject( diaobjectid=23,
-                         radecmjdtai=60000.,
-                         ra=42.,
-                         dec=14
+                         radecmjdtai=50000.,
+                         ra=137.,
+                         dec=43.
                         )
     obj.insert()
 
@@ -46,9 +64,9 @@ def ppdbobj2():
 @pytest.fixture
 def ppdbobj3():
     obj = PPDBDiaObject( diaobjectid=64738,
-                         radecmjdtai=60000.,
-                         ra=42.,
-                         dec=15
+                         radecmjdtai=50000.,
+                         ra=137.,
+                         dec=44.
                         )
     obj.insert()
 
@@ -141,20 +159,20 @@ class TestPPDBHostGalaxy( BaseTestDB ):
 
         self.obj1 = PPDBHostGalaxy( id=uuid.uuid4(),
                                     objectid=42,
-                                    ra=13.,
-                                    dec=-66.
+                                    ra=230.,
+                                    dec=64.
                                    )
         self.dict1 = { k: getattr( self.obj1, k ) for k in self.columns }
         self.obj2 = PPDBHostGalaxy( id=uuid.uuid4(),
                                     objectid=23,
-                                    ra=137.,
+                                    ra=128.,
                                     dec=42.,
                                 )
         self.dict2 = { k: getattr( self.obj2, k ) for k in self.columns }
         self.dict3 = { 'id': uuid.uuid4(),
                        'objectid': 31337,
                        'ra': 32.,
-                       'dec': 64.
+                       'dec': 55.
                        }
 
 
@@ -223,19 +241,19 @@ class TestPPDBDiaObject( BaseTestDB ):
         self.uniques = []
 
         self.obj1 = PPDBDiaObject( diaobjectid=1,
-                                   radecmjdtai=60000.,
+                                   radecmjdtai=50000.,
                                    ra=42.,
-                                  dec=128. )
+                                  dec=88. )
         self.dict1 = { k: getattr( self.obj1, k ) for k in self.columns }
         self.obj2 = PPDBDiaObject( diaobjectid=2,
-                                   radecmjdtai=61000.,
+                                   radecmjdtai=51000.,
                                    ra=23.,
-                                  dec=-42. )
+                                  dec=77. )
         self.dict2 = { k: getattr( self.obj2, k ) for k in self.columns }
         self.dict3 = { 'diaobjectid': 3,
-                       'radecmjdtai': 62000.,
-                       'ra': 64.,
-                       'dec': -23. }
+                       'radecmjdtai': 52000.,
+                       'ra': 99.,
+                       'dec': 66. }
 
 
 class TestPPDBDiaSource( BaseTestDB ):
@@ -301,7 +319,7 @@ class TestPPDBDiaSource( BaseTestDB ):
             'xerr',
             'yerr',
             'x_y_cov',
-            'band',
+            # 'band',        # move 'band' to the end because of complicated interaction with a session fixture
             'midpointmjdtai',
             'ra',
             'raerr',
@@ -341,6 +359,7 @@ class TestPPDBDiaSource( BaseTestDB ):
             'ixypsf',
             'flags',
             'pixelflags',
+            'band'
         ]
         self.uniques = []
 
@@ -348,9 +367,9 @@ class TestPPDBDiaSource( BaseTestDB ):
                                    visit=1,
                                    detector=1,
                                    band='r',
-                                   midpointmjdtai=60000.,
-                                   ra=42.0001,
-                                   dec=12.9998,
+                                   midpointmjdtai=50000.,
+                                   ra=137.0001,
+                                   dec=42.9998,
                                    psfflux=123.4,
                                    psffluxerr=5.6,
                                   )
@@ -359,9 +378,9 @@ class TestPPDBDiaSource( BaseTestDB ):
                                    visit=2,
                                    detector=2,
                                    band='i',
-                                   midpointmjdtai=60010.,
-                                   ra=42.0002,
-                                   dec=13.0001,
+                                   midpointmjdtai=50010.,
+                                   ra=137.0002,
+                                   dec=42.0001,
                                    psfflux=124.6,
                                    psffluxerr=8.0
                                   )
@@ -370,9 +389,9 @@ class TestPPDBDiaSource( BaseTestDB ):
                        'visit': 3,
                        'detector': 3,
                        'band': 'g',
-                       'midpointmjdtai': 60015.,
-                       'ra': 41.9999,
-                       'dec': 13.0002,
+                       'midpointmjdtai': 50015.,
+                       'ra': 137.9999,
+                       'dec': 42.0002,
                        'psfflux': 135.7,
                        'psffluxerr': 9.1 }
 
@@ -416,10 +435,10 @@ class TestPPDBDiaForcedSource( BaseTestDB ):
         self.obj1 = PPDBDiaForcedSource( diaobjectid=ppdbobj1.diaobjectid,
                                          visit=1,
                                          detector=1,
-                                         midpointmjdtai=60000.,
+                                         midpointmjdtai=50000.,
                                          band='r',
-                                         ra=42.,
-                                         dec=13.,
+                                         ra=137.,
+                                         dec=42.,
                                          psfflux=123.4,
                                          psffluxerr=5.6,
                                          scienceflux=234.5,
@@ -431,10 +450,10 @@ class TestPPDBDiaForcedSource( BaseTestDB ):
         self.obj2 = PPDBDiaForcedSource( diaobjectid=ppdbobj1.diaobjectid,
                                          visit=2,
                                          detector=2,
-                                         midpointmjdtai=60001.,
+                                         midpointmjdtai=50001.,
                                          band='i',
-                                         ra=42.0001,
-                                         dec=13.0001,
+                                         ra=137.0001,
+                                         dec=42.0001,
                                          psfflux=123.5,
                                          psffluxerr=5.7,
                                          scienceflux=235.5,
@@ -446,10 +465,10 @@ class TestPPDBDiaForcedSource( BaseTestDB ):
         self.dict3 = { 'diaobjectid': ppdbobj1.diaobjectid,
                        'visit': 3,
                        'detector': 3,
-                       'midpointmjdtai': 600002.,
+                       'midpointmjdtai': 500002.,
                        'band': 'g',
-                       'ra': 41.9999,
-                       'dec': 12.9999,
+                       'ra': 137.9999,
+                       'dec': 42.9999,
                        'psfflux': 122.3,
                        'psffluxerr': 4.5,
                        'scienceflux': 233.4,
