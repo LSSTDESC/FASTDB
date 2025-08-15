@@ -1,4 +1,4 @@
-name: Run Model Tests 1
+name: Run FASTDB Tests
 
 on:
   push:
@@ -9,10 +9,10 @@ on:
 
 jobs:
   tests:
-    name: run model tests 1
+    name: run fastdb tests
     runs-on: ubuntu-latest
     env:
-      DOCKER_ARCHIVE: ghcr.io/LSSTDESC
+      DOCKER_ARCHIVE: ghcr.io/lsstdesc
 
     steps:
       - name: Dump docker logs on failure

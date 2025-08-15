@@ -340,7 +340,7 @@ Hopefully you don't have to do this.  In the rare case where you do (which will 
 
 First, edit ``docker-compose.yaml`` and find all lines that start with ``image:`` (after several spaces).  At the end of that line you should see something like ``${DOCKER_VERSION:-test20250815}``.  Bump the date after ``test`` to the current date.  Make sure *not* to remove either the colon, or the dash right after the colon.  (We're assuming two people won't be doing this on the same day....)  Then, at the top level of your archive, run::
 
-  DOCKER_ARCHIVE=ghcr.io/LSSTDESC docker compose build
+  DOCKER_ARCHIVE=ghcr.io/lsstdesc docker compose build
 
 when the build finishes, run all of the following, where ``<version>`` is what you replaced ``test20250815`` with above::
 
