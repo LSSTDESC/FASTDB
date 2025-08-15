@@ -51,7 +51,7 @@ jobs:
 
       - name: unpack test data
         run: |
-          cd /home/runner/work/FASTDB/tests
+          cd tests
           tar xf elasticc2_test_data.tar.bz2
           
       - name: run test
