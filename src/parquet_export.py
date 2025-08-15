@@ -28,7 +28,7 @@ def create_diaobject_sources_view(connection, procver):
                         SELECT diaobjectid,
                             array_agg(s ORDER BY s.midpointmjdtai) AS diasource
                         FROM diasource AS s
-                        WHERE s.diaobject_procver = {procver} AND s.processing_version = {procver}
+                        WHERE s.processing_version = {procver}
                         GROUP BY diaobjectid
                     ) AS ds
                     ON ds.diaobjectid = o.diaobjectid
@@ -36,7 +36,7 @@ def create_diaobject_sources_view(connection, procver):
                         SELECT diaobjectid,
                             array_agg(s ORDER BY s.midpointmjdtai) AS diaforcedsource
                         FROM diaforcedsource AS s
-                        WHERE s.diaobject_procver = {procver} AND s.processing_version = {procver}
+                        WHERE s.processing_version = {procver}
                         GROUP BY diaobjectid
                     ) AS dfs
                     ON dfs.diaobjectid = o.diaobjectid

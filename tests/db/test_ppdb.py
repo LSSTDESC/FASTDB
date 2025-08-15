@@ -7,7 +7,19 @@ from db import DB, PPDBHostGalaxy, PPDBDiaObject, PPDBDiaSource, PPDBDiaForcedSo
 from basetest import BaseTestDB
 
 
-# These fixture is much like one in conftest.py,but is specific to this file
+# These tests are a little scary because the database tests in
+# basetest.py sort of assume that the database tables they're futzing
+# with are empty, but there are session scope fixtures that load up the
+# PPDB.
+#
+# As of this writing, the numbers below (luckily) avoid conflicts with
+# the sanna_fits_ppdb_loaded session fixture in conftest.py.  One thing
+# that needed to be done was to move the 'band' entry in
+# TestPPDBDiaSource's safe_to_modify list further down.  (It was being
+# used in a test to search by attributes; the test expected to find one
+# result, but found lots, because the test PPDB includes lots of things
+# with band='r'.  By moving 'band' further down in the safe_to_modify
+# list, that attribute was not used in that test.)
 
 @pytest.fixture
 def ppdbobj1():
@@ -301,7 +313,7 @@ class TestPPDBDiaSource( BaseTestDB ):
             'xerr',
             'yerr',
             'x_y_cov',
-            'band',
+            # 'band',         # Moved down for reasons described in comments at the top of this file
             'midpointmjdtai',
             'ra',
             'raerr',
@@ -341,6 +353,7 @@ class TestPPDBDiaSource( BaseTestDB ):
             'ixypsf',
             'flags',
             'pixelflags',
+            'band',
         ]
         self.uniques = []
 

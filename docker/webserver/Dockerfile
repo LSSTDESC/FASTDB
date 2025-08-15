@@ -20,7 +20,7 @@ RUN  apt-get update \
     && apt-get -y install -y \
          python3 locales netcat-openbsd gnupg curl elinks postgresql-client make rlwrap socat \
          ca-certificates \
-         tmux emacs-nox less procps \
+         tmux emacs-nox less procps bzip2 \
     && apt-get -y autoremove \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
