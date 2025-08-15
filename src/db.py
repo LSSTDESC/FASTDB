@@ -19,6 +19,16 @@ import psycopg.rows
 import psycopg.types.json
 import pymongo
 
+import util
+
+# These next two are for debugging.  They are used in DBCon.__init__.
+# For normal use, they should be False, as they bloat the logs a lot.
+# (They will only actually add things to the logs the debug level,
+# Set near the bottom of webserver/server.py, is DEBUG.)
+# We should replace them with configurable options.
+_echoqueries = True
+_alwaysexplain = False
+
 # The tables here should be in the order they safe to drop.
 # (Insofar as it's safe to drop all your tables....)
 all_table_names = [ 'query_queue',
@@ -68,7 +78,7 @@ def get_dbcon():
 
     It's your responsibility to roll it back, close it, etc!
 
-    Consider using the DB context manager instead of this.
+    Consider using the DB or DBCon context managers instead of this.
     """
 
     global dbuser, dbpasswd, dbhost, dbport, dbname
@@ -78,7 +88,7 @@ def get_dbcon():
 
 @contextmanager
 def DB( dbcon=None ):
-    """Get a database connection in a context manager.
+    """Get a psycopg.connection in a context manager.
 
     Always call this as "with DB() as ..."
 
@@ -108,6 +118,154 @@ def DB( dbcon=None ):
         if conn is not None:
             conn.rollback()
             conn.close()
+
+
+class DBCon:
+    """Class that encapsulates a postgres database connection.
+
+    Prefer using this class in a context manager:
+
+        with DBCon() as dbcon:
+            rows, cols = dbcon.execute( query, subdict )
+             # do other things
+
+    That way, it will automatically close the database connection
+    when the context manager exists.
+
+    Send queries using DBCon.execute_nofetch() and DBCon.execute().
+
+    """
+
+    def __init__( self, dictcursor=False ):
+        """Instantiate.
+
+        If you use this, you should also use close(), and soon.
+
+        Parameters
+        ----------
+          dictcursor : bool, default False
+            If True, then the cursor uses psycopg.rows.dict_row as its
+            row factory.  execite() will return a list of dictionaries,
+            with each element of the list being one row of the result.
+            If False, then execute returns two lists: a list of tuples
+            (the rows) and a list of strings (the column names).
+
+        """
+
+        global dbuser, dbpasswd, dbhost, dbport, dbname
+
+        # TODO : make these next two configurable rather than hardcoded
+        # These are useful for debugging, but are profligate for production
+        global _echoqueries, _alwaysexplain
+        self.echoqueries = _echoqueries
+        self.alwaysexplain = _alwaysexplain
+
+        self.dictcursor = dictcursor
+
+        self.con = psycopg.connect( dbname=dbname, user=dbuser, password=dbpasswd, host=dbhost, port=dbport )
+        self.remake_cursor()
+
+
+    def __enter__( self ):
+        return self
+
+
+    def __exit__( self, type, value, traceback ):
+        self.close()
+
+
+    def remake_cursor( self, dictcursor=None ):
+        """Recreate the cursor used for database communication.
+
+        Parameters
+        ----------
+          dictcursor : bool, default None
+            If None, will make a cursor that returns dictionaries
+            (vs. tuples) for rows based on what was passed to the
+            dictcursor argument of the DBCon constructor.  If True,
+            makes a cursor that will cause execute() to return a list of
+            dictionaries.  If False, makes a cursor that will cause
+            execute() to return two lists; the first is a list of tuples
+            (the rows), the second is a list of strings (the column
+            names).
+
+        """
+        self.curcursorisdict = self.dictcursor if dictcursor is None else dictcursor
+        if self.curcursorisdict:
+            self.cursor = self.con.cursor( row_factory=psycopg.rows.dict_row )
+        else:
+            self.cursor = self.con.cursor()
+
+
+    def close( self ):
+        """Rolls back and closes the connection.
+
+        If you did stuff you want kept, make sure to call commit.
+        """
+        self.con.rollback()
+        self.con.close()
+
+
+    def commit( self ):
+        """Commit changes to the database.
+
+        Call this if you've done any INSERT or UPDATE or similar
+        commands that change the database, and you want your commands to
+        stick.
+
+        """
+        self.con.commit()
+        self.remake_cursor( self, self.curcursorisdict )  # ...is this necessary?
+
+
+    def execute_nofetch( self, q, subdict={}, silent=False):
+        """Runs a query where you don't expect to fetch results."""
+        if self.echoqueries and not silent:
+            util.logger.debug( f"Sending query\n{q}\nwith substitutions: {subdict}" )
+
+        if self.alwaysexplain and not silent:
+            self.cursor.execute( f"EXPLAIN {q}", subdict )
+            rows = self.cursor.fetchall()
+            dex = 'QUERY PLAN' if self.curcursorisdict else 0
+            nl = '\n'
+            util.logger.debug( f"Query plan:\n{nl.join([r[dex] for r in rows])}" )
+
+        self.cursor.execute( q, subdict )
+
+
+    def execute( self, q, subdict={}, silent=False ):
+        """Runs a query, and returns either (rows, columns) or just rows.
+
+        Parmaeters
+        ----------
+          q : str
+            The query.  Use %(var)s in the string for a substitution.
+            The key "var" must then show up in subdict.
+
+          subdict : dict
+            Substitution dictionary. For every %(var)s that shows up in q,
+            there must be a key "var" in this dictionary with the value to
+            be substituted.  Extra keys are ignored.
+
+          silent : bool, default False
+            If True, don't echo the query or the explain even if we normally would.
+
+        Returns
+        -------
+          If the current cursor is a dict cursor, returns a list of dictionaries.
+
+          If the current cursor is not a dict cursor, returns two lists.
+          The first is a list of lists, with the rows pulled from the
+          dictionary.  The second is a list of column names.
+
+        """
+        self.execute_nofetch( q, subdict, silent=silent )
+        if self.curcursorisdict:
+            return self.cursor.fetchall()
+        else:
+            cols = [ desc[0] for desc in self.cursor.description ]
+            rows = self.cursor.fetchall()
+            return rows, cols
 
 
 # ======================================================================

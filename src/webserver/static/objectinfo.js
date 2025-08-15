@@ -8,6 +8,11 @@ import { SVGPlot } from "./svgplot.js"
 
 fastdbap.ObjectInfo = class
 {
+    static ltcv_display_cache = "combined";
+    static yscale_cache = "nJy";
+    static nondet_cache = true;
+    static shown_bands_cache = null;
+
     constructor( data, context, parentdiv )
     {
         this.data = data;
@@ -84,7 +89,12 @@ fastdbap.ObjectInfo = class
         this.allbands = [];
         for ( let b of knownbands ) if ( this.ltcvs.hasOwnProperty( b ) ) this.allbands.push( b );
         this.allbands = this.allbands.concat( unknownbands );
-        this.shownbands = [...this.allbands];
+        if ( fastdbap.ObjectInfo.shown_bands_cache == null ) {
+            this.shownbands = [...this.allbands];
+            fastdbap.ObjectInfo.shown_bands_cache = [...this.shownbands];
+        } else {
+            this.shownbands = [...fastdbap.ObjectInfo.shown_bands_cache];
+        }
 
         this.datasets = {};
         for ( let b of this.allbands ) {
@@ -139,16 +149,20 @@ fastdbap.ObjectInfo = class
     render_page()
     {
         let self = this;
-        let topdiv, infodiv, ltcvdiv, table, tr, td, p;
+        let topdiv, infodiv, ltcvdiv, table, tr, td, p, option;
+
+        this.current_ltcv_display = fastdbap.ObjectInfo.ltcv_display_cache;
+        this.current_ltcv_yscale = fastdbap.ObjectInfo.yscale_cache;
+        this.show_nondet = fastdbap.ObjectInfo.nondet_cache;
 
         rkWebUtil.wipeDiv( this.parentdiv );
-        topdiv = rkWebUtil.elemaker( "div", this.parentdiv, { "classes": [ "objectinfohbox" ] } );
-        // TODO : maybe use a class other than "searchinner"?  It's got what I want,
-        //   but is semantically weird
-        infodiv = rkWebUtil.elemaker( "div", topdiv, { "classes": [ "searchinner", "yscroll", "xmarginright",
-                                                                    "maxwcontent", "flexgrow0" ] } );
-        ltcvdiv = rkWebUtil.elemaker( "div", topdiv, { "classes": [ "searchinner", "yscroll",
-                                                                    "minwid0", "flexgrow1" ] } );
+        // topdiv = rkWebUtil.elemaker( "div", this.parentdiv, { "classes": [ "objectinfohbox" ] } );
+        topdiv = this.parentdiv;
+        infodiv = rkWebUtil.elemaker( "div", topdiv, { "classes": [ "ltcvvalues" ] } );
+        if ( this.current_ltcv_display == "combined" )
+            ltcvdiv = rkWebUtil.elemaker( "div", topdiv, { "classes": [ "ltcvplots_combined" ] } );
+        else
+            ltcvdiv = rkWebUtil.elemaker( "div", topdiv, { "classes": [ "ltcvplots_separate" ] } );
 
         // Object info on the left
 
@@ -206,41 +220,42 @@ fastdbap.ObjectInfo = class
 
         // Lightcurve plots on right
 
-        p = rkWebUtil.elemaker( "p", ltcvdiv, { "text": "Lightcurve display: " } );
+        p = rkWebUtil.elemaker( "div", ltcvdiv, { "text": "Lightcurve display: ",
+                                                  "classes": [ "flexgrow0", "maxhcontent" ] } );
 
-        this.current_ltcv_display = "combined";
         this.ltcv_display_widget = rkWebUtil.elemaker( "select", p,
                                                        { "change": (e) => { self.update_ltcv_display() } } );
-        rkWebUtil.elemaker( "option", this.ltcv_display_widget, { "value": "separate",
-                                                                  "text": "separate" } );
-        rkWebUtil.elemaker( "option", this.ltcv_display_widget, { "value": "combined",
-                                                                  "text": "combined",
-                                                                  "attributes": { "selected": 1 } } );
+        option = rkWebUtil.elemaker( "option", this.ltcv_display_widget, { "value": "separate",
+                                                                           "text": "separate" } );
+        if ( this.current_ltcv_display == "separate" ) option.setAttribute( "selected", 1 );
+        option = rkWebUtil.elemaker( "option", this.ltcv_display_widget, { "value": "combined",
+                                                                           "text": "combined" } );
+        if ( this.current_ltcv_display == "combined" ) option.setAttribute( "selected", 1 );
 
         rkWebUtil.elemaker( "text", p, { "text": "    y scale: " } );
-        this.current_ltcv_yscale = "nJy";
         this.ltcv_yscale_widget = rkWebUtil.elemaker( "select", p,
                                                       { "change": (e) => { self.update_ltcv_display() } } );
-        rkWebUtil.elemaker( "option", this.ltcv_yscale_widget, { "value": "nJy",
-                                                                 "text": "nJy",
-                                                                 "attributes": { "selected": 1 } } );
-        rkWebUtil.elemaker( "option", this.ltcv_yscale_widget, { "value": "relative",
-                                                                 "text": "relative" } )
+        option = rkWebUtil.elemaker( "option", this.ltcv_yscale_widget, { "value": "nJy",
+                                                                          "text": "nJy" } );
+        if ( this.current_ltcv_yscale == "nJy" ) option.setAttribute( "selected", 1 );
+        option = rkWebUtil.elemaker( "option", this.ltcv_yscale_widget, { "value": "relative",
+                                                                          "text": "relative" } );
+        if ( this.current_ltcv_yscale == "relative" ) option.setAttribute( "selected", 1 );
 
 
         rkWebUtil.elemaker( "text", p, { "text": "   " } );
-        this.show_nondet = true;
         this.show_nondet_checkbox = rkWebUtil.elemaker( "input", p,
                                                         { "id": "show-nondetections-checkbox",
                                                           "change": (e) => { self.update_ltcv_display() },
-                                                          "attributes": { "type": "checkbox",
-                                                                          "checked": 1 } } );
+                                                          "attributes": { "type": "checkbox" } } );
+        if ( this.show_nondet ) this.show_nondet_checkbox.setAttribute( "checked", 1 );
         rkWebUtil.elemaker( "label", p, { "text": "Show nondetections",
                                           "attributes": { "for": "show-nondetections-checkbox" } } );
 
-        this.colorcheckboxp = rkWebUtil.elemaker( "p", ltcvdiv );
+        rkWebUtil.elemaker( "br", p )
+        this.colorcheckboxp = rkWebUtil.elemaker( "span", p );
 
-        this.ltcvs_div = rkWebUtil.elemaker( "div", ltcvdiv );
+        this.ltcvs_div = rkWebUtil.elemaker( "div", ltcvdiv, { 'classes': [ "svgplotwrapper" ] } );
 
         // Make the plots
 
@@ -279,6 +294,10 @@ fastdbap.ObjectInfo = class
         }
         if ( mustchange ) {
             this.shownbands = newshow;
+            fastdbap.ObjectInfo.ltcv_display_cache = this.current_ltcv_display;
+            fastdbap.ObjectInfo.yscale_cache = this.current_ltcv_yscale;
+            fastdbap.ObjectInfo.nondet_cache = this.show_nondet;
+            fastdbap.ObjectInfo.shown_bands_cache = this.shownbands;
             this.render_ltcvs();
         }
     }
@@ -315,6 +334,8 @@ fastdbap.ObjectInfo = class
                                            "title": null,
                                            "xtitle": "MJD",
                                            "ytitle": ytitle,
+                                           "axistitlesize": 28,
+                                           "axislabelsize": 26,
                                            "defaultlimits": [ minmjd, maxmjd, null, null ],
                                            "nosuppresszeroy": true,
                                            "zoommode": "default"
@@ -339,6 +360,8 @@ fastdbap.ObjectInfo = class
                                                "title": b,
                                                "xtitle": "MJD",
                                                "ytitle": ytitle,
+                                               "axistitlesize": 28,
+                                               "axislabelsize": 26,
                                                "defaultlimits": [ this.minmjd, this.maxmjd, null, null ],
                                                "nosuppresszeroy": true,
                                                "zoommode": "default"
