@@ -135,6 +135,9 @@ class DBCon:
 
     Send queries using DBCon.execute_nofetch() and DBCon.execute().
 
+    If for some reason you need access to the underyling cursor, you can
+    get it from the cursor property.
+
     """
 
     def __init__( self, con=None, dictcursor=False ):
@@ -152,7 +155,7 @@ class DBCon:
             roll back and close the connection.  However, if con is not
             None, then the assumption is that somebody else is managing
             the connection, so will not rollback or close.
-        
+
           dictcursor : bool, default False
             If True, then the cursor uses psycopg.rows.dict_row as its
             row factory.  execite() will return a list of dictionaries,
@@ -226,7 +229,7 @@ class DBCon:
         non-None none, then this method does nothing.
 
         """
-        if self self._con_is_mine:
+        if self._con_is_mine:
             self.con.rollback()
             self.con.close()
 
@@ -240,7 +243,7 @@ class DBCon:
 
         """
         self.con.commit()
-        self.remake_cursor( self, self.curcursorisdict )  # ...is this necessary?
+        self.remake_cursor( self.curcursorisdict )  # ...is this necessary?
 
 
     def execute_nofetch( self, q, subdict={}, silent=False):
@@ -502,20 +505,17 @@ class DBBase:
         if cls._tablemeta is not None:
             return
 
-        with DB( dbcon ) as con:
-            cursor = con.cursor( row_factory=psycopg.rows.dict_row )
-            cursor.execute( "SELECT c.column_name,c.data_type,c.column_default,c.is_nullable,"
-                            "       e.data_type AS element_type "
-                            "FROM information_schema.columns c "
-                            "LEFT JOIN information_schema.element_types e "
-                            "  ON ( (c.table_catalog, c.table_schema, c.table_name, "
-                            "        'TABLE', c.dtd_identifier) "
-                            "      =(e.object_catalog, e.object_schema, e.object_name, "
-                            "        e.object_type, e.collection_type_identifier) ) "
-                            "WHERE table_name=%(table)s",
-                            { 'table': cls.__tablename__ } )
-            cols = cursor.fetchall()
-
+        with DBCon( dbcon, dictcursor=True ) as dbcon:
+            cols = dbcon.execute( "SELECT c.column_name,c.data_type,c.column_default,c.is_nullable,"
+                                  "       e.data_type AS element_type "
+                                  "FROM information_schema.columns c "
+                                  "LEFT JOIN information_schema.element_types e "
+                                  "  ON ( (c.table_catalog, c.table_schema, c.table_name, "
+                                  "        'TABLE', c.dtd_identifier) "
+                                  "      =(e.object_catalog, e.object_schema, e.object_name, "
+                                  "        e.object_type, e.collection_type_identifier) ) "
+                                  "WHERE table_name=%(table)s",
+                                  { 'table': cls.__tablename__ } )
             cls._tablemeta = { c['column_name']: ColumnMeta(**c) for c in cols }
 
             # See Issue #4!!!!
@@ -533,10 +533,45 @@ class DBBase:
 
 
     def __init__( self, dbcon=None, cols=None, vals=None, _noinit=False, noconvert=True, **kwargs):
-        """Create an object based on a row returned from psycopg's cursor.fetch*.
+        """Create an object.
 
-        You could probably use this also just to create an object fresh; in
-        that case, you *probably* want to set noconvert to True.
+        If this is based on a fetch from a postgres connection, then you
+        want to set noconvert=False (see below).
+
+        Set properties of the object either by passing cols and vals
+        (see below), or just by passing additional arguments to the
+        constructor (in which case cols and vals should be left at their
+        default of None).  Additional arguments will be set as
+        properties of the object.  However, the names of the additional
+        arguments must all be columns of the table.
+
+        Properties
+        ----------
+          dbcon : DBCon or psycopg.Connection, default None
+            Database connection to use.  If None (default), will open a
+            new connection if necessary (to pull down the class' table
+            metadata if that hasn't been done already) and close it.
+
+          cols : list of str, default None
+            Attributes of the object to set.  Each should be a column
+            name in the database table.  Instead of using this and vals,
+            you can just pass additional arguments to the construtor.
+            (See above.)
+
+          vals : list, default None
+            Values to set; length should be the same as cols, or should
+            be None if cols is None.
+
+          _noinit : bool, default False
+            Don't use this, it's used internally.
+
+          noconvert : bool, default True
+            Normally, the assumption is that the values of the
+            attributes to set are regular python objects.  If instead
+            vals are things that have just been read from a postgres
+            database, pass False for noconvert, and then they will be
+            run through a type converter to convert postgres types to
+            python types as necessary.
 
         """
 
@@ -549,15 +584,12 @@ class DBBase:
         if not ( ( cols is None ) and ( vals is None ) ):
             if ( cols is None ) or ( vals is None ):
                 raise ValueError( "Both or neither of cols and vals must be none." )
-            if ( ( not isinstance( cols, collections.abc.Sequence ) ) or ( isinstance( cols, str ) ) or
-                 ( not isinstance( vals, collections.abc.Sequence ) ) or ( isinstance( vals, str ) ) or
-                 ( len( cols ) != len( vals ) )
-                ):
+            if ( not util.isSequence( cols ) ) or ( not util.isSequence( vals ) ) or ( len( cols ) != len( vals ) ):
                 raise ValueError( "cols and vals most both be lists of the same length" )
 
         if cols is not None:
             if len(kwargs) > 0:
-                raise ValueError( "Can only column values as named arguments "
+                raise ValueError( "Can only pass column values as named arguments "
                                   "if cols and vals are both None" )
         else:
             cols = kwargs.keys()
@@ -570,7 +602,7 @@ class DBBase:
         for col in mycols:
             setattr( self, col, None )
 
-        self._set_self_from_fetch_cols_row( cols, vals )
+        self._set_self_from_fetch_cols_row( cols, vals, noconvert=noconvert )
 
 
     def _set_self_from_fetch_cols_row( self, cols, fetchrow, noconvert=False, dbcon=None ):
@@ -672,15 +704,22 @@ class DBBase:
 
     @classmethod
     def get( cls, *args, dbcon=None ):
-        """Get an object from a table row with the specified primary key(s)."""
+        """Get an object from a table row with the specified primary key(s).
+
+        There should be as many positional arguments as there are primary keys for the table.
+
+        Parameters
+        ----------
+          dbcon : DBCon or psycopg.Connection, default None
+            If given, use this database connection.  Otherwise, it will
+            open and close a new database connection.
+
+        """
 
         q, subdict = cls._construct_pk_query_where( *args )
         q = f"SELECT * FROM {cls.__tablename__} {q}"
-        with DB( dbcon ) as con:
-            cursor = con.cursor()
-            cursor.execute( q, subdict )
-            cols = [ desc[0] for desc in cursor.description ]
-            rows = cursor.fetchall()
+        with DBCon( dbcon ) as dbcon:
+            rows, cols = dbcon.execute( q, subdict )
 
         if len(rows) > 1:
             raise RuntimeError( f"Found multiple rows of {cls.__tablename__} with primary keys {args}; "
@@ -700,6 +739,10 @@ class DBBase:
           pks : list of lists
             Each element of the list must be a list whose length matches
             the length of self._pk.
+
+          dbcon : DBCon or psycopg.Connection, default None
+            If given, use this database connection.  Otherwise, it will
+            open and close a new database connection.
 
         Returns
         -------
@@ -747,12 +790,9 @@ class DBBase:
             _and = "AND"
             comma = ","
 
-        with DB( dbcon ) as con:
-            cursor = con.cursor()
+        with DBCon( dbcon ) as dbcon:
             q = f"SELECT * FROM {cls.__tablename__} JOIN (VALUES {mess}) AS t({collist}) ON {onlist} "
-            cursor.execute( q, subdict )
-            cols = [ desc[0] for desc in cursor.description ]
-            rows = cursor.fetchall()
+            rows, cols = dbcon.execute( q, subdict )
 
         objs = []
         for row in rows:
@@ -764,6 +804,15 @@ class DBBase:
 
     @classmethod
     def getbyattrs( cls, dbcon=None, **attrs ):
+        """Get a list of objects whose attributes match the keyword arguments passed to this function.
+
+        Parameters
+        ----------
+          dbcon : DBCon or psycopg.Connection, default None
+            If given, use this database connection.  Otherwise, it will
+            open and close a new database connection.
+
+        """
         if cls._tablemeta is None:
             cls.load_table_meta( dbcon )
 
@@ -776,11 +825,8 @@ class DBBase:
             q += f"{_and} {k}=%({k})s "
             _and = "AND"
 
-        with DB( dbcon ) as con:
-            cursor = con.cursor()
-            cursor.execute( q, attrs )
-            cols = [ desc[0] for desc in cursor.description ]
-            rows = cursor.fetchall()
+        with DBCon( dbcon ) as con:
+            rows, cols = con.execute( q, attrs )
 
         objs = []
         for row in rows:
@@ -791,14 +837,28 @@ class DBBase:
         return objs
 
     def refresh( self, dbcon=None ):
+        """Reload the object from the database.
+
+        Will set the attributes of the object based on the row from the
+        database whose primary keys match the primary key of the object.
+        (BE CAREFUL: this may not work if the table has a default for
+        the primary key column, and you depended on the database to set
+        that default, e.g. when using the insert() method.  In that
+        case, the object may not know its own primary key!)
+
+        Parameters
+        ----------
+          dbcon : DBCon or psycopg.Connection, default None
+            If given, use this database connection.  Otherwise, it will
+            open and close a new database connection.
+
+        """
+
         q, subdict = self._construct_pk_query_where( *self.pks )
         q = f"SELECT * FROM {self.__tablename__} {q}"
 
-        with DB( dbcon ) as con:
-            cursor = con.cursor()
-            cursor.execute( q, subdict )
-            cols = [ desc[0] for desc in cursor.description ]
-            rows = cursor.fetchall()
+        with DBCon( dbcon ) as con:
+            rows, cols = con.execute( q, subdict )
 
         if len(rows) > 1:
             raise RuntimeError( f"Found more than one row in {self.__tablename__} with primary keys "
@@ -810,6 +870,38 @@ class DBBase:
 
 
     def insert( self, dbcon=None, refresh=True, nocommit=False ):
+        """Insert an object into the database.
+
+        Columns in the database will be set based on attributes of the
+        object.
+
+        Parameters
+        ----------
+          dbcon : DBCon or psycopg.Connection, default None
+            If given, use this database connection.  Otherwise, it will
+            open and close a new database connection.
+
+          refresh : bool, default True
+            After inserting the object into the database, reread the
+            parameters back from the database.  This will pick up any
+            colums set from defaults.  WARNING: if you're depending on
+            the database default to set the primary key, then there will
+            be an exception if you don't set refresh=False!  Reason: the
+            object has to know its own primary key in order to refresh
+            itself from the database, but if you're using a databse
+            default, then the object python-side won't know what the
+            database set.
+
+            Ignored if nocommit=True.
+
+          nocommit : bool, default False
+            Normally, after inserting, the database connection is
+            committed so that the object will really be on the database.
+            Set this to True to skip that step.  (You might do that,
+            e.g., if you make a whole bunch of insert calls at once.)
+
+        """
+
         if refresh and nocommit:
             raise RuntimeError( "Can't refresh with nocommit" )
 
@@ -818,24 +910,68 @@ class DBBase:
         q = ( f"INSERT INTO {self.__tablename__}({','.join(subdict.keys())}) "
               f"VALUES ({','.join( [ f'%({c})s' for c in subdict.keys() ] )})" )
 
-        with DB( dbcon ) as con:
-            cursor = con.cursor()
-            cursor.execute( q, subdict )
+        with DBCon( dbcon ) as con:
+            con.execute_nofetch( q, subdict )
             if not nocommit:
                 con.commit()
                 if refresh:
                     self.refresh( con )
 
     def delete_from_db( self, dbcon=None, nocommit=False ):
+        """Delete the row from the database with the object's primary keys.
+
+        Won't work if the object's primary key attributes aren't set, or are None.
+
+        Paramaeters
+        -----------
+          dbcon : DBCon or psycopg.Connection, default None
+            If given, use this database connection.  Otherwise, it will
+            open and close a new database connection.
+
+          nocmmit : bool, default False
+            Normally, the connection is committed after the DELETE
+            command is sent, so the row will really be removed.  Set
+            this to True to skip the commit step (e.g. if you want to do
+            several deletes in one commit).
+
+        """
         where, subdict = self._construct_pk_query_where( me=self )
         q = f"DELETE FROM {self.__tablename__} {where}"
-        with DB( dbcon ) as con:
-            cursor = con.cursor()
-            cursor.execute( q, subdict )
-            con.commit()
+        with DBCon( dbcon ) as con:
+            con.execute_nofetch( q, subdict )
+            if not nocommit:
+                con.commit()
 
 
     def update( self, dbcon=None, refresh=False, nocommit=False ):
+        """Update the database row with attributes from the object.
+
+        The object's primary keys must be set so this method can figure
+        out which row to update!
+
+        See the docs on _build_subdict for the complicated behavior for
+        columns with no corresponding attribute, or when attributes are
+        None.
+
+        Parameters
+        ----------
+          dbcon : DBCon or psycopg.Connection, default None
+            If given, use this database connection.  Otherwise, it will
+            open and close a new database connection.
+
+          refresh : bool, default False
+            After updating, refresh the object from the database.  This
+            is useful if, for instance, some attributes don't exist in
+            the object for which there are columns in the database with
+            defaults.  Requires nocommit=False.
+
+          nocommit : bool, default False.
+            Normally, the connection is committed after the UPDATE
+            command is sent, so the row will really be updated.  Set
+            this to True to skip the commit step (e.g. if you want to do
+            several updates all in one commit).
+
+        """
         if refresh and nocommit:
             raise RuntimeError( "Can't refresh with nocommit" )
 
@@ -846,9 +982,8 @@ class DBBase:
         subdict.update( wheresubdict )
         q += where
 
-        with DB( dbcon) as con:
-            cursor = con.cursor()
-            cursor.execute( q, subdict )
+        with DBCon( dbcon ) as con:
+            con.execute_nofetch( q, subdict )
             if not nocommit:
                 con.commit()
                 if refresh:
@@ -876,13 +1011,17 @@ class DBBase:
              the values in dict.  (SQL will have ON CONFLICT DO NOTHING
              if False, ON CONFLICT DO UPDATE if True.)
 
-          assume_no_conflict: bool, default Falsea
+          assume_no_conflict: bool, default False
              Usually you just want to leave this False.  There are
              obscure kludge cases (e.g. if you're playing games and have
              removed primary key constraints and you know what you're
              doing-- this happens in load_snana_fits.py, for instance)
              where the conflict clauses cause the sql to fail.  Set this
              to True to avoid having those clauses.
+
+          dbcon : DBCon or psycopg.Connection, default None
+            If given, use this database connection.  Otherwise, it will
+            open and close a new database connection.
 
           nocommit : bool, default False
              This one is very scary and you should only use it if you
@@ -917,6 +1056,8 @@ class DBBase:
         elif isinstance( data, dict ):
             columns = list( data.keys() )
             values = [ [ data[c][i] for c in columns ] for i in range(len(data[columns[0]])) ]
+            # TODO : check that the lenght of all the lists in values is the
+            #   same as the length of columns
         elif isinstance( data, list ) and isinstance( data[0], cls ):
             # This isn't entirely satisfying.  But, we're going
             #   to assume that things that are None because they
@@ -929,13 +1070,12 @@ class DBBase:
             #   so we can't just pass it d.values()
             values = [ list( d.values() ) for d in data ]
         else:
-            raise TypeError( f"data must be something other than a {cls.__name__}" )
+            raise TypeError( f"Invalid type for data: {type(data)}" )
 
-        with DB( dbcon ) as con:
-            cursor = con.cursor()
-            cursor.execute( "DROP TABLE IF EXISTS temp_bulk_upsert" )
-            cursor.execute( f"CREATE TEMP TABLE temp_bulk_upsert (LIKE {cls.__tablename__})" )
-            with cursor.copy( f"COPY temp_bulk_upsert({','.join(columns)}) FROM STDIN" ) as copier:
+        with DBCon( dbcon ) as con:
+            con.execute_nofetch( "DROP TABLE IF EXISTS temp_bulk_upsert" )
+            con.execute_nofetch( f"CREATE TEMP TABLE temp_bulk_upsert (LIKE {cls.__tablename__})" )
+            with con.cursor.copy( f"COPY temp_bulk_upsert({','.join(columns)}) FROM STDIN" ) as copier:
                 for v in values:
                     copier.write_row( v )
 
@@ -953,9 +1093,9 @@ class DBBase:
             if nocommit:
                 return q
             else:
-                cursor.execute( q )
-                ninserted = cursor.rowcount
-                cursor.execute( "DROP TABLE temp_bulk_upsert" )
+                dbcon.execute_nofetch( q )
+                ninserted = dbcon.cursor.rowcount
+                dbcon.execute_nofetch( "DROP TABLE temp_bulk_upsert" )
                 con.commit()
                 return ninserted
 

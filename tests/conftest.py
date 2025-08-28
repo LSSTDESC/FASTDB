@@ -1,24 +1,27 @@
-import sys
 import os
 import pytest
 import pathlib
 import datetime
 import subprocess
+import uuid
 
+import numpy as np
 from pymongo import MongoClient
 
-from db import ( ProcessingVersion,
+from db import ( BaseProcessingVersion,
+                 ProcessingVersion,
                  RootDiaObject,
                  DiaObject,
                  DiaSource,
                  DiaForcedSource,
                  DB,
+                 DBCon,
                  AuthUser )
 from util import asUUID, logger
 from fastdb.fastdb_client import FASTDBClient
 
 
-sys.path.insert( 0, pathlib.Path(__file__).parent )
+# sys.path.insert( 0, pathlib.Path(__file__).parent )
 # For cleanliness, a bunch of fixtures are broken
 #   out into their own files.  To be able to see
 #   them, put those files in this list below.
@@ -75,6 +78,232 @@ def procver2():
         cursor.execute( "DELETE FROM processing_version WHERE id=%(id)s",
                         { 'id': pv.id } )
         con.commit()
+
+
+@pytest.fixture( scope='module' )
+def procver_collection():
+    # A set of processing versions loaded into the database, including:
+    #   base procesing versions pvc_bpv1, pvc_bpv1a, pvc_bpv1b, pvc_bpv2, pvc_bpv2a, pvc_bpv3
+    #   A set of processing versions with priorities (high to low)
+    #     pvc_pv1 : pvc_bpv1b, pvc_bpv1a, pvc_bpv1
+    #     pvc_pv2 : pvc_bpv2a, pvc_bpv2
+    #     pvc_pv3 : pvc_bpv3
+    #
+    # fixture value is a tuple of two dictionaries of str → BaseProcessingVersion, str → ProcessingVersion
+
+    bpvs = {}
+    pvs = {}
+
+    try:
+        with DBCon() as con:
+            bpvs['bpv1'] = BaseProcessingVersion( id=uuid.uuid4(), description='pvc_bpv1' )
+            bpvs['bpv1a'] = BaseProcessingVersion( id=uuid.uuid4(), description='pvc_bpv1a' )
+            bpvs['bpv1b'] = BaseProcessingVersion( id=uuid.uuid4(), description='pvc_bpv1b' )
+            bpvs['bpv2'] = BaseProcessingVersion( id=uuid.uuid4(), description='pvc_bpv2' )
+            bpvs['bpv2a'] = BaseProcessingVersion( id=uuid.uuid4(), description='pvc_bpv2a' )
+            bpvs['bpv3'] = BaseProcessingVersion( id=uuid.uuid4(), description='pvc_bpv3' )
+            for bpv in bpvs.values():
+                bpv.insert( dbcon=con, nocommit=True, refresh=False )
+
+            pvs['pv1'] = ProcessingVersion( id=uuid.uuid4(), description='pvc_pv1' )
+            pvs['pv2'] = ProcessingVersion( id=uuid.uuid4(), description='pvc_pv2' )
+            pvs['pv3'] = ProcessingVersion( id=uuid.uuid4(), description='pvc_pv3' )
+            for pv in pvs.values():
+                pv.insert( dbcon=con, nocommit=True, refresh=False )
+
+            for pv, bpvae in zip( [ 'pv1', 'pv2', 'pv3' ],
+                                  [ [ 'bpv1', 'bpv1a', 'bpv1b' ],
+                                    [ 'bpv2', 'bpv2a' ],
+                                    [ 'bpv3' ] ] ):
+                for prio, bpv in enumerate( bpvae ):
+                    con.execute_nofetch( "INSERT INTO base_procver_of_procver(procver_id,base_procver_id,priority) "
+                                         "VALUES (%(pv)s,%(bpv)s,%(prio)s)",
+                                         { 'pv': pvs[pv].id, 'bpv': bpvs[bpv].id, 'prio': prio } )
+
+            con.commit()
+
+        yield bpvs, pvs
+
+    finally:
+        with DBCon() as con:
+            con.execute_nofetch( "DELETE FROM base_procver_of_procver WHERE procver_id=ANY(%(pvs)s)",
+                                 { 'pvs': [ p.id for p in pvs.values() ] } )
+            for bpv in bpvs.values():
+                bpv.delete_from_db( dbcon=con, nocommit=True )
+            for pv in pvs.values():
+                pv.delete_from_db( dbcon=con, nocommit=True )
+            con.commit()
+
+
+@pytest.fixture( scope='module' )
+def set_of_lightcurves( procver_collection ):
+    # Define four root objects:
+    #   0-1: 2 within 15" of each other
+    #   2: 1 20" away
+    #   3: 1 much further away
+    #
+    # The first root object has two diaobjects associated with it, under bpv1 and bpv2
+    # The others only have diaobjects in bpv2
+    #
+    # Objects have lightcurves:
+    #     object 0 : first detection mjd 60000, last detection mjd 60030, peak 60010, mag 24
+    #     object 1 : first detection mjd 60020, last detection mjd 60060, peak 60035, mag 22
+    #     object 2 : first detection mjd 60040, last detection mjd 60080, peak 60050, mag 23
+    #     object 3 : first detection mjd 60050, last detection mjd 60060, peak 60055, mag 25
+    #
+    # For object 0, the first diaobject will only have detections through 60015
+    #    and forced photometry through 60010 in bpv1,
+    #    but will have the full photometry in bpv1a, bpv2, bpv2a, bpv3
+    # All objects have full lightcurves in bpv2, bpv2a, bpv3
+
+    roots = []
+    delobjs = []
+    bpvs, _pvs = procver_collection
+
+    try:
+        flux = lambda mag: 10 ** ( ( mag - 31.4 ) / ( -2.5 ) )
+
+        with DBCon() as con:
+
+            rootobjs = [ { 'ra': 42., 'dec': 13. },
+                         { 'ra': 42., 'dec': 13.0036 },
+                         { 'ra': 42., 'dec': 13.0056 },
+                         { 'ra': 42., 'dec': 14. } ]
+
+            detrange = [ ( 60000., 60030. ),
+                         ( 60020., 60060. ),
+                         ( 60040., 60080. ),
+                         ( 60050., 60080. ) ]
+            tmax = [ 60030., 60060., 60080., 60060. ]
+
+            peakmag = [ 24., 22., 23., 25. ]
+            minmag = 26.
+            zeromag = 32.
+
+            visit = 0
+            for i, rootobj in enumerate(rootobjs):
+                robj = RootDiaObject( id=uuid.uuid4() )
+                robj.insert()
+                delobjs.append( robj )
+
+                rootdict = { 'root': robj,
+                             'objs': [] }
+                roots.append( rootdict )
+
+                # diaobjects
+                obj = DiaObject( diaobjectid=200+i, ra=rootobj['ra'], dec=rootobj['dec'],
+                                 rootid=robj.id, base_procver_id=bpvs['bpv2'].id )
+                obj.insert()
+                delobjs.append( obj )
+                rootdict['objs'].append( { 'obj': obj, 'src': {}, 'frc': {} } )
+                if i == 0:
+                    obj1 = DiaObject( diaobjectid=100, ra=rootobj['ra'], dec=rootobj['dec'],
+                                      rootid=robj.id, base_procver_id=bpvs['bpv1'].id )
+                    obj1.insert()
+                    delobjs.append( obj1 )
+                    rootdict['objs'].append( { 'obj': obj1, 'src': {}, 'frc': {} } )
+
+                # Detections
+                for sourcemjd in np.arange( detrange[i][0], detrange[i][1]+1., 2.5 ):
+                    visit += 1
+                    if sourcemjd < tmax[i]:
+                        mag = minmag + ( ( sourcemjd - detrange[i][0] ) *
+                                         ( peakmag[i] - minmag ) / ( tmax[i] - detrange[i][0] ) )
+                    else:
+                        mag = peakmag[i] + ( ( sourcemjd - detrange[i][1] ) *
+                                             ( peakmag[i] - minmag ) / ( tmax[i] - detrange[i][1] ) )
+                    psfflux = flux( mag )
+                    psffluxerr = 0.1 * psfflux
+
+                    for bpv in [ 'bpv2', 'bpv2a', 'bpv3' ]:
+                        rootdict['objs'][0]['src'][bpv] = []
+                        rootdict['objs'][0]['frc'][bpv] = []
+                        src = DiaSource( diaobjectid=obj.diaobjectid, visit=visit, detector=0,
+                                         band=('r' if visit%2==0 else 'i'), midpointmjdtai=sourcemjd,
+                                         ra=rootobj['ra'], dec=rootobj['dec'],
+                                         psfflux=psfflux, psffluxerr=psffluxerr,
+                                         base_procver_id=bpvs[bpv].id )
+                        src.insert()
+                        delobjs.append( src )
+                        rootdict['objs'][0]['src'][bpv].append( src )
+                        frc = DiaForcedSource( diaobjectid=obj.diaobjectid, visit=visit, detector=0,
+                                               band=('r' if visit%2==0 else 'i'), midpointmjdtai=sourcemjd,
+                                               ra=rootobj['ra'], dec=rootobj['dec'],
+                                               psfflux=psfflux, psffluxerr=psffluxerr,
+                                               base_procver_id=bpvs[bpv].id )
+                        frc.insert()
+                        delobjs.append( frc )
+                        rootdict['objs'][0]['frc'][bpv].append( frc )
+
+                    if i == 0:
+                        for bpv in [ 'bpv1', 'bpv1a' ]:
+                            rootdict['objs'][1]['src'][bpv] = []
+                            rootdict['objs'][1]['frc'][bpv] = []
+                            if ( bpv == 'bpv1' ) and ( sourcemjd >= 60015 ):
+                                continue
+                            src = DiaSource( diaobjectid=obj1.diaobjectid, visit=visit, detector=0,
+                                             band=('r' if visit%2==0 else 'i'), midpointmjdtai=sourcemjd,
+                                             ra=rootobj['ra'], dec=rootobj['dec'],
+                                             psfflux=psfflux, psffluxerr=psffluxerr,
+                                             base_procver_id=bpvs[bpv].id )
+                            src.insert()
+                            delobjs.append( src )
+                            rootdict['objs'][1]['src'][bpv].append( src )
+                            frc = DiaForcedSource( diaobjectid=obj1.diaobjectid, visit=visit, detector=0,
+                                                   band=('r' if visit%2==0 else 'i'), midpointmjdtai=sourcemjd,
+                                                   ra=rootobj['ra'], dec=rootobj['dec'],
+                                                   psfflux=psfflux, psffluxerr=psffluxerr,
+                                                   base_procver_id=bpvs[bpv].id )
+                            frc.insert()
+                            delobjs.append( frc )
+                            rootdict['objs'][1]['frc'][bpv].append( frc )
+
+
+                # Nondetections
+                mjds1 = np.arange( detrange[i][0] - 10., detrange[i][0], 2.5 )
+                mjds2 = np.arange( detrange[i][1] + 2.5, detrange[i][1] + 21., 2.5 )
+                mjds = np.concatenate( ( mjds1, mjds2 ) )
+                for sourcemjd in mjds:
+                    visit += 1
+                    if sourcemjd < tmax[i]:
+                        mag = zeromag + ( detrange[i][0] - sourcemjd ) * ( minmag - zeromag ) / 10.
+                    else:
+                        mag = peakmag[i] + ( sourcemjd - detrange[i][0] ) * ( zeromag - peakmag[i]) / 20.
+                    psfflux = flux( mag )
+                    psffluxerr = 0.5 * psfflux
+
+                    for bpv in [ 'bpv2', 'bpv2a', 'bpv3' ]:
+                        frc = DiaForcedSource( diaobjectid=obj.diaobjectid, visit=visit, detector=0,
+                                               band=('r' if visit%2==0 else 'i'), midpointmjdtai=sourcemjd,
+                                               ra=rootobj['ra'], dec=rootobj['dec'],
+                                               psfflux=psfflux, psffluxerr=psffluxerr,
+                                               base_procver_id=bpvs[bpv].id )
+                        frc.insert()
+                        delobjs.append( frc )
+                        rootdict['objs'][0]['frc'][bpv].append( frc )
+
+                    if i == 0:
+                        for bpv in [ 'bpv1', 'bpv1a' ]:
+                            if ( bpv == 'bpv1' ) and ( sourcemjd > 60015. ):
+                                continue
+                            frc = DiaForcedSource( diaobjectid=obj1.diaobjectid, visit=visit, detector=0,
+                                                   band=('r' if visit%2==0 else 'i'), midpointmjdtai=sourcemjd,
+                                                   ra=rootobj['ra'], dec=rootobj['dec'],
+                                                   psfflux=psfflux, psffluxerr=psffluxerr,
+                                                   base_procver_id=bpvs[bpv].id )
+                            frc.insert()
+                            delobjs.append( frc )
+                            rootdict['objs'][1]['frc'][bpv].append( frc )
+
+                # OMG HOST GALAXIES... TODO
+
+        yield roots
+    finally:
+        with DBCon() as con:
+            delobjs.reverse()
+            for obj in delobjs:
+                obj.delete_from_db( dbcon=con, nocommit=True )
+            con.commit()
 
 
 @pytest.fixture

@@ -4,6 +4,7 @@ import pathlib
 import logging
 import numbers
 import uuid
+import collections.abc
 
 import fastavro
 import astropy.time
@@ -34,6 +35,20 @@ def asUUID( id ):
 
 
 NULLUUID = asUUID( '00000000-0000-0000-0000-000000000000' )
+
+
+def isSequence( var ):
+    """Return True if var is a sequence, but not a string or bytes.
+
+    Todo: figure out other things we want to exclude.
+
+    The goal is to return True if it's a list, tuple, array, or
+    something that works like that.
+
+    """
+    return ( isinstance( var, collections.abc.Sequence )
+             and not ( isinstance( var, str ) or
+                       isinstance( var, bytes ) ) )
 
 
 # These next few will, by design, raise an exception of d[kw] isn't empty and can't be parsed to the right thing
@@ -136,6 +151,7 @@ def float_or_none_from_dict_float_or_hms( d, kw ):
 
 
 def get_alert_schema( schemadir=None ):
+
     """Return a dictionary of { name: schema }, plus 'alert_schema_file': Path }"""
 
     schemadir = pathlib.Path( "/fastdb/share/avsc" if schemadir is None else schemadir )
