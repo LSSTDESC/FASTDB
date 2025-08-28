@@ -151,9 +151,9 @@ def set_of_lightcurves( procver_collection ):
     #     object 2 : first detection mjd 60040, last detection mjd 60080, peak 60050, mag 23
     #     object 3 : first detection mjd 60050, last detection mjd 60060, peak 60055, mag 25
     #
-    # For object 0, the first diaobject will only have detections through 60015
-    #    and forced photometry through 60010 in bpv1,
-    #    but will have the full photometry in bpv1a, bpv2, bpv2a, bpv3
+    # Object 0 is complicated.  The first diaboject will only have detections through
+    #     60015 and forced photometry through 60010 in bpv1a.
+    #     It will have detections through 60030 and forced photometry through 60025 in bpv1
     # All objects have full lightcurves in bpv2, bpv2a, bpv3
 
     roots = []
@@ -174,7 +174,7 @@ def set_of_lightcurves( procver_collection ):
                          ( 60020., 60060. ),
                          ( 60040., 60080. ),
                          ( 60050., 60080. ) ]
-            tmax = [ 60030., 60060., 60080., 60060. ]
+            tmax = [ 60010., 60035., 60050., 60055. ]
 
             peakmag = [ 24., 22., 23., 25. ]
             minmag = 26.
@@ -206,12 +206,8 @@ def set_of_lightcurves( procver_collection ):
                 # Detections
                 for sourcemjd in np.arange( detrange[i][0], detrange[i][1]+1., 2.5 ):
                     visit += 1
-                    if sourcemjd < tmax[i]:
-                        mag = minmag + ( ( sourcemjd - detrange[i][0] ) *
-                                         ( peakmag[i] - minmag ) / ( tmax[i] - detrange[i][0] ) )
-                    else:
-                        mag = peakmag[i] + ( ( sourcemjd - detrange[i][1] ) *
-                                             ( peakmag[i] - minmag ) / ( tmax[i] - detrange[i][1] ) )
+                    mjdend = detrange[i][0] if sourcemjd < tmax[i] else detrange[i][1]
+                    mag = minmag + ( sourcemjd - mjdend ) * ( peakmag[i] - minmag ) / ( tmax[i] - mjdend  )
                     psfflux = flux( mag )
                     psffluxerr = 0.1 * psfflux
 
@@ -237,10 +233,11 @@ def set_of_lightcurves( procver_collection ):
 
                     if i == 0:
                         for bpv in [ 'bpv1', 'bpv1a' ]:
+                            if ( ( ( bpv == 'bpv1a' ) and ( sourcemjd > 60015 ) ) or
+                                 ( ( bpv == 'bpv1' ) and ( sourcemjd > 60030 ) ) ):
+                                continue
                             rootdict['objs'][1]['src'][bpv] = []
                             rootdict['objs'][1]['frc'][bpv] = []
-                            if ( bpv == 'bpv1' ) and ( sourcemjd >= 60015 ):
-                                continue
                             src = DiaSource( diaobjectid=obj1.diaobjectid, visit=visit, detector=0,
                                              band=('r' if visit%2==0 else 'i'), midpointmjdtai=sourcemjd,
                                              ra=rootobj['ra'], dec=rootobj['dec'],
@@ -249,6 +246,9 @@ def set_of_lightcurves( procver_collection ):
                             src.insert()
                             delobjs.append( src )
                             rootdict['objs'][1]['src'][bpv].append( src )
+                            if ( ( ( bpv == 'bpv1a' ) and ( sourcemjd > 60010 ) ) or
+                                 ( ( bpv == 'bpv1' ) and ( sourcemjd > 60025 ) ) ):
+                                continue
                             frc = DiaForcedSource( diaobjectid=obj1.diaobjectid, visit=visit, detector=0,
                                                    band=('r' if visit%2==0 else 'i'), midpointmjdtai=sourcemjd,
                                                    ra=rootobj['ra'], dec=rootobj['dec'],
@@ -266,9 +266,9 @@ def set_of_lightcurves( procver_collection ):
                 for sourcemjd in mjds:
                     visit += 1
                     if sourcemjd < tmax[i]:
-                        mag = zeromag + ( detrange[i][0] - sourcemjd ) * ( minmag - zeromag ) / 10.
+                        mag = minmag + ( detrange[i][0] - sourcemjd ) * ( zeromag - minmag ) / 10.
                     else:
-                        mag = peakmag[i] + ( sourcemjd - detrange[i][0] ) * ( zeromag - peakmag[i]) / 20.
+                        mag = minmag + ( sourcemjd - detrange[i][0] ) * ( zeromag - minmag ) / 20.
                     psfflux = flux( mag )
                     psffluxerr = 0.5 * psfflux
 
@@ -284,7 +284,8 @@ def set_of_lightcurves( procver_collection ):
 
                     if i == 0:
                         for bpv in [ 'bpv1', 'bpv1a' ]:
-                            if ( bpv == 'bpv1' ) and ( sourcemjd > 60015. ):
+                            if ( ( ( bpv == 'bpv1a' ) and ( sourcemjd > 60015. ) ) or
+                                 ( ( bpv == 'bpv1' ) and ( sourcemjd > 60025. ) ) ):
                                 continue
                             frc = DiaForcedSource( diaobjectid=obj1.diaobjectid, visit=visit, detector=0,
                                                    band=('r' if visit%2==0 else 'i'), midpointmjdtai=sourcemjd,

@@ -1,3 +1,5 @@
+import pytest
+import numpy as np
 import ltcv
 
 
@@ -5,24 +7,51 @@ def test_object_ltcv( procver_collection, set_of_lightcurves ):
     roots = set_of_lightcurves
     bpvs, pvs = procver_collection
 
-    # Try to get the object lightcurve for the first object of roots[0] using pv1
+    # The fixture loads up lightcurves every 2.5 days
+
+    # Try to get the object lightcurve for the second object of roots[0] using pv1
     # Should get detections starting 60000, forced starting 50090,
-    # sources through 60015, forced through 60010
+    # sources through 60015 and forced through 60010 in bpv1a, then sources through 60030
+    # and forced through 60050 in bpv1
 
     sources = ltcv.object_ltcv( pvs['pv1'].id, roots[0]['objs'][1]['obj'].diaobjectid,
-                                return_format='pandas', which='detections' )
+                                return_format='pandas', which='detections', include_base_procver=True )
     forced = ltcv.object_ltcv( pvs['pv1'].id, roots[0]['objs'][1]['obj'].diaobjectid,
-                               return_format='pandas', which='forced' )
+                               return_format='pandas', which='forced', include_base_procver=True )
     df = ltcv.object_ltcv( pvs['pv1'].id, roots[0]['objs'][1]['obj'].diaobjectid,
-                           return_format='pandas', which='patch' )
+                           return_format='pandas', which='patch', include_base_procver=True )
 
-    assert len( forced ) > len(sources )
-    assert len( df ) > len( forced )
+    assert len(sources) == 13
+    assert len(forced) == 15
+    assert len(df) == 17
+
+    assert np.all( ( sources.mjd >= 60000 ) & ( sources.mjd <= 60030 ) )
+    assert np.all( sources[ sources.mjd <= 60015 ].base_procver == 'pvc_bpv1a' )
+    assert np.all( sources[ sources.mjd > 60015 ].base_procver == 'pvc_bpv1' )
+    assert np.all( sources.isdet )
+    assert np.all( forced[ forced.mjd <= 60010 ].base_procver == 'pvc_bpv1a' )
+    assert np.all( forced[ forced.mjd > 60010 ].base_procver == 'pvc_bpv1' )
+    assert np.all( forced[ ( forced.mjd >= 60000 ) & ( forced.mjd <= 60030 ) ].isdet )
+    assert np.all( ~forced[ ( forced.mjd < 60000 ) | ( forced.mjd > 60030 ) ].isdet )
+    assert np.all( df[ df.mjd <= 60010 ].base_procver == 'pvc_bpv1a' )
+    assert np.all( df[ df.mjd > 60010 ].base_procver == 'pvc_bpv1' )
+    assert np.all( df[ df.mjd > 60025 ].ispatch )
+    assert np.all( ~df[ df.mjd <= 60025 ].ispatch )
+    assert np.all( df[ ( df.mjd >= 60000 ) & ( df.mjd <= 60030 ) ].isdet )
+    assert np.all( ~df[ ( df.mjd < 60000 ) | ( df.mjd > 60030 ) ].isdet )
+
+
+    # If we ask for roots[1] from pv1, we shouldn't get anything.
+    # (Also trying using the root object this time.)
+
+    with pytest.raises( RuntimeError, match="Could not find object for diaobjectid" ):
+        df = ltcv.object_ltcv( pvs['pv1'].id, roots[1]['root'].id, return_format='pandas', which='patch',
+                               include_base_procver=True )
 
     import pdb; pdb.set_trace()
     pass
 
-
+    # ROB YOU ARE HERE
 
 
 

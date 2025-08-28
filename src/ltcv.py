@@ -36,7 +36,7 @@ def _procver_id( processing_version, dbcon=None ):
 
 
 def object_ltcv( processing_version='default', diaobjectid=None, object_processing_version=None,
-                 bands=None, which='patch', return_format='json', dbcon=None ):
+                 bands=None, which='patch', include_base_procver=False, return_format='json', dbcon=None ):
     """Get the lightcurve for an object
 
     Parameters
@@ -61,6 +61,12 @@ def object_ltcv( processing_version='default', diaobjectid=None, object_processi
           forced : get forced photometry (i.e. diaforcedsource)
           detections : get detections (i.e. diasource)
           patch : get forced photometry, but patch in detections where forced photometry is missing
+
+       include_base_procver : bool, default False
+          If True, the returned data will have a two columns,
+          base_procver_s and base_procver_f, that are the descriptions
+          of the base processing versions of the object for sources and
+          forced sources respectively (or NaN if not defined).
 
        return_format : str, default 'json'
           'json' or 'pandas'
@@ -104,7 +110,8 @@ def object_ltcv( processing_version='default', diaobjectid=None, object_processi
         # Figure out the diaobjectid if necessary
         if not isinstance( diaobjectid, numbers.Integral ):
             try:
-                diaobjectid = uuid.UUID( diaobjectid )
+                if not isinstance( diaobjectid, uuid.UUID ):
+                    diaobjectid = uuid.UUID( diaobjectid )
             except (ValueError, AttributeError):
                 raise TypeError( f'diaobjectid must be an integer, uuid, or string converatble to uuid; '
                                  f'got "{diaobjectid}"' )
@@ -115,20 +122,21 @@ def object_ltcv( processing_version='default', diaobjectid=None, object_processi
                                          "  ON o.base_procver_id=bpvopv.base_procver_id\n"
                                          "WHERE bpvopv.procver_id=%(pvid)s\n"
                                          "  AND o.rootid=%(objid)s\n"
-                                         "ORDER BY pbvopv.priority DESC\n"
+                                         "ORDER BY bpvopv.priority DESC\n"
                                          "LIMIT 1",
                                          { 'pvid': obj_pv, 'objid': diaobjectid } )
             if len( rows ) == 0:
-                raise RuntimeError( f"Could not not find object for  diaobject id {diaobjectid} "
+                raise RuntimeError( f"Could not find object for diaobjectid {diaobjectid} "
                                     f"and object processing version {obj_pv_desc}" )
             diaobjectid = int( rows[0][0] )
         elif object_processing_version is not None:
             util.logger.warning( "Ignoring object_processing_version given numeric diaobject" )
 
         q =  ( "SELECT DISTINCT ON(s.visit)\n"
-               "  s.midpointmjdtai AS mjd, s.band, s.psfflux, s.psffluxerr\n"
+               "  s.midpointmjdtai AS mjd, s.band, s.psfflux, s.psffluxerr, b.description AS base_procver\n"
                "FROM diasource s\n"
                "INNER JOIN base_procver_of_procver bpvopv ON s.base_procver_id=bpvopv.base_procver_id\n"
+               "INNER JOIN base_processing_version b ON b.id=bpvopv.base_procver_id\n"
                "WHERE s.diaobjectid=%(id)s AND bpvopv.procver_id=%(pv)s\n" )
         if bands is not None:
             q += "AND band=ANY(%(bands)s)\n"
@@ -138,9 +146,10 @@ def object_ltcv( processing_version='default', diaobjectid=None, object_processi
         sources.sort_values( 'mjd' )
         if which in ( 'forced', 'patch' ):
             q = ( "SELECT DISTINCT ON(f.visit)\n"
-                  "  f.midpointmjdtai AS mjd, f.band, f.psfflux, f.psffluxerr\n"
+                  "  f.midpointmjdtai AS mjd, f.band, f.psfflux, f.psffluxerr, b.description AS base_procver\n"
                   "FROM diaforcedsource f\n"
                   "INNER JOIN base_procver_of_procver bpvopv ON f.base_procver_id=bpvopv.base_procver_id\n"
+                  "INNER JOIN base_processing_version b ON b.id=bpvopv.base_procver_id\n"
                   "WHERE diaobjectid=%(id)s AND bpvopv.procver_id=%(pv)s " )
             if bands is not None:
                 q += "AND band=ANY(%(bands)s) "
@@ -202,6 +211,13 @@ def object_ltcv( processing_version='default', diaobjectid=None, object_processi
         joined.rename( inplace=True, columns={ 'mjd_f': 'mjd',
                                                'psfflux_f': 'psfflux',
                                                'psffluxerr_f': 'psffluxerr' } )
+
+        if include_base_procver:
+            joined[ 'base_procver' ] = joined[ 'base_procver_f' ]
+            joined[ 'base_procver' ][ joined['ispatch'] ] = joined[ 'base_procver_s'][ joined['ispatch'] ]
+        joined.drop( 'base_procver_f', axis=1, inplace=True )
+        joined.drop( 'base_procver_s', axis=1, inplace=True )
+
         retframe = joined
 
     retframe.sort_values( [ 'mjd', 'band' ], inplace=True )
