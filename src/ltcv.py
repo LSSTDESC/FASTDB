@@ -1,6 +1,9 @@
+__all__ = [ "object_ltcv", "object_search", "get_hot_ltcvs" ]
+
 import datetime
 import numbers
 import json   # noqa: F401
+import uuid
 
 import numpy
 import pandas
@@ -10,11 +13,11 @@ import db
 import util
 
 
-def procver_int( processing_version, dbcon=None ):
-    if isinstance( processing_version, numbers.Integral ):
+def _procver_id( processing_version, dbcon=None ):
+    if isinstance( processing_version, uuid.UUID ):
         return processing_version
     try:
-        ipv = int( processing_version )
+        ipv = uuid.UUID( processing_version )
         return ipv
     except Exception:
         pass
@@ -24,7 +27,7 @@ def procver_int( processing_version, dbcon=None ):
         row = cursor.fetchone()
         if row is not None:
             return row[0]
-        cursor.execute( "SELECT id FROM processing_version_alias WHERE description=%(pv)s",
+        cursor.execute( "SELECT procver_id FROM processing_version_alias WHERE description=%(pv)s",
                         { 'pv': processing_version } )
         row = cursor.fetchone()
         if row is None:
@@ -32,20 +35,25 @@ def procver_int( processing_version, dbcon=None ):
         return row[0]
 
 
-def object_ltcv( processing_version, diaobjectid, return_format='json', bands=None, which='patch', dbcon=None ):
+def object_ltcv( processing_version='default', diaobjectid=None, object_processing_version=None,
+                 bands=None, which='patch', return_format='json', dbcon=None ):
     """Get the lightcurve for an object
 
     Parameters
     ----------
-       processing_version : int or str
+       processing_version : UUID or str, default 'default'
           The processing verson (or alias) to search
 
-       diaobjectid : int
-          The object id
+       diaobjectid : int or UUID; required
+          The object id -- will be either a diaobjectid or a root_diaobjectid based on the type passed.
 
-       return_format : str, default 'json'
-          'json' or 'pandas'
-
+       object_processing_version : UUID or str, default None
+           Ignored if diaobejct id is an integer.  If diaobjectid is a
+           UUID, uses this to figure out which diaobjectid to associate
+           with the given root_diabojectid.  In this case, if
+           object_processing_version is not given, uses
+           processing_version.
+    
        bands : list of str or None
           If not None, only include the bands in this list.
 
@@ -53,6 +61,13 @@ def object_ltcv( processing_version, diaobjectid, return_format='json', bands=No
           forced : get forced photometry (i.e. diaforcedsource)
           detections : get detections (i.e. diasource)
           patch : get forced photometry, but patch in detections where forced photometry is missing
+
+       return_format : str, default 'json'
+          'json' or 'pandas'
+
+       dbcon: psycopg.Connection, db.DBCon, or None
+          Database connection to use.  If None, will make a new
+          connection and close it when done.
 
     Returns
     -------
@@ -67,7 +82,9 @@ def object_ltcv( processing_version, diaobjectid, return_format='json', bands=No
                          this field is only present if which='patch'.)
 
     """
-
+    if diaobjectid is None:
+        raise ValueError( f"diaobject cannot be None" )
+    
     if which not in ( 'detections', 'forced', 'patch' ):
         raise ValueError( f"Unknown value of which for object_ltcv: {which}" )
 
@@ -81,28 +98,49 @@ def object_ltcv( processing_version, diaobjectid, return_format='json', bands=No
     # out like we do in get_hot_ltcvs.
     sources = []
     forced = []
-    with db.DB( dbcon ) as dbcon:
-        pv = procver_int( processing_version, dbcon=dbcon )
-        cursor = dbcon.cursor()
-        q =  ( "SELECT midpointmjdtai AS mjd, band, psfflux, psffluxerr "
-               "FROM diasource "
-               "WHERE diaobjectid=%(id)s AND processing_version=%(pv)s " )
+    with db.DBCon( dbcon ) as dbcon:
+        pv = _procver_id( processing_version, dbcon=dbcon )
+
+        # Figure out the diaobjectid
+        if not isinstance( diaobjectid, numbers.Integral ):
+            obj_pv_desc = processing_version if object_processing_version is None else object_processing_version
+            obj_pv = _procver_id( opj_pv_desc, dbcon=dbcon )
+            rols, _cols = dbcon.execute( "SELECT diaobjectid FROM diaobject o\n"
+                                         "INNER JOIN base_procver_of_procver bpvopv\n"
+                                         "  ON o.base_procver_id=bpvopv.base_procver_id\n"
+                                         "WHERE bpvopv.procver_id=%(pvid)s\n"
+                                         "  AND o.rootid=%(objid)s\n"
+                                         "ORDER BY pbvopv.priority DESC\n"
+                                         "LIMIT 1",
+                                         { 'pvid': obj_pv, 'objid': diaobjectid } )
+            if len( rows ) == 0:
+                raise RuntimeError( f"Could not not find object for  diaobject id {diaobjecvtid} "
+                                    f"and object processing version {obj_pv_desc}" )
+            diaobjectid = int( rows[0][0] )
+        
+        q =  ( "SELECT DISTINCT ON(s.visit)\n"
+               "  s.midpointmjdtai AS mjd, s.band, s.psfflux, s.psffluxerr\n"
+               "FROM diasource s\n"
+               "INNER JOIN base_procver_of_procver bpvopv ON s.base_procver_id=bpvopv.base_procver_id\n"
+               "WHERE s.diaobjectid=%(id)s AND bpvopv.procver_id=%(pv)s\n" )
         if bands is not None:
-            q += "AND band=ANY(%(bands)s) "
-        q += "ORDER BY mjd "
-        cursor.execute( q, { 'id': diaobjectid, 'pv': pv, 'bands': bands } )
-        columns = [ d[0] for d in cursor.description ]
-        sources = pandas.DataFrame( cursor.fetchall(), columns=columns )
+            q += "AND band=ANY(%(bands)s)\n"
+        q += "ORDER BY s.visit, bpvopv.priority DESC"
+        rows, columns = dbcon.execute( q, { 'id': diaobjectid, 'pv': pv, 'bands': bands } )
+        sources = pandas.DataFrame( rows, columns=columns )
+        sources.sort_values( 'mjd' )
         if which in ( 'forced', 'patch' ):
-            q = ( "SELECT midpointmjdtai AS mjd, band, psfflux, psffluxerr "
-                  "FROM diaforcedsource "
-                  "WHERE diaobjectid=%(id)s AND processing_version=%(pv)s " )
+            q = ( "SELECT DISTINCT ON(f.visit)\n"
+                  "  f.midpointmjdtai AS mjd, f.band, f.psfflux, f.psffluxerr\n"
+                  "FROM diaforcedsource f\n"
+                  "INNER JOIN base_procver_of_procver bpvopv ON f.base_procver_id\n"
+                  "WHERE diaobjectid=%(id)s AND bpvopv.procver_id=%(pv)s " )
             if bands is not None:
                 q += "AND band=ANY(%(bands)s) "
-            q += "ORDER BY mjd "
-            cursor.execute( q, { 'id': diaobjectid, 'pv': pv, 'bands': bands } )
-            columns = [ d[0] for d in cursor.description ]
+            q += "ORDER BY f.visit, bpvopv.priority DESC "
+            rows, columns = dbcon.execute( q, { 'id': diaobjectid, 'pv': pv, 'bands': bands } )
             forced = pandas.DataFrame( cursor.fetchall(), columns=columns )
+            forced.sort_values( 'mjd' )
 
     if which == 'detections':
         # If we're only asking for detections, this is easy
@@ -178,8 +216,8 @@ def debug_count_temp_table( con, table ):
     util.logger.debug( f"Table {table} has {res[0][0]} rows" )
 
 
-# TODO : allow different object processing_version from source processing_version
-def object_search( processing_version, return_format='json', just_objids=False, **kwargs ):
+def object_search( processing_version='default', object_processing_version=None,
+                   return_format='json', just_objids=False, **kwargs ):
     """Search for objects.
 
     For parameters that define the search, if they are None, they are
@@ -187,9 +225,16 @@ def object_search( processing_version, return_format='json', just_objids=False, 
 
     Parameters
     ----------
-      processing_version : string or int
-         The processing version you're looking at
+      processing_version : UUID or str
+         The processing version you're looking at (for sources and forced sources).
 
+      object_processing_version : UUID or str, default None
+          If not None, only consider diaobjects from this processing
+          version.  If None, consider all diaobjects.  However, it won't
+          really, because many diaobjects will not have sources or
+          forced sources with processing_version.  Passing something
+          here may make this function more efficient.
+    
       return format : string
          Either "json" or "pandas".  (TODO: pyarrow? polars?)
 
@@ -432,7 +477,8 @@ def object_search( processing_version, return_format='json', just_objids=False, 
 
 
     with db.DBCon() as con:
-        procver = procver_int( processing_version )
+        procver = _procver_id( processing_version )
+        objprocvedr = None if object_processing_version is None else _procver_id( object_processing_versin )
 
         # Search criteria consistency checks
         if ( any( [ ( ra is None ), ( dec is None ), ( radius is None ) ] )
@@ -458,14 +504,19 @@ def object_search( processing_version, return_format='json', just_objids=False, 
         if ra is not None:
             radius = util.float_or_none_from_dict( kwargs, 'radius' )
             radius = radius if radius is not None else 10.
-            q = ( "SELECT diaobjectid,ra,dec INTO TEMP TABLE objsearch_radeccut\n"
-                  "FROM diaobject\n"
-                  "WHERE processing_version=%(pv)s\n"
-                  "AND q3c_radial_query( ra, dec, %(ra)s, %(dec)s, %(rad)s )" )
-            subdict = { 'pv': procver, 'ra': ra, 'dec': dec, 'rad': radius/3600. }
-            util.logger.debug( f"Sending query: {q} with subdict {subdict}" )
+            q = ( "SELECT DISTINCT ON(diaobjectid) diaobjectid,ra,dec INTO TEMP TABLE objsearch_radeccut\n"
+                  "FROM diaobject o\n" )
+            if objprocver is not None:
+                q += ( "INNER JOIN base_procver_of_procver pv ON pv.base_procver_id=o.base_procver_id\n"
+                       "  AND pv.procver_id=%(pv)s\n" )
+            q += f"WHERE q3c_radial_query( ra, dec, %(ra)s, %(dec)s, %(rad)s )\n"
+            if objprocver is not None:
+                q += "ORDER BY diaobjectid,pv.priority DESC\n"
+            subdict = { 'pv': objprocver, 'ra': ra, 'dec': dec, 'rad': radius/3600. }
             con.execute_nofetch( q, subdict )
+            # ****
             debug_count_temp_table( con, 'objsearch_radeccut' )
+            # ****
             nexttable = 'objsearch_radeccut'
 
         # Count (and maybe filter) by number of detections within the time window
@@ -480,7 +531,8 @@ def object_search( processing_version, return_format='json', just_objids=False, 
                   f"  SELECT o.diaobjectid, o.ra, o.dec, COUNT(s.midpointmjdtai) AS numdetinwindow\n"
                   f"  FROM {nexttable} o\n"
                   f"  INNER JOIN diasource s ON o.diaobjectid=s.diaobjectid\n"
-                  f"         AND s.processing_version=%(pv)s\n"
+                  f"  INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id\n"
+                  f"         AND pv.procver_id=%(pv)s\n"
                   f"  WHERE s.midpointmjdtai>=%(t0)s AND s.midpointmjdtai<=%(t1)s\n" )
             if statbands is not None:
                 q += "     AND s.band=ANY(%(bands)s)\n"

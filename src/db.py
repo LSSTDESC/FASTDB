@@ -36,7 +36,8 @@ all_table_names = [ 'query_queue',
                     'ppdb_alerts_sent', 'ppdb_diaforcedsource', 'ppdb_diasource', 'ppdb_diaobject', 'ppdb_host_galaxy',
                     'diaforcedsource', 'diasource', 'diaobject', 'root_diaobject','host_galaxy',
                     'diasource_import_time',
-                    'processing_version_alias', 'processing_version',
+                    'processing_version_alias', 'base_procver_of_procver',
+                    'processing_version', 'base_processing_version',
                     'passwordlink', 'authuser',
                     'migrations_applied' ]
 
@@ -136,13 +137,22 @@ class DBCon:
 
     """
 
-    def __init__( self, dictcursor=False ):
+    def __init__( self, con=None, dictcursor=False ):
         """Instantiate.
 
         If you use this, you should also use close(), and soon.
 
         Parameters
         ----------
+          con : psycopg.Connection or DBCon
+            If None (the default), will make a new connection, and will
+            roll back and close it when done.  If not None, then will
+            instead wrap this connection; when close() is called, or
+            when the context manager that created this object ends, will
+            roll back and close the connection.  However, if con is not
+            None, then the assumption is that somebody else is managing
+            the connection, so will not rollback or close.
+        
           dictcursor : bool, default False
             If True, then the cursor uses psycopg.rows.dict_row as its
             row factory.  execite() will return a list of dictionaries,
@@ -153,16 +163,25 @@ class DBCon:
         """
 
         global dbuser, dbpasswd, dbhost, dbport, dbname
-
         # TODO : make these next two configurable rather than hardcoded
         # These are useful for debugging, but are profligate for production
         global _echoqueries, _alwaysexplain
-        self.echoqueries = _echoqueries
-        self.alwaysexplain = _alwaysexplain
+
+        if con is not None:
+            if isinstance( con, DBCon ):
+                self.con = con.con
+            elif isinstance( con, psycopg.Connection ):
+                self.con = con
+            else:
+                raise TypeError( f"con must be None, a DBCon, or a psycopg.Connection, not a {type(con)}" )
+            self._con_is_mine = False
+        else:
+            self.con = psycopg.connect( dbname=dbname, user=dbuser, password=dbpasswd, host=dbhost, port=dbport )
+            self._con_is_mine = True
 
         self.dictcursor = dictcursor
-
-        self.con = psycopg.connect( dbname=dbname, user=dbuser, password=dbpasswd, host=dbhost, port=dbport )
+        self.echoqueries = _echoqueries
+        self.alwaysexplain = _alwaysexplain
         self.remake_cursor()
 
 
@@ -198,12 +217,18 @@ class DBCon:
 
 
     def close( self ):
-        """Rolls back and closes the connection.
+        """Rolls back and closes the connection if appropriate.
 
         If you did stuff you want kept, make sure to call commit.
+
+        If the constructor was called with con=None, then the connection
+        will be rolled back.  If the constructor was callled with a
+        non-None none, then this method does nothing.
+
         """
-        self.con.rollback()
-        self.con.close()
+        if self self._con_is_mine:
+            self.con.rollback()
+            self.con.close()
 
 
     def commit( self ):
@@ -956,6 +981,14 @@ class PasswordLink( DBBase ):
 
 # ======================================================================
 
+class BaseProcessingVersion( DBBase ):
+    __tablename__ = "base_processing_version"
+    _tablemeta = None
+    _pk = [ 'id' ]
+
+
+# ======================================================================
+
 class ProcessingVersion( DBBase ):
     __tablename__ = "processing_version"
     _tablemeta = None
@@ -991,7 +1024,7 @@ class RootDiaObject( DBBase ):
 class DiaObject( DBBase ):
     __tablename__ = "diaobject"
     _tablemeta = None
-    _pk = [ 'diaobjectid', 'processing_version' ]
+    _pk = [ 'diaobjectid', 'base_procver_id' ]
 
 
 # ======================================================================
@@ -999,7 +1032,7 @@ class DiaObject( DBBase ):
 class DiaSource( DBBase ):
     __tablename__ = "diasource"
     _tablemeta = None
-    _pk = [ 'processing_version', 'diaobjectid', 'visit' ]
+    _pk = [ 'base_procver_id', 'diaobjectid', 'visit' ]
 
 
 # ======================================================================
@@ -1007,7 +1040,7 @@ class DiaSource( DBBase ):
 class DiaForcedSource( DBBase ):
     __tablename__ = "diaforcedsource"
     _tablemeta = None
-    _pk = [ 'processing_version', 'diaobjectid', 'visit' ]
+    _pk = [ 'base_procver_id', 'diaobjectid', 'visit' ]
 
 
 # ======================================================================
