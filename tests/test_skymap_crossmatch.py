@@ -40,9 +40,9 @@ def test_bayestar_crossmatch(alerts_90days_sent_received_and_imported, bayestar_
     # Cross-match first 30 days of sources against the Bayestar skymap
     with db.DB() as conn:
         cur = conn.cursor()
-        # Populate npix_order29 column
+        # Populate npix_order13 column
         cur.execute(
-            "UPDATE diaobject SET npix_order29 = healpix_ang2ipix_nest(8192, ra, dec)"
+            "UPDATE diaobject SET npix_order13 = healpix_ang2ipix_nest(8192, ra, dec)"
         )
         conn.commit()
 
@@ -68,7 +68,7 @@ def test_bayestar_crossmatch(alerts_90days_sent_received_and_imported, bayestar_
                        (decode_uniq(uniq)).ipix_coarse AS ipix_coarse
                 FROM tmpskymap
             ) s
-            ON (d.npix_order29 >> (2 * (29 - s.order_m))) = s.ipix_coarse
+            ON (d.npix_order13 >> (2 * (13 - s.order_m))) = s.ipix_coarse
             """
         )
         match_count = cur.fetchone()[0]

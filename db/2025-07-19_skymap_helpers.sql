@@ -22,5 +22,5 @@ DROP FUNCTION IF EXISTS is_within(BIGINT, INT, BIGINT);
 CREATE FUNCTION is_within(npix BIGINT, order_m INT, ipix_coarse BIGINT)
 RETURNS BOOLEAN
 LANGUAGE SQL IMMUTABLE STRICT AS $$
-    SELECT (npix >> (2 * (29 - order_m))) = ipix_coarse;
+    SELECT (npix >> (2 * (13 - order_m))) = ipix_coarse;
 $$;
