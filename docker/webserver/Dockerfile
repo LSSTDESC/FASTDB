@@ -18,7 +18,9 @@ ENV TZ="UTC"
 RUN  apt-get update \
     && apt-get -y upgrade \
     && apt-get -y install -y \
-         python3 locales tmux netcat-openbsd gnupg curl elinks postgresql-client make rlwrap socat ca-certificates \
+         python3 locales netcat-openbsd gnupg curl elinks postgresql-client make rlwrap socat \
+         ca-certificates \
+         tmux emacs-nox less procps bzip2 \
     && apt-get -y autoremove \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
@@ -71,6 +73,7 @@ RUN source /venv/bin/activate && \
        flask-sock==0.7.0 \
        gevent==24.11.1 \
        gunicorn==23.0.0 \
+       nested-pandas==0.4.6 \
        numpy==2.2.4 \
        pandas==2.2.3 \
        polars==1.29.0 \

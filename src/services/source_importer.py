@@ -23,19 +23,19 @@ class SourceImporter:
                         'pmDec', 'pmDecErr', 'pmDec_parallax_Cov', 'pmRa_pmDec_Cov' ]
 
     # TODO : flags!
-    source_lcfields = [ 'diaSourceId', 'diaObjectId', 'ssObjectId', 'visit', 'detector',
+    source_lcfields = [ 'diaObjectId', 'ssObjectId', 'visit', 'detector',
                         'x', 'y', 'xErr', 'yErr', 'x_y_Cov',
                         'band', 'midpointMjdTai', 'ra', 'raErr', 'dec', 'decErr', 'ra_dec_Cov',
                         'psfFlux', 'psfFluxErr', 'psfRa', 'psfDec', 'psfRaErr', 'psfDecErr',
                         'psfra_psfdec_Cov', 'psfFlux_psfRa_Cov', 'psfFlux_psfDec_Cov',
                         'psfLnL', 'psfChi2', 'psfNdata', 'snr',
                         'sciencEFlux', 'scienceFluxErr', 'fpBkgd', 'fpBkgdErr',
-                        'parentDiaSourceId', 'extendedness', 'reliability',
+                        'extendedness', 'reliability',
                         'ixx', 'ixxErr', 'iyy', 'iyyErr', 'ixy', 'ixyErr',
                         'ixx_ixy_Cov', 'ixx_iyy_Cov', 'iyy_ixy_Cov',
                         'ixxPsf', 'iyyPsf', 'ixyPsf' ]
 
-    forcedsource_lcfields = [ 'diaForcedSourceId', 'diaObjectId', 'visit', 'detector',
+    forcedsource_lcfields = [ 'diaObjectId', 'visit', 'detector',
                               'midpointMjdTai', 'band', 'ra', 'dec', 'psfFlux', 'psfFluxErr',
                               'scienceFlux', 'scienceFluxErr', 'time_processed', 'time_withdrawn' ]
 
@@ -66,6 +66,12 @@ class SourceImporter:
             raise ValueError( f"Invalid temp table name {liketable}" )
         pqcursor = pqconn.cursor()
         pqcursor.execute( f"CREATE TEMP TABLE {temptable} (LIKE {liketable})" )
+        # Special case hack alert : in the case of diaobject, we have to make
+        # the root object nullable in the temp table.  (This is just because
+        # when we import objects, they start that way, and only get root ids
+        # after we figure out which ones need them and they've been created.)
+        if liketable == 'diaobject':
+            pqcursor.execute( f"ALTER TABLE {temptable} ALTER COLUMN rootid DROP NOT NULL" )
 
         if ( t0 is not None ) or ( t1 is not None ):
             if ( t0 is not None ) and ( t1 is not None ):
@@ -133,13 +139,13 @@ class SourceImporter:
         """
 
         fields = self.source_lcfields
-        group = { "_id": "$msg.diaSource.diaSourceId" }
+        group = { "_id": { "diaObjectId": "$msg.diaSource.diaObjectId", "visit": "$msg.diaSource.visit" } }
         group.update( { k: { "$first": f"$msg.diaSource.{k}" } for k in fields } )
         pipeline = [ { "$group": group } ]
 
         self._read_mongo_fields( pqconn, collection, pipeline, fields, "temp_diasource_import", "diasource",
                                  t0=t0, t1=t1, batchsize=batchsize,
-                                 procver_fields=[ 'processing_version', 'diaobject_procver' ] )
+                                 procver_fields=[ 'processing_version' ] )
 
 
     def read_mongo_prvsources( self, pqconn, collection, t0=None, t1=None, batchsize=10000 ):
@@ -154,14 +160,14 @@ class SourceImporter:
         """
 
         fields = self.source_lcfields
-        group = { "_id": "$msg.prvDiaSources.diaSourceId" }
+        group = { "_id": { "diaObjectId": "$msg.prvDiaSources.diaObjectId", "visit": "$msg.prvDiaSources.visit" } }
         group.update( { k: { "$first": f"$msg.prvDiaSources.{k}" } for k in fields } )
         pipeline = [ { "$unwind": "$msg.prvDiaSources" },
                      { "$group": group } ]
 
         self._read_mongo_fields( pqconn, collection, pipeline, fields, "temp_prvdiasource_import", "diasource",
                                  t0=t0, t1=t1, batchsize=batchsize,
-                                 procver_fields=[ 'processing_version', 'diaobject_procver' ] )
+                                 procver_fields=[ 'processing_version' ] )
 
 
     def read_mongo_prvforcedsources( self, pqconn, collection, t0=None, t1=None, batchsize=10000 ):
@@ -176,14 +182,15 @@ class SourceImporter:
         """
 
         fields = self.forcedsource_lcfields
-        group = { "_id": "$msg.prvDiaForcedSources.diaForcedSourceId" }
+        group = { "_id": { "diaObjectId": "$msg.prvDiaForcedSources.diaObjectId",
+                           "visit": "$msg.prvDiaForcedSources.visit" } }
         group.update( { k: { "$first": f"$msg.prvDiaForcedSources.{k}" } for k in fields } )
         pipeline = [ { "$unwind": "$msg.prvDiaForcedSources" },
                      { "$group": group } ]
 
         self._read_mongo_fields( pqconn, collection, pipeline, fields, "temp_prvdiaforcedsource_import",
                                  "diaforcedsource", t0=t0, t1=t1, batchsize=batchsize,
-                                 procver_fields=[ 'processing_version', 'diaobject_procver' ] )
+                                 procver_fields=[ 'processing_version' ] )
 
 
     def import_objects_from_collection( self, collection, t0=None, t1=None, batchsize=10000,
@@ -205,40 +212,41 @@ class SourceImporter:
                             "    o.diaobjectid=tdi.diaobjectid AND o.processing_version=tdi.processing_version "
                             "  WHERE o.diaobjectid IS NULL )" )
 
-            # Populate the objects table.  We could just do this straight from
-            #  temp_diaobject_import and have ON CONFLICT DO NOTHING.  However,
-            #  we'll need temp_new_diaobject for later steps, so that's why
-            #  we did that first.
-            cursor.execute( "INSERT INTO diaobject ( SELECT * FROM temp_new_diaobject )" )
-            nobjs = cursor.rowcount
-
             # Link new objects to existing root objects
-            cursor.execute( "DROP TABLE IF EXISTS temp_diaobject_root_map" )
-            cursor.execute( "CREATE TEMP TABLE temp_diaobject_root_map AS "
-                            "( SELECT drm.rootid AS rootid, tno.diaobjectid AS diaobjectid, "
-                            "         tno.processing_version AS processing_version "
-                            "  FROM diaobject_root_map drm "
-                            "  INNER JOIN diaobject o "
-                            "    ON o.diaobjectid=drm.diaobjectid AND o.processing_version=drm.processing_version "
-                            "  INNER JOIN temp_new_diaobject tno "
-                            "    ON q3c_join( tno.ra, tno.dec, o.ra, o.dec, %(rad)s) )",
+            # TODO : test this with multiple processing versions and multiple#
+            #   objects that match!!!
+            cursor.execute( "UPDATE temp_new_diaobject tno SET rootid=o.rootid "
+                            "FROM diaobject o "
+                            "WHERE o.processing_version=tno.processing_version "
+                            " AND q3c_radial_query(o.ra, o.dec, tno.ra, tno.dec, %(rad)s)",
                             { 'rad': self.object_match_radius/3600. } )
-            cursor.execute( "INSERT INTO diaobject_root_map(rootid, diaobjectid, processing_version) "
-                            "(SELECT * FROM temp_diaobject_root_map)" )
 
             # Create new root objects
-            cursor.execute( "DROP TABLE IF EXISTS temp_diaobject_new_root_map" )
-            cursor.execute( "CREATE TEMP TABLE temp_diaobject_new_root_map AS "
-                            "( SELECT gen_random_uuid() AS rootid, tno.diaobjectid AS diaobjectid, "
-                            "         tno.processing_version AS processing_version "
-                            "  FROM temp_new_diaobject tno "
-                            "  LEFT JOIN diaobject_root_map drm ON "
-                            "    tno.diaobjectid=drm.diaobjectid AND tno.processing_version=drm.processing_version "
-                            "  WHERE drm.diaobjectid IS NULL )" )
-            cursor.execute( "INSERT INTO root_diaobject(id) SELECT rootid FROM temp_diaobject_new_root_map" )
-            cursor.execute( "INSERT INTO diaobject_root_map(rootid, diaobjectid, processing_version) "
-                            "(SELECT * FROM temp_diaobject_new_root_map)" )
+            cursor.execute( "CREATE TEMP TABLE temp_new_root_obj (id UUID)" )
+            cursor.execute( "INSERT INTO temp_new_root_obj "
+                            "( SELECT gen_random_uuid() FROM temp_new_diaobject "
+                            "  WHERE rootid IS NULL )" )
+            # This next one is byzantine.  I'm trying to say, "hey, there are n
+            # rows in tmp_new_diaobject that have NULL rootid, and I've just
+            # created tmp_new_root_obj with n rows, now just fill those n NULL rootids
+            # from the n rows in tmp_new_root_obj".  There must be a less byzantine
+            # way to do this.
+            cursor.execute( "UPDATE temp_new_diaobject tno SET rootid=r.id "
+                            "FROM ( ( SELECT id, ROW_NUMBER() OVER () AS n FROM temp_new_root_obj ) tnro "
+                            "       INNER JOIN "
+                            "       ( SELECT diaobjectid, rootid, ROW_NUMBER() OVER () AS n FROM "
+                            "         ( SELECT diaobjectid, rootid FROM temp_new_diaobject WHERE rootid IS NULL ) subq "
+                            "       ) tnd "
+                            "       ON tnro.n=tnd.n ) r "
+                            "WHERE r.diaobjectid=tno.diaobjectid" )
+
+            # Add the new root diaobjects
+            cursor.execute( "INSERT INTO root_diaobject ( SELECT * FROM temp_new_root_obj )" )
             nroot = cursor.rowcount
+
+            # Add the new objects.
+            cursor.execute( "INSERT INTO diaobject ( SELECT * FROM temp_new_diaobject )" )
+            nobjs = cursor.rowcount
 
             if commit:
                 pqconn.commit()
@@ -354,8 +362,8 @@ class SourceImporter:
 
             # Make sure foreign key constraints aren't goign to trip us up
             #   below, but that they're only checked at the end of the transaction.
-            cursor.execute( "SET CONSTRAINTS fk_diasource_diaobject DEFERRED" )
-            cursor.execute( "SET CONSTRAINTS fk_diaforcedsource_diaobject DEFERRED" )
+            cursor.execute( "SET CONSTRAINTS fk_diasource_diaobjectid DEFERRED" )
+            cursor.execute( "SET CONSTRAINTS fk_diaforcedsource_diaobjectid DEFERRED" )
 
             nobj, nroot = self.import_objects_from_collection( collection, t0, t1, conn=pqconn, commit=False )
             nsrc = self.import_sources_from_collection( collection, t0, t1, conn=pqconn, commit=False )

@@ -7,7 +7,19 @@ from db import DB, PPDBHostGalaxy, PPDBDiaObject, PPDBDiaSource, PPDBDiaForcedSo
 from basetest import BaseTestDB
 
 
-# These fixture is much like one in conftest.py,but is specific to this file
+# These tests are a little scary because the database tests in
+# basetest.py sort of assume that the database tables they're futzing
+# with are empty, but there are session scope fixtures that load up the
+# PPDB.
+#
+# As of this writing, the numbers below (luckily) avoid conflicts with
+# the sanna_fits_ppdb_loaded session fixture in conftest.py.  One thing
+# that needed to be done was to move the 'band' entry in
+# TestPPDBDiaSource's safe_to_modify list further down.  (It was being
+# used in a test to search by attributes; the test expected to find one
+# result, but found lots, because the test PPDB includes lots of things
+# with band='r'.  By moving 'band' further down in the safe_to_modify
+# list, that attribute was not used in that test.)
 
 @pytest.fixture
 def ppdbobj1():
@@ -244,10 +256,9 @@ class TestPPDBDiaSource( BaseTestDB ):
     def basetest_setup( self, ppdbobj1 ):
         self.cls = PPDBDiaSource
         self.columns = {
-            'diasourceid',
             'diaobjectid',
-            'ssobjectid',
             'visit',
+            'ssobjectid',
             'detector',
             'x',
             'y',
@@ -278,7 +289,6 @@ class TestPPDBDiaSource( BaseTestDB ):
             'sciencefluxerr',
             'fpbkgd',
             'fpbkgderr',
-            'parentdiasourceid',
             'extendedness',
             'reliability',
             'ixx',
@@ -297,14 +307,13 @@ class TestPPDBDiaSource( BaseTestDB ):
             'pixelflags',
         }
         self.safe_to_modify = [
-            'visit',
             'detector',
             'x',
             'y',
             'xerr',
             'yerr',
             'x_y_cov',
-            'band',
+            # 'band',         # Moved down for reasons described in comments at the top of this file
             'midpointmjdtai',
             'ra',
             'raerr',
@@ -328,7 +337,6 @@ class TestPPDBDiaSource( BaseTestDB ):
             'sciencefluxerr',
             'fpbkgd',
             'fpbkgderr',
-            'parentdiasourceid',
             'extendedness',
             'reliability',
             'ixx',
@@ -345,11 +353,11 @@ class TestPPDBDiaSource( BaseTestDB ):
             'ixypsf',
             'flags',
             'pixelflags',
+            'band',
         ]
         self.uniques = []
 
-        self.obj1 = PPDBDiaSource( diasourceid=1,
-                                   diaobjectid=ppdbobj1.diaobjectid,
+        self.obj1 = PPDBDiaSource( diaobjectid=ppdbobj1.diaobjectid,
                                    visit=1,
                                    detector=1,
                                    band='r',
@@ -360,8 +368,7 @@ class TestPPDBDiaSource( BaseTestDB ):
                                    psffluxerr=5.6,
                                   )
         self.dict1 = { k: getattr( self.obj1, k ) for k in self.columns }
-        self.obj2 = PPDBDiaSource( diasourceid=2,
-                                   diaobjectid=ppdbobj1.diaobjectid,
+        self.obj2 = PPDBDiaSource( diaobjectid=ppdbobj1.diaobjectid,
                                    visit=2,
                                    detector=2,
                                    band='i',
@@ -372,8 +379,7 @@ class TestPPDBDiaSource( BaseTestDB ):
                                    psffluxerr=8.0
                                   )
         self.dict2 = { k: getattr( self.obj2, k ) for k in self.columns }
-        self.dict3 = { 'diasourceid': 3,
-                       'diaobjectid': ppdbobj1.diaobjectid,
+        self.dict3 = { 'diaobjectid': ppdbobj1.diaobjectid,
                        'visit': 3,
                        'detector': 3,
                        'band': 'g',
@@ -390,7 +396,6 @@ class TestPPDBDiaForcedSource( BaseTestDB ):
     def basetest_setup( self, ppdbobj1 ):
         self.cls = PPDBDiaForcedSource
         self.columns = {
-            'diaforcedsourceid',
             'diaobjectid',
             'visit',
             'detector',
@@ -406,7 +411,6 @@ class TestPPDBDiaForcedSource( BaseTestDB ):
             'time_withdrawn',
         }
         self.safe_to_modify = [
-            'visit',
             'detector',
             'midpointmjdtai',
             'band',
@@ -422,8 +426,7 @@ class TestPPDBDiaForcedSource( BaseTestDB ):
         self.uniques = []
 
         t0 = datetime.datetime.now( tz=datetime.UTC )
-        self.obj1 = PPDBDiaForcedSource( diaforcedsourceid=1,
-                                         diaobjectid=ppdbobj1.diaobjectid,
+        self.obj1 = PPDBDiaForcedSource( diaobjectid=ppdbobj1.diaobjectid,
                                          visit=1,
                                          detector=1,
                                          midpointmjdtai=60000.,
@@ -438,8 +441,7 @@ class TestPPDBDiaForcedSource( BaseTestDB ):
                                          time_withdrawn=None
                                         )
         self.dict1 = { k: getattr( self.obj1, k ) for k in self.columns }
-        self.obj2 = PPDBDiaForcedSource( diaforcedsourceid=2,
-                                         diaobjectid=ppdbobj1.diaobjectid,
+        self.obj2 = PPDBDiaForcedSource( diaobjectid=ppdbobj1.diaobjectid,
                                          visit=2,
                                          detector=2,
                                          midpointmjdtai=60001.,
@@ -454,8 +456,7 @@ class TestPPDBDiaForcedSource( BaseTestDB ):
                                          time_withdrawn=t0 + datetime.timedelta( days=365 )
                                         )
         self.dict2 = { k: getattr( self.obj2, k ) for k in self.columns }
-        self.dict3 = { 'diaforcedsourceid': 3,
-                       'diaobjectid': ppdbobj1.diaobjectid,
+        self.dict3 = { 'diaobjectid': ppdbobj1.diaobjectid,
                        'visit': 3,
                        'detector': 3,
                        'midpointmjdtai': 600002.,

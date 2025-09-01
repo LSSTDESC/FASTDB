@@ -1,6 +1,6 @@
 {
   "name": "Alert",
-  "namespace": "fastdb_test_0.1",
+  "namespace": "fastdb_test_0.2",
   "type": "record",
   "fields": [
     { "name": "alertId",
@@ -8,22 +8,22 @@
       "doc": "unique alert identifer"
     },
     { "name": "diaSource",
-      "type": "fastdb_test_0.1.DiaSource"
+      "type": "fastdb_test_0.2.DiaSource"
     },
     { "name": "prvDiaSources",
       "type": ["null", { "type": "array",
-                         "items": "fastdb_test_0.1.DiaSource" }
+                         "items": "fastdb_test_0.2.DiaSource" }
               ],
       "default": null
     },
     { "name": "prvDiaForcedSources",
       "type": ["null", { "type": "array",
-                         "items": "fastdb_test_0.1.DiaForcedSource" }
+                         "items": "fastdb_test_0.2.DiaForcedSource" }
               ],
       "default": null
     },
     { "name": "diaObject",
-      "type": "fastdb_test_0.1.DiaObject"
+      "type": "fastdb_test_0.2.DiaObject"
     },
     { "name": "classifications",
       "type": {

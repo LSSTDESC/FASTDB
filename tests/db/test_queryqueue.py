@@ -15,8 +15,8 @@ def test_insert( test_user, src1, src1_pv2 ):
             queryid = queryid,
             userid = test_user.id,
             submitted = datetime.datetime.now( tz=datetime.UTC ),
-            queries = [ 'SELECT * FROM diasource WHERE diasourceid=%(id)s' ],
-            subdicts = [ { 'id': 42 } ]
+            queries = [ 'SELECT * FROM diasource WHERE diaobjectid=%(id)s AND visit=%(visit)s' ],
+            subdicts = [ { 'id': 42, 'visit': 64 } ]
         )
         qq.insert()
 

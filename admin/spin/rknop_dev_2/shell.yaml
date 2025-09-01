@@ -105,6 +105,8 @@ spec:
           name: fastdb-sessions
         - mountPath: /sample
           name: fastdb-sample
+        - mountPath: /dp1
+          name: dp1-parquet
         - mountPath: /code
           name: fastdb-checkout
       dnsConfig: {}
@@ -142,6 +144,10 @@ spec:
           path: /global/cfs/cdirs/desc-td/ELASTICC2
           type: Directory
         name: fastdb-sample
+      - hostPath:
+          path: /global/cfs/cdirs/lsst/shared/rubin/DP1/HATS/dp1_full/hats/v29_0_0/dia_object_collection/dia_object_lc/dataset
+          type: Directory
+        name: dp1-parquet
 ---
 apiVersion: v1
 kind: Service

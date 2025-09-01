@@ -1,4 +1,5 @@
 .. _developers-docs:
+
 .. contents::
 
 ==========================
@@ -52,7 +53,7 @@ It's possible that after running the first command, you'll get errors about ``ac
   find . -name Makefile.am -exec touch \{\} \;
   find . -name Makefile.in -exec touch \{\} \;
 
-and then retry the ``./configure`` command above.
+and then retry the ``./configure`` and ``make`` commands above.
 
 
 .. _local-test-env:
@@ -60,16 +61,74 @@ and then retry the ``./configure`` command above.
 Local Test Environment
 =======================
 
-Build and run the Docker services
-----------------------------------
+The file ``docker-compose.yaml`` in the top-level directory contains (almost) everything necessary to bring up a test/development FASTDB environment on your local machine.  You'll need to have some form of docker installed, with a new enough version of ``docker compose``.  Rob is able to get things to work with Docker 20.10.24 (run ``docker --version``) and docker compose 2.36.2 (run ``docker compose version``).  If you have older versions and something doesn't work, try upgrading.  You'll need to have the docker container runtime going; how that works depends on exactly which docker you install.  On a Linux, we rcommend `installing Docker Engline <https://docs.docker.com/engine/install/>`_.  On a Mac, you can also try that, but people have had success with `Docker Desktop <https://www.docker.com/products/docker-desktop>`_.
 
-The file ``docker-compose.yaml`` in the top-level directory contains (almost) everything necessary to bring up a test FASTDB environment on your local machine.  You'll need to have some form of docker installed, with a new enough version of ``docker compose``.  Rob is able to get things to work with Docker 20.10.24 (run ``docker --version``) and docker compose 2.36.2 (run ``docker compose version``).  If you have older versions and something doesn't work, try upgrading.  You'll need to have the docker container runtime going; how that works depends on exactly which docker you install.  On a Linux, we rcommend `installing Docker Engline <https://docs.docker.com/engine/install/>`_.  On a Mac, you can also try that, but people have had success with `Docker Desktop <https://www.docker.com/products/docker-desktop>`_.
+.. _test-build-docker-images:
+
+Buildng the Docker images
+-------------------------
 
 You can build all the docker images necessary to create a development/test environment by running the following in the top level directory of your git checkout::
 
   docker compose build
 
-Once you've successfully built the docker environments, run::
+If all is well, it should tell you that several images were built.
+
+.. _installing-for-tests:
+
+Installing for tests
+--------------------
+
+Before running all the docker containers, you have to install the code in the location that the containers will be expecting to find it.  :ref:`installing-the-code` above describes the general procedure for installing the code.  If you want to install the code on your local test enviroment for use with the tests in the docker compose environment, cd into the top level of your ``FASTDB`` checkout and run::
+
+  ./configure --with-installdir=$PWD/install \
+              --with-smtp-server=mailhog \
+              --with-smtp-port=1025
+
+This may not work on your system, depending on whether you've got a compatible version of autotools installed.  If it doesn't, see :ref:`autotools-in-container` below.
+
+Once your configure has worked, run::
+
+  make install
+
+If you get an error on the ``./configure`` or the ``make`` line, it means one of two things.  It's possible you've edited the file ``Makefile.am`` in one of the subdirectories, which you need to do if you add files that need to be installed.  (Never edit any of the ``Makefile.in`` files, as these are all automatically generated.)  If you have edited one of these files, see :ref:`autoreconf-install` below.  If you haven't, then this is errors the result of autotools and git not agreeing about how file timestamps should be treated.  In this case, try running::
+
+  touch aclocal.m4 configure
+  find . -name Makefile.am -exec touch \{\} \;
+  find . -name Makefile.in -exec touch \{\} \;
+
+and then redoing the line that failed.
+
+.. _autotools-in-container:
+
+If you don't have autotools on your system
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+You can always try installing autotools; it's widely supported.  If you're on Linux, you can probably easily get it from your distribution's package manager.  If you're on a Mac, something something brew something something.  However, you can also go into the container and run the ``./configure`` and ``make`` steps there.  Run the ``shell`` container with::
+
+  docker compose up -d shell
+
+The get a shell inside the container with::
+
+  docker compose exec -it shell /bin/bash
+
+Go to the location of the top-level of the FASTDB checkout inside the container with::
+
+  cd /code
+
+Then, there, run the steps described in :ref:`installing-for-tests` above.
+
+When you are done, ``exit`` the container shell, and once back on the host system, do::
+
+  docker compose down -v shell
+
+
+.. _run-docker-environment:
+
+Running the Docker Services
+----------------------------
+  
+Once you've successfully built the docker environments, and installed the code, run::
 
   docker compose up -d webap
   docker compose up -d shell
@@ -82,7 +141,7 @@ When you run these two commands, it will start a number of local servers (contai
 
    http://localhost:8080
 
-(You can change the port on your local machine from ``8080`` to something else by setting the ``WEBPORT`` environment variable before running ``docker compose``.)  This will give you the interactive web pages; however, the same URL can be used for API calls documented on :ref:`Using FASTDB <usage-docs>`.  Right after bringing it up, you won't be able to do much with it, because there are no FASTDB users configured.  See :ref:`creating-a-persistent-test-user` below.
+(You can change the port on your local machine from ``8080`` to something else by setting the ``WEBPORT`` environment variable before running ``docker compose``.)  This will give you the interactive web pages; however, the same URL can be used for API calls documented on :ref:`Using FASTDB <usage-docs>`.  Right after bringing it up, you won't be able to do much with it, because there are no FASTDB users configured.  See :ref:`creating-a-persistent-test-user` below.  (If what you want to do is run tests, you don't need to create a persistent user, as the tests create users as necessary.)
 
 The containers that get started by ``docker compose`` are, as of this writing:
 
@@ -129,29 +188,31 @@ That will connect you to the shell container.  (You can tell you're inside the c
 If you want to run the tests in the ``tests`` subdirectory, you will first need to install the code to where it's expected; see :ref:`installing-for-tests`.  Once you're ready, inside the container go to the ``/code/tests`` directory and run various tests with ``pytest``.  If you just run ``pytest -v``, it will try to run all of them, but you can, as usual with pytest, give it just the file (or just the file and test) you want to run.
 
 
-.. _installing-for-tests:
+If you edit any python files
+----------------------------
 
-Installing for tests
---------------------
-
-:ref:`installing-the-code` above describes the general procedure for installing the code.  If you want to install the code on your local test enviroment for use with the tests in the docker compose environment, then make sure you're inside the shell container, and run::
-
-  cd /code
-  ./configure --with-installdir=$PWD/install \
-              --with-smtp-server=mailhog \
-              --with-smtp-port=1025
-
-If you get an error on the ``./configure`` line, it means one of two things.  Either you've edited the file ``aclocal.m4``, or you've edited the file ``Makefile.am`` in one of the subdirectories.  (Never edit any of the ``Makefile.in`` files, as these are all automatically generated.)  If you have edited one of these files, see :ref:`autoreconf-install` below.  If you haven't, then this is the result of autotools and git not agreeing about how file timestamps should be treated.  Try running::
-
-  touch aclocal.m4 configure
-  find . -name Makefile.am -exec touch \{\} \;
-  find . -name Makefile.in -exec touch \{\} \;
-
-and then redoing the ``./configure`` line.
-
-Once your configure has worked, run::
+The tests do not run the code out of the source directory; rather, they run it out of where it's installed.  So, if you've edited any of the source files, for the tests to see them you need to reinstall the code.  If in :ref:`installing-for-tests` you did the ``./configure`` and ``make`` steps outside of the container, then in a shell outside of the container ``cd`` to the top level of your git checkout and run::
 
   make install
+
+If you did the ``./confiugure`` and ``make`` steps inside the container, then cd to ``/code`` before running ``make install``.
+
+After that, the tests should see your updated code.
+
+If you've added any python files, then you may need to put them in one of the ``Makefile.am`` files, and do the steps in :ref:`autoreconf-install` below.
+
+
+Restarting the webserver
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+However, there may be one more step.  If you modified code that the webserver uses, you have to tell the webserver to reread the code.  After doing the ``make install`` described above, ``cd`` into the top level of your git checkout and run::
+
+  docker compose down webap
+  docker compose up webap
+  docker compose logs webap
+
+The last step show not show any errors or tracebacks; if it did, then you broke the code an the webserver can't start.  Fix the code, install again, and then do the three steps above again until it works.
+
 
 .. _autoreconf-install:
 
@@ -176,7 +237,7 @@ The tests will not yet run as-is.  Inside the ``tests`` subdirectory, you must r
 
   tar xvf elasticc2_test_data.tar.bz2
 
-in order create the expected test data on your local machine.  Note that ``bzip2`` is *not* installed inside the docker container, so you need to run this on your host machine.  You only need to do this once in your checkout; you do *not* have to do this every time you create a new set of docker containers.  (If the subdirectory ``tests/elasticc2_test_data`` has stuff in it, then you've probably already done this.)
+in order create the expected test data on your local machine.  You only need to do this once in your checkout; you do *not* have to do this every time you create a new set of docker containers.  (If the subdirectory ``tests/elasticc2_test_data`` has stuff in it, then you've probably already done this.)
 
 Exiting the test environment
 ----------------------------
@@ -220,7 +281,6 @@ TODO : instructions for accessing the mongo database.
 
 .. _creating-a-persistent-test-user:
 
-
 Setting yourself up to futz around with the web app
 ---------------------------------------------------
 
@@ -258,6 +318,42 @@ Loading persistent test data
 
 TODO
 
+
+Notes and Tips for Development and Testing
+==========================================
+
+Changing database structures
+----------------------------
+
+If you change database sturctures (adding fields, etc.), it's possible that some of the tests will start failing because cached test data no longer matches what's expected.  This will happen (at least) to tests that use the ``alerts_90days_sent_received_and_imported`` fixture in ``tests/fixtures/alertcycle.py``.  If you're seeing something you think is this error, look at all the comments above and below that test in that file for information on rebuilding the cached test data.
+
+
+Pushing Branches and Pull Requests
+==================================
+
+TODO
+
+Updating Docker Images
+----------------------
+
+Hopefully you don't have to do this.  In the rare case where you do (which will be if you've edited anything in the ``docker`` subdirectory), you need to build and push new docker images for the automated tests on github to use.
+
+First, edit ``docker-compose.yaml`` and find all lines that start with ``image:`` (after several spaces).  At the end of that line you should see something like ``${DOCKER_VERSION:-test20250815}``.  Bump the date after ``test`` to the current date.  Make sure *not* to remove either the colon, or the dash right after the colon.  (We're assuming two people won't be doing this on the same day....)  Then, at the top level of your archive, run::
+
+  DOCKER_ARCHIVE=ghcr.io/lsstdesc docker compose build
+
+when the build finishes, run all of the following, where ``<version>`` is what you replaced ``test20250815`` with above::
+
+  docker push ghcr.io/LSSTDESC/fastdb-kafka-test:<version>
+  docker push ghcr.io/LSSTDESC/fastdb-postgres:<version>
+  docker push ghcr.io/LSSTDESC/fastdb-mongodb:<version>
+  docker push ghcr.io/LSSTDESC/fastdb-shell:<version>
+  docker push ghcr.io/LSSTDESC/fastdb-query-runner:<version>
+  docker push ghcr.io/LSSTDESC/fastdb-webap:<version>
+
+Before running those, you may need to do::
+
+  docker login ghcr.io
 
 
 Note for Rob: Installing on Perlmutter

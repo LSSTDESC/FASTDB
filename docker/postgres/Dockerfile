@@ -13,8 +13,9 @@ SHELL ["/bin/bash", "-c"]
 RUN apt-get update \
   && DEBIAN_FRONTEND="nointeractive" apt-get -y upgrade \
   && DEBIAN_FRONTEND="noninteractive" TZ="UTC" apt-get -y install -y --no-install-recommends \
-      postgresql-15 postgresql-client-15 pgtop libssl3 libreadline8 zlib1g tmux netcat-openbsd \
+      postgresql-15 postgresql-client-15 pgtop libssl3 libreadline8 zlib1g netcat-openbsd \
       libzstd1 liblz4-1 \
+      tmux emacs-nox less procps \
   && apt-get clean \
   && rm -rf /var/lib/apt/lists/*
 
@@ -45,7 +46,7 @@ WORKDIR /build
 RUN apt-get update \
   && DEBIAN_FRONTEND="noninteractive" TZ="UTC" apt-get -y install -y --no-install-recommends \
       make git gcc libssl-dev libreadline-dev zlib1g-dev libzstd-dev liblz4-dev curl \
-      postgresql-server-dev-15 ca-certificates
+      postgresql-server-dev-15 ca-certificates pkg-config
 
 RUN git clone https://github.com/segasai/q3c.git
 RUN cd q3c \
@@ -59,6 +60,31 @@ RUN curl -L https://github.com/ossc-db/pg_hint_plan/archive/refs/tags/REL15_1_5_
   && make \
   && make install
 
+
+ENV CARGO_HOME=/opt/rust
+ENV RUSTUP_HOME=/opt/rust
+ENV PATH="${PATH}:/opt/rust/bin"
+RUN mkdir -p /opt/rust \
+  && chown postgres -R /opt/rust
+
+RUN chown postgres -R /usr/share/postgresql/ \
+  && chown postgres -R /usr/lib/postgresql
+
+ENV PG_PARQUET_VERSION=0.4.0
+ENV PGRX_VERSION=0.14.1
+RUN curl https://sh.rustup.rs -sSf | sh -s -- --no-modify-path --profile minimal --default-toolchain stable -y
+RUN cargo install --locked cargo-pgrx --version ${PGRX_VERSION}
+RUN cargo pgrx init --pg15 $(which pg_config)
+
+RUN mkdir -p ~/.pgrx/data-15 \
+  && echo "shared_preload_libraries = 'pg_parquet'" >> ~/.pgrx/data-15/postgresql.conf
+RUN cd /opt/rust \
+  && curl -LOJ https://github.com/CrunchyData/pg_parquet/archive/refs/tags/v${PG_PARQUET_VERSION}.tar.gz \
+  && tar -xvzf pg_parquet-${PG_PARQUET_VERSION}.tar.gz \
+  && cd pg_parquet-${PG_PARQUET_VERSION} \
+  && cargo pgrx install --release
+
+
 # ======================================================================
 FROM base AS postgres
 
@@ -70,6 +96,8 @@ COPY --from=build /usr/lib/postgresql/15/lib/pg_hint_plan.so usr/lib/postgresql/
 COPY --from=build /usr/lib/postgresql/15/lib/bitcode/pg_hint_plan /usr/share/postgresql/lib/bitcode/pg_hint_plan
 COPY --from=build /usr/lib/postgresql/15/lib/bitcode/pg_hint_plan.index.bc /usr/share/postgresql/lib/bitcode/pg_hint_plan.index.bc
 COPY --from=build /usr/share/postgresql/15/extension/pg_hint_plan* /usr/share/postgresql/15/extension/
+COPY --from=build /usr/lib/postgresql/15/lib/pg_parquet.so /usr/lib/postgresql/15/lib/
+COPY --from=build /usr/share/postgresql/15/extension/pg_parquet* /usr/share/postgresql/15/extension/
 
 # Make sure this matches what is in the config file (created just above)
 # (There is some futzing about here to make sure the right permissions are
