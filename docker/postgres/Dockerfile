@@ -59,6 +59,12 @@ RUN curl -L https://github.com/ossc-db/pg_hint_plan/archive/refs/tags/REL15_1_5_
   && make \
   && make install
 
+RUN git clone https://github.com/segasai/pg_healpix.git /build/pg_healpix \
+ && cd /build/pg_healpix \
+ && make USE_PGXS=1 \
+ && make USE_PGXS=1 install \
+ && rm -rf /build/pg_healpix
+
 # ======================================================================
 FROM base AS postgres
 
@@ -70,6 +76,9 @@ COPY --from=build /usr/lib/postgresql/15/lib/pg_hint_plan.so usr/lib/postgresql/
 COPY --from=build /usr/lib/postgresql/15/lib/bitcode/pg_hint_plan /usr/share/postgresql/lib/bitcode/pg_hint_plan
 COPY --from=build /usr/lib/postgresql/15/lib/bitcode/pg_hint_plan.index.bc /usr/share/postgresql/lib/bitcode/pg_hint_plan.index.bc
 COPY --from=build /usr/share/postgresql/15/extension/pg_hint_plan* /usr/share/postgresql/15/extension/
+# pg_healpix extension
+COPY --from=build /usr/lib/postgresql/15/lib/pg_healpix.so /usr/lib/postgresql/15/lib/pg_healpix.so
+COPY --from=build /usr/share/postgresql/15/extension/pg_healpix* /usr/share/postgresql/15/extension/
 
 # Make sure this matches what is in the config file (created just above)
 # (There is some futzing about here to make sure the right permissions are

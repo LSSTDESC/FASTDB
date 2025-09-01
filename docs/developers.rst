@@ -25,6 +25,13 @@ If later you pull a new revision, ``git status`` may show your submodule as modi
 
 to get the current version of all submodules.
 
+The ``pg_healpix`` submodule contains a PostgreSQL extension written in
+C for HEALPix indexing.  After checking out the code you may build and
+install the extension with ``make`` and ``make install`` (``pg_config``
+must be in your ``PATH``).  Then load it in your database with::
+
+  CREATE EXTENSION pg_healpix;
+
 
 .. _installing-the-code:
 

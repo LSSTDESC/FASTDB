@@ -83,7 +83,9 @@ RUN source /venv/bin/activate && \
        pytz==2025.1 \
        remote-pdb==2.1.0 \
        requests==2.32.3 \
-       simplejson==3.20.1
+       simplejson==3.20.1 \
+       ligo.skymap==2.4.0
+
 
 # ======================================================================
 # This is for the test webserver.  It installs crappy keys so you
