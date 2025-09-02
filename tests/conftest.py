@@ -150,11 +150,13 @@ def set_of_lightcurves( procver_collection ):
     #     object 1 : first detection mjd 60020, last detection mjd 60060, peak 60035, mag 22
     #     object 2 : first detection mjd 60040, last detection mjd 60080, peak 60050, mag 23
     #     object 3 : first detection mjd 60050, last detection mjd 60060, peak 60055, mag 25
+    # Forced photometry starts 10 days before first detection and goes through 20 days after last detection.
     #
     # Object 0 is complicated.  The first diaboject will only have detections through
     #     60015 and forced photometry through 60010 in bpv1a.
     #     It will have detections through 60030 and forced photometry through 60025 in bpv1
     # All objects have full lightcurves in bpv2, bpv2a, bpv3
+    # All lightcurves are at a 2.5 day cadence, alternating bands r and i.
 
     roots = []
     delobjs = []
@@ -173,11 +175,13 @@ def set_of_lightcurves( procver_collection ):
             detrange = [ ( 60000., 60030. ),
                          ( 60020., 60060. ),
                          ( 60040., 60080. ),
-                         ( 60050., 60080. ) ]
+                         ( 60050., 60060. ) ]
             tmax = [ 60010., 60035., 60050., 60055. ]
 
             peakmag = [ 24., 22., 23., 25. ]
-            minmag = 26.
+            firstmag = [ 26., 25., 25.5, 25.8 ]
+            lastmag = [ 25.9, 25.1, 25.6, 26. ]
+            # minmag = 26.
             zeromag = 32.
 
             visit = 0
@@ -207,7 +211,8 @@ def set_of_lightcurves( procver_collection ):
                 for sourcemjd in np.arange( detrange[i][0], detrange[i][1]+1., 2.5 ):
                     visit += 1
                     mjdend = detrange[i][0] if sourcemjd < tmax[i] else detrange[i][1]
-                    mag = minmag + ( sourcemjd - mjdend ) * ( peakmag[i] - minmag ) / ( tmax[i] - mjdend  )
+                    endmag = firstmag[i] if sourcemjd < tmax[i] else lastmag[i]
+                    mag = endmag + ( sourcemjd - mjdend ) * ( peakmag[i] - endmag ) / ( tmax[i] - mjdend  )
                     psfflux = flux( mag )
                     psffluxerr = 0.1 * psfflux
 
@@ -266,9 +271,9 @@ def set_of_lightcurves( procver_collection ):
                 for sourcemjd in mjds:
                     visit += 1
                     if sourcemjd < tmax[i]:
-                        mag = minmag + ( detrange[i][0] - sourcemjd ) * ( zeromag - minmag ) / 10.
+                        mag = firstmag[i] + ( detrange[i][0] - sourcemjd ) * ( zeromag - firstmag[i] ) / 10.
                     else:
-                        mag = minmag + ( sourcemjd - detrange[i][0] ) * ( zeromag - minmag ) / 20.
+                        mag = lastmag[i] + ( sourcemjd - detrange[i][0] ) * ( zeromag - lastmag[i] ) / 20.
                     psfflux = flux( mag )
                     psffluxerr = 0.5 * psfflux
 
