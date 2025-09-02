@@ -1,3 +1,8 @@
+__all__ = [ "asUUID", "isSequence", "float_or_none_from_dict", "int_or_none_from_dict",
+            "datetime_or_none_from_dict_mjd_or_timestring", "mjd_or_none_from_dict_mjd_or_timestring",
+            "parse_sexigesimal", "float_or_none_from_dict_float_or_dms", "float_or_none_from_dict_float_or_hms",
+            "get_alert_schema", "procver_id" ]
+
 import sys
 import re
 import pathlib
@@ -9,6 +14,8 @@ import collections.abc
 import fastavro
 import astropy.time
 import rkwebutil
+
+import db
 
 _schema_namespace = 'fastdb_test_0.2'
 
@@ -82,7 +89,7 @@ def datetime_or_none_from_dict_mjd_or_timestring( d, kw ):
         return dateval
     except rkwebutil.ErrorMsg:
         mjd = float( d[kw].strip() )
-        return astropy.time.Time( mjd, format='mjd' ).to_datetime()
+        return astropy.time.Time( mjd, format='mjd' ).to_datetime( timezome=datetime.UTC )
 
 
 def mjd_or_none_from_dict_mjd_or_timestring( d, kw ):
@@ -176,3 +183,43 @@ def get_alert_schema( schemadir=None ):
              'alert_schema_file': schemadir / f"{_schema_namespace}.Alert.avsc",
              'brokermessage_schema_file': schemadir / f"{_schema_namespace}.BrokerMessage.avsc"
             }
+
+
+def procver_id( processing_version, dbcon=None ):
+    """Return the uuid of processint_version.
+
+    Parameters
+    ----------
+      processing_version: str or UUID
+        If a UUID, just return it straight.  If a str that is a string
+        version of a UUID, UUIDifies it and returns it.  Otherwise,
+        queries the database for the processing version and returns the
+        UUID.
+
+      dbcon: db.DBCon or psycopg2.Connection or None
+        Database connection to use.  If None, and one is needed, will
+        open a new one and close it when done.
+
+    Returns
+    -------
+      UUID
+
+    """
+
+    if isinstance( processing_version, uuid.UUID ):
+        return processing_version
+    try:
+        ipv = uuid.UUID( processing_version )
+        return ipv
+    except Exception:
+        pass
+    with db.DBCon( dbcon ) as con:
+        rows, _cols = con.execute( "SELECT id FROM processing_version WHERE description=%(pv)s",
+                                   { 'pv': processing_version } )
+        if len(rows) > 0:
+            return rows[0][0]
+        rows, _cols = con.execute( "SELECT procver_id FROM processing_version_alias WHERE description=%(pv)s",
+                                   { 'pv': processing_version } )
+        if len(rows) == 0:
+            raise ValueError( f"Unknown processing version {processing_version}" )
+        return rows[0][0]

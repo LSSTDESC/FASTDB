@@ -13,28 +13,6 @@ import db
 import util
 
 
-def _procver_id( processing_version, dbcon=None ):
-    if isinstance( processing_version, uuid.UUID ):
-        return processing_version
-    try:
-        ipv = uuid.UUID( processing_version )
-        return ipv
-    except Exception:
-        pass
-    with db.DB( dbcon ) as con:
-        cursor = con.cursor()
-        cursor.execute( "SELECT id FROM processing_version WHERE description=%(pv)s", { 'pv': processing_version } )
-        row = cursor.fetchone()
-        if row is not None:
-            return row[0]
-        cursor.execute( "SELECT procver_id FROM processing_version_alias WHERE description=%(pv)s",
-                        { 'pv': processing_version } )
-        row = cursor.fetchone()
-        if row is None:
-            raise ValueError( f"Unknown processing version {processing_version}" )
-        return row[0]
-
-
 def object_ltcv( processing_version='default', diaobjectid=None, object_processing_version=None,
                  bands=None, which='patch', include_base_procver=False, return_format='json',
                  mjd_now=None, dbcon=None ):
@@ -122,7 +100,7 @@ def object_ltcv( processing_version='default', diaobjectid=None, object_processi
     sources = []
     forced = []
     with db.DBCon( dbcon ) as dbcon:
-        pv = _procver_id( processing_version, dbcon=dbcon.con )
+        pv = util.procver_id( processing_version, dbcon=dbcon.con )
 
         # Figure out the diaobjectid if necessary
         if not isinstance( diaobjectid, numbers.Integral ):
@@ -133,7 +111,7 @@ def object_ltcv( processing_version='default', diaobjectid=None, object_processi
                 raise TypeError( f'diaobjectid must be an integer, uuid, or string converatble to uuid; '
                                  f'got "{diaobjectid}"' )
             obj_pv_desc = processing_version if object_processing_version is None else object_processing_version
-            obj_pv = _procver_id( obj_pv_desc, dbcon=dbcon.con )
+            obj_pv = util.procver_id( obj_pv_desc, dbcon=dbcon.con )
             rows, _cols = dbcon.execute( "SELECT diaobjectid FROM diaobject o\n"
                                          "INNER JOIN base_procver_of_procver bpvopv\n"
                                          "  ON o.base_procver_id=bpvopv.base_procver_id\n"
@@ -549,8 +527,8 @@ def object_search( processing_version='default', object_processing_version=None,
 
 
     with db.DBCon( dbcon ) as con:
-        procver = _procver_id( processing_version, dbcon=con.con )
-        objprocver = None if object_processing_version is None else _procver_id( object_processing_version )
+        procver = util.procver_id( processing_version, dbcon=con.con )
+        objprocver = None if object_processing_version is None else util.procver_id( object_processing_version )
 
         # Search criteria consistency checks
         if ( any( [ ( ra is None ), ( dec is None ), ( radius is None ) ] )
@@ -599,7 +577,7 @@ def object_search( processing_version='default', object_processing_version=None,
                 # Make a primary key so we can group by
                 con.execute_nofetch( f"ALTER TABLE {nexttable} ADD PRIMARY KEY (diaobjectid)" )
             subdict = { 'pv': procver, 't0': window_t0, 't1': window_t1 }
-            q = ( f"/*+ IndexScan(s idx_diasource_diaobjectid) */\n"
+            q = ( f"/*+ IndexScan(src idx_diasource_diaobjectid) */\n"
                   f"SELECT diaobjectid,ra,dec,numdetinwindow INTO TEMP TABLE objsearch_windowdet FROM (\n"
                   f"  SELECT o.diaobjectid, o.ra, o.dec, COUNT(s.visit) AS numdetinwindow\n"
                   f"  FROM {nexttable} o\n"
@@ -642,7 +620,7 @@ def object_search( processing_version='default', object_processing_version=None,
                  ( mint_firstdetection < maxt_lastdetection ) ):
                 raise RuntimeError( "maxt_lastdetection > mint_firstdetection, which makes no sense." )
             subdict = { 'pv': procver }
-            q = ( "/*+ IndexScan(s idx_diasource_diaobjectid) */\n"
+            q = ( "/*+ IndexScan(src idx_diasource_diaobjectid) */\n"
                   "SELECT * INTO TEMP TABLE objsearch_detcut FROM (\n"
                   "  SELECT DISTINCT ON (o.diaobjectid) o.diaobjectid,o.ra,o.dec" )
             if len(addlfields) > 0:
@@ -688,7 +666,7 @@ def object_search( processing_version='default', object_processing_version=None,
         subdict = { 'pv': procver }
 
         # First: build the table, put in first detection
-        q = ( "/*+ IndexScan(s idx_diasource_diaobjectid) */\n"
+        q = ( "/*+ IndexScan(src idx_diasource_diaobjectid) */\n"
               "SELECT * INTO TEMP TABLE objsearch_stattab FROM (\n"
               "  SELECT DISTINCT ON (diaobjectid)\n"
               "         o.diaobjectid,o.ra,o.dec,\n" )
@@ -723,7 +701,7 @@ def object_search( processing_version='default', object_processing_version=None,
         con.execute_nofetch( q, subdict )
 
         # Add in last detection
-        q = ( f"/*+ IndexScan(s idx_diasource_diaobjectid) */\n"
+        q = ( f"/*+ IndexScan(src idx_diasource_diaobjectid) */\n"
               f"UPDATE objsearch_stattab o\n"
               f"SET lastdetmjd=midpointmjdtai, lastdetband=band,\n"
               f"    lastdetflux=psfflux, lastdetfluxerr=psffluxerr\n"
@@ -752,7 +730,7 @@ def object_search( processing_version='default', object_processing_version=None,
         con.execute_nofetch( q, subdict )
 
         # Add in max detection
-        q = ( f"/*+ IndexScan(s idx_diasource_diobjectid) */\n"
+        q = ( f"/*+ IndexScan(src idx_diasource_diobjectid) */\n"
               f"UPDATE objsearch_stattab o\n"
               f"SET maxdetmjd=midpointmjdtai, maxdetband=band,\n"
               f"    maxdetflux=psfflux, maxdetfluxerr=psffluxerr\n"
@@ -781,7 +759,7 @@ def object_search( processing_version='default', object_processing_version=None,
         con.execute_nofetch( q, subdict )
 
         # Add in number of detections
-        q = ( f"/*+ IndexScan(s idx_diasource_diaobjectid) */\n"
+        q = ( f"/*+ IndexScan(src idx_diasource_diaobjectid) */\n"
               f"UPDATE objsearch_stattab o\n"
               f"SET numdet=n "
               f"FROM (\n"
@@ -876,7 +854,7 @@ def object_search( processing_version='default', object_processing_version=None,
         nexttable = 'objsearch_stattab'
 
         # Get the last forced source
-        q = ( f"/*+ IndexScan(f idx_diaforcedsource_diaobjectid ) */\n"
+        q = ( f"/*+ IndexScan(frc idx_diaforcedsource_diaobjectid ) */\n"
               f"SELECT * INTO TEMP TABLE objsearch_final FROM (\n"
               f"  SELECT DISTINCT ON (t.diaobjectid) t.*,\n"
               f"      f.psfflux AS lastforcedflux, f.psffluxerr AS lastforcedfluxerr,\n"
@@ -1073,7 +1051,7 @@ def get_hot_ltcvs( processing_version, detected_since_mjd=None, detected_in_last
     bands = [ 'u', 'g', 'r', 'i', 'z', 'y' ]
 
     with db.DBCon( dbcon ) as con:
-        procver = _procver_id( processing_version, dbcon=con.con )
+        procver = util.procver_id( processing_version, dbcon=con.con )
 
         # First : get a table of all the object ids (root object ids)
         #   that have a detection (i.e. a diasource) in the
@@ -1106,7 +1084,7 @@ def get_hot_ltcvs( processing_version, detected_since_mjd=None, detected_in_last
             if host_processing_version is None:
                 host_pv = procver
             else:
-                host_pv = _procver_id( host_processing_version, dbcon=con.con )
+                host_pv = util.procver_id( host_processing_version, dbcon=con.con )
             q = "SELECT DISTINCT ON (o.diaobjectid) o.rootid,o.diaobjectid,"
             for bandi in range( len(bands)-1 ):
                 q += ( f"h.stdcolor_{bands[bandi]}_{bands[bandi+1]},"
@@ -1159,8 +1137,8 @@ def get_hot_ltcvs( processing_version, detected_since_mjd=None, detected_in_last
         #   are big!
         sourcedf = None
         if source_patch:
-            q = ( "/*+ IndexScan(s idx_diasource_diaobjectid)\n"
-                  "    IndexScan(f idx_diaforcedsource_diaobjectid)\n"
+            q = ( "/*+ IndexScan(src idx_diasource_diaobjectid)\n"
+                  "    IndexScan(frc idx_diaforcedsource_diaobjectid)\n"
                   "    IndexScan(o)\n"
                   "*/\n"
                   "SELECT o.rootid,o.diaobjectid,o.ra,o.dec,s.visit,s.detector,\n"

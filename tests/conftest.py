@@ -89,6 +89,8 @@ def procver_collection():
     #     pvc_pv2 : pvc_bpv2a, pvc_bpv2
     #     pvc_pv3 : pvc_bpv3
     #
+    # (The fallbacks of pvc_pv2 and pvc_pv3 to the earlier bpvs are for Object handing in set_of_lightcurves)
+    #
     # fixture value is a tuple of two dictionaries of str → BaseProcessingVersion, str → ProcessingVersion
 
     bpvs = {}
