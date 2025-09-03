@@ -14,11 +14,11 @@ def test_object_ltcv( procver_collection, set_of_lightcurves ):
     # sources through 60015 and forced through 60010 in bpv1a, then sources through 60030
     # and forced through 60050 in bpv1
 
-    sources = ltcv.object_ltcv( pvs['pv1'].id, roots[0]['objs'][1]['obj'].diaobjectid,
+    sources = ltcv.object_ltcv( pvs['pv1'].id, roots[0]['objs'][2]['obj'].diaobjectid,
                                 return_format='pandas', which='detections', include_base_procver=True )
-    forced = ltcv.object_ltcv( pvs['pv1'].id, roots[0]['objs'][1]['obj'].diaobjectid,
+    forced = ltcv.object_ltcv( pvs['pv1'].id, roots[0]['objs'][2]['obj'].diaobjectid,
                                return_format='pandas', which='forced', include_base_procver=True )
-    df = ltcv.object_ltcv( pvs['pv1'].id, roots[0]['objs'][1]['obj'].diaobjectid,
+    df = ltcv.object_ltcv( pvs['pv1'].id, roots[0]['objs'][2]['obj'].diaobjectid,
                            return_format='pandas', which='patch', include_base_procver=True )
 
     assert len(sources) == 13

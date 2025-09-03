@@ -5,6 +5,7 @@ __all__ = [ "asUUID", "isSequence", "float_or_none_from_dict", "int_or_none_from
 
 import sys
 import re
+import datetime
 import pathlib
 import logging
 import numbers
