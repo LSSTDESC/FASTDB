@@ -6,7 +6,7 @@ import db
 import ltcv
 
 
-def check_df_contents( df, procverid, statbands=None ):
+def check_df_contents( df, procver, statbands=None ):
     """Used in the test ltcv object test, to verify that the first, last, max fields match the databse.
 
     Won't work with anything that uses numdetinwindow, because the
@@ -18,6 +18,7 @@ def check_df_contents( df, procverid, statbands=None ):
 
     with db.DB() as con:
         cursor = con.cursor()
+        procverid = procver.highest_prio_base_procver( dbcon=con ).id
 
         assert all( df.lastdetmjd >= df.firstdetmjd )
         assert all( df.lastforcedmjd >= df.lastdetmjd )
@@ -31,7 +32,7 @@ def check_df_contents( df, procverid, statbands=None ):
         for row in df.itertuples():
             q = ( "SELECT psfflux, psffluxerr, midpointmjdtai, band "
                   "FROM diasource "
-                  "WHERE diaobjectid=%(o)s AND processing_version=%(pv)s " )
+                  "WHERE diaobjectid=%(o)s AND base_procver_id=%(pv)s " )
             if statbands is not None:
                 q += "AND band=ANY(%(bands)s) "
             q += "ORDER BY psfflux DESC LIMIT 1"
@@ -44,7 +45,7 @@ def check_df_contents( df, procverid, statbands=None ):
 
             q = ( "SELECT psfflux, psffluxerr, midpointmjdtai, band "
                   "FROM diasource "
-                  "WHERE diaobjectid=%(o)s AND processing_version=%(pv)s " )
+                  "WHERE diaobjectid=%(o)s AND base_procver_id=%(pv)s " )
             if statbands is not None:
                 q += "AND band=ANY(%(bands)s) "
             q += "ORDER BY midpointmjdtai DESC LIMIT 1"
@@ -57,7 +58,7 @@ def check_df_contents( df, procverid, statbands=None ):
 
             q = ( "SELECT psfflux, psffluxerr, midpointmjdtai, band "
                   "FROM diasource "
-                  "WHERE diaobjectid=%(o)s AND processing_version=%(pv)s " )
+                  "WHERE diaobjectid=%(o)s AND base_procver_id=%(pv)s " )
             if statbands is not None:
                 q += "AND band=ANY(%(bands)s) "
             q += "ORDER BY midpointmjdtai LIMIT 1"
@@ -70,7 +71,7 @@ def check_df_contents( df, procverid, statbands=None ):
 
             q = ( "SELECT psfflux, psffluxerr, midpointmjdtai, band "
                   "FROM diaforcedsource "
-                  "WHERE diaobjectid=%(o)s AND processing_version=%(pv)s " )
+                  "WHERE diaobjectid=%(o)s AND base_procver_id=%(pv)s " )
             if statbands is not None:
                 q += "AND band=ANY(%(bands)s) "
             q += "ORDER BY midpointmjdtai DESC LIMIT 1"
@@ -82,6 +83,11 @@ def check_df_contents( df, procverid, statbands=None ):
             assert dbrow[1] == pytest.approx( row.lastforcedfluxerr, rel=1e-5 )
 
 
+# NOTE : this tests functionality that's also tested in test_ltcv.py.
+# It's kept here because this works on some SNANA-loaded ELAsTiCC2 sample
+# data, whereas thet est in test_ltcv.py works entirely on constructed
+# fake data from conftest.py.
+#
 # The test_user fixture is in this next test not becasue it's needed for
 #   the test, but because this is a convenient test for loading up a
 #   database for use developing the web ap.  In the tests subdirectory,
@@ -92,17 +98,18 @@ def check_df_contents( df, procverid, statbands=None ):
 #   with the web ap.
 
 # This is separated out from test_ltcv.py since it uses a different fixture... at least for now
-def test_object_search( procver, test_user, snana_fits_maintables_loaded_module ):
+def test_object_search( procver_collection, test_user, snana_fits_maintables_loaded_module ):
     """This test tests lots of the keywords, but doesn't test every conceivable combination because n² is big."""
+    _bpv, pv = procver_collection
 
     with pytest.raises( ValueError, match="Unknown search keywords: {'foo'}" ):
-        ltcv.object_search( procver.description, foo=5 )
+        ltcv.object_search( pv['pv1'].description, foo=5 )
 
     with pytest.raises( ValueError, match='Unknown return format foo' ):
-        ltcv.object_search( procver.description, return_format='foo' )
+        ltcv.object_search( pv['pv1'].description, return_format='foo' )
 
     # Do an absurdly large radial query to see if we get more than one
-    jsonresults = ltcv.object_search( procver.description, return_format='json',
+    jsonresults = ltcv.object_search( pv['pv1'].description, return_format='json',
                                       ra=185.45, dec=-34.95, radius=5.3*3600. )
     assert set( jsonresults.keys() ) == { 'diaobjectid', 'ra', 'dec', 'numdet', 'numdetinwindow',
                                           'firstdetmjd', 'firstdetband', 'firstdetflux', 'firstdetfluxerr',
@@ -112,7 +119,7 @@ def test_object_search( procver, test_user, snana_fits_maintables_loaded_module 
     assert set( jsonresults['diaobjectid']) == { 1340712, 1822149, 2015822 }
 
     # Also get the pandas response, make sure it's the same as json
-    results = ltcv.object_search( procver.description, return_format='pandas',
+    results = ltcv.object_search( pv['pv1'].description, return_format='pandas',
                                   ra=185.45, dec=-34.95, radius=5.3*3600. )
     assert len(results) == 3
     assert set( results.columns ) == set( jsonresults.keys() )
@@ -121,20 +128,20 @@ def test_object_search( procver, test_user, snana_fits_maintables_loaded_module 
         for col in results.columns:
             assert jsonresults[col][dex] == getattr( row, col )
 
-    check_df_contents( results, procver.id, None )
+    check_df_contents( results, pv['pv1'], None )
 
     # Now do a search including only r-band
-    resultsr = ltcv.object_search( procver.description, return_format='pandas',
+    resultsr = ltcv.object_search( pv['pv1'].description, return_format='pandas',
                                    ra=185.45, dec=-34.95, radius=5.3*3600.,
                                    statbands='r' )
     assert len(resultsr) == 3
     assert all( r.maxdetband == 'r' for r in resultsr.itertuples() )
     assert all( r.lastdetband == 'r' for r in resultsr.itertuples() )
     assert all( r.lastforcedband == 'r' for r in resultsr.itertuples() )
-    check_df_contents( resultsr, procver.id, ['r'] )
+    check_df_contents( resultsr, pv['pv1'], ['r'] )
 
     # Now try r- and g-band
-    resultsrg = ltcv.object_search( procver.description, return_format='pandas',
+    resultsrg = ltcv.object_search( pv['pv1'].description, return_format='pandas',
                                     ra=185.45, dec=-34.95, radius=5.3*3600.,
                                     statbands=[ 'r', 'g' ] )
     assert len(resultsrg) == 3
@@ -146,29 +153,29 @@ def test_object_search( procver, test_user, snana_fits_maintables_loaded_module 
     assert all( r.maxdetband in ('r', 'g') for r in resultsrg.itertuples() )
     assert all( r.lastdetband in ('r', 'g') for r in resultsrg.itertuples() )
     assert all( r.lastforcedband in  ('r', 'g') for r in resultsrg.itertuples() )
-    check_df_contents( resultsrg, procver.id, ['r', 'g'] )
+    check_df_contents( resultsrg, pv['pv1'], ['r', 'g'] )
 
 
     # FIRST/MAX/LAST FLUX MJD TESTS
 
-    results = ltcv.object_search( procver.description, return_format='pandas',
+    results = ltcv.object_search( pv['pv1'].description, return_format='pandas',
                                   mint_firstdetection=60400, maxt_firstdetection=60700 )
     assert all( results.firstdetmjd >= 60400 )
     assert all( results.firstdetmjd <= 60700 )
     assert any( results.lastdetmjd > 60700 )
     assert all( results.lastdetmjd >= results.firstdetmjd )
-    check_df_contents( results, procver.id )
+    check_df_contents( results, pv['pv1'] )
 
-    results = ltcv.object_search( procver.description, return_format='pandas',
+    results = ltcv.object_search( pv['pv1'].description, return_format='pandas',
                                   mint_firstdetection=60400, maxt_firstdetection=60700,
                                   statbands=['g','r'] )
     assert len(results) == 64
     assert all( results.firstdetmjd >= 60400 )
     assert all( results.firstdetmjd <= 60700 )
     assert any( results.lastdetmjd > 60700 )
-    check_df_contents( results, procver.id, ['g', 'r'] )
+    check_df_contents( results, pv['pv1'], ['g', 'r'] )
 
-    results = ltcv.object_search( procver.description, return_format='pandas',
+    results = ltcv.object_search( pv['pv1'].description, return_format='pandas',
                                   mint_firstdetection=60400, maxt_firstdetection=60700,
                                   minmag_firstdetection=22, maxmag_firstdetection=24 )
     assert len(results) == 57
@@ -177,9 +184,9 @@ def test_object_search( procver, test_user, snana_fits_maintables_loaded_module 
     assert all( results.firstdetflux >= 10**( (24-31.4) / -2.5 ) )
     assert all( results.firstdetflux <= 10**( (22-31.4) / -2.5 ) )
     assert any( results.lastdetmjd > 60700 )
-    check_df_contents( results, procver.id )
+    check_df_contents( results, pv['pv1'] )
 
-    results = ltcv.object_search( procver.description, return_format='pandas',
+    results = ltcv.object_search( pv['pv1'].description, return_format='pandas',
                                   mint_firstdetection=60400, maxt_firstdetection=60700,
                                   minmag_firstdetection=22, maxmag_firstdetection=24,
                                   statbands=['g', 'r'] )
@@ -189,27 +196,27 @@ def test_object_search( procver, test_user, snana_fits_maintables_loaded_module 
     assert all( results.firstdetflux >= 10**( (24-31.4) / -2.5 ) )
     assert all( results.firstdetflux <= 10**( (22-31.4) / -2.5 ) )
     assert any( results.lastdetmjd > 60700 )
-    check_df_contents( results, procver.id, ['g', 'r'] )
+    check_df_contents( results, pv['pv1'], ['g', 'r'] )
 
 
-    results = ltcv.object_search( procver.description, return_format='pandas',
+    results = ltcv.object_search( pv['pv1'].description, return_format='pandas',
                                   mint_lastdetection=60400, maxt_lastdetection=60700 )
     assert len(results) == 90
     assert all( results.lastdetmjd >= 60400 )
     assert all( results.lastdetmjd <= 60700 )
     assert any( results.firstdetmjd < 60400 )
-    check_df_contents( results, procver.id )
+    check_df_contents( results, pv['pv1'] )
 
-    results = ltcv.object_search( procver.description, return_format='pandas',
+    results = ltcv.object_search( pv['pv1'].description, return_format='pandas',
                                   mint_lastdetection=60400, maxt_lastdetection=60700,
                                   statbands=['g', 'r'] )
     assert len(results) == 66
     assert all( results.lastdetmjd >= 60400 )
     assert all( results.lastdetmjd <= 60700 )
     assert any( results.firstdetmjd < 60400 )
-    check_df_contents( results, procver.id, ['g', 'r'] )
+    check_df_contents( results, pv['pv1'], ['g', 'r'] )
 
-    results = ltcv.object_search( procver.description, return_format='pandas',
+    results = ltcv.object_search( pv['pv1'].description, return_format='pandas',
                                   mint_lastdetection=60400, maxt_lastdetection=60700,
                                   minmag_lastdetection=22, maxmag_lastdetection=24 )
     assert len(results) == 67
@@ -218,9 +225,9 @@ def test_object_search( procver, test_user, snana_fits_maintables_loaded_module 
     assert all( results.lastdetflux >= 10**( (24-31.4) / -2.5 ) )
     assert all( results.lastdetflux <= 10**( (22-31.4) / -2.5 ) )
     assert any( results.firstdetmjd < 60400 )
-    check_df_contents( results, procver.id )
+    check_df_contents( results, pv['pv1'] )
 
-    results = ltcv.object_search( procver.description, return_format='pandas',
+    results = ltcv.object_search( pv['pv1'].description, return_format='pandas',
                                   mint_lastdetection=60400, maxt_lastdetection=60700,
                                   minmag_lastdetection=22, maxmag_lastdetection=24,
                                   statbands=['g', 'r'] )
@@ -230,19 +237,19 @@ def test_object_search( procver, test_user, snana_fits_maintables_loaded_module 
     assert all( results.lastdetflux >= 10**( (24-31.4) / -2.5 ) )
     assert all( results.lastdetflux <= 10**( (22-31.4) / -2.5 ) )
     assert any( results.firstdetmjd < 60400 )
-    check_df_contents( results, procver.id, ['g', 'r'] )
+    check_df_contents( results, pv['pv1'], ['g', 'r'] )
 
 
-    results = ltcv.object_search( procver.description, return_format='pandas',
+    results = ltcv.object_search( pv['pv1'].description, return_format='pandas',
                                   mint_maxdetection=60400, maxt_maxdetection=60700 )
     assert len(results) == 88
     assert all( results.maxdetmjd >= 60400 )
     assert all( results.maxdetmjd <= 60700 )
     assert any( results.firstdetmjd < 60400 )
     assert any( results.lastdetmjd > 60700 )
-    check_df_contents( results, procver.id )
+    check_df_contents( results, pv['pv1'] )
 
-    results = ltcv.object_search( procver.description, return_format='pandas',
+    results = ltcv.object_search( pv['pv1'].description, return_format='pandas',
                                   mint_maxdetection=60400, maxt_maxdetection=60700,
                                   statbands=['g', 'r'] )
     assert len(results) == 64
@@ -250,10 +257,10 @@ def test_object_search( procver, test_user, snana_fits_maintables_loaded_module 
     assert all( results.maxdetmjd <= 60700 )
     assert any( results.firstdetmjd < 60400 )
     # assert any( results.lastdetmjd > 60700 )   #  Just didn't happen...
-    check_df_contents( results, procver.id, ['g', 'r'] )
+    check_df_contents( results, pv['pv1'], ['g', 'r'] )
 
 
-    results = ltcv.object_search( procver.description, return_format='pandas',
+    results = ltcv.object_search( pv['pv1'].description, return_format='pandas',
                                   mint_maxdetection=60400, maxt_maxdetection=60700,
                                   minmag_maxdetection=22, maxmag_lastdetection=24 )
     assert len(results) == 57
@@ -263,9 +270,9 @@ def test_object_search( procver, test_user, snana_fits_maintables_loaded_module 
     assert any( results.lastdetmjd > 60700 )
     assert all( results.maxdetflux >= 10**( (24-31.4) / -2.5 ) )
     assert all( results.maxdetflux <= 10**( (22-31.4) / -2.5 ) )
-    check_df_contents( results, procver.id )
+    check_df_contents( results, pv['pv1'] )
 
-    results = ltcv.object_search( procver.description, return_format='pandas',
+    results = ltcv.object_search( pv['pv1'].description, return_format='pandas',
                                   mint_maxdetection=60400, maxt_maxdetection=60700,
                                   minmag_maxdetection=22, maxmag_lastdetection=24,
                                   statbands=['g', 'r'] )
@@ -276,30 +283,30 @@ def test_object_search( procver, test_user, snana_fits_maintables_loaded_module 
     # assert any( results.lastdetmjd > 60700 )   #  Just didn't happen...
     assert all( results.maxdetflux >= 10**( (24-31.4) / -2.5 ) )
     assert all( results.maxdetflux <= 10**( (22-31.4) / -2.5 ) )
-    check_df_contents( results, procver.id, ['g', 'r'] )
+    check_df_contents( results, pv['pv1'], ['g', 'r'] )
 
 
     # Number of detections
-    lotsofresults = ltcv.object_search( procver.description, return_format='pandas', min_numdetections=1 )
+    lotsofresults = ltcv.object_search( pv['pv1'].description, return_format='pandas', min_numdetections=1 )
     for n in [ 5, 10, 25, 50 ]:
-        results = ltcv.object_search( procver.description, return_format='pandas', min_numdetections=n )
+        results = ltcv.object_search( pv['pv1'].description, return_format='pandas', min_numdetections=n )
         expectedn = ( lotsofresults.numdet >= n ).sum()
         assert len(results) == expectedn
-        check_df_contents( results, procver.id )
+        check_df_contents( results, pv['pv1'] )
 
-    manyresults = ltcv.object_search( procver.description, return_format='pandas', min_numdetections=1,
+    manyresults = ltcv.object_search( pv['pv1'].description, return_format='pandas', min_numdetections=1,
                                       statbands=['g','r'] )
     assert len(manyresults) < len(lotsofresults)
     for n in [ 5, 10, 25, 50 ]:
-        results = ltcv.object_search( procver.description, return_format='pandas', min_numdetections=n,
+        results = ltcv.object_search( pv['pv1'].description, return_format='pandas', min_numdetections=n,
                                       statbands=['g', 'r'] )
         expectedn = ( manyresults.numdet >= n ).sum()
         assert len(results) == expectedn
-        check_df_contents( results, procver.id, ['g', 'r'] )
+        check_df_contents( results, pv['pv1'], ['g', 'r'] )
 
 
     # A numdetection mix just for the sake of it
-    results = ltcv.object_search( procver.description, return_format='pandas',
+    results = ltcv.object_search( pv['pv1'].description, return_format='pandas',
                                   mint_maxdetection=60400, maxt_maxdetection=60700,
                                   minmag_maxdetection=22, maxmag_lastdetection=24,
                                   min_numdetections=5 )
@@ -311,17 +318,17 @@ def test_object_search( procver, test_user, snana_fits_maintables_loaded_module 
     # assert any( results.lastdetmjd > 60700 )   # Didn't happen
     assert all( results.maxdetflux >= 10**( (24-31.4) / -2.5 ) )
     assert all( results.maxdetflux <= 10**( (22-31.4) / -2.5 ) )
-    check_df_contents( results, procver.id )
+    check_df_contents( results, pv['pv1'] )
 
 
     # Check minimum and maximum last mag
     # Start by redoing an old search
-    oldresults = ltcv.object_search( procver.description, return_format='pandas',
+    oldresults = ltcv.object_search( pv['pv1'].description, return_format='pandas',
                                      mint_maxdetection=60400, maxt_maxdetection=60700 )
     kept = oldresults[ oldresults.lastforcedflux > 0 ]
     kept = kept[ ( -2.5*np.log10( kept.lastforcedflux ) + 31.4 <= 24 ) &
                  ( -2.5*np.log10( kept.lastforcedflux ) + 31.4 >= 23 ) ]
-    results = ltcv.object_search( procver.description, return_format='pandas',
+    results = ltcv.object_search( pv['pv1'].description, return_format='pandas',
                                   mint_maxdetection=60400, maxt_maxdetection=60700,
                                   min_lastmag=23, max_lastmag=24 )
     assert len(results) == len(kept)
@@ -331,13 +338,13 @@ def test_object_search( procver, test_user, snana_fits_maintables_loaded_module 
     assert all( results.maxdetmjd <= 60700 )
     assert any( results.firstdetmjd < 60400 )
     # assert any( results.lastdetmjd > 60700 )   # Didn't happen
-    check_df_contents( results, procver.id )
+    check_df_contents( results, pv['pv1'] )
 
 
     # Test searching inside a window
     # This is what I got the first time I ran it.  TODO, poke into the
     #   database to make sure it got the right results?
-    results = ltcv.object_search( procver.description, return_format='pandas',
+    results = ltcv.object_search( pv['pv1'].description, return_format='pandas',
                                   window_t0=60500, window_t1=60600, min_window_numdetections=5 )
     assert all( results.numdetinwindow >= 5 )
     assert len(results) == 8

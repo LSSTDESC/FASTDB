@@ -70,14 +70,14 @@ RUN mkdir -p /opt/rust \
 RUN chown postgres -R /usr/share/postgresql/ \
   && chown postgres -R /usr/lib/postgresql
 
-ENV PG_PARQUET_VERSION=0.4.0
-ENV PGRX_VERSION=0.14.1
+ENV PG_PARQUET_VERSION=0.4.3
+ENV PGRX_VERSION=0.16.0
 RUN curl https://sh.rustup.rs -sSf | sh -s -- --no-modify-path --profile minimal --default-toolchain stable -y
 RUN cargo install --locked cargo-pgrx --version ${PGRX_VERSION}
 RUN cargo pgrx init --pg15 $(which pg_config)
 
-RUN mkdir -p ~/.pgrx/data-15 \
-  && echo "shared_preload_libraries = 'pg_parquet'" >> ~/.pgrx/data-15/postgresql.conf
+# RUN mkdir -p ~/.pgrx/data-15 \
+#   && echo "shared_preload_libraries = 'pg_parquet'" >> ~/.pgrx/data-15/postgresql.conf
 RUN cd /opt/rust \
   && curl -LOJ https://github.com/CrunchyData/pg_parquet/archive/refs/tags/v${PG_PARQUET_VERSION}.tar.gz \
   && tar -xvzf pg_parquet-${PG_PARQUET_VERSION}.tar.gz \

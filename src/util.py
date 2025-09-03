@@ -186,79 +186,9 @@ def get_alert_schema( schemadir=None ):
             }
 
 
-def procver_id( processing_version, dbcon=None ):
-    """Return the uuid of processing_version.
-
-    Will also search procesing version aliases if necessary.
-
-    Parameters
-    ----------
-      processing_version: str or UUID
-        If a UUID, just return it straight.  If a str that is a string
-        version of a UUID, UUIDifies it and returns it.  Otherwise,
-        queries the database for the processing version and returns the
-        UUID.
-
-      dbcon: db.DBCon or psycopg.Connection or None
-        Database connection to use.  If None, and one is needed, will
-        open a new one and close it when done.
-
-    Returns
-    -------
-      UUID
-
-    """
-
-    if isinstance( processing_version, uuid.UUID ):
-        return processing_version
-    try:
-        ipv = uuid.UUID( processing_version )
-        return ipv
-    except Exception:
-        pass
-    with db.DBCon( dbcon ) as con:
-        rows, _cols = con.execute( "SELECT id FROM processing_version WHERE description=%(pv)s",
-                                   { 'pv': processing_version } )
-        if len(rows) > 0:
-            return rows[0][0]
-        rows, _cols = con.execute( "SELECT procver_id FROM processing_version_alias WHERE description=%(pv)s",
-                                   { 'pv': processing_version } )
-        if len(rows) == 0:
-            raise ValueError( f"Unknown processing version {processing_version}" )
-        return rows[0][0]
+def procver_id( *args, **kwargs ):
+    return db.ProcessingVersion.procver_id( *args, **kwargs )
 
 
-def base_procver_id( base_processing_version, dbcon=None ):
-    """Return the uuid of base_processing_version.
-
-    Parameters
-    ----------
-      base_processing_version: str or UUID
-        If a UUID, just return it straight.  If a str that is a string
-        version of a UUID, UUIDifies it and returns it.  Otherwise,
-        queries the database for the base processing version and returns
-        the UUID.
-
-     dbcon: db.DBCon or psycopg2.connection or NOne
-       Databse connection to use.  If None, and one is needed, will
-       open a new one and close it when done.
-
-    Returns
-    -------
-      UUID
-
-    """
-
-    if isinstance( base_processing_version, uuid.UUID ):
-        return base_processing_version
-    try:
-        bpv = uuid.UUID( base_processing_version )
-        return bpv
-    except Exception:
-        pass
-    with db.DBCon( dbcon ) as con:
-        rows, _cols = con.execute( "SELECT id FROM base_procesing_version WHERE description=%(pv)s",
-                                   { 'pv': base_processing_version } )
-        if len(rows) == 0:
-            raise ValueError( f"Unknown base processing version {base_processing_version}" )
-        return rows[0][0]
+def base_procver_id( *args, **kwargs ):
+    return db.BaseProcessingVersion.base_procver_id( *args, **kwargs )

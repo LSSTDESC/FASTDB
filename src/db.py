@@ -16,6 +16,7 @@ from contextlib import contextmanager
 import numpy as np
 import psycopg
 import psycopg.rows
+import psycopg.sql
 import psycopg.types.json
 import pymongo
 
@@ -246,13 +247,25 @@ class DBCon:
         self.remake_cursor( self.curcursorisdict )  # ...is this necessary?
 
 
-    def execute_nofetch( self, q, subdict={}, silent=False):
-        """Runs a query where you don't expect to fetch results."""
-        if self.echoqueries and not silent:
-            util.logger.debug( f"Sending query\n{q}\nwith substitutions: {subdict}" )
+    def execute_nofetch( self, q, subdict={}, echo=None, explain=None ):
+        """Runs a query where you don't expect to fetch results.
 
-        if self.alwaysexplain and not silent:
-            self.cursor.execute( f"EXPLAIN {q}", subdict )
+        Parameters are the same as execute().  Returns nothing.
+
+        """
+        echo = echo if echo is not None else self.echoqueries
+        explain = explain if explain is not None else self.alwaysexplain
+        if echo:
+            if isinstance( q, psycopg.sql.Composed ):
+                util.logger.debug( f"Sending query\n{q.as_string()}" )
+            else:
+                util.logger.debug( f"Sending query\n{q}\nwith substitutions: {subdict}" )
+
+        if explain:
+            if isinstance( q, psycopg.sql.Composed ):
+                self.cursor.execute( f"EXPLAIN {q.as_string()}", subdict )
+            else:
+                self.cursor.execute( f"EXPLAIN {q}", subdict )
             rows = self.cursor.fetchall()
             dex = 'QUERY PLAN' if self.curcursorisdict else 0
             nl = '\n'
@@ -261,22 +274,35 @@ class DBCon:
         self.cursor.execute( q, subdict )
 
 
-    def execute( self, q, subdict={}, silent=False ):
+    def execute( self, q, subdict={}, silent=False, echo=None, explain=None ):
         """Runs a query, and returns either (rows, columns) or just rows.
 
         Parmaeters
         ----------
-          q : str
-            The query.  Use %(var)s in the string for a substitution.
-            The key "var" must then show up in subdict.
+          q : str or psycopg.sql.Composed
+            The query.  Use %(var)s in the string for a substitution, if
+            necessary.  The key "var" must then show up in subdict.
 
           subdict : dict
-            Substitution dictionary. For every %(var)s that shows up in q,
-            there must be a key "var" in this dictionary with the value to
-            be substituted.  Extra keys are ignored.
+            Substitution dictionary. For every %(var)s that shows up in
+            q, there must be a key "var" in this dictionary with the
+            value to be substituted.  Extra keys are ignored.  Do not
+            pass this if q is a Composed; in that case, you've already
+            built in the substitutions.
 
-          silent : bool, default False
-            If True, don't echo the query or the explain even if we normally would.
+          echo : bool, default None
+            If True, echo queries before sending them.  If False, don't.
+            If None, use the default (self.echoqueries, initialized from
+            the _echoqueries variable at the top of this module).
+
+          explain : bool, default None
+            If True, before running the query run an EXPLAIN on it and
+            send the output to debug logging.  If False, don't.  If
+            None, use the default (self.alwaysexplain, initialized from
+            the _alwaysexplain variable at the top of this module).
+
+            WARNING: use of this makes you susceptible to SQL injection
+            attacks.  Do not get bobby tablesed!
 
         Returns
         -------
@@ -287,12 +313,14 @@ class DBCon:
           dictionary.  The second is a list of column names.
 
         """
-        self.execute_nofetch( q, subdict, silent=silent )
+        self.execute_nofetch( q, subdict, echo=echo, explain=explain )
         if self.curcursorisdict:
             return self.cursor.fetchall()
         else:
-            cols = [ desc[0] for desc in self.cursor.description ]
+            if self.cursor.description is None:
+                return None, None
             rows = self.cursor.fetchall()
+            cols = [ desc[0] for desc in self.cursor.description ]
             return rows, cols
 
 
@@ -1126,6 +1154,42 @@ class BaseProcessingVersion( DBBase ):
     _tablemeta = None
     _pk = [ 'id' ]
 
+    @classmethod
+    def base_procver_id( cls, base_processing_version, dbcon=None ):
+        """Return the uuid of base_processing_version.
+
+        Parameters
+        ----------
+          base_processing_version: str or UUID
+            If a UUID, just return it straight.  If a str that is a string
+            version of a UUID, UUIDifies it and returns it.  Otherwise,
+            queries the database for the base processing version and returns
+            the UUID.
+
+         dbcon: db.DBCon or psycopg2.connection or NOne
+           Databse connection to use.  If None, and one is needed, will
+           open a new one and close it when done.
+
+        Returns
+        -------
+          UUID
+
+        """
+
+        if isinstance( base_processing_version, uuid.UUID ):
+            return base_processing_version
+        try:
+            bpv = uuid.UUID( base_processing_version )
+            return bpv
+        except Exception:
+            pass
+        with DBCon( dbcon ) as con:
+            rows, _cols = con.execute( "SELECT id FROM base_processing_version WHERE description=%(pv)s",
+                                       { 'pv': base_processing_version } )
+            if len(rows) == 0:
+                raise ValueError( f"Unknown base processing version {base_processing_version}" )
+            return rows[0][0]
+
 
 # ======================================================================
 
@@ -1133,6 +1197,85 @@ class ProcessingVersion( DBBase ):
     __tablename__ = "processing_version"
     _tablemeta = None
     _pk = [ 'id' ]
+
+    @classmethod
+    def procver_id( cls, processing_version, dbcon=None ):
+        """Return the uuid of processing_version.
+
+        Will also search procesing version aliases if necessary.
+
+        Parameters
+        ----------
+          processing_version: str or UUID
+            If a UUID, just return it straight.  If a str that is a string
+            version of a UUID, UUIDifies it and returns it.  Otherwise,
+            queries the database for the processing version and returns the
+            UUID.
+
+          dbcon: db.DBCon or psycopg.Connection or None
+            Database connection to use.  If None, and one is needed, will
+            open a new one and close it when done.
+
+        Returns
+        -------
+          UUID
+
+        """
+
+        if isinstance( processing_version, uuid.UUID ):
+            return processing_version
+        try:
+            ipv = uuid.UUID( processing_version )
+            return ipv
+        except Exception:
+            pass
+        with DBCon( dbcon ) as con:
+            rows, _cols = con.execute( "SELECT id FROM processing_version WHERE description=%(pv)s",
+                                       { 'pv': processing_version } )
+            if len(rows) > 0:
+                return rows[0][0]
+            rows, _cols = con.execute( "SELECT procver_id FROM processing_version_alias WHERE description=%(pv)s",
+                                       { 'pv': processing_version } )
+            if len(rows) == 0:
+                raise ValueError( f"Unknown processing version {processing_version}" )
+            return rows[0][0]
+
+
+    def highest_prio_base_procver( self, dbcon=None ):
+        """Returns the highest priority base_processing_version associated with this processing version.
+
+        Be careful with this.  If you don't fully understand the
+        processing version scheme (and, Rob, if you haven't thought
+        about it recently, that probably includes you), you can use this
+        wrong.  Because there are multiple base processing versions for
+        one processing version, using this to search for things is
+        almost certainly the wrong thing to do; it undercuts the whole
+        "fall back to other versions" nature of processing_version.
+        This method may be useful for figuring out the base processing
+        version to insert something under.
+
+        Parameters
+        ----------
+          dbcon : DBCon or psycopg.Connection, default None
+            Database connection to use.  If not given, will open a new
+            one and close it when done.
+
+        Returns
+        -------
+          BaseProcessingVersion
+
+        """
+        with DBCon( dbcon, dictcursor=True ) as con:
+            bpv = con.execute( "SELECT b.* FROM base_processing_version b\n"
+                               "INNER JOIN base_procver_of_procver j ON j.base_procver_id=b.id\n"
+                               "WHERE j.procver_id=%(pv)s\n"
+                               "ORDER BY j.priority DESC\n"
+                               "LIMIT 1",
+                               { 'pv': self.id } )
+            if len(bpv) == 0:
+                raise ValueError( f"Can't find base processing version for processing version {self.description}" )
+            bpv = bpv[0]
+            return BaseProcessingVersion( **bpv, noconvert=False )
 
 
 # ======================================================================

@@ -473,8 +473,9 @@ def object_search( processing_version='default', object_processing_version=None,
     statbands = None
     if 'statbands' in kwargs:
         if util.isSequence( kwargs['statbands'] ):
-            if not all( isinstance(b, str) for b in statbands ):
+            if not all( isinstance(b, str) for b in kwargs['statbands'] ):
                 return TypeError( 'statbands must be a str or a list of str' )
+            statbands = kwargs['statbands']
         elif isinstance( kwargs['statbands'], str ):
             statbands = [ kwargs['statbands'] ]
         else:
@@ -635,19 +636,19 @@ def object_search( processing_version='default', object_processing_version=None,
                    f"      AND pv.procver_id=%(pv)s\n" )
             _and = "WHERE"
             if ( mint_firstdetection is not None ) or ( mint_lastdetection is not None ):
-                q += f"    {_and} midpointmjdtai>=%(mint)s\n"
+                q += f"    {_and} src.midpointmjdtai>=%(mint)s\n"
                 subdict['mint'] = ( mint_firstdetection if mint_lastdetection is None
                                     else mint_lastdetection if mint_firstdetection is None
                                     else min( mint_firstdetection, mint_lastdetection ) )
                 _and = "  AND"
             if ( maxt_firstdetection is not None ) or ( maxt_lastdetection is not None ):
-                q += f"    {_and} midpointmjdtai<=%(maxt)s\n"
+                q += f"    {_and} src.midpointmjdtai<=%(maxt)s\n"
                 subdict['maxt'] = ( maxt_firstdetection if maxt_lastdetection is None
                                     else maxt_lastdetection if maxt_firstdetection is None
                                     else max( maxt_firstdetection, maxt_lastdetection ) )
                 _and = "  AND"
             if statbands is not None:
-                q += f"   {_and} s.band=ANY(%(bands)s)\n"
+                q += f"   {_and} src.band=ANY(%(bands)s)\n"
                 subdict['bands'] = statbands
             q += ( "    ORDER BY src.diaobjectid,src.visit, pv.priority DESC\n"
                    "  ) s ON o.diaobjectid=s.diaobjectid\n"
@@ -746,10 +747,10 @@ def object_search( processing_version='default', object_processing_version=None,
               f"      AND pv.procver_id=%(pv)s\n" )
         _and = "WHERE"
         if statbands is not None:
-            q += f"       {_and} src.band=ANY(%(bands)s)\n"
+            q += f"    {_and} src.band=ANY(%(bands)s)\n"
             _and = "  AND"
         if mjd_now is not None:
-            q += f"       {_and} src.midpointmjdtai<=%(mjdnow)s\n"
+            q += f"    {_and} src.midpointmjdtai<=%(mjdnow)s\n"
             _and = "  AND"
         q += ( "    ORDER BY src.diaobjectid, src.visit, pv.priority DESC\n"
                "  ) s ON o.diaobjectid=s.diaobjectid\n"
