@@ -83,7 +83,7 @@ class ParquetFileHandler:
         self.pipe = pipe
 
         # Copy settings from parent
-        for attr in [ 'really_do', 'verbose', 'ppdb', 'processing_version' ]:
+        for attr in [ 'really_do', 'verbose', 'ppdb', 'processing_version', 'base_processing_version' ]:
             setattr( self, attr, getattr( parent ,attr ) )
 
         self.logger = logging.getLogger( f"logger {os.getpid()}" )
@@ -135,9 +135,9 @@ class ParquetFileHandler:
             DP1ColumnMapper.diaforcedsource_map_columns( forceddf )
 
             if not self.ppdb:
-                df['processing_version'] = self.processing_version
-                sourcedf['processing_version'] = self.processing_version
-                forceddf['processing_version'] = self.processing_version
+                df['base_procver_id'] = self.base_processing_version
+                sourcedf['base_procver_id'] = self.base_processing_version
+                forceddf['base_procver_id'] = self.base_processing_version
 
             # Not sure where the index came from.  There was lots of
             #   redundancy.  This may be something nested_pandas did?
@@ -328,7 +328,7 @@ def main():
 
 Trolls the given directory for all files named "Npix=<number>.parqet".  Loads
 diaobject, diasource, diaforcedsource, or, if --ppdb is given, ppdb_diaobject,
-ppdb_diasource, and ppdb_diaforcedsource.  May add a processing_version row.
+ppdb_diasource, and ppdb_diaforcedsource.  May add a row to base_processing_version.
 
 Does *not* load root_diaobject!
 """
@@ -337,8 +337,8 @@ Does *not* load root_diaobject!
     parser.add_argument( '-n', '--nprocs', default=5, type=int,
                          help=( "Number of worker processes to load; make sure that the number of CPUs "
                                 "available is at least this many plus one." ) )
-    parser.add_argument( '--processing-version', '--pv', default=None,
-                         help="String value of the processing version to set for all objects" )
+    parser.add_argument( '--base-processing-version', '--bpv', default=None,
+                         help="String value of the base processing version to set for all objects" )
     parser.add_argument( '--dont-disable-indexes-fks', action='store_true', default=False,
                          help="Don't temporarily disable indexes and foreign keys (by default will)" )
     parser.add_argument( '--ppdb', action='store_true', default=False,
@@ -354,15 +354,15 @@ Does *not* load root_diaobject!
         logger.setLevel( logging.DEBUG )
 
     if args.ppdb:
-        if args.processing_version is not None:
-            logger.warning( "processing_version is ignored when loading the ppdb" )
+        if args.base_processing_version is not None:
+            logger.warning( "base_processing_version is ignored when loading the ppdb" )
 
     loader = DP1ParquetLoader( args.nprocs,
                                args.dir,
                                really_do=args.do,
                                verbose=args.verbose,
                                dont_disable_indexes_fks=args.dont_disable_indexes_fks,
-                               processing_version=args.processing_version )
+                               processing_version=args.base_processing_version )
     loader()
 
 
