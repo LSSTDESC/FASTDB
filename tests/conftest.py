@@ -1,7 +1,6 @@
 import os
 import pytest
 import pathlib
-import datetime
 import subprocess
 import uuid
 
@@ -30,54 +29,54 @@ from fastdb.fastdb_client import FASTDBClient
 pytest_plugins = [ 'fixtures.alertcycle' ]
 
 
-@pytest.fixture( scope='session' )
-def procver():
-    pv = ProcessingVersion( id=1, description='test_procesing_version',
-                            validity_start=datetime.datetime( 2025, 2, 14, 0, 0, 0 ),
-                            validity_end=datetime.datetime( 2999, 2, 14, 0, 0, 0 )
-                           )
-    pv.insert()
+# @pytest.fixture( scope='session' )
+# def procver():
+#     pv = ProcessingVersion( id=1, description='test_procesing_version',
+#                             validity_start=datetime.datetime( 2025, 2, 14, 0, 0, 0 ),
+#                             validity_end=datetime.datetime( 2999, 2, 14, 0, 0, 0 )
+#                            )
+#     pv.insert()
 
-    yield pv
-    with DB() as con:
-        cursor = con.cursor()
-        cursor.execute( "DELETE FROM processing_version WHERE id=%(id)s",
-                        { 'id': pv.id } )
-        con.commit()
-
-
-@pytest.fixture
-def procver1():
-    pv = ProcessingVersion( id=42,
-                            description='pv42',
-                            validity_start=datetime.datetime( 2025, 2, 14, 1, 2, 3 ),
-                            validity_end=datetime.datetime( 2030, 2, 14, 1, 2, 3 )
-                           )
-    pv.insert()
-
-    yield pv
-    with DB() as con:
-        cursor = con.cursor()
-        cursor.execute( "DELETE FROM processing_version WHERE id=%(id)s",
-                        { 'id': pv.id } )
-        con.commit()
+#     yield pv
+#     with DB() as con:
+#         cursor = con.cursor()
+#         cursor.execute( "DELETE FROM processing_version WHERE id=%(id)s",
+#                         { 'id': pv.id } )
+#         con.commit()
 
 
-@pytest.fixture
-def procver2():
-    pv = ProcessingVersion( id=23,
-                            description='pv23',
-                            validity_start=datetime.datetime( 2015, 10, 21, 12, 15, 0 ),
-                            validity_end=datetime.datetime( 2045, 10, 21, 12, 15, 0 )
-                           )
-    pv.insert()
+# @pytest.fixture
+# def procver1():
+#     pv = ProcessingVersion( id=42,
+#                             description='pv42',
+#                             validity_start=datetime.datetime( 2025, 2, 14, 1, 2, 3 ),
+#                             validity_end=datetime.datetime( 2030, 2, 14, 1, 2, 3 )
+#                            )
+#     pv.insert()
 
-    yield pv
-    with DB() as con:
-        cursor = con.cursor()
-        cursor.execute( "DELETE FROM processing_version WHERE id=%(id)s",
-                        { 'id': pv.id } )
-        con.commit()
+#     yield pv
+#     with DB() as con:
+#         cursor = con.cursor()
+#         cursor.execute( "DELETE FROM processing_version WHERE id=%(id)s",
+#                         { 'id': pv.id } )
+#         con.commit()
+
+
+# @pytest.fixture
+# def procver2():
+#     pv = ProcessingVersion( id=23,
+#                             description='pv23',
+#                             validity_start=datetime.datetime( 2015, 10, 21, 12, 15, 0 ),
+#                             validity_end=datetime.datetime( 2045, 10, 21, 12, 15, 0 )
+#                            )
+#     pv.insert()
+
+#     yield pv
+#     with DB() as con:
+#         cursor = con.cursor()
+#         cursor.execute( "DELETE FROM processing_version WHERE id=%(id)s",
+#                         { 'id': pv.id } )
+#         con.commit()
 
 
 @pytest.fixture( scope='module' )
@@ -426,9 +425,10 @@ def rootobj3():
 
 
 @pytest.fixture
-def obj1( procver1, rootobj1 ):
+def obj1( procver_collection, rootobj1 ):
+    bpvs, _pvs = procver_collection
     obj = DiaObject( diaobjectid=42,
-                     processing_version=procver1.id,
+                     base_procver_id=bpvs['bpv1'].id,
                      radecmjdtai=60000.,
                      ra=42.,
                      dec=13,
@@ -439,14 +439,15 @@ def obj1( procver1, rootobj1 ):
     yield obj
     with DB() as con:
         cursor = con.cursor()
-        subdict = { 'rootid': rootobj1.id, 'id': obj.diaobjectid, 'pv': procver1.id }
-        cursor.execute( "DELETE FROM diaobject WHERE diaobjectid=%(id)s AND processing_version=%(pv)s", subdict )
+        subdict = { 'rootid': rootobj1.id, 'id': obj.diaobjectid, 'pv': obj.base_procver_id }
+        cursor.execute( "DELETE FROM diaobject WHERE diaobjectid=%(id)s AND base_procver_id=%(pv)s", subdict )
         con.commit()
 
 
 @pytest.fixture
-def src1( obj1, procver1 ):
-    src = DiaSource( processing_version=procver1.id,
+def src1( obj1, procver_collection ):
+    bpvs, _pvs = procver_collection
+    src = DiaSource( base_procver_id=bpvs['bpv1'].id,
                      diaobjectid=obj1.diaobjectid,
                      visit=64,
                      detector=9,
@@ -462,15 +463,16 @@ def src1( obj1, procver1 ):
     yield src
     with DB() as con:
         cursor = con.cursor()
-        cursor.execute( "DELETE FROM diasource WHERE processing_version=%(pv)s "
+        cursor.execute( "DELETE FROM diasource WHERE base_procver_id=%(pv)s "
                         "                        AND diaobjectid=%(objid)s AND visit=%(visit)s",
-                        { 'pv': src.processing_version, 'objid': src.diaobjectid, 'visit': src.visit } )
+                        { 'pv': src.base_procver_id, 'objid': src.diaobjectid, 'visit': src.visit } )
         con.commit()
 
 
 @pytest.fixture
-def src1_pv2( obj1, procver2 ):
-    src = DiaSource( processing_version=procver2.id,
+def src1_pv2( obj1, procver_collection ):
+    bpvs, _pvs = procver_collection
+    src = DiaSource( base_procver_id=bpvs['bpv2'].id,
                      diaobjectid=obj1.diaobjectid,
                      visit=64,
                      detector=9,
@@ -486,15 +488,16 @@ def src1_pv2( obj1, procver2 ):
     yield src
     with DB() as con:
         cursor = con.cursor()
-        cursor.execute( "DELETE FROM diasource WHERE processing_version=%(pv)s "
+        cursor.execute( "DELETE FROM diasource WHERE base_procver_id=%(pv)s "
                         "                        AND diaobjectid=%(objid)s AND visit=%(visit)s",
-                        { 'pv': src.processing_version, 'objid': src.diaobjectid, 'visit': src.visit } )
+                        { 'pv': src.base_procver_id, 'objid': src.diaobjectid, 'visit': src.visit } )
         con.commit()
 
 
 @pytest.fixture
-def forced1( obj1, procver1 ):
-    src = DiaForcedSource( processing_version=procver1.id,
+def forced1( obj1, procver_collection ):
+    bpvs, _pvs = procver_collection
+    src = DiaForcedSource( base_procver_id=bpvs['bpv1'].id,
                            diaobjectid=obj1.diaobjectid,
                            visit=128.,
                            detector=10.,
@@ -514,15 +517,16 @@ def forced1( obj1, procver1 ):
     yield src
     with DB() as con:
         cursor = con.cursor()
-        cursor.execute( "DELETE FROM diaforcedsource WHERE processing_version=%(pv)s "
+        cursor.execute( "DELETE FROM diaforcedsource WHERE base_procver_id=%(pv)s "
                         "                              AND objectid=%(id)s AND visit=%(visit)s",
                         { 'pv': src.processing_version, 'objid': src.diaobjectid, 'visit': src.visit } )
         con.commit()
 
 
 @pytest.fixture
-def forced1_pv2( obj1, procver2 ):
-    src = DiaForcedSource( processing_version=procver2.id,
+def forced1_pv2( obj1, procver_collection ):
+    bpvs, _pvs = procver_collection
+    src = DiaForcedSource( base_processing_version=bpvs['bpv2'].id,
                            diaobjectid=obj1.diaobjectid,
                            visit=128.,
                            detector=10.,
@@ -542,7 +546,7 @@ def forced1_pv2( obj1, procver2 ):
     yield src
     with DB() as con:
         cursor = con.cursor()
-        cursor.execute( "DELETE FROM diaforcedsource WHERE processing_version=%(pv)s "
+        cursor.execute( "DELETE FROM diaforcedsource WHERE base_procver_id=%(pv)s "
                         "                              AND objectid=%(objid)s AND visit=%(visit)s",
                         { 'pv': src.processing_version, 'objid': src.diaobjectid, 'visit': src.visit } )
         con.commit()
@@ -621,7 +625,7 @@ def snana_fits_ppdb_loaded():
 # WARNING -- do not use this fixture together with other fixtures
 #   that affect the diaobject, root_diaboject, diasource, or diaforcedsource tables!!!!
 @pytest.fixture( scope='module' )
-def snana_fits_maintables_loaded_module( procver ):
+def snana_fits_maintables_loaded_module( procver_collection ):
     e2td = pathlib.Path( "elasticc2_test_data" )
     assert e2td.is_dir()
     dirs = e2td.glob( "*" )
@@ -632,7 +636,7 @@ def snana_fits_maintables_loaded_module( procver ):
         com = [ "python", "/code/src/admin/load_snana_fits.py",
                 "-n", "5",
                 "-v",
-                "--pv", procver.description,
+                "--pv", procver_collection[1]['pv1'].description,
                 "-d",
                ]
         com.extend( dirs )

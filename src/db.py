@@ -1093,9 +1093,9 @@ class DBBase:
             if nocommit:
                 return q
             else:
-                dbcon.execute_nofetch( q )
-                ninserted = dbcon.cursor.rowcount
-                dbcon.execute_nofetch( "DROP TABLE temp_bulk_upsert" )
+                con.execute_nofetch( q )
+                ninserted = con.cursor.rowcount
+                con.execute_nofetch( "DROP TABLE temp_bulk_upsert" )
                 con.commit()
                 return ninserted
 

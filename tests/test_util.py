@@ -1,5 +1,7 @@
 import util
 
+# OMG LOTS OF TESTS STILL NEED TO BE WRITTEN
+
 
 def test_parse_sexigesimal():
     assert util.parse_sexigesimal( "00:00:00" ) == 0.

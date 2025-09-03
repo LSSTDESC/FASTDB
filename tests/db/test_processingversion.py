@@ -1,3 +1,4 @@
+import uuid
 import datetime
 import pytest
 
@@ -6,28 +7,29 @@ from db import ProcessingVersion
 from basetest import BaseTestDB
 
 
-class TestPasswordLink( BaseTestDB ):
+class TestProcessingVersion( BaseTestDB ):
 
     @pytest.fixture
     def basetest_setup( self ):
         self.cls = ProcessingVersion
-        self.columns = { 'id', 'description', 'validity_start', 'validity_end' }
-        self.safe_to_modify = [ 'validity_start', 'validity_end' ]
+        self.columns = { 'id', 'description', 'notes', 'created_at' }
+        self.safe_to_modify = [ 'notes', 'created_at' ]
         self.uniques = [ 'description' ]
         t0 = datetime.datetime.now( tz=datetime.UTC )
-        self.obj1 = ProcessingVersion( id=1,
+        self.obj1 = ProcessingVersion( id=uuid.uuid4(),
                                        description='testprocver_pv1',
-                                       validity_start=t0,
-                                       validity_end=t0 + datetime.timedelta( hours=1 )
+                                       notes='testprocver_pv1 notes',
+                                       created_at=t0
                                       )
         self.dict1 = { k: getattr( self.obj1, k ) for k in self.columns }
-        self.obj2 = ProcessingVersion( id=2,
+        self.obj2 = ProcessingVersion( id=uuid.uuid4(),
                                        description='testprocver_pv2',
-                                       validity_start=t0 + datetime.timedelta( minutes=1 ),
-                                       validity_end=t0 + datetime.timedelta( days=1 )
+                                       notes='testprocver_pv2 notes',
+                                       created_at=t0 + datetime.timedelta( minutes=1 )
                                       )
         self.dict2 = { k: getattr( self.obj2, k ) for k in self.columns }
-        self.dict3 = { 'id': 3,
+        self.dict3 = { 'id': uuid.uuid4(),
                        'description': 'testprocver_pv3',
-                       'validity_start': t0 + datetime.timedelta( hours=2 ),
-                       'validity_end': t0 + datetime.timedelta( weeks=1 ) }
+                       'notes': 'testprocver_pv3 notes',
+                       'created_at': t0 + datetime.timedelta( hours=2 )
+                      }

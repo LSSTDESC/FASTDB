@@ -182,7 +182,7 @@ def alerts_60moredays_sent_and_brokermessage_consumed( barf, alerts_60moredays_s
 #   want a loaded database, whereas all of the others are for
 #   actually testing the load process.)
 @pytest.fixture( scope='module' )
-def alerts_90days_sent_received_and_imported( procver ):
+def alerts_90days_sent_received_and_imported( procver_collection ):
     try:
         args = [ 'pg_restore', '-h', 'postgres', '-U', 'postgres', '-d', 'fastdb', '-a',
                  'elasticc2_test_data/alerts_90days_sent_received_and_imported.pgdump' ]
@@ -226,16 +226,18 @@ def alerts_90days_sent_received_and_imported( procver ):
 #
 # You will then also need to rebuild the elasticc2_test_data.tar.bz2 file!
 # @pytest.fixture( scope='module' )
-# def alerts_90days_sent_received_and_imported( barf, procver, alerts_60moredays_sent_and_brokermessage_consumed ):
+# def alerts_90days_sent_received_and_imported( barf, procver_collection,
+#                                               alerts_60moredays_sent_and_brokermessage_consumed ):
+#     bpv, _pv = procver_collection
 #     from services.source_importer import SourceImporter
 #     from services.dr_importer import DRImporter
 #     collection_name = f'fastdb_{barf}'
 #     try:
-#         si = SourceImporter( procver.id )
+#         si = SourceImporter( bpv['realtime'].id )
 #         with db.MG() as mongoclient:
 #             collection = db.get_mongo_collection( mongoclient, collection_name )
 #             nobj, nroot, nsrc, nfrc = si.import_from_mongo( collection )
-#         dri = DRImporter( procver.id )
+#         dri = DRImporter( bpv['realtime'].id )
 #         dri.import_host_info()
 #         yield nobj, nroot, nsrc, nfrc
 #     finally:

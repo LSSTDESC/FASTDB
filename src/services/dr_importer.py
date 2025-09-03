@@ -1,4 +1,5 @@
 import db
+import util
 
 
 class DRImporter:
@@ -20,16 +21,16 @@ class DRImporter:
                          'pzquant060', 'pzquant070', 'pzquant080', 'pzquant090', 'pzquant100',
                          'flags' ]
 
-    def __init__( self, processing_version ):
+    def __init__( self, base_processing_version ):
         """Make
 
         Parameters
         ----------
-          processing_version : int
-            The processing version of the objects and hosts to look at.
+          processing_version : uuid or str
+            The base processing version of the objects and hosts to look at.
 
         """
-        self.processing_version = int( processing_version )
+        self.base_processing_version = util.base_procver_id( base_processing_version )
 
 
     # This is all written to the SNANA PPDB simulation tables.
@@ -47,18 +48,18 @@ class DRImporter:
                     q = "INSERT INTO temp_missing_hosts "
                 q += ( f"( SELECT o.nearbyextobj{i} FROM diaobject o "
                        f"  LEFT JOIN host_galaxy h ON ( o.nearbyextobj{i}=h.objectid AND "
-                       f"                               o.processing_version=h.processing_version ) "
-                       f"  WHERE o.processing_version=%(procver)s "
+                       f"                               o.base_procver_id=h.base_procver_id ) "
+                       f"  WHERE o.base_procver_id=%(procver)s "
                        f"    AND h.objectid IS NULL "
                        f"    AND o.nearbyextobj{i} IS NOT NULL )" )
-                cursor.execute( q, { 'procver': self.processing_version } )
+                cursor.execute( q, { 'procver': self.base_processing_version } )
 
             # Port over the missing objects from the ppdb_host_galaxy table to the host_galaxy table
             # This is what would need to get replaced by a query of othe actual ppdb
-            q = ( f"INSERT INTO host_galaxy({','.join(self.host_galaxy_cols)},processing_version) "
+            q = ( f"INSERT INTO host_galaxy({','.join(self.host_galaxy_cols)},base_procver_id) "
                   f"( SELECT {','.join(self.host_galaxy_cols)},%(procver)s FROM ppdb_host_galaxy "
                   f"  WHERE objectid IN (SELECT * FROM temp_missing_hosts) )" )
-            cursor.execute( q, { 'procver': self.processing_version } )
+            cursor.execute( q, { 'procver': self.base_processing_version } )
             nhosts = cursor.rowcount
 
             # Update the objects table to have the host uuids
@@ -67,10 +68,10 @@ class DRImporter:
             for i in range( 1, 4 ):
                 q = ( f"UPDATE diaobject o SET nearbyextobj{i}id="
                       f"( SELECT id FROM host_galaxy h WHERE ( h.objectid=o.nearbyextobj{i} AND "
-                      f"                                       h.processing_version=o.processing_version ) ) "
+                      f"                                       h.base_procver_id=o.base_procver_id ) ) "
                       f"WHERE o.nearbyextobj{i} IN ( SELECT * FROM temp_missing_hosts ) "
-                      f"  AND o.processing_version=%(procver)s" )
-                cursor.execute( q, { 'procver': self.processing_version } )
+                      f"  AND o.base_procver_id=%(procver)s" )
+                cursor.execute( q, { 'procver': self.base_processing_version } )
 
             conn.commit()
 

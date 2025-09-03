@@ -9,10 +9,11 @@ from basetest import BaseTestDB
 class TestDiaForcedSource( BaseTestDB ):
 
     @pytest.fixture
-    def basetest_setup( self, procver1, obj1 ):
+    def basetest_setup( self, procver_collection, obj1 ):
+        bpv, _pv = procver_collection
         self.cls = DiaForcedSource
         self.columns = {
-            'processing_version',
+            'base_procver_id',
             'diaobjectid',
             'visit',
             'detector',
@@ -43,7 +44,7 @@ class TestDiaForcedSource( BaseTestDB ):
         self.uniques = []
 
         t0 = datetime.datetime.now( tz=datetime.UTC )
-        self.obj1 = DiaForcedSource( processing_version=procver1.id,
+        self.obj1 = DiaForcedSource( base_procver_id=bpv['bpv1'].id,
                                      diaobjectid=obj1.diaobjectid,
                                      visit=1,
                                      detector=1,
@@ -59,7 +60,7 @@ class TestDiaForcedSource( BaseTestDB ):
                                      time_withdrawn=None
                                     )
         self.dict1 = { k: getattr( self.obj1, k ) for k in self.columns }
-        self.obj2 = DiaForcedSource( processing_version=procver1.id,
+        self.obj2 = DiaForcedSource( base_procver_id=bpv['bpv1'].id,
                                      diaobjectid=obj1.diaobjectid,
                                      visit=2,
                                      detector=2,
@@ -75,7 +76,7 @@ class TestDiaForcedSource( BaseTestDB ):
                                      time_withdrawn=t0 + datetime.timedelta( days=365 )
                                     )
         self.dict2 = { k: getattr( self.obj2, k ) for k in self.columns }
-        self.dict3 = { 'processing_version': procver1.id,
+        self.dict3 = { 'base_procver_id': bpv['bpv1'].id,
                        'diaobjectid': obj1.diaobjectid,
                        'visit': 3,
                        'detector': 3,

@@ -8,10 +8,10 @@ from basetest import BaseTestDB
 class TestDiaSource( BaseTestDB ):
 
     @pytest.fixture
-    def basetest_setup( self, procver1, obj1 ):
+    def basetest_setup( self, obj1 ):
         self.cls = DiaSource
         self.columns = {
-            'processing_version',
+            'base_procver_id',
             'diaobjectid',
             'visit',
             'ssobjectid',
@@ -112,7 +112,7 @@ class TestDiaSource( BaseTestDB ):
         ]
         self.uniques = []
 
-        self.obj1 = DiaSource( processing_version=procver1.id,
+        self.obj1 = DiaSource( base_procver_id=obj1.base_procver_id,
                                diaobjectid=obj1.diaobjectid,
                                visit=1,
                                detector=1,
@@ -124,7 +124,7 @@ class TestDiaSource( BaseTestDB ):
                                psffluxerr=5.6,
                               )
         self.dict1 = { k: getattr( self.obj1, k ) for k in self.columns }
-        self.obj2 = DiaSource( processing_version=procver1.id,
+        self.obj2 = DiaSource( base_procver_id=obj1.base_procver_id,
                                diaobjectid=obj1.diaobjectid,
                                visit=2,
                                detector=2,
@@ -136,7 +136,7 @@ class TestDiaSource( BaseTestDB ):
                                psffluxerr=8.0
                               )
         self.dict2 = { k: getattr( self.obj2, k ) for k in self.columns }
-        self.dict3 = { 'processing_version': procver1.id,
+        self.dict3 = { 'base_procver_id': obj1.base_procver_id,
                        'diaobjectid': obj1.diaobjectid,
                        'visit': 3,
                        'detector': 3,

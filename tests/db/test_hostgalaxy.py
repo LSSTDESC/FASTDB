@@ -9,11 +9,12 @@ from basetest import BaseTestDB
 class TestHostGalaxy( BaseTestDB ):
 
     @pytest.fixture
-    def basetest_setup( self, procver1 ):
+    def basetest_setup( self, procver_collection ):
+        bpv, _pv = procver_collection
         self.cls = HostGalaxy
         self.columns = {
             'id',
-            'processing_version',
+            'base_procver_id',
             'objectid',
             'ra',
             'dec',
@@ -84,21 +85,21 @@ class TestHostGalaxy( BaseTestDB ):
         self.uniques = []
 
         self.obj1 = HostGalaxy( id=uuid.uuid4(),
-                                processing_version=procver1.id,
+                                base_procver_id=bpv['bpv1'].id,
                                 objectid=42,
                                 ra=13.,
                                 dec=-66.
                                )
         self.dict1 = { k: getattr( self.obj1, k ) for k in self.columns }
         self.obj2 = HostGalaxy( id=uuid.uuid4(),
-                                processing_version=procver1.id,
+                                base_procver_id=bpv['bpv1'].id,
                                 objectid=23,
                                 ra=137.,
                                 dec=42.,
                                )
         self.dict2 = { k: getattr( self.obj2, k ) for k in self.columns }
         self.dict3 = { 'id': uuid.uuid4(),
-                       'processing_version': procver1.id,
+                       'base_procver_id': bpv['bpv1'].id,
                        'objectid': 31337,
                        'ra': 32.,
                        'dec': 64.

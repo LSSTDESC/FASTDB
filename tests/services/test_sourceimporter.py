@@ -17,12 +17,13 @@ from services.dr_importer import DRImporter
 # Fixtures that are used in multiple tests
 
 @pytest.fixture
-def import_first30days_objects( barf, alerts_30days_sent_and_brokermessage_consumed, procver ):
+def import_first30days_objects( barf, alerts_30days_sent_and_brokermessage_consumed, procver_collection ):
+    bpv, _pv = procver_collection
     collection_name = f'fastdb_{barf}'
     t1 = alerts_30days_sent_and_brokermessage_consumed
 
     try:
-        si = SourceImporter( procver.id )
+        si = SourceImporter( bpv['realtime'].id )
         with db.MG() as mongoclient:
             collection = db.get_mongo_collection( mongoclient, collection_name )
             nobj, nroot = si.import_objects_from_collection( collection, t1=t1 )
@@ -38,9 +39,10 @@ def import_first30days_objects( barf, alerts_30days_sent_and_brokermessage_consu
 
 
 @pytest.fixture
-def import_first30days_hosts( import_first30days_objects, procver ):
+def import_first30days_hosts( import_first30days_objects, procver_collection ):
+    bpv, _pv = procver_collection
     try:
-        dri = DRImporter( procver.id )
+        dri = DRImporter( bpv['realtime'].id )
         yield dri.import_host_info()
     finally:
         with db.DB() as conn:
@@ -50,13 +52,14 @@ def import_first30days_hosts( import_first30days_objects, procver ):
 
 
 @pytest.fixture
-def import_first30days_sources( barf, import_first30days_objects, procver,
+def import_first30days_sources( barf, import_first30days_objects, procver_collection,
                                 alerts_30days_sent_and_brokermessage_consumed ):
+    bpv, _pv = procver_collection
     collection_name = f'fastdb_{barf}'
     t1 = alerts_30days_sent_and_brokermessage_consumed
 
     try:
-        si = SourceImporter( procver.id )
+        si = SourceImporter( bpv['realtime'].id )
         with db.MG() as mongoclient:
             collection = db.get_mongo_collection( mongoclient, collection_name )
             n = si.import_sources_from_collection( collection, t1=t1 )
@@ -70,13 +73,14 @@ def import_first30days_sources( barf, import_first30days_objects, procver,
 
 
 @pytest.fixture
-def import_30days_prvsources( barf, import_first30days_sources, procver,
+def import_30days_prvsources( barf, import_first30days_sources, procver_collection,
                               alerts_30days_sent_and_brokermessage_consumed ):
+    bpv, _pv = procver_collection
     collection_name = f'fastdb_{barf}'
     t1 = alerts_30days_sent_and_brokermessage_consumed
 
     try:
-        si = SourceImporter( procver.id )
+        si = SourceImporter( bpv['realtime'].id )
         with db.MG() as mongoclient:
             collection = db.get_mongo_collection( mongoclient, collection_name )
             n = si.import_prvsources_from_collection( collection, t1=t1 )
@@ -88,13 +92,14 @@ def import_30days_prvsources( barf, import_first30days_sources, procver,
 
 
 @pytest.fixture
-def import_30days_prvforcedsources( barf, import_first30days_sources, procver,
+def import_30days_prvforcedsources( barf, import_first30days_sources, procver_collection,
                               alerts_30days_sent_and_brokermessage_consumed ):
+    bpv, _pv = procver_collection
     collection_name = f'fastdb_{barf}'
     t1 = alerts_30days_sent_and_brokermessage_consumed
 
     try:
-        si = SourceImporter( procver.id )
+        si = SourceImporter( bpv['realtime'].id )
         with db.MG() as mongoclient:
             collection = db.get_mongo_collection( mongoclient, collection_name )
             n = si.import_prvforcedsources_from_collection( collection, t1=t1 )
@@ -110,16 +115,17 @@ def import_30days_prvforcedsources( barf, import_first30days_sources, procver,
 # Import days 30-90 without importing days 0-30
 # This uses the timestamps returned by some of the other fixtures
 @pytest.fixture
-def import_next60days_noprv( barf, procver,
+def import_next60days_noprv( barf, procver_collection,
                              alerts_30days_sent_and_brokermessage_consumed,
                              alerts_60moredays_sent_and_brokermessage_consumed
                             ):
+    bpv, _pv = procver_collection
     collection_name = f'fastdb_{barf}'
     t0 = alerts_30days_sent_and_brokermessage_consumed
     t1 = alerts_60moredays_sent_and_brokermessage_consumed
 
     try:
-        si = SourceImporter( procver.id )
+        si = SourceImporter( bpv['realtime'].id )
         with db.MG() as mongoclient:
             collection = db.get_mongo_collection( mongoclient, collection_name )
             nobj, nroot = si.import_objects_from_collection( collection, t0=t0, t1=t1 )
@@ -137,9 +143,10 @@ def import_next60days_noprv( barf, procver,
 
 
 @pytest.fixture
-def import_next60days_hosts( import_next60days_noprv, procver ):
+def import_next60days_hosts( import_next60days_noprv, procver_collection ):
+    bpv, _pv = procver_collection
     try:
-        dri = DRImporter( procver.id )
+        dri = DRImporter( bpv['realtime'].id )
         yield dri.import_host_info()
     finally:
         with db.DB() as conn:
@@ -149,16 +156,16 @@ def import_next60days_hosts( import_next60days_noprv, procver ):
 
 
 @pytest.fixture
-def import_next60days_prv( barf, procver, import_next60days_noprv,
+def import_next60days_prv( barf, procver_collection, import_next60days_noprv,
                            alerts_30days_sent_and_brokermessage_consumed,
                            alerts_60moredays_sent_and_brokermessage_consumed ):
-
+    bpv, _pv = procver_collection
     collection_name = f'fastdb_{barf}'
     t0 = alerts_30days_sent_and_brokermessage_consumed
     t1 = alerts_60moredays_sent_and_brokermessage_consumed
 
     try:
-        si = SourceImporter( procver.id )
+        si = SourceImporter( bpv['realtime'].id )
         with db.MG() as mongoclient:
             collection = db.get_mongo_collection( mongoclient, collection_name )
             nsrc = si.import_prvsources_from_collection( collection, t0=t0, t1=t1 )
@@ -172,22 +179,23 @@ def import_next60days_prv( barf, procver, import_next60days_noprv,
 
 # Import days 30-90 after importing days 0-30
 @pytest.fixture
-def import_30days_60days( barf, procver, import_30days_prvsources, import_30days_prvforcedsources,
+def import_30days_60days( barf, procver_collection, import_30days_prvsources, import_30days_prvforcedsources,
                            alerts_30days_sent_and_brokermessage_consumed,
                            alerts_60moredays_sent_and_brokermessage_consumed ):
+    bpv, _pv = procver_collection
     collection_name = f'fastdb_{barf}'
     t0 = alerts_30days_sent_and_brokermessage_consumed
     t1 = alerts_60moredays_sent_and_brokermessage_consumed
 
     try:
-        si = SourceImporter( procver.id )
+        si = SourceImporter( bpv['realtime'].id )
         with db.MG() as mongoclient:
             collection = db.get_mongo_collection( mongoclient, collection_name )
             nobj, nroot = si.import_objects_from_collection( collection, t0=t0, t1=t1 )
             nsrc = si.import_sources_from_collection( collection, t0=t0, t1=t1 )
             nprvsrc = si.import_prvsources_from_collection( collection, t0=t0, t1=t1 )
             nprvfrc = si.import_prvforcedsources_from_collection( collection, t0=t0, t1=t1 )
-        dri = DRImporter( procver.id )
+        dri = DRImporter( bpv['realtime'].id )
         nhosts = dri.import_host_info()
 
         yield nobj, nroot, nsrc, nprvsrc, nprvfrc, nhosts
@@ -202,10 +210,11 @@ def import_30days_60days( barf, procver, import_30days_prvsources, import_30days
 # **********************************************************************
 # Tests on importation of the first 30 days
 
-def test_read_mongo_objects( barf, alerts_30days_sent_and_brokermessage_consumed, procver ):
+def test_read_mongo_objects( barf, alerts_30days_sent_and_brokermessage_consumed, procver_collection ):
+    bpv, _pv = procver_collection
     collection_name = f'fastdb_{barf}'
 
-    si = SourceImporter( procver.id )
+    si = SourceImporter( bpv['realtime'].id )
     with db.MG() as mongoclient:
         collection = db.get_mongo_collection( mongoclient, collection_name )
 
@@ -251,13 +260,14 @@ def test_read_mongo_objects( barf, alerts_30days_sent_and_brokermessage_consumed
     # TODO : look at other fields?
 
 
-def test_read_mongo_sources( barf, alerts_30days_sent_and_brokermessage_consumed, procver ):
+def test_read_mongo_sources( barf, alerts_30days_sent_and_brokermessage_consumed, procver_collection ):
+    bpv, _pv = procver_collection
     collection_name = f'fastdb_{barf}'
 
     # Not going to test time cuts here because it's the same code path that
     #   was already tested intest_read_mongo_objects
 
-    si = SourceImporter( procver.id )
+    si = SourceImporter( bpv['realtime'].id )
     with db.MG() as mongoclient:
         collection = db.get_mongo_collection( mongoclient, collection_name )
         with db.DB() as pqconn:
@@ -271,10 +281,11 @@ def test_read_mongo_sources( barf, alerts_30days_sent_and_brokermessage_consumed
     # TODO : more stringent tests
 
 
-def test_read_mongo_previous_sources( barf, alerts_30days_sent_and_brokermessage_consumed, procver ):
+def test_read_mongo_previous_sources( barf, alerts_30days_sent_and_brokermessage_consumed, procver_collection ):
+    bpv, _pv = procver_collection
     collection_name = f'fastdb_{barf}'
 
-    si = SourceImporter( procver.id )
+    si = SourceImporter( bpv['realtime'].id )
     with db.MG() as mongoclient:
         collection = db.get_mongo_collection( mongoclient, collection_name )
         with db.DB() as pqconn:
@@ -305,10 +316,11 @@ def test_read_mongo_previous_sources( barf, alerts_30days_sent_and_brokermessage
     # TODO: check more fields
 
 
-def test_read_mongo_previous_forced_sources( barf, alerts_30days_sent_and_brokermessage_consumed, procver ):
+def test_read_mongo_previous_forced_sources( barf, alerts_30days_sent_and_brokermessage_consumed, procver_collection ):
+    bpv, _pv = procver_collection
     collection_name = f'fastdb_{barf}'
 
-    si = SourceImporter( procver.id )
+    si = SourceImporter( bpv['realtime'].id )
     with db.MG() as mongoclient:
         collection = db.get_mongo_collection( mongoclient, collection_name )
         with db.DB() as pqconn:
@@ -435,14 +447,15 @@ class TestImport:
 
     # Run SourceImporter.import_from_mongo after the first 30 days of alerts are out
     @pytest.fixture( scope='class' )
-    def run_import_30days( self, barf, procver, alerts_30days_sent_and_brokermessage_consumed ):
+    def run_import_30days( self, barf, procver_collection, alerts_30days_sent_and_brokermessage_consumed ):
+        bpv, _pv = procver_collection
         collection_name = f'fastdb_{barf}'
         tsent = alerts_30days_sent_and_brokermessage_consumed
 
         try:
             with db.MG() as mongoclient:
                 collection = db.get_mongo_collection( mongoclient, collection_name )
-                si = SourceImporter( procver.id )
+                si = SourceImporter( bpv['realtime'].id )
                 nobj, nroot, nsrc, nfrc = si.import_from_mongo( collection )
 
             yield nobj, nroot, nsrc, nfrc, tsent, datetime.datetime.now( tz=datetime.UTC )
@@ -485,9 +498,10 @@ class TestImport:
     #   timestamps come out right; the first 30 days sould be imported before
     #   this test begins and also before the next 60 days of alerts were sent
     #   out.  The next 60 days should be imported after both of those.
-    def test_run_import_30days_60days( self, barf, procver, run_import_30days,
+    def test_run_import_30days_60days( self, barf, procver_collection, run_import_30days,
                                        alerts_60moredays_sent_and_brokermessage_consumed
                                       ):
+        bpv, _pv = procver_collection
         nobj30, nroot30, nsrc30, nfrc30, t30send, t30 = run_import_30days
         t60send = alerts_60moredays_sent_and_brokermessage_consumed
         collection_name = f'fastdb_{barf}'
@@ -508,7 +522,7 @@ class TestImport:
 
             with db.MG() as mongoclient:
                 collection = db.get_mongo_collection( mongoclient, collection_name )
-                si = SourceImporter( procver.id )
+                si = SourceImporter( bpv['realtime'].id )
                 nobj, nroot, nsrc, nfrc = si.import_from_mongo( collection )
             t1 = datetime.datetime.now( tz=datetime.UTC )
 
