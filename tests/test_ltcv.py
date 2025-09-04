@@ -76,8 +76,6 @@ def test_object_ltcv( procver_collection, set_of_lightcurves ):
     for js, pd in zip( [ j_sources, j_forced, j_df ], [ sources, forced, df ] ):
         assert isinstance( js, dict )
         for col in pd.columns:
-            if col == 'ispatch':
-                continue
             assert ( pd[col] == np.array( js[col] ) ).all()
 
     # Make sure we can pass a string processing version
@@ -91,6 +89,114 @@ def test_object_ltcv( procver_collection, set_of_lightcurves ):
                            which='patch', include_base_procver=True, mjd_now=60040 )
     assert ( df.mjd <= 60040 ).all()
     assert len( df ) == 13
+
+
+def test_many_object_ltcvs( procver_collection, set_of_lightcurves ):
+    roots = set_of_lightcurves
+    _bpvs, pvs = procver_collection
+
+    # First, reproduce the tests from test_object_ltcv.  We'll ask for two lightcurves,
+    #   but only one is going to be present.
+
+    sources = ltcv.many_object_ltcvs( pvs['pv1'].id, [ roots[i]['root'].id for i in [0,1] ],
+                                      return_format='pandas', which='detections', include_base_procver=True )
+    forced = ltcv.many_object_ltcvs( pvs['pv1'].id, [ roots[i]['root'].id for i in [0,1] ],
+                                     return_format='pandas', which='forced', include_base_procver=True )
+    df = ltcv.many_object_ltcvs( pvs['pv1'].id, [ roots[i]['root'].id for i in [0,1] ],
+                                 return_format='pandas', which='patch', include_base_procver=True )
+
+    assert sources.index.get_level_values( 'diaobjectid' ).unique().values == np.array( [100] )
+    assert forced.index.get_level_values( 'diaobjectid' ).unique().values == np.array( [100] )
+    assert df.index.get_level_values( 'diaobjectid' ).unique().values == np.array( [100] )
+
+    sources.reset_index( inplace=True )
+    sources.drop( 'diaobjectid', axis='columns', inplace=True )
+    forced.reset_index( inplace=True )
+    forced.drop( 'diaobjectid', axis='columns', inplace=True )
+    df.reset_index( inplace=True )
+    df.drop( 'diaobjectid', axis='columns', inplace=True )
+
+    # These checks are (sorta) copied from test_object_ltcv
+    assert len(sources) == 13
+    assert len(forced) == 15
+    assert len(df) == 17
+
+    assert np.all( ( sources.mjd >= 60000 ) & ( sources.mjd <= 60030 ) )
+    assert np.all( sources[ sources.mjd <= 60015 ].base_procver == 'pvc_bpv1a' )
+    assert np.all( sources[ sources.mjd > 60015 ].base_procver == 'pvc_bpv1' )
+    assert np.all( sources.isdet )
+    assert np.all( forced[ forced.mjd <= 60010 ].base_procver == 'pvc_bpv1a' )
+    assert np.all( forced[ forced.mjd > 60010 ].base_procver == 'pvc_bpv1' )
+    assert np.all( forced[ ( forced.mjd >= 60000 ) & ( forced.mjd <= 60030 ) ].isdet )
+    assert np.all( ~forced[ ( forced.mjd < 60000 ) | ( forced.mjd > 60030 ) ].isdet )
+    assert np.all( df[ df.mjd <= 60010 ].base_procver == 'pvc_bpv1a' )
+    assert np.all( df[ df.mjd > 60010 ].base_procver == 'pvc_bpv1' )
+    assert np.all( df[ df.mjd > 60025 ].ispatch )
+    assert np.all( ~df[ df.mjd <= 60025 ].ispatch )
+    assert np.all( df[ ( df.mjd >= 60000 ) & ( df.mjd <= 60030 ) ].isdet )
+    assert np.all( ~df[ ( df.mjd < 60000 ) | ( df.mjd > 60030 ) ].isdet )
+
+    # Now ask for two lightcurves where we expect to get two lightcurves
+    sources = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['root'].id for i in [0,2] ],
+                                      return_format='pandas', which='detections', include_base_procver=True )
+    forced = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['root'].id for i in [0,2] ],
+                                     return_format='pandas', which='forced', include_base_procver=True )
+    df = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['root'].id for i in [0,2] ],
+                                 return_format='pandas', which='patch', include_base_procver=True )
+    # We know we're going to be sorted by diaobjectid
+    assert ( sources.index.get_level_values( 'diaobjectid' ).unique().values == np.array( [200, 202] ) ).all()
+    assert ( forced.index.get_level_values( 'diaobjectid' ).unique().values == np.array( [200, 202] ) ).all()
+    assert ( df.index.get_level_values( 'diaobjectid' ).unique().values == np.array( [200, 202] ) ).all()
+    assert len( sources ) == 30
+    assert len( sources.xs( 200, level='diaobjectid' ) ) == 13
+    assert len( sources.xs( 202, level='diaobjectid' ) ) == 17
+    assert len( forced ) == 54
+    assert len( forced.xs( 200, level='diaobjectid' ) ) == 25
+    assert len( forced.xs( 202, level='diaobjectid' ) ) == 29
+    assert len( df ) == 54
+    assert len( df.xs( 200, level='diaobjectid' ) ) == 25
+    assert len( df.xs( 202, level='diaobjectid' ) ) == 29
+
+    # Make sure the dict returns are consistent
+    sourcesjs = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['root'].id for i in [0,2] ],
+                                        return_format='json', which='detections', include_base_procver=True )
+    forcedjs = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['root'].id for i in [0,2] ],
+                                       return_format='json', which='forced', include_base_procver=True )
+    dfjs = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['root'].id for i in [0,2] ],
+                                   return_format='json', which='patch', include_base_procver=True )
+    assert list( sourcesjs.keys() ) == [ 200, 202 ]
+    assert list( forcedjs.keys() ) == [ 200, 202 ]
+    assert list( dfjs.keys() ) == [ 200, 202 ]
+    for js, pd in zip( [ sourcesjs, forcedjs, dfjs ], [ sources, forced, df ] ):
+        for objid in [ 200, 202 ]:
+            subpd = pd.xs( objid, level='diaobjectid' ).reset_index().drop( 'rootid', axis='columns' )
+            subjs = js[ objid ]
+            for col in subpd.columns:
+                assert ( subpd[col] == np.array( subjs[col] ) ).all()
+
+    # TODO : make sure that the lightcurves are actually right!
+
+    # make sure that if we ask using the right diaobjectid, we get the same things back
+    sources2 = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['objs'][1]['obj'].diaobjectid for i in [0,2] ],
+                                       return_format='pandas', which='detections', include_base_procver=True )
+    forced2 = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['objs'][1]['obj'].diaobjectid for i in [0,2] ],
+                                      return_format='pandas', which='forced', include_base_procver=True )
+    df2 = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['objs'][1]['obj'].diaobjectid for i in [0,2] ],
+                                  return_format='pandas', which='patch', include_base_procver=True )
+    assert ( sources == sources2 ).all().all()
+    assert ( forced == forced2 ).all().all()
+    assert ( df == df2 ).all().all()
+
+    # But we get nothing back if we ask for the wrong diaobjectid
+    sources2 = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['objs'][0]['obj'].diaobjectid for i in [0,2] ],
+                                       return_format='pandas', which='detections', include_base_procver=True )
+    forced2 = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['objs'][0]['obj'].diaobjectid for i in [0,2] ],
+                                      return_format='pandas', which='forced', include_base_procver=True )
+    df2 = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['objs'][0]['obj'].diaobjectid for i in [0,2] ],
+                                  return_format='pandas', which='patch', include_base_procver=True )
+    assert len(sources2) == 0
+    assert len(forced2) == 0
+    assert len(df2) == 0
 
 
 # There is another test of ltcv_object_search that uses loaded SNANA data
