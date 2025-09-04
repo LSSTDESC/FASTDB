@@ -1,6 +1,30 @@
 import pytest
 import numpy as np
+
+import db
 import ltcv
+
+
+def test_get_object_infos( set_of_lightcurves ):
+    roots = set_of_lightcurves
+
+    info = ltcv.get_object_infos( [ 200, 201, 202 ], return_format='pandas' )
+    assert info.index.name == 'diaobjectid'
+    assert set(info.columns.values) == set( [ i for i in db.DiaObject().tablemeta.keys() if i != 'diaobjectid' ] )
+    assert len(info) == 3
+    assert list( info.index.values ) == [ 200, 201, 202 ]
+    assert info.rootid.values.tolist() == [ roots[i]['root'].id for i in [0, 1, 2] ]
+
+    jsinfo = ltcv.get_object_infos( [ 200, 201, 202 ], return_format='json' )
+    info.reset_index( inplace=True )
+    for col in info.columns:
+        assert ( info.loc[ :, col ].values == np.array( jsinfo[col] ) ).all()
+
+    with pytest.raises( ValueError, match='Passing root ids requires a processing_version' ):
+        info = ltcv.get_object_infos( [ roots[i]['root'].id for i in [0, 1, 2] ] )
+
+    info = ltcv.get_object_infos( [ roots[i]['root'].id for i in [0, 1, 2] ], processing_version='pvc_pv2' )
+    assert info['diaobjectid'] == [ 200, 201, 202 ]
 
 
 def test_object_ltcv( procver_collection, set_of_lightcurves ):

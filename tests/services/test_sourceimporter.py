@@ -12,6 +12,9 @@ from services.dr_importer import DRImporter
 # Ordering of these tests matters, because they use module scope fixtures.
 # See the comment before class TestImport
 
+# NOTE : there is currently no test that checks when object_processing_version
+#   and processing_version are different
+
 
 # **********************************************************************
 # Fixtures that are used in multiple tests

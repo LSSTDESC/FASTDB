@@ -12,6 +12,81 @@ import db
 import util
 
 
+def get_object_infos( objids, processing_version=None, return_format='json', dbcon=None ):
+    """Get information from the diaobject table.
+
+    Parameters
+    ----------
+      objids : list of int or uuid
+        Either the diaobejctid or rootid values for the objects to get.
+
+      processing_version : str, uuid, or None
+        If objids is a list of rootids, then this is required.  If
+        objids is a list of int, then this is ignored.
+
+      return_format : str, default 'json'
+        Either 'pandas' or 'json'
+
+      dbcon : db.DBCon or psycopg.Connection, default None
+        If given, use this database connection.  If not given,
+        then open a connection, closing it when done.
+
+    Returns
+    -------
+      rval: pandas.DataFrame or dict
+        If return_format is 'pandas', the dataframe is indexed by diaobjectid and has
+        all columns from the diaobject table.
+
+        If return_format is 'json', then the return is a dictionary whose keys are
+        the columns of diaobject, and whose values are lists all of the same length.
+
+    """
+    if not util.isSequence( objids ):
+        objids = [ objids ]
+    if all( isinstance( o, numbers.Integral ) for o in objids ):
+        obj_is_root = False
+    else:
+        try:
+            objids = [ util.asUUID(o) for o in objids ]
+        except ValueError:
+            raise ValueError( "objids must be a list of integers or a list of uuids" )
+        obj_is_root = True
+        if processing_version is None:
+            raise ValueError( "Passing root ids requires a processing_version" )
+        pv = db.ProcessingVersion.procver_id( processing_version )
+    if len(objids) == 0:
+        raise ValueError( "no objids requested" )
+
+    if return_format not in ( 'pandas', 'json' ):
+        raise ValueError( f"return_format must be pandas or json, not {return_format}" )
+
+    with db.DBCon( dbcon ) as dbcon:
+        if obj_is_root:
+            q = sql.SQL(
+                """
+                SELECT DISTINCT ON(o.diaobjectid) o.*
+                FROM diaobject o
+                INNER JOIN base_procver_of_procver pv ON o.base_procver_id=pv.base_procver_id
+                                                     AND pv.procver_id={pv}
+                WHERE o.rootid=ANY(%(objids)s)
+                ORDER BY o.diaobjectid, pv.priority DESC
+                """
+            ).format( pv=pv )
+        else:
+            q = sql.SQL( "SELECT * FROM diaobject WHERE diaobjectid=ANY(%(objids)s)" )
+
+        rows, cols = dbcon.execute( q, { 'objids': objids } )
+
+        if return_format == 'pandas':
+            return pandas.DataFrame( rows, columns=cols ).set_index( 'diaobjectid' )
+
+        elif return_format == 'json':
+            return { c: [ r[i] for r in rows ] for i, c in enumerate( cols ) }
+
+        else:
+            raise RuntimeError( "This should never happen" )
+
+
 def many_object_ltcvs( processing_version='default', objids=None,
                        bands=None, which='patch', include_base_procver=False,
                        return_format='json', mjd_now=None, dbcon=None ):
@@ -267,7 +342,7 @@ def many_object_ltcvs( processing_version='default', objids=None,
         raise RuntimeError( "This should never happen." )
 
 
-def object_ltcv( processing_version='default', diaobjectid=None, object_processing_version=None,
+def object_ltcv( processing_version='default', diaobjectid=None,
                  bands=None, which='patch', include_base_procver=False, return_format='json',
                  mjd_now=None, dbcon=None ):
     """Get the lightcurve for an object.
@@ -275,17 +350,13 @@ def object_ltcv( processing_version='default', diaobjectid=None, object_processi
     Parameters
     ----------
        processing_version : UUID or str, default 'default'
-          The processing verson (or alias) to search
+          The processing verson (or alias) to search photometry.
 
        diaobjectid : int or UUID; required
-          The object id -- will be either a diaobjectid or a root_diaobjectid based on the type passed.
-
-       object_processing_version : UUID or str, default None
-           Ignored if diaobejct id is an integer.  If diaobjectid is a
-           UUID, uses this to figure out which diaobjectid to associate
-           with the given root_diabojectid.  In this case, if
-           object_processing_version is not given, uses
-           processing_version.
+          The object id -- will be either a diaobjectid or a
+          root_diaobjectid based on the type passed.  If an int,
+          it's a diaobjectid, and it needs to be consistent with
+          what's in processing_verson or you'll get nothing back.
 
        bands : list of str or None
           If not None, only include the bands in this list.
@@ -337,9 +408,6 @@ def object_ltcv( processing_version='default', diaobjectid=None, object_processi
                          this field is only present if which='patch'.)
 
     """
-
-    if object_processing_version is not None:
-        raise NotImplementedError( "Don't use object_processing_version" )
 
     rval = many_object_ltcvs( processing_version=processing_version, objids=[ diaobjectid ],
                               bands=bands, which=which, include_base_procver=include_base_procver,

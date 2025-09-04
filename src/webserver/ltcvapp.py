@@ -1,5 +1,6 @@
 import numbers
 
+from psycopg import sql
 import flask
 
 import db
@@ -15,10 +16,10 @@ class GetManyLtcvs( BaseView ):
     def get_ltcvs( self, procver, objids, dbcon=None ):
         """Return lightcurves of objects as json.
 
-        Reads parameters 'bands' and 'which' from flask.request.json.
-        'bands' is a list of bands to include in the lightcurve.
-        'which' is one of 'detections', 'forced', or 'patch'.  See
-        ltcv.object_ltcv
+        Reads parameters 'bands', 'which', and 'mjd_now' from
+        flask.request.json.  'bands' is a list of bands to include in
+        the lightcurve.  'which' is one of 'detections', 'forced', or
+        'patch'.  See ltcv.object_ltcv
 
         Parameters
         ----------
@@ -35,9 +36,7 @@ class GetManyLtcvs( BaseView ):
         Returns
         -------
           result: dict
-            keys include 'status' (which is 'ok'), 'objinfo' (which is a
-            list of dicts), and 'ltcvdata' (which is a list of ROB
-            DOCUMENT).
+            Same dict as is returned from ltcv.many_object_ltcvs()
 
         """
 
@@ -56,9 +55,10 @@ class GetManyLtcvs( BaseView ):
 
         bands = None
         which = 'patch'
+        mjd_now = None
         if flask.request.is_json:
             data = flask.request.json
-            unknown = set( data.keys() ) - { 'bands', 'which' }
+            unknown = set( data.keys() ) - { 'bands', 'which', 'mjd_now' }
             if len(unknown) > 0:
                 raise ValueError( f"Unknown data parameters: {unknown}" )
             if 'bands' in data:
@@ -67,59 +67,35 @@ class GetManyLtcvs( BaseView ):
                 if data['which'] not in ( 'detections', 'forced', 'patch' ):
                     raise ValueError( f"Unknown value of which: {which}" )
                 which = data['which']
+            if 'mjd_now' in data:
+                mjd_now = float( data['mjd_now'] )
 
-        # TODO : implement multiple lightcurves in ltcv.py and fix this code to use it
-        if len( objids ) > 1:
-            raise NotImplementedError( "Multiple lightcurves not yet supported" )
+        return ltcv.many_object_ltcvs( procver, objids, bands=bands, which=which,
+                                       return_format='json', mjd_now=mjd_now, dbcon=dbcon )
 
-        with db.DBCon( dbcon ) as dbcon:
-            mess = ltcv.object_ltcv( processing_version=procver, diaobjectid=FOO )
+    def do_the_things( self, procver='default' ):
+        if ( not flask.is_json ) or ( 'objids' not in flask.request.json ):
+            raise ValueError( f"Must pass POST data as a json dict with at least objids as a key" )
+        return self.get_ltcvs( procver, flask.request.json['objids'] )
+    
 
 
 # ======================================================================
 # /ltcv/getltcv
+#
+# Returns a dict with keys mjd, band, flux, fluxerr, isdet, and maybe ispatch
 
-class GetLtcv( BaseView ):
-    def get_ltcv( self, procver, procverid, objid, dbcon=None ):
-        bands = None
-        which = 'patch'
-        if flask.request.is_json:
-            data = flask.request.json
-            unknown = set( data.keys() ) - { 'bands', 'which' }
-            if len(unknown) > 0:
-                raise ValueError( f"Unknown data parameters: {unknown}" )
-            if 'bands' in data:
-                bands = data['bands']
-            if 'which' in data:
-                if data['which'] not in ( 'detections', 'forced', 'patch' ):
-                    raise ValueError( f"Unknown value of which: {which}" )
-                which = data['which']
+class GetLtcv( GetManyLtcvs ):
+    def do_the_things( self, procver, objid=None ):
+        if objid is None:
+            objid = procver
+            procver = 'default'
 
-        with db.DB( dbcon ) as dbcon:
-            cursor = dbcon.cursor()
-            # Converting bigints to strings because Javscript will read from JSON as if they're doubles
-            # TODO : return nearby object info?
-            q = ( "SELECT diaobjectid::text,processing_version,radecmjdtai,"
-                  "ra,dec,raerr,decerr,ra_dec_cov FROM diaobject "
-                  "WHERE diaobjectid=%(id)s AND processing_version=%(pv)s " )
-            cursor.execute( q, { 'id': objid, 'pv': procverint } )
-            columns = [ d[0] for d in cursor.description ]
-            row = cursor.fetchone()
-            if row is None:
-                raise ValueError( f"Unknown object {objid} in processing version {procver}" )
-            objinfo = { columns[i]: row[i] for i in range(len(columns)) }
-            # Convert procesing version to something usable for user display
-            objinfo['processing_version'] = f"{procver} ({objinfo['processing_version']})"
-
-            ltcvdata = ltcv.object_ltcv( procverint, objid, return_format='json',
-                                         bands=bands, which=which, dbcon=dbcon )
-            retval= { 'status': 'ok', 'objinfo': objinfo, 'ltcv': ltcvdata }
-            return retval
-
-    def do_the_things( self, procver, objid ):
-        with db.DB() as dbcon:
-            pv = db.ProcessingVersion.procver_id( procver )
-            return self.get_ltcv( procver, pv, objid, dbcon=dbcon )
+        mess = self.get_ltcvs( procver, [ objid ] )
+        key0 = list( mess.keys() )[0]
+        rval = mess[ key0 ]
+        del rval['rootid']
+        return rval
 
 
 # ======================================================================
@@ -127,9 +103,31 @@ class GetLtcv( BaseView ):
 
 class GetRandomLtcv( GetLtcv ):
     def do_the_things( self, procver ):
-        with db.DB() as dbcon:
-            pv = ltcv.procver_int( procver )
-            cursor = dbcon.cursor()
+        with db.DBCon() as dbcon:
+            pv = db.ProcessingVersion.procver_id( procver, dbcon=dbcon  )
+
+            q = sql.SQL(
+                """
+                SELECT diaobjectid
+                FROM (
+                  SELECT DISTINCT ON (o.diaobjectid) o.diaobjectid
+                  FROM diaobject o
+                  INNER JOIN base_procver_of_procver pv ON o.base_procver_id=pv.base_procver_id
+                                                       AND pv.procver_id={procver}
+                  ORDER BY o.diaobjectid, pv.priority DESC
+                ) subq
+                ORDER BY random() LIMIT 1
+                """
+            ).format( procver=pv )
+            rows, _cols = dbcon.execute( q )
+
+            mess = self.get_ltcvs( pv, [ rows[0][0] ], dbcon=dbcon )
+            key0 = list( mess.keys() )[0]
+            rval = mess[ key0 ]
+            del rval['rootid']
+            
+            
+            
             # THINK ; this may be slow, as it may sort the entire object table!  Or at least the index.
             # TABLESAMPLE may be a solution, but it doesn't interact with WHERE
             #   the way I'd want it to.  (Empirically, doesn't seem too bad with a 4M object table.)
