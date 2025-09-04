@@ -1,15 +1,86 @@
+import numbers
+
 import flask
 
 import db
 import ltcv
+import util
 from webserver.baseview import BaseView
+
+
+# ======================================================================
+#
+
+class GetManyLtcvs( BaseView ):
+    def get_ltcvs( self, procver, objids, dbcon=None ):
+        """Return lightcurves of objects as json.
+
+        Reads parameters 'bands' and 'which' from flask.request.json.
+        'bands' is a list of bands to include in the lightcurve.
+        'which' is one of 'detections', 'forced', or 'patch'.  See
+        ltcv.object_ltcv
+
+        Parameters
+        ----------
+          procver : uuid or str
+            The processing version to pull lightcurves from.
+
+          objids : int, uuid, list of int, or list of uuid
+            The object IDs to pull lightcurves for.
+
+          dbcon : db.DBCon or psycopg.Connection, default None
+            Database connection.  If None, opens a new one and closes it
+            when done.
+
+        Returns
+        -------
+          result: dict
+            keys include 'status' (which is 'ok'), 'objinfo' (which is a
+            list of dicts), and 'ltcvdata' (which is a list of ROB
+            DOCUMENT).
+
+        """
+
+        if not util.isSequence( objids ):
+            objids = [ objids ]
+        if all( isinstance( o, numbers.Integral ) for o in objids ):
+            objids_are_root = False
+        else:
+            objids_are_root = True
+            try:
+                objids = [ util.asUUID( o ) for o in objids ]
+            except ValueError:
+                raise ValueError( "objids must be a list of integers or a list of uuids" )
+        if len( objids ) == 0:
+            raise ValueError( "no objids requested" )
+
+        bands = None
+        which = 'patch'
+        if flask.request.is_json:
+            data = flask.request.json
+            unknown = set( data.keys() ) - { 'bands', 'which' }
+            if len(unknown) > 0:
+                raise ValueError( f"Unknown data parameters: {unknown}" )
+            if 'bands' in data:
+                bands = data['bands']
+            if 'which' in data:
+                if data['which'] not in ( 'detections', 'forced', 'patch' ):
+                    raise ValueError( f"Unknown value of which: {which}" )
+                which = data['which']
+
+        # TODO : implement multiple lightcurves in ltcv.py and fix this code to use it
+        if len( objids ) > 1:
+            raise NotImplementedError( "Multiple lightcurves not yet supported" )
+
+        with db.DBCon( dbcon ) as dbcon:
+            mess = ltcv.object_ltcv( processing_version=procver, diaobjectid=FOO )
 
 
 # ======================================================================
 # /ltcv/getltcv
 
 class GetLtcv( BaseView ):
-    def get_ltcv( self, procver, procverint, objid, dbcon=None ):
+    def get_ltcv( self, procver, procverid, objid, dbcon=None ):
         bands = None
         which = 'patch'
         if flask.request.is_json:
@@ -47,8 +118,7 @@ class GetLtcv( BaseView ):
 
     def do_the_things( self, procver, objid ):
         with db.DB() as dbcon:
-            objid = int( objid )
-            pv = ltcv.procver_int( procver )
+            pv = db.ProcessingVersion.procver_id( procver )
             return self.get_ltcv( procver, pv, objid, dbcon=dbcon )
 
 

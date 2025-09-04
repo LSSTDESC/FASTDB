@@ -57,7 +57,7 @@ def test_object_ltcv( procver_collection, set_of_lightcurves ):
                                which='forced', include_base_procver=True )
     df = ltcv.object_ltcv( pvs['pv2'].id, roots[1]['root'].id, return_format='pandas',
                            which='patch', include_base_procver=True )
-    assert ( df == forced ).all().all()
+    assert ( df.loc[ :, [ c for c in df.columns if c!='ispatch'] ] == forced ).all().all()
     assert ( ~df.ispatch ).all()
     assert len( df[ df.isdet ] ) == len( sources )
     assert df[ df.isdet ].isdet.all()
@@ -76,6 +76,8 @@ def test_object_ltcv( procver_collection, set_of_lightcurves ):
     for js, pd in zip( [ j_sources, j_forced, j_df ], [ sources, forced, df ] ):
         assert isinstance( js, dict )
         for col in pd.columns:
+            if col == 'ispatch':
+                continue
             assert ( pd[col] == np.array( js[col] ) ).all()
 
     # Make sure we can pass a string processing version
