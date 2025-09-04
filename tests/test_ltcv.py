@@ -156,6 +156,8 @@ def test_many_object_ltcvs( procver_collection, set_of_lightcurves ):
     assert len( df ) == 54
     assert len( df.xs( 200, level='diaobjectid' ) ) == 25
     assert len( df.xs( 202, level='diaobjectid' ) ) == 29
+    tmp = df.drop( 'ispatch', axis='columns' )
+    assert ( tmp == forced ).all().all()
 
     # Make sure the dict returns are consistent
     sourcesjs = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['root'].id for i in [0,2] ],
@@ -197,6 +199,25 @@ def test_many_object_ltcvs( procver_collection, set_of_lightcurves ):
     assert len(sources2) == 0
     assert len(forced2) == 0
     assert len(df2) == 0
+
+    # Make sure bands works
+    sources = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['root'].id for i in [0,2] ],
+                                      return_format='pandas', which='detections', include_base_procver=True,
+                                      bands='r' )
+    forced = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['root'].id for i in [0,2] ],
+                                     return_format='pandas', which='forced', include_base_procver=True,
+                                     bands=[ 'r' ] )
+    df = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['root'].id for i in [0,2] ],
+                                 return_format='pandas', which='patch', include_base_procver=True,
+                                 bands='r' )
+    assert len(sources) == 14
+    assert len(forced) == 26
+    assert len(df) == 26
+    assert ( sources.band == 'r' ).all()
+    assert ( forced.band == 'r' ).all()
+    assert ( df.band == 'r' ).all()
+    tmp = df.drop( 'ispatch', axis='columns' )
+    assert ( tmp == forced ).all().all()
 
 
 # There is another test of ltcv_object_search that uses loaded SNANA data

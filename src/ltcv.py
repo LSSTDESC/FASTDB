@@ -165,7 +165,7 @@ def many_object_ltcvs( processing_version='default', objids=None,
                 ORDER BY o.diaobjectid, s.mjd
                 """
             ).format( objfield=sql.Identifier(objfield), procver=pvid )
-            rows, cols = con.execute( q, { 'objids': objids } )
+            rows, cols = con.execute( q, { 'objids': objids, 'bands': bands } )
             retframe = pandas.DataFrame( rows, columns=cols )
 
         elif which in ( 'forced', 'patch' ):
@@ -219,7 +219,7 @@ def many_object_ltcvs( processing_version='default', objids=None,
                 q += sql.SQL( f"                    {_and} frc.midpointmjdtai<={{t0}}" ).format( t0=mjd_now )
                 _and = "  AND"
             if bands is not None:
-                q += sql.SQL( f"            {_and} src.band=ANY(%(bands)s)" )
+                q += sql.SQL( f"            {_and} frc.band=ANY(%(bands)s)" )
                 _and = "  AND"
             q += sql.SQL(
                 """
