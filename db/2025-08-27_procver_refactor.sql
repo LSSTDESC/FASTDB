@@ -85,7 +85,7 @@ ALTER TABLE diaforcedsource ADD CONSTRAINT fk_diaforcedsource_procver
   FOREIGN KEY(base_procver_id) REFERENCES base_processing_version(id) ON DELETE RESTRICT;
 CREATE INDEX idx_diaforcedsource_procver ON diaforcedsource(base_procver_id);
 ALTER TABLE diaforcedsource DROP COLUMN old_procver;
- 
+
 
 ALTER TABLE diaobject DROP CONSTRAINT diaobject_pkey;
 DROP INDEX idx_diaobject_procver;
@@ -103,7 +103,7 @@ ALTER TABLE diaobject ADD CONSTRAINT fk_diaobject_procver
   FOREIGN KEY(base_procver_id) REFERENCES base_processing_version(id) ON DELETE RESTRICT;
 CREATE INDEX idx_diaobject_procver ON diaobject(base_procver_id);
 ALTER TABLE diaobject DROP COLUMN old_procver;
- 
+
 
 ALTER TABLE diasource DROP CONSTRAINT diasource_pkey;
 DROP INDEX idx_diasource_procver;
@@ -121,7 +121,7 @@ ALTER TABLE diasource ADD CONSTRAINT fk_diasource_procver
   FOREIGN KEY(base_procver_id) REFERENCES base_processing_version(id) ON DELETE RESTRICT;
 CREATE INDEX idx_diasource_procver ON diasource(base_procver_id);
 ALTER TABLE diasource DROP COLUMN old_procver;
- 
+
 
 DROP INDEX idx_hostgalaxy_procver;
 ALTER TABLE host_galaxy RENAME COLUMN processing_version to old_procver;
@@ -136,7 +136,7 @@ ALTER TABLE host_galaxy ADD CONSTRAINT fk_hostgalaxy_procver
   FOREIGN KEY(base_procver_id) REFERENCES base_processing_version(id) ON DELETE RESTRICT;
 CREATE INDEX idx_hostgalaxy_procver ON host_galaxy(base_procver_id);
 ALTER TABLE host_galaxy DROP COLUMN old_procver;
- 
+
 
 DROP TABLE old_processing_version_alias;
 DROP TABLE old_processing_version;

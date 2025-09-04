@@ -37,8 +37,9 @@ def create_diaobject_sources_query(connection, procver, diaobjs=None, offset=Non
     procver = db.ProcessingVersion.procver_id( procver )
     with db.DBCon( connection ) as dbcon:
         # When Kostya originally wrote this, this wasn't necessary, but somehow an
-        #   additional levelof subqueries made postgres start spitting about
-        #   not being able to create a column with pseudo-type record[]
+        #   additional level of subqueries made postgres start spitting about
+        #   not being able to create a column with pseudo-type record[], so
+        #   we have to define an explicit record type to cast things to.
         # A side-effect of this is that we have to explicitly list the columns
         #   of diasource and diaforcedsource we want to include, rather than
         #   including them all.  (This may be just as well; there's a lot of
@@ -90,6 +91,7 @@ def create_diaobject_sources_query(connection, procver, diaobjs=None, offset=Non
 
         if diaobjs is not None:
             q += sql.SQL( "WHERE diaobjectid=ANY({obj})\n" ).format( obj=diaobjs )
+        q += sql.SQL( "ORDER BY diaobjectid\n" )
         if offset is not None:
             q += sql.SQL( "OFFSET {offset}\n" ).format( offset=offset )
         if limit is not None:
