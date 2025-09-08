@@ -1,5 +1,3 @@
-import numbers
-
 from psycopg import sql
 import flask
 
@@ -10,7 +8,10 @@ from webserver.baseview import BaseView
 
 
 # ======================================================================
+# /getmanyltcvs
+# /getmanyltcvs/<procver>
 #
+# POST body must be json, must include objids.  May include bands, which, mjd_now
 
 class GetManyLtcvs( BaseView ):
     def get_ltcvs( self, procver, objids, dbcon=None ):
@@ -36,20 +37,28 @@ class GetManyLtcvs( BaseView ):
         Returns
         -------
           result: dict
-            Same dict as is returned from ltcv.many_object_ltcvs()
-
+            keys are diaobjectids (warning: stringified ints, because JSON), values are dicts
+              The inner dict keys are are everything from diaobject
+              plus 'ltcv', which is itself a dict
+                The inner-inner dicts have keys:
+                { 'mjd': list of float,
+                  'band': list of str,
+                  'flux': list of float,
+                  'fluxerr': list of float,
+                  'isdet': list of int,   (1 for true, 0 for false)
+                  'ispatch': list of int,  (1 for true, 0 for false; only present if 'which' is 'patch')
+                }
         """
 
         if not util.isSequence( objids ):
             objids = [ objids ]
-        if all( isinstance( o, numbers.Integral ) for o in objids ):
-            objids_are_root = False
-        else:
-            objids_are_root = True
+        try:
+            objids = [ int( o ) for o in objids ]
+        except ValueError:
             try:
                 objids = [ util.asUUID( o ) for o in objids ]
             except ValueError:
-                raise ValueError( "objids must be a list of integers or a list of uuids" )
+                raise ValueError( f"objids must be a list of integers or a list of uuids, got {objids}" )
         if len( objids ) == 0:
             raise ValueError( "no objids requested" )
 
@@ -70,20 +79,48 @@ class GetManyLtcvs( BaseView ):
             if 'mjd_now' in data:
                 mjd_now = float( data['mjd_now'] )
 
-        return ltcv.many_object_ltcvs( procver, objids, bands=bands, which=which,
-                                       return_format='json', mjd_now=mjd_now, dbcon=dbcon )
+        with db.DBCon() as dbcon:
+            flask.current_app.logger.debug( f"Asking for lightcurves for {objids}, processing version {procver}, "
+                                            f"which {which}, bands {bands}" )
+            ltcvs = ltcv.many_object_ltcvs( procver, objids, bands=bands, which=which,
+                                            return_format='json', string_keys=True,
+                                            mjd_now=mjd_now, dbcon=dbcon )
+            if len(ltcvs) != len(objids):
+                flask.current_app.logger.warning( f"Asked for {len(objids)} lightcurves, got {len(ltcvs)}" )
+            if len(ltcvs) == 0:
+                return {}
+            objids = list( int(i) for i in ltcvs.keys() )
+            objinfo = ltcv.get_object_infos( objids, dbcon=dbcon )
+
+        if len(ltcvs) != len(objinfo['diaobjectid']):
+            raise RuntimeError( f"len(ltcvs)={len(ltcvs)}, len(objinfo['diaobjectid'])={len(objinfo['diaobjectid'])}, "
+                                "I am perplexed." )
+
+        rval = {}
+        for i in range( len(objinfo['diaobjectid']) ):
+            diaobjectid = str( objinfo['diaobjectid'][i] )
+            rval[ diaobjectid ] = { 'ltcv': ltcvs[ diaobjectid ] }
+            for k, v in objinfo.items():
+                rval[ diaobjectid ][k] = v[i]
+
+        return rval
+
 
     def do_the_things( self, procver='default' ):
-        if ( not flask.is_json ) or ( 'objids' not in flask.request.json ):
-            raise ValueError( f"Must pass POST data as a json dict with at least objids as a key" )
-        return self.get_ltcvs( procver, flask.request.json['objids'] )
-    
+        if ( not flask.request.is_json ) or ( 'objids' not in flask.request.json ):
+            raise ValueError( "Must pass POST data as a json dict with at least objids as a key" )
+        objids = flask.request.json['objids']
+        del flask.request.json['objids']
+        return self.get_ltcvs( procver, objids )
+
 
 
 # ======================================================================
 # /ltcv/getltcv
 #
-# Returns a dict with keys mjd, band, flux, fluxerr, isdet, and maybe ispatch
+# Returns a dict with keys everything from diaobject, plus ltcv
+# ltcv is itself a dict with keys mjd, band, flux, fluxerr, isdet, and maybe ispatch,
+# each of which is a list.
 
 class GetLtcv( GetManyLtcvs ):
     def do_the_things( self, procver, objid=None ):
@@ -92,17 +129,20 @@ class GetLtcv( GetManyLtcvs ):
             procver = 'default'
 
         mess = self.get_ltcvs( procver, [ objid ] )
+        if len(mess) == 0:
+            raise ValueError( f"Could not find lightcurve for {objid} in processing version {procver}" )
         key0 = list( mess.keys() )[0]
-        rval = mess[ key0 ]
-        del rval['rootid']
-        return rval
+        return mess[ key0 ]
 
 
 # ======================================================================
 # /ltcv/getrandomltcv
+#
+# NOTE : I'm not happy with this one, as it requires an object processing
+#   version, but those are more opaque than photometry processing versions.
 
 class GetRandomLtcv( GetLtcv ):
-    def do_the_things( self, procver ):
+    def do_the_things( self, procver="default" ):
         with db.DBCon() as dbcon:
             pv = db.ProcessingVersion.procver_id( procver, dbcon=dbcon  )
 
@@ -122,19 +162,9 @@ class GetRandomLtcv( GetLtcv ):
             rows, _cols = dbcon.execute( q )
 
             mess = self.get_ltcvs( pv, [ rows[0][0] ], dbcon=dbcon )
-            key0 = list( mess.keys() )[0]
-            rval = mess[ key0 ]
-            del rval['rootid']
-            
-            
-            
-            # THINK ; this may be slow, as it may sort the entire object table!  Or at least the index.
-            # TABLESAMPLE may be a solution, but it doesn't interact with WHERE
-            #   the way I'd want it to.  (Empirically, doesn't seem too bad with a 4M object table.)
-            cursor.execute( "SELECT diaobjectid FROM diaobject WHERE processing_version=%(pv)s "
-                            "ORDER BY random() LIMIT 1", { 'pv': pv } )
-            objid = cursor.fetchone()[0]
-            return self.get_ltcv( procver, pv, objid, dbcon=dbcon )
+
+        key0 = list( mess.keys() )[0]
+        return mess[ key0 ]
 
 
 # ======================================================================
@@ -402,7 +432,11 @@ class GetHotTransients( BaseView ):
 bp = flask.Blueprint( 'ltcvapp', __name__, url_prefix='/ltcv' )
 
 urls = {
+    "/getmanyltcvs": GetManyLtcvs,
+    "/getmanyltcvs/<procver>": GetManyLtcvs,
+    "/getltcv/<procver>": GetLtcv,             # <procver> is really <objid> in this case
     "/getltcv/<procver>/<objid>": GetLtcv,
+    "/getrandomltcv": GetRandomLtcv,
     "/getrandomltcv/<procver>": GetRandomLtcv,
     "/gethottransients": GetHotTransients
 }

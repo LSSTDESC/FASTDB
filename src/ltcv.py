@@ -44,6 +44,10 @@ def get_object_infos( objids, processing_version=None, return_format='json', dbc
     if not util.isSequence( objids ):
         objids = [ objids ]
     if all( isinstance( o, numbers.Integral ) for o in objids ):
+        # Make sure they're int, because if it's something like np.int64, postgres will choke
+        objids = [ int(o) for o in objids ]
+        if processing_version is not None:
+            raise ValueError( "Cannot pass processing_version when passing integer objids" )
         obj_is_root = False
     else:
         try:
@@ -89,7 +93,7 @@ def get_object_infos( objids, processing_version=None, return_format='json', dbc
 
 def many_object_ltcvs( processing_version='default', objids=None,
                        bands=None, which='patch', include_base_procver=False,
-                       return_format='json', mjd_now=None, dbcon=None ):
+                       return_format='json', string_keys=False, mjd_now=None, dbcon=None ):
     """Get lightcurves for objects.
 
     Parameters
@@ -130,6 +134,15 @@ def many_object_ltcvs( processing_version='default', objids=None,
 
       return_format : str, default 'json'
          'json' or 'pandas'
+
+      string_keys : bool, default False
+         Ignored unless return_format is 'json'.  Normally, with
+         return_format 'json', the keys of the returned thing are all
+         bigints, as thats what diaobjectids are.  But, if you really
+         want to encode this to actual json, that's a problem, because
+         actual json specifies that keys have to be strings. (Why do we
+         use this format??)  Set string_keys to True, and the diaobjectid
+         keys of the returned dictionary will be wrapped in str().
 
       mjd_now : float, default None
          You almost always want to leave this at None.  It's here for
@@ -179,6 +192,8 @@ def many_object_ltcvs( processing_version='default', objids=None,
     if not util.isSequence( objids ):
         objids = [ objids ]
     if all( isinstance( o, numbers.Integral ) for o in objids ):
+        # Make sure they're int, because if it's something like np.int64, postgres will choke
+        objids = [ int(o) for o in objids ]
         objfield = 'diaobjectid'
     else:
         objfield = 'rootid'
@@ -224,7 +239,7 @@ def many_object_ltcvs( processing_version='default', objids=None,
                                                        AND pv.procver_id={procver}
                   INNER JOIN base_processing_version p ON pv.base_procver_id=p.id
                 """
-            ).format( objfield=objfield, procver=pvid )
+            ).format( objfield=sql.Identifier(objfield), procver=pvid )
             _and = "WHERE"
             if mjd_now is not None:
                 q += sql.SQL( f"            {_and} src.midpointmjdtai<={{t0}}" ).format( t0=mjd_now )
@@ -335,7 +350,8 @@ def many_object_ltcvs( processing_version='default', objids=None,
                 thisretval['ispatch'] = [ int(i) for i in subf.ispatch.values ]
             if include_base_procver:
                 thisretval['base_procver'] = list( subf.base_procver )
-            retval[ objid ] = thisretval
+            k = str(objid) if string_keys else objid
+            retval[ k ] = thisretval
         return retval
 
     else:

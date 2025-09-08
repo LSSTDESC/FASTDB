@@ -29,56 +29,6 @@ from fastdb.fastdb_client import FASTDBClient
 pytest_plugins = [ 'fixtures.alertcycle' ]
 
 
-# @pytest.fixture( scope='session' )
-# def procver():
-#     pv = ProcessingVersion( id=1, description='test_procesing_version',
-#                             validity_start=datetime.datetime( 2025, 2, 14, 0, 0, 0 ),
-#                             validity_end=datetime.datetime( 2999, 2, 14, 0, 0, 0 )
-#                            )
-#     pv.insert()
-
-#     yield pv
-#     with DB() as con:
-#         cursor = con.cursor()
-#         cursor.execute( "DELETE FROM processing_version WHERE id=%(id)s",
-#                         { 'id': pv.id } )
-#         con.commit()
-
-
-# @pytest.fixture
-# def procver1():
-#     pv = ProcessingVersion( id=42,
-#                             description='pv42',
-#                             validity_start=datetime.datetime( 2025, 2, 14, 1, 2, 3 ),
-#                             validity_end=datetime.datetime( 2030, 2, 14, 1, 2, 3 )
-#                            )
-#     pv.insert()
-
-#     yield pv
-#     with DB() as con:
-#         cursor = con.cursor()
-#         cursor.execute( "DELETE FROM processing_version WHERE id=%(id)s",
-#                         { 'id': pv.id } )
-#         con.commit()
-
-
-# @pytest.fixture
-# def procver2():
-#     pv = ProcessingVersion( id=23,
-#                             description='pv23',
-#                             validity_start=datetime.datetime( 2015, 10, 21, 12, 15, 0 ),
-#                             validity_end=datetime.datetime( 2045, 10, 21, 12, 15, 0 )
-#                            )
-#     pv.insert()
-
-#     yield pv
-#     with DB() as con:
-#         cursor = con.cursor()
-#         cursor.execute( "DELETE FROM processing_version WHERE id=%(id)s",
-#                         { 'id': pv.id } )
-#         con.commit()
-
-
 @pytest.fixture( scope='module' )
 def procver_collection():
     # A set of processing versions loaded into the database, including:
@@ -336,7 +286,7 @@ def set_of_lightcurves( procver_collection ):
                 psffluxerr = 0.5 * psfflux
 
                 if ( i < 3 ) and ( sourcemjd <= 60055. ):
-                    frc = DiaForcedSource( diaobjectid=obj.diaobjectid, visit=visit, detector=0,
+                    frc = DiaForcedSource( diaobjectid=objr.diaobjectid, visit=visit, detector=0,
                                            band=('r' if visit%2==0 else 'i'), midpointmjdtai=sourcemjd,
                                            ra=rootobj['ra'], dec=rootobj['dec'],
                                            psfflux=psfflux, psffluxerr=psffluxerr,
@@ -373,6 +323,16 @@ def set_of_lightcurves( procver_collection ):
             DiaObject.bulk_insert_or_upsert( objobjs, dbcon=con )
             DiaSource.bulk_insert_or_upsert( srcobjs, dbcon=con )
             DiaForcedSource.bulk_insert_or_upsert( frcobjs, dbcon=con )
+
+        # For usage convenience, sort all the sources and forced sources by mjd
+        for rootdict in roots:
+            for obj in rootdict['objs']:
+                if obj is None:
+                    continue
+                for src in obj['src'].values():
+                    src.sort( key=lambda x: x.midpointmjdtai )
+                for frc in obj['frc'].values():
+                    frc.sort( key=lambda x: x.midpointmjdtai )
 
         yield roots
     finally:
@@ -587,7 +547,8 @@ tyOci9saPPfI1bNnKD202zsCAwEAAQ==
 
 @pytest.fixture( scope='session' )
 def fastdb_client( test_user ):
-    return FASTDBClient( 'http://webap:8080', username="test", password="test_password", verify=False, debug=True )
+    return FASTDBClient( 'http://webap:8080', username="test", password="test_password", verify=False, debug=True,
+                         retrysleep=0.1, retries=2 )
 
 
 @pytest.fixture( scope='session' )

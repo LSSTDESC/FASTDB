@@ -16,6 +16,7 @@ def test_get_object_infos( set_of_lightcurves ):
     assert info.rootid.values.tolist() == [ roots[i]['root'].id for i in [0, 1, 2] ]
 
     jsinfo = ltcv.get_object_infos( [ 200, 201, 202 ], return_format='json' )
+    assert jsinfo['diaobjectid'] == [ 200, 201, 202 ]
     info.reset_index( inplace=True )
     for col in info.columns:
         assert ( info.loc[ :, col ].values == np.array( jsinfo[col] ) ).all()
@@ -200,7 +201,53 @@ def test_many_object_ltcvs( procver_collection, set_of_lightcurves ):
             for col in subpd.columns:
                 assert ( subpd[col] == np.array( subjs[col] ) ).all()
 
-    # TODO : make sure that the lightcurves are actually right!
+    # Make sure the lightcurves are actually right
+    for diaobjectid in df.index.get_level_values( 'diaobjectid' ).unique():
+        rdex = [ roots[i]['objs'][1]['obj'].diaobjectid for i in range(len(roots)) ].index( diaobjectid )
+        tmpsources = sources.xs( diaobjectid, level='diaobjectid' ).reset_index()
+        tmpforced = forced.xs( diaobjectid, level='diaobjectid' ).reset_index()
+        tmpdf = df.xs( diaobjectid, level='diaobjectid' ).reset_index()
+
+        assert all( s.mjd == pytest.approx( roots[rdex]['objs'][1]['src']['bpv2'][j].midpointmjdtai, abs=1./3600./24. )
+                    for j, s in enumerate( tmpsources.itertuples() ) )
+        assert all( s.band == roots[rdex]['objs'][1]['src']['bpv2'][j].band
+                    for j, s in enumerate( tmpsources.itertuples() ) )
+        assert all( s.flux == pytest.approx( roots[rdex]['objs'][1]['src']['bpv2'][j].psfflux, rel=1e-6 )
+                    for j, s in enumerate( tmpsources.itertuples() ) )
+        assert all( s.fluxerr == pytest.approx( roots[rdex]['objs'][1]['src']['bpv2'][j].psffluxerr, rel=1e-6 )
+                    for j, s in enumerate( tmpsources.itertuples() ) )
+        assert all( tmpsources.isdet )
+        assert all( tmpsources.base_procver == 'pvc_bpv2a' )
+
+        assert all( s.mjd == pytest.approx( roots[rdex]['objs'][1]['frc']['bpv2'][j].midpointmjdtai, abs=1./3600./24. )
+                    for j, s in enumerate( tmpforced.itertuples() ) )
+        assert all( s.band == roots[rdex]['objs'][1]['frc']['bpv2'][j].band
+                    for j, s in enumerate( tmpforced.itertuples() ) )
+        assert all( s.flux == pytest.approx( roots[rdex]['objs'][1]['frc']['bpv2'][j].psfflux, rel=1e-6 )
+                    for j, s in enumerate( tmpforced.itertuples() ) )
+        assert all( s.fluxerr == pytest.approx( roots[rdex]['objs'][1]['frc']['bpv2'][j].psffluxerr, rel=1e-6 )
+                    for j, s in enumerate( tmpforced.itertuples() ) )
+        assert all( tmpforced.isdet[j] if ( tmpforced.mjd[j] >= tmpsources.mjd.min() and
+                                            tmpforced.mjd[j] <= tmpsources.mjd.max() )
+                    else not tmpforced.isdet[j]
+                    for j in range( len(tmpforced) ) )
+        assert all( tmpforced.base_procver == 'pvc_bpv2a' )
+
+        assert all( s.mjd == pytest.approx( roots[rdex]['objs'][1]['frc']['bpv2'][j].midpointmjdtai, abs=1./3600./24. )
+                    for j, s in enumerate( tmpdf.itertuples() ) )
+        assert all( s.band == roots[rdex]['objs'][1]['frc']['bpv2'][j].band
+                    for j, s in enumerate( tmpdf.itertuples() ) )
+        assert all( s.flux == pytest.approx( roots[rdex]['objs'][1]['frc']['bpv2'][j].psfflux, rel=1e-6 )
+                    for j, s in enumerate( tmpdf.itertuples() ) )
+        assert all( s.fluxerr == pytest.approx( roots[rdex]['objs'][1]['frc']['bpv2'][j].psffluxerr, rel=1e-6 )
+                    for j, s in enumerate( tmpdf.itertuples() ) )
+        assert all( tmpdf.isdet[j] if ( tmpdf.mjd[j] >= tmpsources.mjd.min() and
+                                        tmpdf.mjd[j] <= tmpsources.mjd.max() )
+                    else not tmpdf.isdet[j]
+                    for j in range( len(tmpdf) ) )
+        assert all( ~tmpdf.ispatch )
+        assert all( tmpdf.base_procver == 'pvc_bpv2a' )
+
 
     # make sure that if we ask using the right diaobjectid, we get the same things back
     sources2 = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['objs'][1]['obj'].diaobjectid for i in [0,2] ],
@@ -223,6 +270,24 @@ def test_many_object_ltcvs( procver_collection, set_of_lightcurves ):
     assert len(sources2) == 0
     assert len(forced2) == 0
     assert len(df2) == 0
+
+    # test mjd_now
+    assert not ( sources.index.get_level_values( level='mjd' ) <= 60041. ).all()
+    assert not ( forced.index.get_level_values( level='mjd' ) <= 60041. ).all()
+    assert not ( df.index.get_level_values( level='mjd' ) <= 60041. ).all()
+    sources = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['root'].id for i in [0,2] ],
+                                      return_format='pandas', which='detections', include_base_procver=True,
+                                      mjd_now=60041. )
+    forced = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['root'].id for i in [0,2] ],
+                                     return_format='pandas', which='forced', include_base_procver=True,
+                                     mjd_now=60041. )
+    df = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['root'].id for i in [0,2] ],
+                                 return_format='pandas', which='patch', include_base_procver=True,
+                                 mjd_now=60041. )
+    assert ( sources.index.get_level_values( level='mjd' ) <= 60041. ).all()
+    assert ( forced.index.get_level_values( level='mjd' ) <= 60041. ).all()
+    assert ( df.index.get_level_values( level='mjd' ) <= 60041. ).all()
+
 
     # Make sure bands works
     sources = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['root'].id for i in [0,2] ],
