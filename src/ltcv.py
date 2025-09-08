@@ -1,4 +1,4 @@
-K__all__ = [ "object_ltcv", "object_search", "get_hot_ltcvs" ]
+__all__ = [ "object_ltcv", "object_search", "get_hot_ltcvs" ]
 
 import datetime
 import numbers

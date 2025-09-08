@@ -1,5 +1,6 @@
 import logging
 
+from psycopg import sql
 import flask
 import flask_session
 
@@ -109,37 +110,39 @@ class BaseProcVer( BaseView ):
 # ======================================================================
 
 class CountThings( BaseView ):
-    def do_the_things( self, which, procver ):
+    def do_the_things( self, which, procver='default' ):
         global app
 
-        tablemap = { 'object': 'diaobject',
-                     'source': 'diasource',
-                     'forced': 'diaforcedsource' }
+        tablemap = { 'object': ( 'diaobject', ( 'rootid', ) ),
+                     'source': ( 'diasource', ( 'diaobjectid', 'visit' ) ),
+                     'forced': ( 'diaforcedsource', ( 'diaobjectid', 'visit' ) ) }
+        tablemap['diaobject'] = tablemap['object']
+        tablemap['diasource'] = tablemap['source']
+        tablemap['diaforcedsource'] = tablemap['forced']
+
         if which not in tablemap:
             return f"Unknown thing to count: {which}", 500
-        table = tablemap[ which ]
+        table = tablemap[ which ][0]
+        objfields = tablemap[ which ][1]
 
-        with db.DB() as dbcon:
-            cursor = dbcon.cursor()
-            cursor.execute( "SELECT id FROM processing_version WHERE description=%(pv)s",
-                            { 'pv': procver } )
-            rows = cursor.fetchall()
-            if len(rows) == 0:
-                cursor.execute( "SELECT id FROM processing_version_alias WHERE description=%(pv)s",
-                                { 'pv': procver } )
-                rows = cursor.fetchall()
-                if len(rows) == 0:
-                    return f"Unknown processing version {procver}", 500
-            pvid = rows[0][0]
-
-            cursor.execute( f"SELECT COUNT(*) FROM {table} WHERE processing_version=%(pv)s",
-                            { 'pv': pvid } )
-            rows = cursor.fetchall()
-
-        return { 'status': 'ok',
-                 'which': which,
-                 'count': rows[0][0]
-                }
+        with db.DBCon() as dbcon:
+            pvid = db.ProcessingVersion.procver_id( procver )
+            flask.current_app.logger.debug( f"Counting {which} for {pvid}" )
+            q = sql.SQL(
+                """
+                SELECT COUNT(*) FROM (
+                  SELECT DISTINCT ON({pk}) * FROM {table} t
+                  INNER JOIN base_procver_of_procver pv ON t.base_procver_id=pv.base_procver_id
+                                                       AND pv.procver_id={pvid}
+                  ORDER BY {pk},pv.priority DESC
+                ) subq;
+                """
+            ).format( pk=sql.SQL(',').join( sql.Identifier(i) for i in objfields ),
+                      table=sql.Identifier(table), pvid=pvid )
+            rows, _ = dbcon.execute( q )
+            return { 'status': 'ok',
+                     'table': table,
+                     'count': rows[0][0] }
 
 
 # ======================================================================
@@ -157,7 +160,7 @@ class ObjectSearch( BaseView ):
         # javascript may decide to interpret bigints as doubles, thereby
         # losing necessary precision.  Convert all bigints to strings.
         # Right now, that means listing the possible columns here.  There
-        # must be a better way... but if I want to interpret it in javascriptlk
+        # must be a better way... but if I want to interpret it in javascript
         # there probably isn't.
         bigints = [ 'diaobjectid' ]
         for k in bigints:
@@ -215,7 +218,9 @@ urls = {
     "/getprocvers": GetProcVers,
     "/procver/<procver>": ProcVer,
     "/baseprocver/<procver>": BaseProcVer,
+    "/count/<which>": CountThings,
     "/count/<which>/<procver>": CountThings,
+    "/objectsearch": ObjectSearch,
     "/objectsearch/<processing_version>": ObjectSearch
 }
 

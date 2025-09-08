@@ -75,3 +75,57 @@ def test_base_procver( procver_collection, test_user, fastdb_client ):
                 match = re.search( r'pv(\d)', k )
                 pv = f'pvc_pv{match.group(1)}'
                 assert res['procvers'] == [ pv ]
+
+
+def test_countthings( set_of_lightcurves, test_user, fastdb_client ):
+    for pv in ( '', 'pvc_pv2', 'pvc_pv3', 'default' ):
+        for table in ( 'diaobject', 'object' ):
+            suffix = table if pv == '' else f'{table}/{pv}'
+            res = fastdb_client.post( f'/count/{suffix}' )
+            assert res['status'] == 'ok'
+            assert res['table'] == 'diaobject'
+            assert res['count'] == ( 4 if pv == 'pvc_pv2' else 0 )
+
+        for table in ( 'diasource', 'source' ):
+            suffix = table if pv == '' else f'{table}/{pv}'
+            res = fastdb_client.post( f'/count/{suffix}' )
+            assert res['status'] == 'ok'
+            assert res['table'] == 'diasource'
+            assert res['count'] == 52
+
+        for table in ( 'diaforcedsource', 'forced' ):
+            suffix = table if pv == '' else f'{table}/{pv}'
+            res = fastdb_client.post( f'/count/{suffix}' )
+            assert res['status'] == 'ok'
+            assert res['table'] == 'diaforcedsource'
+            assert res['count'] == 100
+
+
+    for table in ( 'diaobject', 'object' ):
+        res = fastdb_client.post( f'/count/{table}/realtime' )
+        assert res['status'] == 'ok'
+        assert res['table'] == 'diaobject'
+        assert res['count'] == 3
+
+    for table in ( 'diasource', 'source' ):
+        res = fastdb_client.post( f'/count/{table}/realtime' )
+        assert res['status'] == 'ok'
+        assert res['table'] == 'diasource'
+        assert res['count'] == 39
+
+    for table in ( 'diaforcedsource', 'forced' ):
+        res = fastdb_client.post( f'/count/{table}/realtime' )
+        assert res['status'] == 'ok'
+        assert res['table'] == 'diaforcedsource'
+        assert res['count'] == 55
+
+    # Temporarily reduce retries to 0 so these will fail fast
+    orig_retries = fastdb_client.retries
+    try:
+        fastdb_client.retries = 0
+        with pytest.raises( RuntimeError, match='Got status 500 trying to connect' ):
+            res = fastdb_client.post( '/count/diaobject/this_processing_version_does_not_exist' )
+        with pytest.raises( RuntimeError, match='Got status 500 trying to connect' ):
+            res = fastdb_client.post( '/count/this_table_does_not_exist' )
+    finally:
+        fastdb_client.retries = orig_retries
