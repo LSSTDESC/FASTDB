@@ -228,7 +228,7 @@ def alerts_90days_sent_received_and_imported( procver_collection ):
 # To regenerate the data file, comment out the fixture above, uncomment
 # the fixture below, run
 #
-#   pytest --trace -v test_alertcycle.py::test_full90days
+#   pytest --trace -v services/test_sourceimporter.py::test_full90days
 #
 # and once the fixture finishes and you're dumped into pdb at the beginning
 # of the test, run:

@@ -26,7 +26,7 @@ def import_first30days_objects( barf, alerts_30days_sent_and_brokermessage_consu
     t1 = alerts_30days_sent_and_brokermessage_consumed
 
     try:
-        si = SourceImporter( bpv['realtime'].id )
+        si = SourceImporter( bpv['realtime'].id, bpv['realtime'].id )
         with db.MG() as mongoclient:
             collection = db.get_mongo_collection( mongoclient, collection_name )
             nobj, nroot = si.import_objects_from_collection( collection, t1=t1 )
@@ -62,7 +62,7 @@ def import_first30days_sources( barf, import_first30days_objects, procver_collec
     t1 = alerts_30days_sent_and_brokermessage_consumed
 
     try:
-        si = SourceImporter( bpv['realtime'].id )
+        si = SourceImporter( bpv['realtime'].id, bpv['realtime'].id )
         with db.MG() as mongoclient:
             collection = db.get_mongo_collection( mongoclient, collection_name )
             n = si.import_sources_from_collection( collection, t1=t1 )
@@ -83,7 +83,7 @@ def import_30days_prvsources( barf, import_first30days_sources, procver_collecti
     t1 = alerts_30days_sent_and_brokermessage_consumed
 
     try:
-        si = SourceImporter( bpv['realtime'].id )
+        si = SourceImporter( bpv['realtime'].id, bpv['realtime'].id )
         with db.MG() as mongoclient:
             collection = db.get_mongo_collection( mongoclient, collection_name )
             n = si.import_prvsources_from_collection( collection, t1=t1 )
@@ -102,7 +102,7 @@ def import_30days_prvforcedsources( barf, import_first30days_sources, procver_co
     t1 = alerts_30days_sent_and_brokermessage_consumed
 
     try:
-        si = SourceImporter( bpv['realtime'].id )
+        si = SourceImporter( bpv['realtime'].id, bpv['realtime'].id )
         with db.MG() as mongoclient:
             collection = db.get_mongo_collection( mongoclient, collection_name )
             n = si.import_prvforcedsources_from_collection( collection, t1=t1 )
@@ -128,7 +128,7 @@ def import_next60days_noprv( barf, procver_collection,
     t1 = alerts_60moredays_sent_and_brokermessage_consumed
 
     try:
-        si = SourceImporter( bpv['realtime'].id )
+        si = SourceImporter( bpv['realtime'].id, bpv['realtime'].id )
         with db.MG() as mongoclient:
             collection = db.get_mongo_collection( mongoclient, collection_name )
             nobj, nroot = si.import_objects_from_collection( collection, t0=t0, t1=t1 )
@@ -168,7 +168,7 @@ def import_next60days_prv( barf, procver_collection, import_next60days_noprv,
     t1 = alerts_60moredays_sent_and_brokermessage_consumed
 
     try:
-        si = SourceImporter( bpv['realtime'].id )
+        si = SourceImporter( bpv['realtime'].id, bpv['realtime'].id )
         with db.MG() as mongoclient:
             collection = db.get_mongo_collection( mongoclient, collection_name )
             nsrc = si.import_prvsources_from_collection( collection, t0=t0, t1=t1 )
@@ -191,7 +191,7 @@ def import_30days_60days( barf, procver_collection, import_30days_prvsources, im
     t1 = alerts_60moredays_sent_and_brokermessage_consumed
 
     try:
-        si = SourceImporter( bpv['realtime'].id )
+        si = SourceImporter( bpv['realtime'].id, bpv['realtime'].id )
         with db.MG() as mongoclient:
             collection = db.get_mongo_collection( mongoclient, collection_name )
             nobj, nroot = si.import_objects_from_collection( collection, t0=t0, t1=t1 )
@@ -217,7 +217,7 @@ def test_read_mongo_objects( barf, alerts_30days_sent_and_brokermessage_consumed
     bpv, _pv = procver_collection
     collection_name = f'fastdb_{barf}'
 
-    si = SourceImporter( bpv['realtime'].id )
+    si = SourceImporter( bpv['realtime'].id, bpv['realtime'].id )
     with db.MG() as mongoclient:
         collection = db.get_mongo_collection( mongoclient, collection_name )
 
@@ -270,7 +270,7 @@ def test_read_mongo_sources( barf, alerts_30days_sent_and_brokermessage_consumed
     # Not going to test time cuts here because it's the same code path that
     #   was already tested intest_read_mongo_objects
 
-    si = SourceImporter( bpv['realtime'].id )
+    si = SourceImporter( bpv['realtime'].id, bpv['realtime'].id )
     with db.MG() as mongoclient:
         collection = db.get_mongo_collection( mongoclient, collection_name )
         with db.DB() as pqconn:
@@ -288,7 +288,7 @@ def test_read_mongo_previous_sources( barf, alerts_30days_sent_and_brokermessage
     bpv, _pv = procver_collection
     collection_name = f'fastdb_{barf}'
 
-    si = SourceImporter( bpv['realtime'].id )
+    si = SourceImporter( bpv['realtime'].id, bpv['realtime'].id )
     with db.MG() as mongoclient:
         collection = db.get_mongo_collection( mongoclient, collection_name )
         with db.DB() as pqconn:
@@ -323,7 +323,7 @@ def test_read_mongo_previous_forced_sources( barf, alerts_30days_sent_and_broker
     bpv, _pv = procver_collection
     collection_name = f'fastdb_{barf}'
 
-    si = SourceImporter( bpv['realtime'].id )
+    si = SourceImporter( bpv['realtime'].id, bpv['realtime'].id )
     with db.MG() as mongoclient:
         collection = db.get_mongo_collection( mongoclient, collection_name )
         with db.DB() as pqconn:
@@ -458,7 +458,7 @@ class TestImport:
         try:
             with db.MG() as mongoclient:
                 collection = db.get_mongo_collection( mongoclient, collection_name )
-                si = SourceImporter( bpv['realtime'].id )
+                si = SourceImporter( bpv['realtime'].id, bpv['realtime'].id )
                 nobj, nroot, nsrc, nfrc = si.import_from_mongo( collection )
 
             yield nobj, nroot, nsrc, nfrc, tsent, datetime.datetime.now( tz=datetime.UTC )
@@ -525,7 +525,7 @@ class TestImport:
 
             with db.MG() as mongoclient:
                 collection = db.get_mongo_collection( mongoclient, collection_name )
-                si = SourceImporter( bpv['realtime'].id )
+                si = SourceImporter( bpv['realtime'].id, bpv['realtime'].id )
                 nobj, nroot, nsrc, nfrc = si.import_from_mongo( collection )
             t1 = datetime.datetime.now( tz=datetime.UTC )
 
@@ -707,3 +707,10 @@ def test_import_30days_60days( import_30days_60days, test_user ):
     objhostids.update( [ o['nearbyextobj2id'] for o in objects if o['nearbyextobj2id'] is not None ] )
     objhostids.update( [ o['nearbyextobj3id'] for o in objects if o['nearbyextobj3id'] is not None ] )
     assert hostids == objhostids
+
+
+# **********************************************************************
+
+def test_full90days( alerts_90days_sent_received_and_imported ):
+    # TODO
+    pass
