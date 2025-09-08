@@ -83,6 +83,31 @@ class ProcVer( BaseView ):
 
 # ======================================================================
 
+class BaseProcVer( BaseView ):
+    def do_the_things( self, procver ):
+        with db.DBCon() as con:
+            pvid = db.BaseProcessingVersion.base_procver_id( procver )
+            if pvid is None:
+                return f"Unknown base processing version {procver}", 500
+
+            retval = { 'status': 'ok', 'id': None, 'description': None, 'procvers': [] }
+            row, _ = con.execute( "SELECT id,description FROM base_processing_version WHERE id=%(pv)s",
+                                  { 'pv': pvid } )
+            retval['id'] = row[0][0]
+            retval['description'] = row[0][1]
+
+            rows, _ = con.execute( "SELECT description FROM processing_version p "
+                                   "INNER JOIN base_procver_of_procver j ON p.id=j.procver_id "
+                                   "WHERE j.base_procver_id=%(pv)s "
+                                   "ORDER BY p.description",
+                                   { 'pv': pvid } )
+            retval['procvers'] = [ r[0] for r in rows ]
+
+            return retval
+
+
+# ======================================================================
+
 class CountThings( BaseView ):
     def do_the_things( self, which, procver ):
         global app
@@ -189,6 +214,7 @@ urls = {
     "/": MainPage,
     "/getprocvers": GetProcVers,
     "/procver/<procver>": ProcVer,
+    "/baseprocver/<procver>": BaseProcVer,
     "/count/<which>/<procver>": CountThings,
     "/objectsearch/<processing_version>": ObjectSearch
 }

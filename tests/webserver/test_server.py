@@ -1,3 +1,4 @@
+import re
 import pytest
 
 
@@ -57,3 +58,20 @@ def test_procver( procver_collection, test_user, fastdb_client ):
             res = fastdb_client.post( '/procver/does_not_exist' )
     finally:
         fastdb_client.retries = orig_retries
+
+
+def test_base_procver( procver_collection, test_user, fastdb_client ):
+    bpvs, _pvs = procver_collection
+
+    for k, bpv in bpvs.items():
+        for suffix in [ k, bpv.id ]:
+            suffix = f'pvc_{k}' if k != 'realtime' else suffix
+            res = fastdb_client.post( f'/baseprocver/{suffix}' )
+            assert res['id'] == str( bpv.id )
+            assert res['description'] == bpv.description
+            if k == 'realtime':
+                assert res['procvers'] == [ 'realtime' ]
+            else:
+                match = re.search( r'pv(\d)', k )
+                pv = f'pvc_pv{match.group(1)}'
+                assert res['procvers'] == [ pv ]
