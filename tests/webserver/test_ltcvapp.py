@@ -1,7 +1,10 @@
 import pytest
 import uuid
 
+import numpy as np
+
 import ltcv
+import util
 
 
 def test_getmanyltcvs( test_user, fastdb_client, set_of_lightcurves ):
@@ -143,143 +146,76 @@ def test_getltcv( test_user, fastdb_client, set_of_lightcurves, procver_collecti
 # TODO : test getrandomltcv ; that might require the ability to pass a random seed for a reproducible test.
 
 
-def test_gethottransients( test_user, fastdb_client, procver, alerts_90days_sent_received_and_imported ):
-    # This tests gets the same information as ../test_ltcv.py, only via the webap.
+def test_gethottransients( test_user, fastdb_client, procver_collection, set_of_lightcurves ):
+    # This tests gets the same information as ../test_ltcv.py, only via
+    # the webap.  ../test_ltcv.py::test_get_hot_ltcvs makes sure that
+    # the direct call to ltcv.get_hot_ltcvs returns the right stuff.
+    # (Or, at least, it should.)  This test makes sure that what you get
+    # from the webap matches what you get from a direct call.
+
+    def _compare_direct_to_webap( df, res ):
+        assert set( str(i) for i in df['rootid'].unique() ) == set( r['rootid'] for r in res )
+        for objrow in res:
+            subdf = df[ df.rootid == util.asUUID( objrow['rootid'] ) ]
+            assert len(subdf) == len( objrow['photometry']['mjd'] )
+            assert objrow['zp'] == 31.4
+            assert ( subdf.diaobjectid == objrow['diaobjectid'] ).all()
+            assert all( subdf.ra == objrow['ra'] )
+            assert all( subdf.dec == objrow['dec'] )
+            assert ( subdf.band == np.array( objrow['photometry']['band'] ) ).all()
+            assert ( subdf.is_source == np.array( objrow['photometry']['is_source'] ) ).all()
+            # Thought required: should we be doing an approx thing for the rest of these?
+            #  (Either pytest.approx or np.isclose.)
+            assert ( subdf.midpointmjdtai == np.array( objrow['photometry']['mjd'] ) ).all()
+            assert ( subdf.psfflux == np.array( objrow['photometry']['flux'] ) ).all()
+            assert ( subdf.psffluxerr == np.array( objrow['photometry']['fluxerr'] ) ).all()
 
     # TODO : look at some of the actual returned values to make sure they're right.
     # (Query the database and compare?)
 
-    # ****************************************
-    # return format 0
-    res = fastdb_client.post( '/ltcv/gethottransients',
-                              json={ 'processing_version': procver.description,
-                                     'detected_since_mjd': 60325.,
-                                     'mjd_now': 60328. } )
-    assert isinstance( res, list )
-    assert len( res ) == 4
-    assert set( res[0].keys() ) == { 'objectid', 'ra', 'dec', 'zp', 'redshift', 'sncode', 'photometry' }
-    for pkey in [ 'mjd', 'band', 'flux', 'fluxerr', 'is_source' ]:
-        assert sum( len( res[i]['photometry'][pkey] ) for i in range( len(res) ) ) == 88
+    df, _ = ltcv.get_hot_ltcvs( 'pvc_pv3', detected_since_mjd=60035, mjd_now=60056 )
+    res = fastdb_client.post( '/ltcv/gethottransients', json={ 'processing_version': 'pvc_pv3',
+                                                               'detected_since_mjd': 60035,
+                                                               'mjd_now': 60056 } )
+    _compare_direct_to_webap( df, res )
 
+    df, _ = ltcv.get_hot_ltcvs( 'pvc_pv3', detected_since_mjd=60035, mjd_now=60046 )
+    res = fastdb_client.post( '/ltcv/gethottransients', json={ 'processing_version': 'pvc_pv3',
+                                                               'detected_since_mjd': 60035,
+                                                               'mjd_now': 60046 } )
+    _compare_direct_to_webap( df, res )
 
-    res = fastdb_client.post( '/ltcv/gethottransients',
-                              json={ 'processing_version': procver.description,
-                                     'detected_since_mjd': 60325.,
-                                     'mjd_now': 60328.,
-                                     'source_patch': True } )
-    assert isinstance( res, list )
-    assert len( res ) == 4
-    assert set( res[0].keys() ) == { 'objectid', 'ra', 'dec', 'zp', 'redshift', 'sncode', 'photometry' }
-    for pkey in [ 'mjd', 'band', 'flux', 'fluxerr', 'is_source' ]:
-        assert sum( len( res[i]['photometry'][pkey] ) for i in range( len(res) ) ) == 91
-    assert sum( sum( res[i]['photometry']['is_source'] ) for i in range( len(res) ) ) == 3
+    df, _ = ltcv.get_hot_ltcvs( 'pvc_pv3', detected_in_last_days=2, mjd_now=60021 )
+    res = fastdb_client.post( '/ltcv/gethottransients', json={ 'processing_version': 'pvc_pv3',
+                                                               'detected_in_last_days': 2,
+                                                               'mjd_now': 60021 } )
+    _compare_direct_to_webap( df, res )
 
+    df, _ = ltcv.get_hot_ltcvs( 'pvc_pv3', detected_in_last_days=2, mjd_now=60041 )
+    res = fastdb_client.post( '/ltcv/gethottransients', json={ 'processing_version': 'pvc_pv3',
+                                                               'detected_in_last_days': 2,
+                                                               'mjd_now': 60041 } )
+    _compare_direct_to_webap( df, res )
 
-    res = fastdb_client.post( '/ltcv/gethottransients',
-                              json={ 'processing_version': procver.description,
-                                     'detected_in_last_days': 3.,
-                                     'mjd_now': 60328.,
-                                     'source_patch': True } )
-    assert isinstance( res, list )
-    assert len( res ) == 4
-    assert set( res[0].keys() ) == { 'objectid', 'ra', 'dec', 'zp', 'redshift', 'sncode', 'photometry' }
-    for pkey in [ 'mjd', 'band', 'flux', 'fluxerr', 'is_source' ]:
-        assert sum( len( res[i]['photometry'][pkey] ) for i in range( len(res) ) ) == 91
-    assert sum( sum( res[i]['photometry']['is_source'] ) for i in range( len(res) ) ) == 3
+    # detected_in_last_days defaults to 30
+    df, _ = ltcv.get_hot_ltcvs( 'pvc_pv3', mjd_now=60085 )
+    res = fastdb_client.post( '/ltcv/gethottransients', json={ 'processing_version': 'pvc_pv3',
+                                                               'mjd_now': 60085 } )
+    _compare_direct_to_webap( df, res )
+    df, _ = ltcv.get_hot_ltcvs( 'pvc_pv3', mjd_now=60095 )
+    res = fastdb_client.post( '/ltcv/gethottransients', json={ 'processing_version': 'pvc_pv3',
+                                                               'mjd_now': 60095 } )
+    _compare_direct_to_webap( df, res )
 
+    # Test source patch.  Gotta use pvc_pv1 for this.
 
-    res = fastdb_client.post( '/ltcv/gethottransients',
-                              json={ 'processing_version': procver.description,
-                                     'mjd_now': 60328.,
-                                     'source_patch': True } )
-    assert isinstance( res, list )
-    assert len( res ) == 14
-    assert set( res[0].keys() ) == { 'objectid', 'ra', 'dec', 'zp', 'redshift', 'sncode', 'photometry' }
-    for pkey in [ 'mjd', 'band', 'flux', 'fluxerr', 'is_source' ]:
-        assert sum( len( res[i]['photometry'][pkey] ) for i in range( len(res) ) ) == 310
-    assert sum( sum( res[i]['photometry']['is_source'] ) for i in range( len(res) ) ) == 12
+    df, _ = ltcv.get_hot_ltcvs( 'pvc_pv1', mjd_now=60031 )
+    res = fastdb_client.post( '/ltcv/gethottransients', json={ 'processing_version': 'pvc_pv1',
+                                                               'mjd_now': 60031 } )
+    _compare_direct_to_webap( df, res )
 
-
-    res = fastdb_client.post( '/ltcv/gethottransients',
-                              json={ 'processing_version': procver.description,
-                                     'detected_since_mjd': 60325.,
-                                     'mjd_now': 60328.,
-                                     'source_patch': True,
-                                     'include_hostinfo': True } )
-    assert isinstance( res, list )
-    assert len( res ) == 4
-    assert set( res[0].keys() ) == { 'objectid', 'ra', 'dec', 'zp', 'redshift', 'sncode', 'photometry',
-                                     'hostgal_petroflux_r', 'hostgal_petroflux_r_err',
-                                     'hostgal_stdcolor_u_g', 'hostgal_stdcolor_g_r', 'hostgal_stdcolor_r_i',
-                                     'hostgal_stdcolor_i_z', 'hostgal_stdcolor_z_y', 'hostgal_stdcolor_u_g_err',
-                                     'hostgal_stdcolor_g_r_err', 'hostgal_stdcolor_r_i_err',
-                                     'hostgal_stdcolor_i_z_err', 'hostgal_stdcolor_z_y_err',
-                                     'hostgal_snsep', 'hostgal_pzmean', 'hostgal_pzstd' }
-
-
-    # ****************************************
-    # return format 1
-    res = fastdb_client.post( '/ltcv/gethottransients',
-                              json={ 'processing_version': procver.description,
-                                     'detected_in_last_days': 3.,
-                                     'mjd_now': 60328.,
-                                     'source_patch': True,
-                                     'return_format': 1 } )
-    assert isinstance( res, list )
-    assert len( res ) == 4
-    assert set( res[0].keys() ) == { 'objectid', 'ra', 'dec', 'zp', 'redshift', 'sncode',
-                                     'mjd', 'band', 'flux', 'fluxerr', 'is_source' }
-    for pkey in [ 'mjd', 'band', 'flux', 'fluxerr', 'is_source' ]:
-        assert sum( len( res[i][pkey] ) for i in range( len(res) ) ) == 91
-    assert sum( sum( res[i]['is_source'] ) for i in range( len(res) ) ) == 3
-
-    res = fastdb_client.post( '/ltcv/gethottransients',
-                              json={ 'processing_version': procver.description,
-                                     'detected_since_mjd': 60325.,
-                                     'mjd_now': 60328.,
-                                     'source_patch': True,
-                                     'include_hostinfo': True,
-                                     'return_format': 1 } )
-    assert isinstance( res, list )
-    assert len( res ) == 4
-    assert set( res[0].keys() ) == { 'objectid', 'ra', 'dec', 'zp', 'redshift', 'sncode',
-                                     'mjd', 'band', 'flux', 'fluxerr', 'is_source',
-                                     'hostgal_petroflux_r', 'hostgal_petroflux_r_err',
-                                     'hostgal_stdcolor_u_g', 'hostgal_stdcolor_g_r', 'hostgal_stdcolor_r_i',
-                                     'hostgal_stdcolor_i_z', 'hostgal_stdcolor_z_y', 'hostgal_stdcolor_u_g_err',
-                                     'hostgal_stdcolor_g_r_err', 'hostgal_stdcolor_r_i_err',
-                                     'hostgal_stdcolor_i_z_err', 'hostgal_stdcolor_z_y_err',
-                                     'hostgal_snsep', 'hostgal_pzmean', 'hostgal_pzstd' }
-
-
-    # ****************************************
-    # return format 2
-    res = fastdb_client.post( '/ltcv/gethottransients',
-                              json={ 'processing_version': procver.description,
-                                     'detected_in_last_days': 3.,
-                                     'mjd_now': 60328.,
-                                     'source_patch': True,
-                                     'return_format': 2 } )
-    assert isinstance( res, dict )
-    assert set( res.keys() ) == { 'objectid', 'ra','dec', 'zp', 'redshift', 'sncode',
-                                  'mjd', 'band', 'flux', 'fluxerr', 'is_source' }
-    assert all( len(v) == 4 for v in res.values() )
-    for pkey in [ 'mjd', 'band', 'flux', 'fluxerr', 'is_source' ]:
-        assert sum( len( res[pkey][i] ) for i in range(4) ) == 91
-    assert sum( sum( res['is_source'][i] ) for i in range(4) ) == 3
-
-    res = fastdb_client.post( '/ltcv/gethottransients',
-                              json={ 'processing_version': procver.description,
-                                     'detected_in_last_days': 3.,
-                                     'mjd_now': 60328.,
-                                     'source_patch': True,
-                                     'include_hostinfo': True,
-                                     'return_format': 2 } )
-    assert set( res.keys() ) == { 'objectid', 'ra', 'dec', 'zp', 'redshift', 'sncode',
-                                  'mjd', 'band', 'flux', 'fluxerr', 'is_source',
-                                  'hostgal_petroflux_r', 'hostgal_petroflux_r_err',
-                                  'hostgal_stdcolor_u_g', 'hostgal_stdcolor_g_r', 'hostgal_stdcolor_r_i',
-                                  'hostgal_stdcolor_i_z', 'hostgal_stdcolor_z_y', 'hostgal_stdcolor_u_g_err',
-                                  'hostgal_stdcolor_g_r_err', 'hostgal_stdcolor_r_i_err',
-                                  'hostgal_stdcolor_i_z_err', 'hostgal_stdcolor_z_y_err',
-                                  'hostgal_snsep', 'hostgal_pzmean', 'hostgal_pzstd' }
+    df, _ = ltcv.get_hot_ltcvs( 'pvc_pv1', mjd_now=60031, source_patch=True )
+    res = fastdb_client.post( '/ltcv/gethottransients', json={ 'processing_version': 'pvc_pv1',
+                                                               'mjd_now': 60031,
+                                                               'source_patch': True } )
+    _compare_direct_to_webap( df, res )

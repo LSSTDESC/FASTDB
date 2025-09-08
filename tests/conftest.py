@@ -65,13 +65,16 @@ def procver_collection():
                 raise RuntimeError( "procver_collection fixture can't proceed, default processing version "
                                     "alias already exists" )
 
-            bpvs['bpv1'] = BaseProcessingVersion( id=uuid.uuid4(), description='pvc_bpv1' )
-            bpvs['bpv1a'] = BaseProcessingVersion( id=uuid.uuid4(), description='pvc_bpv1a' )
-            bpvs['bpv1b'] = BaseProcessingVersion( id=uuid.uuid4(), description='pvc_bpv1b' )
-            bpvs['bpv2'] = BaseProcessingVersion( id=uuid.uuid4(), description='pvc_bpv2' )
-            bpvs['bpv2a'] = BaseProcessingVersion( id=uuid.uuid4(), description='pvc_bpv2a' )
-            bpvs['bpv3'] = BaseProcessingVersion( id=uuid.uuid4(), description='pvc_bpv3' )
-            bpvs['realtime'] = BaseProcessingVersion( id=uuid.uuid4(), description='realtime' )
+            # Gotta hardcode the uuids so that they will match when we do a pg_restore
+            #  in the fixtures/alertycle.py::alerts_90days_sent_received_and_imported fixture
+            bpvs['bpv1'] = BaseProcessingVersion( id='7379926d-9825-4b1b-9dc8-d00cb043ea3e', description='pvc_bpv1' )
+            bpvs['bpv1a'] = BaseProcessingVersion( id='0b2c33ad-aa8e-4344-9da6-925c9f826269', description='pvc_bpv1a' )
+            bpvs['bpv1b'] = BaseProcessingVersion( id='1fbe60a1-4bab-454b-9598-dbac51d36adb', description='pvc_bpv1b' )
+            bpvs['bpv2'] = BaseProcessingVersion( id='eaad2a77-cab3-40d7-8f4b-c3f1b76af91c', description='pvc_bpv2' )
+            bpvs['bpv2a'] = BaseProcessingVersion( id='dc87f7a2-c313-496a-89ae-d85329e23b1a', description='pvc_bpv2a' )
+            bpvs['bpv3'] = BaseProcessingVersion( id='e074266d-4a1c-4045-b04b-deac609f5eb6', description='pvc_bpv3' )
+            bpvs['realtime'] = BaseProcessingVersion( id='46bffce7-7098-4261-ae32-0c9d78cd3c42',
+                                                      description='realtime' )
             for bpv in bpvs.values():
                 bpv.insert( dbcon=con, nocommit=True, refresh=False )
 

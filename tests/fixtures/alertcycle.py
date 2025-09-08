@@ -171,7 +171,7 @@ def alerts_60moredays_sent_and_brokermessage_consumed( barf, alerts_60moredays_s
 
 # This next fixture assumes that the root_diaobject, diaobject,
 #   host_galaxy, diasource, and diaforcedsource tables all start empty,
-#   and completely wipes them out at the end.  Don't use it if that
+#   and completely wipes them out.  Don't use it if that
 #   assumption doesn't hold.
 #
 # (In particular, don't use this with any other fixture that
@@ -184,6 +184,16 @@ def alerts_60moredays_sent_and_brokermessage_consumed( barf, alerts_60moredays_s
 @pytest.fixture( scope='module' )
 def alerts_90days_sent_received_and_imported( procver_collection ):
     try:
+        # We have to wipe out the database because we're about to restore it!
+        with db.DB() as conn:
+            cursor = conn.cursor()
+            cursor.execute( "DELETE FROM diaforcedsource" )
+            cursor.execute( "DELETE FROM diasource" )
+            cursor.execute( "DELETE FROM diaobject" )
+            cursor.execute( "DELETE FROM root_diaobject" )
+            cursor.execute( "DELETE FROM host_galaxy" )
+            conn.commit()
+
         args = [ 'pg_restore', '-h', 'postgres', '-U', 'postgres', '-d', 'fastdb', '-a',
                  'elasticc2_test_data/alerts_90days_sent_received_and_imported.pgdump' ]
         res = subprocess.run( args, env={ 'PGPASSWORD': 'fragile'}, capture_output=True )
@@ -216,7 +226,10 @@ def alerts_90days_sent_received_and_imported( procver_collection ):
 # we ran it and pg_dumped the results, which the fixture above loads.
 #
 # To regenerate the data file, comment out the fixture above, uncomment
-# the fixture below, run a test that uses this fixture with --trace,
+# the fixture below, run
+#
+#   pytest --trace -v test_alertcycle.py::test_full90days
+#
 # and once the fixture finishes and you're dumped into pdb at the beginning
 # of the test, run:
 #
@@ -233,7 +246,7 @@ def alerts_90days_sent_received_and_imported( procver_collection ):
 #     from services.dr_importer import DRImporter
 #     collection_name = f'fastdb_{barf}'
 #     try:
-#         si = SourceImporter( bpv['realtime'].id )
+#         si = SourceImporter( bpv['realtime'].id, bpv['realtime'].id )
 #         with db.MG() as mongoclient:
 #             collection = db.get_mongo_collection( mongoclient, collection_name )
 #             nobj, nroot, nsrc, nfrc = si.import_from_mongo( collection )

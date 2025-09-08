@@ -181,7 +181,7 @@ class GetHotTransients( BaseView ):
     optional):
 
        processing_version : str
-         The processing version or alias.  If not given, assumes "default"
+         The processing version or alias.  If not given, uses "default".
 
        return fromat : int
          Specifies the format of the data returned; see below.  If not given,
@@ -219,7 +219,8 @@ class GetHotTransients( BaseView ):
          return_format = 0:
             Returns a list of dictionaries.  Each row corresponds to a single
             detected transients, and will have keys:
-               objectid : string UUID
+               rootid : string UUID
+               diaobjectid : bigint
                ra : float, ra of the object
                dec : float, dec of the object
                zp : float, always 31.4
@@ -261,12 +262,16 @@ class GetHotTransients( BaseView ):
             would have been in the elements of the 'photometry' dictionary in
             return_format 1.
 
+            WARNING NOT TESTED.
+
          return_format = 2:
             Returns a dict.  Each value of the dict is a list, and all lists
             have the same number of values.  Each element of each list corresponds
             to a single transient, and they're all ordered the same.  The keys of
             the top-level dictionary are the same as the keys of each row in
             return_format 1.
+
+            WARNING NOT TESTED.
 
          Both return formats 1 and 2 can be loaded directly into a pandas data
          frame, though polars might work better because it has better direct
@@ -314,7 +319,8 @@ class GetHotTransients( BaseView ):
         if ( return_format == 0 ) or ( return_format == 1 ):
             sne = []
         elif ( return_format == 2 ):
-            sne = { 'objectid': [],
+            sne = { 'rootid': [],
+                    'diaobjectid': [],
                     'ra': [],
                     'dec': [],
                     'mjd': [],
@@ -361,7 +367,8 @@ class GetHotTransients( BaseView ):
                 if hostdf is not None:
                     subhostdf = hostdf.xs( objid )
                 if ( return_format == 0 ) or ( return_format == 1 ):
-                    toadd = { 'objectid': str(objid),
+                    toadd = { 'rootid': str(objid),
+                              'diaobjectid': subdf.diaobjectid.values[0],
                               'ra': subdf.ra.values[0],
                               'dec': subdf.dec.values[0],
                               'zp': 31.4,
