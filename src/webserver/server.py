@@ -36,12 +36,9 @@ class GetProcVers( BaseView ):
     def do_the_things( self ):
         # global app
 
-        with db.DB() as con:
-            cursor = con.cursor()
-            cursor.execute( "SELECT description FROM processing_version" )
-            pvrows = cursor.fetchall()
-            cursor.execute( "SELECT description FROM processing_version_alias" )
-            alrows = cursor.fetchall()
+        with db.DBCon() as con:
+            pvrows, _ = con.execute( "SELECT description FROM processing_version" )
+            alrows, _ = con.execute( "SELECT description FROM processing_version_alias" )
 
         rows = [ r[0] for r in ( pvrows + alrows ) ]
         rows.sort()
@@ -60,44 +57,28 @@ class ProcVer( BaseView ):
         # global app
         # app.logger.debug( f"In ProcVer with procver={procver}" )
 
-        pvid = None
-        with db.DB() as con:
-            cursor = con.cursor()
-            try:
-                intpv = int(procver)
-                cursor.execute( "SELECT id FROM processing_version WHERE id=%(pv)s", { 'pv': intpv } )
-                rows = cursor.fetchall()
-                if len(rows) > 0:
-                    pvid = rows[0][0]
-            except Exception:
-                pass
+        with db.DBCon() as con:
+            pvid = db.ProcessingVersion.procver_id( procver, dbcon=con )
             if pvid is None:
-                cursor.execute( "SELECT id FROM processing_version WHERE description=%(pv)s", { 'pv': procver } )
-                row = cursor.fetchone()
-                if row is not None:
-                    pvid = row[0]
-            if pvid is None:
-                cursor.execute( "SELECT id FROM processing_version_alias "
-                                "WHERE description=%(pv)s ORDER BY description ",
-                                { 'pv': procver } )
-                row = cursor.fetchone()
-                if row is not None:
-                    pvid = row[0]
+                return f"Unknown processing version {procver}", 500
 
-            if pvid is None:
-                return f"Unknonw processing version {procver}", 500
+            retval = { 'status': 'ok', 'id': None, 'description': None, 'aliases': [], 'base_procvers': [] }
+            row, _ = con.execute( "SELECT id,description FROM processing_version WHERE id=%(pv)s", { 'pv': pvid } )
+            retval['id'] = row[0][0]
+            retval['description'] = row[0][1]
 
-            retval = { 'status': 'ok', 'id': None, 'description': None, 'aliases': [] }
-            cursor.execute( "SELECT id,description FROM processing_version WHERE id=%(pv)s", { 'pv': pvid } )
-            row = cursor.fetchone()
-            retval['id'] = row[0]
-            retval['description'] = row[1]
-            cursor.execute( "SELECT description FROM processing_version_alias WHERE id=%(pv)s", { 'pv': pvid } )
-            rows = cursor.fetchall()
+            rows, _ = con.execute( "SELECT description FROM processing_version_alias WHERE procver_id=%(pv)s",
+                                   { 'pv': pvid } )
             retval['aliases'] = [ r[0] for r in rows ]
+
+            rows, _ = con.execute( "SELECT description FROM base_processing_version b "
+                                   "INNER JOIN base_procver_of_procver j ON b.id=j.base_procver_id "
+                                   "WHERE j.procver_id=%(pv)s "
+                                   "ORDER BY j.priority DESC",
+                                   { 'pv': pvid } )
+            retval['base_procvers'] = [ r[0] for r in rows ]
+
             return retval
-
-
 
 
 # ======================================================================
