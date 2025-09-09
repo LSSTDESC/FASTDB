@@ -181,9 +181,9 @@ class GetHotTransients( BaseView ):
     optional):
 
        processing_version : str
-         The processing version or alias.  If not given, uses "default".
+         The processing version or alias.  If not given, uses "realtime".
 
-       return fromat : int
+       return format : int
          Specifies the format of the data returned; see below.  If not given,
          assumes 0.
 
@@ -306,7 +306,7 @@ class GetHotTransients( BaseView ):
 
         kwargs = {}
         if 'procesing_version' not in data:
-            kwargs['processing_version'] = 'default'
+            kwargs['processing_version'] = 'realtime'
         kwargs.update( data )
         if 'return_format' in kwargs:
             return_format = kwargs['return_format']
