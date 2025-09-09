@@ -482,7 +482,7 @@ def object_search( processing_version='default', object_processing_version=None,
           processing_version, some object_processing_versions shouldn't
           really be considered.  There's no _quick_ automatic way to
           figure that out, so allow passing that to make the first
-          diaboject cut more efficient.
+          diaobject cut more efficient.
 
           (Notice that a None here behaves differently than a None
           passed to object_ltcv.
@@ -804,20 +804,22 @@ def object_search( processing_version='default', object_processing_version=None,
                 con.execute_nofetch( f"ALTER TABLE {nexttable} ADD PRIMARY KEY (diaobjectid)", explain=False )
             subdict = { 'pv': procver, 't0': window_t0, 't1': window_t1 }
             q = ( f"/*+ IndexScan(src idx_diasource_diaobjectid) */\n"
-                  f"SELECT diaobjectid,ra,dec,numdetinwindow INTO TEMP TABLE objsearch_windowdet FROM (\n"
-                  f"  SELECT o.diaobjectid, o.ra, o.dec, COUNT(s.visit) AS numdetinwindow\n"
-                  f"  FROM {nexttable} o\n"
-                  f"  INNER JOIN (\n"
-                  f"    SELECT DISTINCT ON (src.diaobjectid,src.visit) src.diaobjectid,src.visit,src.midpointmjdtai "
-                  f"    FROM diasource src "
+                  f"SELECT diaobjectid, ra, dec, numdetinwindow\n"
+                  f"INTO TEMP TABLE objsearch_windowdet\n"
+                  f"FROM (\n"
+                  f"  SELECT o.diaobjectid,o.ra,o.dec,COUNT(s.visit) AS numdetinwindow\n"
+                  f"  FROM (\n"
+                  f"    SELECT DISTINCT ON (o.diaobjectid,s.visit) o.diaobjectid, o.ra, o.dec, s.visit\n"
+                  f"    FROM {nexttable} o\n"
+                  f"    INNER JOIN diasource s ON s.diaobjectid=o.diaobjectid \n"
                   f"    INNER JOIN base_procver_of_procver pv ON src.base_procver_id=pv.base_procver_id\n"
                   f"           AND pv.procver_id=%(pv)s\n"
                   f"    ORDER BY src.diaobjectid, src.visit, pv.priority DESC\n"
-                  f"  ) s ON o.diaobjectid=s.diaobjectid\n"
-                  f"  WHERE s.midpointmjdtai>=%(t0)s AND s.midpointmjdtai<=%(t1)s\n" )
+                  f"    WHERE s.midpointmjdtai>=%(t0)s AND s.midpointmjdtai<=%(t1)s\n" )
             if statbands is not None:
                 q += "     AND s.band=ANY(%(bands)s)\n"
-            q += ( "  GROUP BY o.diaobjectid, o.ra, o.dec\n"
+            q += ( "  ) subsubq\n"
+                   "  GROUP BY o.diaobjectid, o.ra, o.dec\n"
                    ") subq\n" )
             _and = "WHERE"
             if min_window_numdetections is not None:
@@ -836,7 +838,7 @@ def object_search( processing_version='default', object_processing_version=None,
             addlfields.append( "numdetinwindow" )
 
 
-        # First pass cut that has any detection with (min(minfirst,minlast) < t < max(maxfirst,maxlast)
+        # First pass cut that has *any* detection with (min(minfirst,minlast) < t < max(maxfirst,maxlast)
         #   to try to cut down the total size of stuff to think about in our next big join
         # TODO : also thing about adding magnitude cuts here!  May not
         #   be worth it since we don't have indexes on fluxes.  (Maybe we should?)  (No way.)
@@ -854,29 +856,26 @@ def object_search( processing_version='default', object_processing_version=None,
             else:
                 q += "\n"
             q += ( f"  FROM {nexttable} o\n"
-                   f"  INNER JOIN (\n"
-                   f"    SELECT DISTINCT ON (src.diaobjectid,src.visit) src.*\n"
-                   f"    FROM diasource src\n"
-                   f"    INNER JOIN base_procver_of_procver pv ON src.base_procver_id=pv.base_procver_id\n"
-                   f"      AND pv.procver_id=%(pv)s\n" )
+                   f"  INNER JOIN diasource s ON o.diaobjectid=s.diaobjectid\n"
+                   f"  INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id\n"
+                   f"    AND pv.procver_id=%(pv)s\n" )
             _and = "WHERE"
             if ( mint_firstdetection is not None ) or ( mint_lastdetection is not None ):
-                q += f"    {_and} src.midpointmjdtai>=%(mint)s\n"
+                q += f"  {_and} s.midpointmjdtai>=%(mint)s\n"
                 subdict['mint'] = ( mint_firstdetection if mint_lastdetection is None
                                     else mint_lastdetection if mint_firstdetection is None
                                     else min( mint_firstdetection, mint_lastdetection ) )
                 _and = "  AND"
             if ( maxt_firstdetection is not None ) or ( maxt_lastdetection is not None ):
-                q += f"    {_and} src.midpointmjdtai<=%(maxt)s\n"
+                q += f"  {_and} s.midpointmjdtai<=%(maxt)s\n"
                 subdict['maxt'] = ( maxt_firstdetection if maxt_lastdetection is None
                                     else maxt_lastdetection if maxt_firstdetection is None
                                     else max( maxt_firstdetection, maxt_lastdetection ) )
                 _and = "  AND"
             if statbands is not None:
-                q += f"   {_and} src.band=ANY(%(bands)s)\n"
+                q += f"  {_and} s.band=ANY(%(bands)s)\n"
                 subdict['bands'] = statbands
-            q += ( "    ORDER BY src.diaobjectid,src.visit, pv.priority DESC\n"
-                   "  ) s ON o.diaobjectid=s.diaobjectid\n"
+            q += ( "  ORDER BY o.diaobjectid,\n"           # s.visit, pv.priority DESC\n"
                    ") subq\n" )
             con.execute_nofetch( q, subdict )
             # ****
@@ -895,93 +894,100 @@ def object_search( processing_version='default', object_processing_version=None,
         q = ( "/*+ IndexScan(src idx_diasource_diaobjectid) */\n"
               "SELECT * INTO TEMP TABLE objsearch_stattab FROM (\n"
               "  SELECT DISTINCT ON (diaobjectid)\n"
-              "         o.diaobjectid,o.ra,o.dec,\n" )
+              "         diaobjectid,ra,dec,\n" )
         if len(addlfields) > 0:
-            q += f"         {','.join( [f'o.{x}' for x in addlfields] )},\n"
-        q += ( f"         NULL::integer as numdet,\n"
-               f"         s.midpointmjdtai AS firstdetmjd, s.band AS firstdetband,\n"
-               f"         s.psfflux AS firstdetflux, s.psffluxerr AS firstdetfluxerr,\n"
-               f"         NULL::double precision as lastdetmjd, NULL::text as lastdetband,\n"
-               f"         NULL::double precision as lastdetflux, NULL::double precision as lastdetfluxerr,\n"
-               f"         NULL::double precision as maxdetmjd, NULL::text as maxdetband,\n"
-               f"         NULL::double precision as maxdetflux, NULL::double precision as maxdetfluxerr\n"
-               f"  FROM {nexttable} o\n"
-               f"  INNER JOIN (\n"
-               f"    SELECT DISTINCT ON (src.diaobjectid,src.visit) src.*\n"
-               f"    FROM diasource src\n"
-               f"    INNER JOIN base_procver_of_procver pv ON src.base_procver_id=pv.base_procver_id\n"
-               f"      AND pv.procver_id=%(pv)s\n" )
+            q += f"         {','.join(addlfields)},\n"
+        q += ( "         NULL::integer as numdet,\n"
+               "         midpointmjdtai AS firstdetmjd, band AS firstdetband,\n"
+               "         psfflux AS firstdetflux, psffluxerr AS firstdetfluxerr,\n"
+               "         NULL::double precision as lastdetmjd, NULL::text as lastdetband,\n"
+               "         NULL::double precision as lastdetflux, NULL::double precision as lastdetfluxerr,\n"
+               "         NULL::double precision as maxdetmjd, NULL::text as maxdetband,\n"
+               "         NULL::double precision as maxdetflux, NULL::double precision as maxdetfluxerr\n"
+               "  FROM (\n"
+               "    SELECT diaobjectid, ra, dec, midpointmjdtai, band, psfflux, psffluxerr\n" )
+        if len(addlfields) > 0:
+            q += f",{','.join(addlfields)},\n"
+        q += ( "    FROM (\n"
+               "      SELECT DISTINCT ON (o.diaobjectid,s.visit) o.diaobjectid, o.ra, o.dec,\n"
+               "                                                 s.midpointmjdtai, s.band, s.psfflux, s.psffluxerr\n"
+              )
+        if len(addlfields):
+            q += f",{','.join( [ f'o.{x}' for x in addlfields ] )}"
+        q += ( f"      FROM {nexttable} o\n"
+               f"      INNER JOIN diasource s ON o.diaobjectid=s.diaobjectid\n"
+               f"      INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id\n"
+               f"        AND pv.procver_id=%(pv)s\n" )
         _and = "WHERE"
         if statbands is not None:
             subdict['bands'] = statbands
-            q += f"    {_and} src.band=ANY(%(bands)s)\n"
+            q += f"      {_and} s.band=ANY(%(bands)s)\n"
             _and = "  AND"
         if mjd_now is not None:
             subdict['mjdnow'] = mjd_now
-            q += f"    {_and} src.midpointmjdtai<=%(mjdnow)s\n"
+            q += f"      {_and} s.midpointmjdtai<=%(mjdnow)s\n"
             _and = "  AND"
-        q += ( "    ORDER BY src.diaobjectid, src.visit, pv.priority DESC\n"
-               "  ) s ON o.diaobjectid=s.diaobjectid\n"
-               "  ORDER BY o.diaobjectid, s.midpointmjdtai\n"
-               ") subq" )
+        q += ( "      ORDER BY o.diaobjectid, s.visit, pv.priority DESC\n"
+               "    ) subsubq\n"
+               "    ORDER BY diaobjectid, midpointmjdtai\n"
+               "  ) subq\n"
+               ") outersubq" )
         con.execute_nofetch( q, subdict )
 
         # Add in last detection
         q = ( f"/*+ IndexScan(src idx_diasource_diaobjectid) */\n"
-              f"UPDATE objsearch_stattab o\n"
+              f"UPDATE objsearch_stattab ost\n"
               f"SET lastdetmjd=midpointmjdtai, lastdetband=band,\n"
               f"    lastdetflux=psfflux, lastdetfluxerr=psffluxerr\n"
               f"FROM (\n"
-              f"  SELECT DISTINCT ON (o.diaobjectid) o.diaobjectid,\n"
-              f"                                     s.midpointmjdtai, s.band,\n"
-              f"                                     s.psfflux, s.psffluxerr\n"
-              f"  FROM {nexttable} o\n"
-              f"  INNER JOIN (\n"
-              f"    SELECT DISTINCT ON (src.diaobjectid,src.visit) src.*\n"
-              f"    FROM diasource src\n"
-              f"    INNER JOIN base_procver_of_procver pv ON src.base_procver_id=pv.base_procver_id\n"
+              f"  SELECT DISTINCT ON (diaobjectid) diaobjectid, midpointmjdtai, band, psfflux, psffluxerr\n"
+              f"  FROM (\n"
+              f"    SELECT DISTINCT ON (o.diaobjectid, s.visit) o.diaobjectid, s.midpointmjdtai,\n"
+              f"                                                s.band, s.psfflux, s.psffluxerr\n"
+              f"    FROM {nexttable} o\n"
+              f"    INNER JOIN diasource s ON o.diaobjectid=s.diaobjectid\n"
+              f"    INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id\n"
               f"      AND pv.procver_id=%(pv)s\n" )
         _and = "WHERE"
         if statbands is not None:
-            q += f"    {_and} src.band=ANY(%(bands)s)\n"
+            q += f"    {_and} s.band=ANY(%(bands)s)\n"
             _and = "  AND"
         if mjd_now is not None:
-            q += f"    {_and} src.midpointmjdtai<=%(mjdnow)s\n"
+            q += f"    {_and} s.midpointmjdtai<=%(mjdnow)s\n"
             _and = "  AND"
-        q += ( "    ORDER BY src.diaobjectid, src.visit, pv.priority DESC\n"
-               "  ) s ON o.diaobjectid=s.diaobjectid\n"
-               "  ORDER BY o.diaobjectid, s.midpointmjdtai DESC\n"
+        q += ( "    ORDER BY o.diaobjectid, s.visit, pv.priority DESC\n"
+               "  ) subsubq\n"
+               "  ORDER BY diaobjectid, midpointmjdtai DESC\n"
                ") subq\n"
-               "WHERE subq.diaobjectid=o.diaobjectid" )
+               "WHERE subq.diaobjectid=ost.diaobjectid" )
         con.execute_nofetch( q, subdict )
 
         # Add in max detection
-        q = ( f"/*+ IndexScan(src idx_diasource_diobjectid) */\n"
-              f"UPDATE objsearch_stattab o\n"
-              f"SET maxdetmjd=midpointmjdtai, maxdetband=band,\n"
-              f"    maxdetflux=psfflux, maxdetfluxerr=psffluxerr\n"
+        q = ( f"/*+ IndexScan(src idx_diasource_diaobjectid) */\n"
+              f"UPDATE objsearch_stattab ost\n"
+              f"SET lastdetmjd=midpointmjdtai, lastdetband=band,\n"
+              f"    lastdetflux=psfflux, lastdetfluxerr=psffluxerr\n"
               f"FROM (\n"
-              f"  SELECT DISTINCT ON (o.diaobjectid) o.diaobjectid,\n"
-              f"                                     s.midpointmjdtai, s.band,\n"
-              f"                                     s.psfflux, s.psffluxerr\n"
-              f"  FROM {nexttable} o\n"
-              f"  INNER JOIN (\n"
-              f"    SELECT DISTINCT ON (src.diaobjectid,src.visit) src.*\n"
-              f"    FROM diasource src\n"
-              f"    INNER JOIN base_procver_of_procver pv ON src.base_procver_id=pv.base_procver_id\n"
+              f"  SELECT DISTINCT ON (diaobjectid) diaobjectid, midpointmjdtai, band, psfflux, psffluxerr\n"
+              f"  FROM (\n"
+              f"    SELECT DISTINCT ON (o.diaobjectid, s.visit) o.diaobjectid, s.midpointmjdtai,\n"
+              f"                                                s.band, s.psfflux, s.psffluxerr\n"
+              f"    FROM {nexttable} o\n"
+              f"    INNER JOIN diasource s ON o.diaobjectid=s.diaobjectid\n"
+              f"    INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id\n"
               f"      AND pv.procver_id=%(pv)s\n" )
         _and = "WHERE"
         if statbands is not None:
-            q += f"    {_and} src.band=ANY(%(bands)s)\n"
+            q += f"    {_and} s.band=ANY(%(bands)s)\n"
             _and = "  AND"
         if mjd_now is not None:
-            q += f"    {_and} src.midpointmjdtai<=%(mjdnow)s\n"
+            q += f"    {_and} s.midpointmjdtai<=%(mjdnow)s\n"
             _and = "  AND"
-        q += ( "    ORDER BY src.diaobjectid, src.visit, pv.priority DESC\n"
-               "  ) s ON o.diaobjectid=s.diaobjectid\n"
-               "  ORDER BY o.diaobjectid, s.psfflux DESC\n"
+        q += ( "    ORDER BY o.diaobjectid, s.visit, pv.priority DESC\n"
+               "  ) subsubq\n"
+               "  ORDER BY diaobjectid, psfflux DESC\n"
                ") subq\n"
-               "WHERE subq.diaobjectid=o.diaobjectid" )
+               "WHERE subq.diaobjectid=ost.diaobjectid" )
         con.execute_nofetch( q, subdict )
 
         # Add in number of detections
@@ -989,23 +995,23 @@ def object_search( processing_version='default', object_processing_version=None,
               f"UPDATE objsearch_stattab o\n"
               f"SET numdet=n "
               f"FROM (\n"
-              f"  SELECT o.diaobjectid, COUNT(s.midpointmjdtai) AS n\n"
-              f"  FROM {nexttable} o\n"
-              f"  INNER JOIN (\n"
-              f"    SELECT DISTINCT ON (src.diaobjectid,src.visit) src.*\n"
-              f"    FROM diasource src\n"
-              f"    INNER JOIN base_procver_of_procver pv ON src.base_procver_id=pv.base_procver_id\n"
+              f"  SELECT diaobjectid, COUNT(visit) AS n\n"
+              f"  FROM (\n"
+              f"    SELECT DISTINCT ON (o.diaobjectid, s.visit) o.diaobjectid, s.visit\n"
+              f"    FROM {nexttable} o\n"
+              f"    INNER JOIN diasource s ON s.diaobjectid=o.diaobjectid\n"
+              f"    INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id\n"
               f"      AND pv.procver_id=%(pv)s\n" )
         _and = "WHERE"
         if statbands is not None:
-            q += f"    {_and} src.band=ANY(%(bands)s)\n"
+            q += f"    {_and} s.band=ANY(%(bands)s)\n"
             _and = "  AND"
         if mjd_now is not None:
-            q += f"    {_and} src.midpointmjdtai<=%(mjdnow)s\n"
+            q += f"    {_and} s.midpointmjdtai<=%(mjdnow)s\n"
             _and = "  AND"
-        q += ( "    ORDER BY src.diaobjectid, src.visit, pv.priority DESC\n"
-               "  ) s ON o.diaobjectid=s.diaobjectid\n"
-               "  GROUP BY o.diaobjectid\n"
+        q += ( "    ORDER BY o.diaobjectid, s.visit, pv.priority DESC\n"
+               "  ) subsubq\n"
+               "  GROUP BY diaobjectid\n"
                ") subq\n"
                "WHERE subq.diaobjectid=o.diaobjectid" )
         con.execute_nofetch( q, subdict )
@@ -1082,25 +1088,25 @@ def object_search( processing_version='default', object_processing_version=None,
         # Get the last forced source
         q = ( f"/*+ IndexScan(frc idx_diaforcedsource_diaobjectid ) */\n"
               f"SELECT * INTO TEMP TABLE objsearch_final FROM (\n"
-              f"  SELECT DISTINCT ON (t.diaobjectid) t.*,\n"
-              f"      f.psfflux AS lastforcedflux, f.psffluxerr AS lastforcedfluxerr,\n"
-              f"      f.midpointmjdtai AS lastforcedmjd, f.band AS lastforcedband\n"
-              f"  FROM {nexttable} t\n"
-              f"  INNER JOIN (\n"
-              f"    SELECT DISTINCT ON (frc.diaobjectid,frc.visit) frc.*\n"
-              f"    FROM diaforcedsource frc\n"
-              f"    INNER JOIN base_procver_of_procver pv ON frc.base_procver_id=pv.base_procver_id\n"
+              f"  SELECT DISTINCT ON (diaobjectid) *\n"
+              f"  FROM (\n"
+              f"    SELECT DISTINCT ON (t.diaobjectid, f.visit) t.*,\n"
+              f"        f.psfflux AS lastforcedflux, f.psffluxerr AS lastforcedfluxerr,\n"
+              f"        f.midpointmjdtai AS lastforcedmjd, f.band AS lastforcedband\n"
+              f"    FROM {nexttable} t\n"
+              f"    INNER JOIN diaforcedsource f ON f.diaobjectid=t.diaobjectid\n"
+              f"    INNER JOIN base_procver_of_procver pv ON f.base_procver_id=pv.base_procver_id\n"
               f"      AND pv.procver_id=%(pv)s\n" )
         _and = "WHERE"
         if statbands is not None:
-            q += f"    {_and} frc.band=ANY(%(bands)s)\n"
+            q += f"    {_and} f.band=ANY(%(bands)s)\n"
             _and = "  AND"
         if mjd_now is not None:
-            q += f"    {_and} frc.midpointmjdtai<=%(mjdnow)s\n"
+            q += f"    {_and} f.midpointmjdtai<=%(mjdnow)s\n"
             _and = "  AND"
-        q += ( "    ORDER BY frc.diaobjectid, frc.visit, pv.priority DESC\n"
-               "  ) f ON f.diaobjectid=t.diaobjectid\n"
-               "  ORDER BY t.diaobjectid, f.midpointmjdtai DESC\n"
+        q += ( "    ORDER BY t.diaobjectid, f.visit, pv.priority DESC\n"
+               "  ) subsubq\n"
+               "  ORDER BY diaobjectid, lastforcedmjd DESC\n"
                ") subq" )
         con.execute_nofetch( q, subdict )
         debug_count_temp_table( con, 'objsearch_final' )
