@@ -453,7 +453,6 @@ def object_ltcv( processing_version='default', diaobjectid=None,
 
     elif return_format == 'json':
         rval = rval[ list(rval.keys())[0] ]
-        del rval['rootid']
         return rval
 
 
@@ -807,19 +806,19 @@ def object_search( processing_version='default', object_processing_version=None,
                   f"SELECT diaobjectid, ra, dec, numdetinwindow\n"
                   f"INTO TEMP TABLE objsearch_windowdet\n"
                   f"FROM (\n"
-                  f"  SELECT o.diaobjectid,o.ra,o.dec,COUNT(s.visit) AS numdetinwindow\n"
+                  f"  SELECT diaobjectid,ra,dec,COUNT(visit) AS numdetinwindow\n"
                   f"  FROM (\n"
                   f"    SELECT DISTINCT ON (o.diaobjectid,s.visit) o.diaobjectid, o.ra, o.dec, s.visit\n"
                   f"    FROM {nexttable} o\n"
                   f"    INNER JOIN diasource s ON s.diaobjectid=o.diaobjectid \n"
-                  f"    INNER JOIN base_procver_of_procver pv ON src.base_procver_id=pv.base_procver_id\n"
+                  f"    INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id\n"
                   f"           AND pv.procver_id=%(pv)s\n"
-                  f"    ORDER BY src.diaobjectid, src.visit, pv.priority DESC\n"
-                  f"    WHERE s.midpointmjdtai>=%(t0)s AND s.midpointmjdtai<=%(t1)s\n" )
+                  f"    WHERE s.midpointmjdtai>=%(t0)s AND s.midpointmjdtai<=%(t1)s\n"
+                  f"    ORDER BY o.diaobjectid, s.visit, pv.priority DESC\n" )
             if statbands is not None:
                 q += "     AND s.band=ANY(%(bands)s)\n"
             q += ( "  ) subsubq\n"
-                   "  GROUP BY o.diaobjectid, o.ra, o.dec\n"
+                   "  GROUP BY diaobjectid, ra, dec\n"
                    ") subq\n" )
             _and = "WHERE"
             if min_window_numdetections is not None:
@@ -875,7 +874,7 @@ def object_search( processing_version='default', object_processing_version=None,
             if statbands is not None:
                 q += f"  {_and} s.band=ANY(%(bands)s)\n"
                 subdict['bands'] = statbands
-            q += ( "  ORDER BY o.diaobjectid,\n"           # s.visit, pv.priority DESC\n"
+            q += ( "  ORDER BY o.diaobjectid\n"           # , s.visit, pv.priority DESC\n"
                    ") subq\n" )
             con.execute_nofetch( q, subdict )
             # ****
@@ -907,12 +906,12 @@ def object_search( processing_version='default', object_processing_version=None,
                "  FROM (\n"
                "    SELECT diaobjectid, ra, dec, midpointmjdtai, band, psfflux, psffluxerr\n" )
         if len(addlfields) > 0:
-            q += f",{','.join(addlfields)},\n"
+            q += f",{','.join(addlfields)}\n"
         q += ( "    FROM (\n"
                "      SELECT DISTINCT ON (o.diaobjectid,s.visit) o.diaobjectid, o.ra, o.dec,\n"
                "                                                 s.midpointmjdtai, s.band, s.psfflux, s.psffluxerr\n"
               )
-        if len(addlfields):
+        if len(addlfields) > 0:
             q += f",{','.join( [ f'o.{x}' for x in addlfields ] )}"
         q += ( f"      FROM {nexttable} o\n"
                f"      INNER JOIN diasource s ON o.diaobjectid=s.diaobjectid\n"
@@ -965,8 +964,8 @@ def object_search( processing_version='default', object_processing_version=None,
         # Add in max detection
         q = ( f"/*+ IndexScan(src idx_diasource_diaobjectid) */\n"
               f"UPDATE objsearch_stattab ost\n"
-              f"SET lastdetmjd=midpointmjdtai, lastdetband=band,\n"
-              f"    lastdetflux=psfflux, lastdetfluxerr=psffluxerr\n"
+              f"SET maxdetmjd=midpointmjdtai, maxdetband=band,\n"
+              f"    maxdetflux=psfflux, maxdetfluxerr=psffluxerr\n"
               f"FROM (\n"
               f"  SELECT DISTINCT ON (diaobjectid) diaobjectid, midpointmjdtai, band, psfflux, psffluxerr\n"
               f"  FROM (\n"
