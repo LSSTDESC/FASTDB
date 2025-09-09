@@ -174,8 +174,7 @@ def many_object_ltcvs( processing_version='default', objids=None,
 
         If return_format is 'json', then you get back a dict of diaobjectid -> dict
         The inner dict has fields:
-          { 'rootid': uuid,
-            'visit': list of bigint,
+          { 'visit': list of bigint,
             'mjd': list of float,
             'band': list of str,
             'flux': list of float,
@@ -356,8 +355,7 @@ def many_object_ltcvs( processing_version='default', objids=None,
         retval = {}
         for objid in retframe.diaobjectid.unique():
             subf = retframe[ retframe.diaobjectid==objid  ]
-            thisretval = { 'rootid': subf.rootid.values[0],
-                           'visit': list( subf.visit.values ),
+            thisretval = { 'visit': list( subf.visit.values ),
                            'mjd': list( subf.mjd.values ),
                            'band': list( subf.band.values ),
                            'flux': list( subf.flux.values ),
