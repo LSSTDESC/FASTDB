@@ -223,111 +223,117 @@ def many_object_ltcvs( processing_version='default', objids=None,
     with db.DBCon( dbcon ) as con:
         pvid = db.ProcessingVersion.procver_id( processing_version, dbcon=con )
 
+        # For efficiency, we're going to make a first pass and extract just the object ids.
+        # If these are root ids, then we can't be sure which diaobjectid will correspond
+        # to them, so we will pull the *all* out.  (Think about this.  It's possible we
+        # could be doing something with the object's processing version, but consisder
+        # all the complicated messy cases.)
+
+        dbcon.execute( "CREATE TEMP TABLE tmp_objids( diaobjectid bigint )" )
+        if objfield == 'rootid':
+            q = sql.SQL(
+                """INSERT INTO tmp_objids (
+                     SELECT diaobjectid FROM diaobject
+                     WHERE rootid=ANY(%(roots)s)
+                   )
+                """
+            )
+            dbcon.execute( q, { 'roots': objids } )
+        else:
+            with dbcon.cursor.copy( "COPY temp_objids(diaobjectid) FROM STDIN" ) as copier:
+                for objid in objids:
+                    copier.write_row( [ objid ] )
+
+        # Extract detections
+        dbcon.execute( "CREATE_TEMP_TABLE tmp_sources( diaobjectid bigint, rootid uuid, visit bigint,"
+                       "                               mjd double precision, band text, flux real, fluxerr real,"
+                       "                               isdet bool, base_procver text )" )
+        q = sql.SQL(
+            """/*+ IndexScan(o idx_diaobject_diaobjectid)
+                   IndexScan(s idx_diasource_diaobjectid) */
+               SELECT DISTINCT ON (o.diaobjectid, s.visit)
+                 o.diaobjectid, o.rootid, s.visit, s.mjd, s.band, s.flux, s.fluxerr, TRUE as isdet, s.base_procver
+               INTO tmp_sources
+               FROM tmp_objids t
+               INNER JOIN diaobject o ON t.diaobjectid=o.diaobjectid
+               INNER JOIN diasource s ON s.diaobjectid=o.diaobjectid
+               INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id
+                                                    AND pv.procver_id={procver}
+               INNER JOIN base_processing_version p ON pv.base_procver_id=p.id
+            """
+        ).format( procver=pvid )
+        _and = "WHERE"
+        if mjd_now is not None:
+            q += sql.SQL( f"                   {_and} src.midpointmjdtai<={{t0}}" ).format( t0=mjd_now )
+            _and = "  AND"
+        if bands is not None:
+            q += sql.SQL( f"                   {_and} src.band=ANY(%(bands)s)" )
+            _and = "  AND"
+        q += sql.SQL(
+            """
+               ORDER BY o.diaobjectid, s.visit, pv.priority DESC
+            """ )
+        dbcon.execute( q )
+
         if which == 'detections':
-            q = sql.SQL(
-                """/*+ IndexScan(src idx_diasource_diaobjectid)
-                       IndexScan(o idx_diaobject_{objfield} */
-                SELECT o.diaobjectid, o.rootid, s.mjd, s.band, s.flux, s.fluxerr, TRUE as isdet, s.base_procver
-                FROM diaobject o
-                INNER JOIN (
-                  SELECT DISTINCT ON (src.diaobjectid, src.visit)
-                    src.diaobjectid, src.visit, src.midpointmjdtai AS mjd, src.band,
-                    src.psfflux AS flux, src.psffluxerr as fluxerr,
-                    p.description as base_procver
-                  FROM diasource src
-                  INNER JOIN base_procver_of_procver pv ON src.base_procver_id=pv.base_procver_id
-                                                       AND pv.procver_id={procver}
-                  INNER JOIN base_processing_version p ON pv.base_procver_id=p.id
-                """
-            ).format( objfield=sql.Identifier(objfield), procver=pvid )
-            _and = "WHERE"
-            if mjd_now is not None:
-                q += sql.SQL( f"            {_and} src.midpointmjdtai<={{t0}}" ).format( t0=mjd_now )
-                _and = "  AND"
-            if bands is not None:
-                q += sql.SQL( f"            {_and} src.band=ANY(%(bands)s)" )
-                _and = "  AND"
-            q += sql.SQL(
-                """
-                  ORDER BY src.diaobjectid, src.visit, pv.priority DESC
-                ) s ON s.diaobjectid=o.diaobjectid
-                WHERE o.{objfield}=ANY(%(objids)s)
-                ORDER BY o.diaobjectid, s.mjd
-                """
-            ).format( objfield=sql.Identifier(objfield), procver=pvid )
-            rows, cols = con.execute( q, { 'objids': objids, 'bands': bands } )
-            retframe = pandas.DataFrame( rows, columns=cols )
+            rows, cols = dbcon.execute( "SELECT * FROM tmp_sources" )
 
-        elif which in ( 'forced', 'patch' ):
+        else:
+            # Extract forced photometry if necessary
+            dbcon.execute( "CREATE_TEMP_TABLE tmp_forced( diaobjectid bigint, rootid uuid, visit bigint,"
+                           "                              mjd double precision, band text, flux real, fluxerr real,"
+                           "                              isdet bool, base_procver text )" )
             q = sql.SQL(
-                """/*+ IndexScan(src idx_diasource_diaobjectid)
-                       IndexScan(frc idx_diaforcedsource_diaobjectid)
-                       IndexScan(o idx_diaobject_{objfield} */
-                SELECT o.diaobjectid, o.rootid,
-                       CASE WHEN f.mjd IS NULL THEN s.mjd ELSE f.mjd END AS mjd,
-                       CASE WHEN f.band IS NULL THEN s.band ELSE f.band END AS band,
-                       CASE WHEN f.flux IS NULL THEN s.flux ELSE f.flux END AS flux,
-                       CASE WHEN f.fluxerr IS NULL THEN s.fluxerr ELSE f.fluxerr END AS fluxerr,
-                       CASE WHEN s.mjd IS NULL THEN FALSE ELSE TRUE END AS isdet,
-                       CASE WHEN f.mjd IS NULL THEN TRUE ELSE FALSE END AS ispatch,
-                       CASE WHEN f.base_procver IS NULL THEN s.base_procver ELSE f.base_procver END AS base_procver
-                FROM diaobject o
-                INNER JOIN (
-                  ( SELECT DISTINCT ON (src.diaobjectid, src.visit)
-                      src.diaobjectid, src.visit, src.midpointmjdtai AS mjd, src.band,
-                      src.psfflux AS flux, src.psffluxerr as fluxerr,
-                      p.description as base_procver
-                    FROM diasource src
-                    INNER JOIN base_procver_of_procver pv ON src.base_procver_id=pv.base_procver_id
-                                                         AND pv.procver_id={procver}
-                    INNER JOIN base_processing_version p ON pv.base_procver_id=p.id
+                """/*+ IndexScan(o idx_diaobject_diaobjectid)
+                       IndexScan(s idx_diaforcedsource_diaobjectid) */
+                   SELECT DISTINCT ON (o.diaobjectid, s.visit)
+                     o.diaobjectid, o.rootid, s.visit, s.mjd, s.band, s.flux, s.fluxerr, FALSE as isdet, s.base_procver
+                   INTO tmp_forced
+                   FROM tmp_objids t
+                   INNER JOIN diaobject o ON t.diaobjectid=o.diaobjectid
+                   INNER JOIN diaforcedsource s ON s.diaobjectid=o.diaobjectid
+                   INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id
+                                                        AND pv.procver_id={procver}
+                   INNER JOIN base_processing_version p ON pv.base_procver_id=p.id
                 """
-            ).format( objfield=sql.Identifier(objfield), procver=pvid )
+            ).format( procver=pvid )
             _and = "WHERE"
             if mjd_now is not None:
-                q += sql.SQL( f"                    {_and} src.midpointmjdtai<={{t0}}" ).format( t0=mjd_now )
+                q += sql.SQL( f"                   {_and} src.midpointmjdtai<={{t0}}" ).format( t0=mjd_now )
                 _and = "  AND"
             if bands is not None:
-                q += sql.SQL( f"            {_and} src.band=ANY(%(bands)s)" )
+                q += sql.SQL( f"                   {_and} src.band=ANY(%(bands)s)" )
                 _and = "  AND"
             q += sql.SQL(
                 """
-                    ORDER BY src.diaobjectid, src.visit, pv.priority DESC
-                  ) s
-                  FULL OUTER JOIN
-                  ( SELECT DISTINCT ON (frc.diaobjectid, frc.visit)
-                      frc.diaobjectid, frc.visit, frc.midpointmjdtai AS mjd, frc.band,
-                      frc.psfflux AS flux, frc.psffluxerr as fluxerr,
-                      p.description as base_procver
-                  FROM diaforcedsource frc
-                  INNER JOIN base_procver_of_procver pv ON frc.base_procver_id=pv.base_procver_id
-                                                       AND pv.procver_id={procver}
-                  INNER JOIN base_processing_version p ON pv.base_procver_id=p.id
-                """ ).format( objfield=sql.Identifier(objfield), procver=pvid )
-            _and = "WHERE"
-            if mjd_now is not None:
-                q += sql.SQL( f"                    {_and} frc.midpointmjdtai<={{t0}}" ).format( t0=mjd_now )
-                _and = "  AND"
-            if bands is not None:
-                q += sql.SQL( f"            {_and} frc.band=ANY(%(bands)s)" )
-                _and = "  AND"
-            q += sql.SQL(
-                """
-                    ORDER BY frc.diaobjectid, frc.visit, pv.priority DESC
-                  ) f ON f.diaobjectid=s.diaobjectid AND f.visit=s.visit
-                ) ON s.diaobjectid=o.diaobjectid OR f.diaobjectid=o.diaobjectid
-                WHERE o.{objfield}=ANY(%(objids)s)
-                ORDER BY o.diaobjectid, mjd
-                """
-            ).format( objfield=sql.Identifier(objfield), procver=pvid )
-            rows, cols = con.execute( q, { 'objids': objids, 'bands': bands } )
-            retframe = pandas.DataFrame( rows, columns=cols )
+                   ORDER BY o.diaobjectid, s.visit, pv.priority DESC
+                """ )
+            dbcon.execute( q )
 
+            if which == 'detections':
+                rows, cols = dbcon.execute( "SELECT * FROM tmp_sources" )
+
+            # Join detections to forced photometry to set the 'isdet' and 'ispatch' flags
+            q = sql.SQL(
+                """SELECT CASE WHEN f.diaojbectid IS NULL THEN s.diaobjectid ELSE f.diaobjectid END AS diaobjectid,
+                          CASE WHEN f.rootid IS NULL THEN s.rootid ELSE f.rootid END AS rootid,
+                          CASE WHEN f.mjd IS NULL THEN s.mjd ELSE f.mjd END AS mjd,
+                          CASE WHEN f.band IS NULL THEN s.band ELSE f.band END AS band,
+                          CASE WHEN f.flux IS NULL THEN s.flux ELSE f.flux END AS flux,
+                          CASE WHEN f.fluxerr IS NULL THEN s.fluxerr ELSE f.fluxerr END AS fluxerr,
+                          CASE WHEN s.mjd IS NULL THEN FALSE ELSE TRUE AS isdet,
+                          CASE WHEN f.mjd IS NULL THEN TRUE ELSE FALSE END as ispatch,
+                          CASE WHEN f.base_procver IS NULL THEN s.base_procver ELSE f.base_procver END AS base_procver
+                   FROM tmp_forced f
+                   FULL OUTER JOIN tmp_sources s ON f.diaobjectid=s.diaobjectid AND s.visit=f.visit
+                """)
             if which == 'forced':
-                # Remove the patches
-                if retframe.ispatch.any():
-                    retframe = retframe[ ~retframe.ispatch ]
-                retframe.drop( 'ispatch', axis='columns', inplace=True )
+                q += sql.SQL( "                   WHERE NOT ispatch" )
+            q += sql.SQL( "                   ORDER BY diaobjectid, mjd" )
+
+            rows, cols = dbcon.execute( q )
+
+    retframe = pandas.DataFrame( rows, columns=cols )
 
     if not include_base_procver:
         retframe.drop( 'base_procver', axis='columns', inplace=True )

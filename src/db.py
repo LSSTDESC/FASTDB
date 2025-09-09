@@ -28,7 +28,7 @@ import util
 # Set near the bottom of webserver/server.py, is DEBUG.)
 # We should replace them with configurable options.
 _echoqueries = True
-_alwaysexplain = False
+_alwaysexplain = True
 
 # The tables here should be in the order they safe to drop.
 # (Insofar as it's safe to drop all your tables....)

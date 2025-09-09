@@ -82,7 +82,7 @@ spec:
       volumes:
       - name: postgres
         persistentVolumeClaim:
-          claimName: fastdb-rknop-dev-postgres-pvc-20250222
+          claimName: fastdb-rknop-dev-postgres-pvc-20250909
       - name: secrets
         secret:
           defaultMode: 292

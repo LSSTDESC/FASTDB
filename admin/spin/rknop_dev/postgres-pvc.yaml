@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: fastdb-rknop-dev-postgres-pvc-20250222
+  name: fastdb-rknop-dev-postgres-pvc-20250909
   namespace: fastdb-rknop-dev
 spec:
   accessModes:
