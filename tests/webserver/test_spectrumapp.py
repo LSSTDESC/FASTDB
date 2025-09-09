@@ -12,7 +12,9 @@ import db
 
 
 @pytest.fixture
-def setup_wanted_spectra_etc( procver, alerts_90days_sent_received_and_imported, test_user ):
+def setup_wanted_spectra_etc( procver_collection, alerts_90days_sent_received_and_imported, test_user ):
+    bpvs, _pvs = procver_collection
+    rtbpv = bpvs['realtime']
     # Prime the database with some wanted spectra
     # Some objects of interest:
     #    1696949 — 5 detections, 5 forced
@@ -41,9 +43,9 @@ def setup_wanted_spectra_etc( procver, alerts_90days_sent_received_and_imported,
         with db.DB() as con:
             cursor = con.cursor()
             cursor.execute( "SELECT rootid,diaobjectid FROM diaobject "
-                            "WHERE diaobjectid=ANY(%(obj)s) AND processing_version=%(procver)s",
+                            "WHERE diaobjectid=ANY(%(obj)s) AND base_procver_id=%(procver)s",
                             { 'obj': [ 1696949, 1981540, 191776, 1747042, 1173200 ],
-                              'procver': procver.id } )
+                              'procver': rtbpv.id } )
             idmap = { r[1]: r[0] for r in cursor.fetchall() }
             assert len(idmap) == 5
 
@@ -204,10 +206,12 @@ def setup_spectrum_info( setup_wanted_spectra_etc ):
 
 
 
-def test_ask_for_spectra( procver, alerts_90days_sent_received_and_imported, fastdb_client ):
+def test_ask_for_spectra( procver_collection, alerts_90days_sent_received_and_imported, fastdb_client ):
+    _bpvs, pvs = procver_collection
+    rtpv = pvs['realtime']
     try:
         # Get some hot lightcurves
-        df, _hostdf = ltcv.get_hot_ltcvs( procver.description, mjd_now=60328., source_patch=True )
+        df, _hostdf = ltcv.get_hot_ltcvs( rtpv.description, mjd_now=60328., source_patch=True )
         assert df.midpointmjdtai.max() < 60328.
         assert len(df.rootid.unique()) == 14
         assert len(df) == 310

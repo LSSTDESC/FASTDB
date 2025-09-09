@@ -140,7 +140,9 @@ def what_spectra_are_wanted( procver='realtime', wantsince=None, requester=None,
         rows, _cols = con.execute( "SELECT COUNT(root_diaobject_id) FROM tmp_wanted" )
         if rows[0][0] == 0:
             logger.debug( "Empty table tmp_wanted" )
-            return { 'status': 'ok', 'wantedspectra': [] }
+            return pandas.DataFrame( [], columns=[ 'root_diaobject_id', 'requester', 'priority', 'diaobjectid',
+                                                   'ra', 'dec', 'src_mjd', 'src_band', 'src_mag',
+                                                   'frced_mjd', 'frced_band', 'frced_mag' ] )
         else:
             logger.debug( f"{rows[0][0]} rows in tmp_wanted" )
         if _show_way_too_much_debug_info:
@@ -177,7 +179,9 @@ def what_spectra_are_wanted( procver='realtime', wantsince=None, requester=None,
         row, _cols = con.execute( "SELECT COUNT(root_diaobject_id) FROM tmp_wanted_no_spec" )
         if row[0][0] == 0:
             logger.debug( "Empty table tmp_wanted_no_spec" )
-            return { 'status': 'ok', 'wantedspectra': [] }
+            return pandas.DataFrame( [], columns=[ 'root_diaobject_id', 'requester', 'priority', 'diaobjectid',
+                                                   'ra', 'dec', 'src_mjd', 'src_band', 'src_mag',
+                                                   'frced_mjd', 'frced_band', 'frced_mag' ] )
         else:
             logger.debug( f"{row[0][0]} rows in tmp_wanted_no_spec" )
         if _show_way_too_much_debug_info:
@@ -217,7 +221,9 @@ def what_spectra_are_wanted( procver='realtime', wantsince=None, requester=None,
         row, _cols = con.execute( "SELECT COUNT(root_diaobject_id) FROM tmp_wanted_detected" )
         if row[0][0] == 0:
             logger.debug( "Empty table tmp_wanted_detected" )
-            return { 'status': 'ok', 'wantedspectra': [] }
+            return pandas.DataFrame( [], columns=[ 'root_diaobject_id', 'requester', 'priority', 'diaobjectid',
+                                                   'ra', 'dec', 'src_mjd', 'src_band', 'src_mag',
+                                                   'frced_mjd', 'frced_band', 'frced_mag' ] )
         else:
             logger.debug( f"{row[0][0]} rows in tmp_wanted_detected\n" )
         if _show_way_too_much_debug_info:

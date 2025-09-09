@@ -411,7 +411,7 @@ class ColumnMeta:
     # If a function is "None", it means the identity function.  (So 0=1, P=NP, and Δs<0.)
 
     typeconverters = {
-        # 'uuid': ( str, util.asUUID ),      # Doesn't seem to be needed any more for psycopg3
+        'uuid': ( util.asUUID, None ),
         'jsonb': ( psycopg.types.json.Jsonb, None )
     }
 

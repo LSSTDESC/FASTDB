@@ -58,7 +58,7 @@ class WhatSpectraAreWanted( BaseView ):
     def do_the_things( self ):
         data = flask.request.json
 
-        procver = data['processing_version'] if 'processing_version' in data.keys() else None
+        procver = data['processing_version'] if 'processing_version' in data.keys() else 'realtime'
 
         lim_mag_band = data['lim_mag_band'] if 'lim_mag_band' in data else None
         lim_mag = float( data['lim_mag'] ) if 'lim_mag' in data else None
