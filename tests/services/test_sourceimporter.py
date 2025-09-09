@@ -6,6 +6,7 @@ import datetime
 import psycopg
 
 import db
+from util import env_as_bool
 from services.source_importer import SourceImporter
 from services.dr_importer import DRImporter
 
@@ -660,14 +661,6 @@ def test_import_next60days_with_prev( import_next60days_prv ):
 
 # **********************************************************************
 # Now make sure that if we import 30 days, then import 60 days, we get what's expected
-#
-# The test_user fixture is here not becasue it's needed for the test, but because
-#   this is a convenient test for loading up a database for use developing the web ap.
-#   In the tests subdirectory, run
-#      pytest -v --trace services/test_sourceimporter.py::test_import_30days_60days
-#   and wait about a minute for the fixtures to finish.  When you get the (Pdb) prompt,
-#   you're at the beginning of this test.  Let that shell just sit there, and go play
-#   with the web ap.
 
 def test_import_30days_60days( import_30days_60days, test_user ):
     nobj, nroot, nsrc, nprvsrc, nprvfrc, nhosts = import_30days_60days
@@ -710,7 +703,17 @@ def test_import_30days_60days( import_30days_60days, test_user ):
 
 
 # **********************************************************************
+# The test_user fixture is in the next two fixtures not because it's
+#   needed for the test, but because this is a convenient test for
+#   loading up a database for use developing the web ap.  See the developers documentation for FASTDB.
 
-def test_full90days( alerts_90days_sent_received_and_imported ):
-    # TODO
+@pytest.mark.skipif( env_as_bool('RUN_FULL90DAYS'), reason='RUN_FULL90DAYS is set' )
+def test_full90days_fast( alerts_90days_sent_received_and_imported ):
+    # TODO -- actually check stuff?
+    pass
+
+
+@pytest.mark.skipif( not env_as_bool('RUN_FULL90DAYS'), reason='RUN_FULL90DAYS is not set' )
+def test_full90days( fully_do_alerts_90days_sent_received_and_imported ):
+    # TODO -- actually check stuff?
     pass

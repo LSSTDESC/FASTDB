@@ -529,7 +529,7 @@ def object_search( processing_version='default', object_processing_version=None,
       # relwindow_t0, relwindow_t1 : float, default None
       #    NOT IMPLEMENTED.  Intended to be a time window around maximum-flux detection.
 
-      mint_firsdtdetection : float, default None
+      mint_firstdetection : float, default None
          Only return objects whose first detection is on this MJD or later.
 
       maxt_firstdetection : float, default None
@@ -613,7 +613,7 @@ def object_search( processing_version='default', object_processing_version=None,
          measurements of the g, r, and i bands, pass ['g', 'r', 'i']
          here.
 
-         This parameter also effects what is included in the returned
+         This parameter also affects what is included in the returned
          array; it will ignroe any measurements of bands that aren't
          included in this list.
 

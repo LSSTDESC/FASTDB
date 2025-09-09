@@ -4,6 +4,7 @@ __all__ = [ "asUUID", "isSequence", "float_or_none_from_dict", "int_or_none_from
             "get_alert_schema", "procver_id" ]
 
 import sys
+import os
 import re
 import datetime
 import pathlib
@@ -29,6 +30,27 @@ _logout.setFormatter( _formatter )
 logger.propagate = False
 # logger.setLevel( logging.INFO )
 logger.setLevel( logging.DEBUG )
+
+
+def parse_bool( val ):
+    """Check if a variable represents a boolean value is True or False."""
+    if val is None:
+        return False
+    if isinstance( val, bool ):
+        return val
+    if isinstance( val, numbers.Integral ):
+        return bool( val )
+    if isinstance( val, str ):
+        if val.strip().lower() in [ 'true', 'yes', '1' ]:
+            return True
+        if val.strip().lower() in [ 'false', 'no', '0' ]:
+            return False
+    raise ValueError( f'Cannot parse boolean value from "{val}" (type {type(val)})' )
+
+
+def env_as_bool( var ):
+    """Parse an environment variable as a boolean."""
+    return parse_bool( os.getenv( var ) )
 
 
 def asUUID( id ):

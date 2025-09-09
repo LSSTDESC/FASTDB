@@ -148,7 +148,7 @@ class CountThings( BaseView ):
 # ======================================================================
 
 class ObjectSearch( BaseView ):
-    def do_the_things( self, processing_version ):
+    def do_the_things( self, processing_version='default' ):
         global app
         if not flask.request.is_json:
             raise TypeError( "POST data was not JSON; send search criteria as a JSON dict" )

@@ -195,7 +195,7 @@ The tests do not run the code out of the source directory; rather, they run it o
 
   make install
 
-If you did the ``./confiugure`` and ``make`` steps inside the container, then cd to ``/code`` before running ``make install``.
+If you did the ``./configure`` and ``make`` steps inside the container, then cd to ``/code`` before running ``make install``.
 
 After that, the tests should see your updated code.
 
@@ -208,7 +208,7 @@ Restarting the webserver
 However, there may be one more step.  If you modified code that the webserver uses, you have to tell the webserver to reread the code.  After doing the ``make install`` described above, ``cd`` into the top level of your git checkout and run::
 
   docker compose down webap
-  docker compose up webap
+  docker compose up -d webap
   docker compose logs webap
 
 The last step show not show any errors or tracebacks; if it did, then you broke the code an the webserver can't start.  Fix the code, install again, and then do the three steps above again until it works.
@@ -284,23 +284,26 @@ TODO : instructions for accessing the mongo database.
 Setting yourself up to futz around with the web app
 ---------------------------------------------------
 
-There will eventually be a better way to do this, as the current method is needlessly slow.  Right now, if you want to have a database with some stuff loaded into it for purposes of developing the web UI, what you can do is get yourself fully set up for tests, and then, inside the shell container, run::container, either run::
+There will eventually be a better way to do this, as the current method is needlessly slow.  Right now, if you want to have a database with some stuff loaded into it for purposes of developing the web UI, what you can do is get yourself fully set up for tests, and then, inside the shell container, run::
 
   cd /code/tests
-  pytest -v --trace test_ltcv_object_search.py::test_object_search
+  pytest -v --trace services/test_sourceimporter.py::test_full90days_fast
 
 or run::
 
   cd /code/tests
-  pytest -v --trace services/test_sourceimporter.py::test_import_30days_60days
+  RUN_FULL90DAYS=1 pytest -v --trace services/test_sourceimporter.py::test_full90days
 
 Both of these start tests with test fixtures that create a database user and load data into the database.  The ``--trace`` command tells pytest to stop at the begining of a test, after the fixture has run.  The shell where you run this will dump you into a ``(Pdb)`` prompt.  Just leave that shell sitting there.  At this point, you have a loaded database.  You can look at ``localhost:8080`` in your web browser to see the web ap, and log in with user ``test`` and password ``test_password``.
 
-The ``test_object_search`` command takes about 10 seconds to run, and loads up the main postgres tables with the test data.  It does *not* load anyting into the mongo database.  The ``test_import_30days_60days`` command takes up to a minute to run, because what it's really doing is testing a whole bunch of different servers, an there are built in sleeps so that each step of the test can be sure that other servers have had time to do their stuff.  This one loads the full test data set into the "ppdb" tables, and runs a 90 simulated days of alerts through some test brokers.  When it's done, the sources from those 90 simulated days will be in the main postgrest ables, and the mongo database will be populated with  the test broker messages.  (The test brokers aren't doing anything real, but are just assigning random classifications for purposes of testing the plubming.)
+The ``test_full90days_fast`` test runs a lot faster, loading up the main postgres tables with the test data.  It does *not* load anyting into the mongo database.  The ``test_full90days`` test takes up to a minute or so to run, because what it's really doing is testing a whole bunch of different servers, an there are built in sleeps so that each step of the test can be sure that other servers have had time to do their stuff.  This one loads the full test data set into the "ppdb" tables, and runs a 90 simulated days of alerts through some test brokers.  When it's done, the sources from those 90 simulated days will be in the main postgrest ables, and the mongo database will be populated with  the test broker messages.  (The test brokers aren't doing anything real, but are just assigning random classifications for purposes of testing the plubming.)
 
 When you're done futzing around with the web ap, go to the shell where you ran ``pytest ...`` and just press ``c`` and hit Enter at the ``(Pdb)`` prompt.  The test will compete, exit, and (ideally) clean up after itself.
 
-If you edit the web ap software and what to see the changes, you need to do a couple of things to see the changes.  First, you need to re-install the code.  On a shell inside the container (a different one from the one where your ``(Pdb)`` prompt is sitting), do ``cd /code`` and ``make install``.  (If you've added files, not just edited them, there is more to do; ROB TODO document this.)   Second, you need to get a shell on the webap.  Outside any container, in the ``tests`` directory, run ``docker compose exec -it webap /bin/bash``.  On the shell inside the webap container, run::
+If you've edited code that affects the web ap
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+If you edit the web ap software and want to see the changes, you need to do a couple of things to see the changes.  First, you need to re-install the code.  On a shell inside the container (a different one from the one where your ``(Pdb)`` prompt is sitting), do ``cd /code`` and ``make install``.  (If you've added files, not just edited them, there is more to do; ROB TODO document this.)   Second, you need to get a shell on the webap.  Outside any container, in the ``tests`` directory, run ``docker compose exec -it webap /bin/bash``.  On the shell inside the webap container, run::
 
   kill -HUP 1
 
