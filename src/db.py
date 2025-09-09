@@ -256,13 +256,13 @@ class DBCon:
         echo = echo if echo is not None else self.echoqueries
         explain = explain if explain is not None else self.alwaysexplain
         if echo:
-            if isinstance( q, psycopg.sql.Composed ):
+            if isinstance( q, ( psycopg.sql.SQL, psycopg.sql.Composed ) ):
                 util.logger.debug( f"Sending query\n{q.as_string()}" )
             else:
                 util.logger.debug( f"Sending query\n{q}\nwith substitutions: {subdict}" )
 
         if explain:
-            if isinstance( q, psycopg.sql.Composed ):
+            if isinstance( q, ( psycopg.sql.SQL, psycopg.sql.Composed ) ):
                 self.cursor.execute( f"EXPLAIN {q.as_string()}", subdict )
             else:
                 self.cursor.execute( f"EXPLAIN {q}", subdict )
@@ -1101,8 +1101,8 @@ class DBBase:
             raise TypeError( f"Invalid type for data: {type(data)}" )
 
         with DBCon( dbcon ) as con:
-            con.execute_nofetch( "DROP TABLE IF EXISTS temp_bulk_upsert" )
-            con.execute_nofetch( f"CREATE TEMP TABLE temp_bulk_upsert (LIKE {cls.__tablename__})" )
+            con.execute_nofetch( "DROP TABLE IF EXISTS temp_bulk_upsert", explain=False )
+            con.execute_nofetch( f"CREATE TEMP TABLE temp_bulk_upsert (LIKE {cls.__tablename__})", explain=False )
             with con.cursor.copy( f"COPY temp_bulk_upsert({','.join(columns)}) FROM STDIN" ) as copier:
                 for v in values:
                     copier.write_row( v )
@@ -1123,7 +1123,7 @@ class DBBase:
             else:
                 con.execute_nofetch( q )
                 ninserted = con.cursor.rowcount
-                con.execute_nofetch( "DROP TABLE temp_bulk_upsert" )
+                con.execute_nofetch( "DROP TABLE temp_bulk_upsert", explain=False )
                 con.commit()
                 return ninserted
 

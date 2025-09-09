@@ -175,6 +175,7 @@ def many_object_ltcvs( processing_version='default', objids=None,
         If return_format is 'json', then you get back a dict of diaobjectid -> dict
         The inner dict has fields:
           { 'rootid': uuid,
+            'visit': list of bigint,
             'mjd': list of float,
             'band': list of str,
             'flux': list of float,
@@ -220,8 +221,8 @@ def many_object_ltcvs( processing_version='default', objids=None,
     # Make sure mjd_now is floatifiable
     mjd_now = None if mjd_now is None else float( mjd_now )
 
-    with db.DBCon( dbcon ) as con:
-        pvid = db.ProcessingVersion.procver_id( processing_version, dbcon=con )
+    with db.DBCon( dbcon ) as dbcon:
+        pvid = db.ProcessingVersion.procver_id( processing_version, dbcon=dbcon )
 
         # For efficiency, we're going to make a first pass and extract just the object ids.
         # If these are root ids, then we can't be sure which diaobjectid will correspond
@@ -229,7 +230,7 @@ def many_object_ltcvs( processing_version='default', objids=None,
         # could be doing something with the object's processing version, but consisder
         # all the complicated messy cases.)
 
-        dbcon.execute( "CREATE TEMP TABLE tmp_objids( diaobjectid bigint )" )
+        dbcon.execute( "CREATE TEMP TABLE tmp_objids( diaobjectid bigint )", explain=False )
         if objfield == 'rootid':
             q = sql.SQL(
                 """INSERT INTO tmp_objids (
@@ -240,20 +241,23 @@ def many_object_ltcvs( processing_version='default', objids=None,
             )
             dbcon.execute( q, { 'roots': objids } )
         else:
-            with dbcon.cursor.copy( "COPY temp_objids(diaobjectid) FROM STDIN" ) as copier:
+            with dbcon.cursor.copy( "COPY tmp_objids(diaobjectid) FROM STDIN" ) as copier:
                 for objid in objids:
                     copier.write_row( [ objid ] )
 
         # Extract detections
-        dbcon.execute( "CREATE_TEMP_TABLE tmp_sources( diaobjectid bigint, rootid uuid, visit bigint,"
+        dbcon.execute( "CREATE TEMP TABLE tmp_sources( diaobjectid bigint, rootid uuid, visit bigint,"
                        "                               mjd double precision, band text, flux real, fluxerr real,"
-                       "                               isdet bool, base_procver text )" )
+                       "                               isdet bool, base_procver text )",
+                       explain=False )
         q = sql.SQL(
             """/*+ IndexScan(o idx_diaobject_diaobjectid)
                    IndexScan(s idx_diasource_diaobjectid) */
+               INSERT INTO tmp_sources
                SELECT DISTINCT ON (o.diaobjectid, s.visit)
-                 o.diaobjectid, o.rootid, s.visit, s.mjd, s.band, s.flux, s.fluxerr, TRUE as isdet, s.base_procver
-               INTO tmp_sources
+                 o.diaobjectid, o.rootid, s.visit, s.midpointmjdtai AS mjd,
+                 s.band, s.psfflux AS flux, s.psffluxerr AS fluxerr,
+                 TRUE as isdet, p.description AS base_procver
                FROM tmp_objids t
                INNER JOIN diaobject o ON t.diaobjectid=o.diaobjectid
                INNER JOIN diasource s ON s.diaobjectid=o.diaobjectid
@@ -264,31 +268,34 @@ def many_object_ltcvs( processing_version='default', objids=None,
         ).format( procver=pvid )
         _and = "WHERE"
         if mjd_now is not None:
-            q += sql.SQL( f"                   {_and} src.midpointmjdtai<={{t0}}" ).format( t0=mjd_now )
+            q += sql.SQL( f"                   {_and} s.midpointmjdtai<={{t0}}" ).format( t0=mjd_now )
             _and = "  AND"
         if bands is not None:
-            q += sql.SQL( f"                   {_and} src.band=ANY(%(bands)s)" )
+            q += sql.SQL( f"                   {_and} s.band=ANY(%(bands)s)" )
             _and = "  AND"
         q += sql.SQL(
             """
                ORDER BY o.diaobjectid, s.visit, pv.priority DESC
             """ )
-        dbcon.execute( q )
+        dbcon.execute( q, { 'bands': bands } )
 
         if which == 'detections':
             rows, cols = dbcon.execute( "SELECT * FROM tmp_sources" )
 
         else:
             # Extract forced photometry if necessary
-            dbcon.execute( "CREATE_TEMP_TABLE tmp_forced( diaobjectid bigint, rootid uuid, visit bigint,"
+            dbcon.execute( "CREATE TEMP TABLE tmp_forced( diaobjectid bigint, rootid uuid, visit bigint,"
                            "                              mjd double precision, band text, flux real, fluxerr real,"
-                           "                              isdet bool, base_procver text )" )
+                           "                              isdet bool, base_procver text )",
+                           explain=False )
             q = sql.SQL(
                 """/*+ IndexScan(o idx_diaobject_diaobjectid)
                        IndexScan(s idx_diaforcedsource_diaobjectid) */
+                   INSERT INTO tmp_forced
                    SELECT DISTINCT ON (o.diaobjectid, s.visit)
-                     o.diaobjectid, o.rootid, s.visit, s.mjd, s.band, s.flux, s.fluxerr, FALSE as isdet, s.base_procver
-                   INTO tmp_forced
+                     o.diaobjectid, o.rootid, s.visit, s.midpointmjdtai AS mjd,
+                     s.band, s.psfflux AS flux, s.psffluxerr AS fluxerr,
+                     FALSE as isdet, p.description AS base_procver
                    FROM tmp_objids t
                    INNER JOIN diaobject o ON t.diaobjectid=o.diaobjectid
                    INNER JOIN diaforcedsource s ON s.diaobjectid=o.diaobjectid
@@ -299,44 +306,47 @@ def many_object_ltcvs( processing_version='default', objids=None,
             ).format( procver=pvid )
             _and = "WHERE"
             if mjd_now is not None:
-                q += sql.SQL( f"                   {_and} src.midpointmjdtai<={{t0}}" ).format( t0=mjd_now )
+                q += sql.SQL( f"                   {_and} s.midpointmjdtai<={{t0}}" ).format( t0=mjd_now )
                 _and = "  AND"
             if bands is not None:
-                q += sql.SQL( f"                   {_and} src.band=ANY(%(bands)s)" )
+                q += sql.SQL( f"                   {_and} s.band=ANY(%(bands)s)" )
                 _and = "  AND"
             q += sql.SQL(
                 """
                    ORDER BY o.diaobjectid, s.visit, pv.priority DESC
                 """ )
-            dbcon.execute( q )
-
-            if which == 'detections':
-                rows, cols = dbcon.execute( "SELECT * FROM tmp_sources" )
+            dbcon.execute( q, { 'bands': bands } )
 
             # Join detections to forced photometry to set the 'isdet' and 'ispatch' flags
             q = sql.SQL(
-                """SELECT CASE WHEN f.diaojbectid IS NULL THEN s.diaobjectid ELSE f.diaobjectid END AS diaobjectid,
+                """SELECT CASE WHEN f.diaobjectid IS NULL THEN s.diaobjectid ELSE f.diaobjectid END AS diaobjectid,
                           CASE WHEN f.rootid IS NULL THEN s.rootid ELSE f.rootid END AS rootid,
+                          CASE WHEN f.visit IS NULL THEN s.visit ELSE f.visit END AS visit,
                           CASE WHEN f.mjd IS NULL THEN s.mjd ELSE f.mjd END AS mjd,
                           CASE WHEN f.band IS NULL THEN s.band ELSE f.band END AS band,
                           CASE WHEN f.flux IS NULL THEN s.flux ELSE f.flux END AS flux,
                           CASE WHEN f.fluxerr IS NULL THEN s.fluxerr ELSE f.fluxerr END AS fluxerr,
-                          CASE WHEN s.mjd IS NULL THEN FALSE ELSE TRUE AS isdet,
+                          CASE WHEN s.mjd IS NULL THEN FALSE ELSE TRUE END AS isdet,
                           CASE WHEN f.mjd IS NULL THEN TRUE ELSE FALSE END as ispatch,
-                          CASE WHEN f.base_procver IS NULL THEN s.base_procver ELSE f.base_procver END AS base_procver
+                          CASE WHEN f.base_procver IS NULL THEN s.base_procver ELSE f.base_procver END
+                            AS base_procver
                    FROM tmp_forced f
                    FULL OUTER JOIN tmp_sources s ON f.diaobjectid=s.diaobjectid AND s.visit=f.visit
-                """)
-            if which == 'forced':
-                q += sql.SQL( "                   WHERE NOT ispatch" )
-            q += sql.SQL( "                   ORDER BY diaobjectid, mjd" )
-
+                ORDER BY diaobjectid, mjd
+                """ )
             rows, cols = dbcon.execute( q )
 
     retframe = pandas.DataFrame( rows, columns=cols )
 
     if not include_base_procver:
         retframe.drop( 'base_procver', axis='columns', inplace=True )
+
+    if which == 'forced':
+        if len(retframe) > 0:
+            # Pandas annoyance: if retframe has 0 length, this next
+            #   statement wipes out the columns.  Grrr.
+            retframe = retframe[ ~retframe.ispatch ]
+        retframe.drop( 'ispatch', axis='columns', inplace=True )
 
     if return_format == 'pandas':
         retframe.set_index( ['diaobjectid', 'mjd'], inplace=True )
@@ -347,6 +357,7 @@ def many_object_ltcvs( processing_version='default', objids=None,
         for objid in retframe.diaobjectid.unique():
             subf = retframe[ retframe.diaobjectid==objid  ]
             thisretval = { 'rootid': subf.rootid.values[0],
+                           'visit': list( subf.visit.values ),
                            'mjd': list( subf.mjd.values ),
                            'band': list( subf.band.values ),
                            'flux': list( subf.flux.values ),
@@ -792,7 +803,7 @@ def object_search( processing_version='default', object_processing_version=None,
         if window_t0 is not None:
             if nexttable != 'diaobject':
                 # Make a primary key so we can group by
-                con.execute_nofetch( f"ALTER TABLE {nexttable} ADD PRIMARY KEY (diaobjectid)" )
+                con.execute_nofetch( f"ALTER TABLE {nexttable} ADD PRIMARY KEY (diaobjectid)", explain=False )
             subdict = { 'pv': procver, 't0': window_t0, 't1': window_t1 }
             q = ( f"/*+ IndexScan(src idx_diasource_diaobjectid) */\n"
                   f"SELECT diaobjectid,ra,dec,numdetinwindow INTO TEMP TABLE objsearch_windowdet FROM (\n"
