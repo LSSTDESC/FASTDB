@@ -307,6 +307,7 @@ class GetHotTransients( BaseView ):
         data = flask.request.json
 
         kwargs = {}
+        source_patch = ( 'source_patch' in kwargs ) and ( kwargs['source_patch'] )
         if 'procesing_version' not in data:
             kwargs['processing_version'] = 'realtime'
         kwargs.update( data )
@@ -317,7 +318,6 @@ class GetHotTransients( BaseView ):
             return_format = 0
 
         ltcvdf, objdf, hostdf = ltcv.get_hot_ltcvs( **kwargs )
-        source_patch = ( 'source_patch' in kwargs ) and ( kwargs['source_patch'] )
 
         if ( return_format == 0 ) or ( return_format == 1 ):
             sne = []
