@@ -1288,7 +1288,7 @@ def get_hot_ltcvs( processing_version, detected_since_mjd=None, detected_in_last
         #   that have a detection (i.e. a diasource) in the
         #   desired time period.
 
-        q = ( "/*+ NoBitmapScan(elasticc2_diasource)\n"
+        q = ( "/*+ IndexScan(s idx_diasource_diaobjectid)\n"
               "*/\n"
               "SELECT DISTINCT ON(o.diaobjectid) o.rootid, o.diaobjectid\n"
               "INTO TEMP TABLE tmp_objids\n"
