@@ -103,7 +103,7 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None,
     with db.DBCon( dbcon ) as dbcon:
         if objids_table is not None:
             q = sql.SQL(
-                """/*+ IndexScan(o, idx_diaobject_diaobjectid) */
+                """/*+ IndexScan(o idx_diaobject_diaobjectid) */
                 SELECT {columns}
                 FROM {objids_table} t
                 INNER JOIN diaobject o ON o.diaobjectid=t.diaobjectid
@@ -543,7 +543,7 @@ def object_search( processing_version='default', object_processing_version=None,
           diaobject cut more efficient.
 
           (Notice that a None here behaves differently than a None
-          passed to object_ltcv.
+          passed to object_ltcv.)
 
       return_format : string
          Either "json" or "pandas".  (TODO: pyarrow? polars?)  See "Results" below.
@@ -840,7 +840,10 @@ def object_search( processing_version='default', object_processing_version=None,
         if ra is not None:
             radius = util.float_or_none_from_dict( kwargs, 'radius' )
             radius = radius if radius is not None else 10.
-            q = ( "SELECT DISTINCT ON(diaobjectid) diaobjectid,ra,dec INTO TEMP TABLE objsearch_radeccut\n"
+            # For reasons I don't understand, adding the hint slows this next query down.
+            # q3c / pg_hint_plan interaction weirdness?
+            q = ( # "/*+ IndexScan(o idx_diaobject_q3c) */"
+                  "SELECT DISTINCT ON(diaobjectid) diaobjectid,ra,dec INTO TEMP TABLE objsearch_radeccut\n"
                   "FROM diaobject o\n" )
             if objprocver is not None:
                 q += ( "INNER JOIN base_procver_of_procver pv ON pv.base_procver_id=o.base_procver_id\n"
@@ -861,7 +864,7 @@ def object_search( processing_version='default', object_processing_version=None,
                 # Make a primary key so we can group by
                 con.execute_nofetch( f"ALTER TABLE {nexttable} ADD PRIMARY KEY (diaobjectid)", explain=False )
             subdict = { 'pv': procver, 't0': window_t0, 't1': window_t1 }
-            q = ( f"/*+ IndexScan(src idx_diasource_diaobjectid) */\n"
+            q = ( f"/*+ IndexScan(s idx_diasource_diaobjectid idx_diasource_mjd) */\n"
                   f"SELECT diaobjectid, ra, dec, numdetinwindow\n"
                   f"INTO TEMP TABLE objsearch_windowdet\n"
                   f"FROM (\n"
@@ -906,7 +909,7 @@ def object_search( processing_version='default', object_processing_version=None,
                  ( mint_firstdetection < maxt_lastdetection ) ):
                 raise RuntimeError( "maxt_lastdetection > mint_firstdetection, which makes no sense." )
             subdict = { 'pv': procver }
-            q = ( "/*+ IndexScan(src idx_diasource_diaobjectid) */\n"
+            q = ( "/*+ IndexScan(s idx_diasource_diaobjectid idx_diasource_mjd) */\n"
                   "SELECT * INTO TEMP TABLE objsearch_detcut FROM (\n"
                   "  SELECT DISTINCT ON (o.diaobjectid) o.diaobjectid,o.ra,o.dec" )
             if len(addlfields) > 0:
@@ -949,7 +952,7 @@ def object_search( processing_version='default', object_processing_version=None,
         subdict = { 'pv': procver }
 
         # First: build the table, put in first detection
-        q = ( "/*+ IndexScan(src idx_diasource_diaobjectid) */\n"
+        q = ( "/*+ IndexScan(s idx_diasource_diaobjectid) */\n"
               "SELECT * INTO TEMP TABLE objsearch_stattab FROM (\n"
               "  SELECT DISTINCT ON (diaobjectid)\n"
               "         diaobjectid,ra,dec,\n" )
@@ -1021,7 +1024,7 @@ def object_search( processing_version='default', object_processing_version=None,
         con.execute_nofetch( q, subdict )
 
         # Add in max detection
-        q = ( f"/*+ IndexScan(src idx_diasource_diaobjectid) */\n"
+        q = ( f"/*+ IndexScan(s idx_diasource_diaobjectid) */\n"
               f"UPDATE objsearch_stattab ost\n"
               f"SET maxdetmjd=midpointmjdtai, maxdetband=band,\n"
               f"    maxdetflux=psfflux, maxdetfluxerr=psffluxerr\n"
@@ -1049,7 +1052,7 @@ def object_search( processing_version='default', object_processing_version=None,
         con.execute_nofetch( q, subdict )
 
         # Add in number of detections
-        q = ( f"/*+ IndexScan(src idx_diasource_diaobjectid) */\n"
+        q = ( f"/*+ IndexScan(s idx_diasource_diaobjectid) */\n"
               f"UPDATE objsearch_stattab o\n"
               f"SET numdet=n "
               f"FROM (\n"
@@ -1144,7 +1147,7 @@ def object_search( processing_version='default', object_processing_version=None,
         nexttable = 'objsearch_stattab'
 
         # Get the last forced source
-        q = ( f"/*+ IndexScan(frc idx_diaforcedsource_diaobjectid ) */\n"
+        q = ( f"/*+ IndexScan(f idx_diaforcedsource_diaobjectid ) */\n"
               f"SELECT * INTO TEMP TABLE objsearch_final FROM (\n"
               f"  SELECT DISTINCT ON (diaobjectid) *\n"
               f"  FROM (\n"

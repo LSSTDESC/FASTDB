@@ -211,14 +211,14 @@ def test_ask_for_spectra( procver_collection, alerts_90days_sent_received_and_im
     rtpv = pvs['realtime']
     try:
         # Get some hot lightcurves
-        df, _hostdf = ltcv.get_hot_ltcvs( rtpv.description, mjd_now=60328., source_patch=True )
-        assert df.midpointmjdtai.max() < 60328.
-        assert len(df.rootid.unique()) == 14
+        df, objdf, _hostdf = ltcv.get_hot_ltcvs( rtpv.description, mjd_now=60328., source_patch=True )
+        assert df.index.get_level_values('mjd').max() < 60328.
+        assert len(objdf.rootid.unique()) == 14
         assert len(df) == 310
 
         # Pick out five objects to ask for spectra
 
-        chosenobjs = [ str(i) for i in df.rootid.unique()[ numpy.array([1, 5, 7]) ] ]
+        chosenobjs = [ str(i) for i in objdf.rootid.unique()[ numpy.array([1, 5, 7]) ] ]
 
         # Ask
 
