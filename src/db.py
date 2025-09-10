@@ -520,13 +520,23 @@ class DBBase:
     def tablemeta( self ):
         """A dictionary of colum_name : ColumMeta."""
         if self._tablemeta is None:
-            self._load_table_meta()
+            self.load_table_meta()
         return self._tablemeta
 
     @property
     def pks( self ):
         return [ getattr( self, k ) for k in self._pk ]
 
+
+    @classmethod
+    def all_columns_sql( cls, prefix=None ):
+        """Returns a psycopg.sql.SQL thingy with all columns comma separated."""
+        if cls._tablemeta is None:
+            cls.load_table_meta()
+        if prefix is None:
+            return psycopg.sql.SQL(',').join( psycopg.sql.Identifier(i) for i in cls._tablemeta.keys() )
+        else:
+            return psycopg.sql.SQL(',').join( psycopg.sql.Identifier(prefix, i) for i in cls._tablemeta.keys() )
 
     @classmethod
     def load_table_meta( cls, dbcon=None ):

@@ -27,6 +27,29 @@ def test_get_object_infos( set_of_lightcurves ):
     info = ltcv.get_object_infos( [ roots[i]['root'].id for i in [0, 1, 2] ], processing_version='pvc_pv2' )
     assert info['diaobjectid'] == [ 200, 201, 202 ]
 
+    info = ltcv.get_object_infos( [ 200, 201, 202 ], columns=['ra', 'dec'] )
+    assert info['diaobjectid'] == [ 200, 201, 202 ]
+    assert set( info.keys() ) == { 'diaobjectid', 'ra', 'dec' }
+
+    with db.DBCon() as dbcon:
+        dbcon.execute( "CREATE TEMP TABLE tempthing(diaobjectid bigint)", explain=False )
+        dbcon.execute( "INSERT INTO tempthing(diaobjectid) VALUES ( 200 )" )
+        dbcon.execute( "INSERT INTO tempthing(diaobjectid) VALUES ( 202 )" )
+        info = ltcv.get_object_infos( objids_table='tempthing', dbcon=dbcon )
+        assert info['diaobjectid'] == [ 200, 202 ]
+
+        with pytest.raises( ValueError, match='objids_table requires dbcon' ):
+            ltcv.get_object_infos( objids_table='tempthing' )
+
+        with pytest.raises( ValueError, match='objids_table and objids cannot be used together' ):
+            ltcv.get_object_infos( objids_table='tempthing', objids=[0, 1, 2], dbcon=dbcon )
+
+        with pytest.raises( ValueError, match='objids_table and objids cannot be used together' ):
+            ltcv.get_object_infos( [0, 1, 2], objids_table='tempthing', dbcon=dbcon )
+
+        with pytest.raises( ValueError, match='Cannot pass processing_version when passing objids_table' ):
+            ltcv.get_object_infos( objids_table='tempthing', processing_version='pvc_pv2', dbcon=dbcon )
+
 
 def test_object_ltcv( procver_collection, set_of_lightcurves ):
     roots = set_of_lightcurves
@@ -196,7 +219,7 @@ def test_many_object_ltcvs( procver_collection, set_of_lightcurves ):
     assert list( dfjs.keys() ) == [ 200, 202 ]
     for js, pd in zip( [ sourcesjs, forcedjs, dfjs ], [ sources, forced, df ] ):
         for objid in [ 200, 202 ]:
-            subpd = pd.xs( objid, level='diaobjectid' ).reset_index().drop( 'rootid', axis='columns' )
+            subpd = pd.xs( objid, level='diaobjectid' ).reset_index()
             subjs = js[ objid ]
             for col in subpd.columns:
                 assert ( subpd[col] == np.array( subjs[col] ) ).all()
@@ -576,46 +599,54 @@ def test_get_hot_ltcvs( set_of_lightcurves ):
     # ...not sure how to test this without mjd_now since it uses the current time,
     #    and that will be different based on when this is run
 
-    df, _ = ltcv.get_hot_ltcvs( 'pvc_pv3', detected_since_mjd=60035, mjd_now=60056 )
-    assert len( df.diaobjectid.unique() ) == 3
-    assert set( df.diaobjectid ) == { 201, 202, 203 }
+    df, objdf, _ = ltcv.get_hot_ltcvs( 'pvc_pv3', detected_since_mjd=60035, mjd_now=60056 )
+    assert set( df.index.names ) == { 'diaobjectid', 'mjd' }
+    assert set( df.columns ) == { 'visit', 'band', 'flux', 'fluxerr', 'isdet' }
+    assert set( df.index.get_level_values('diaobjectid') ) == { 201, 202, 203 }
+    assert set( objdf.index.get_level_values('diaobjectid') ) == set( df.index.get_level_values('diaobjectid') )
 
-    df, _ = ltcv.get_hot_ltcvs( 'pvc_pv3', detected_since_mjd=60035, mjd_now=60046 )
-    assert len( df.diaobjectid.unique() ) == 2
-    assert set( df.diaobjectid ) == { 201, 202 }
+    df, objdf, _ = ltcv.get_hot_ltcvs( 'pvc_pv3', detected_since_mjd=60035, mjd_now=60046 )
+    assert set( df.index.get_level_values('diaobjectid') ) == { 201, 202 }
+    assert set( objdf.index.get_level_values('diaobjectid') ) == set( df.index.get_level_values('diaobjectid') )
 
-    df, _ = ltcv.get_hot_ltcvs( 'pvc_pv3', detected_in_last_days=2, mjd_now=60021 )
-    assert len( df.diaobjectid.unique() ) == 2
-    assert set( df.diaobjectid ) == { 200, 201 }
+    df, objdf, _ = ltcv.get_hot_ltcvs( 'pvc_pv3', detected_in_last_days=2, mjd_now=60021 )
+    assert set( df.index.get_level_values('diaobjectid') ) == { 200, 201 }
+    assert set( objdf.index.get_level_values('diaobjectid') ) == set( df.index.get_level_values('diaobjectid') )
 
-    df, _ = ltcv.get_hot_ltcvs( 'pvc_pv3', detected_in_last_days=2, mjd_now=60041 )
-    assert len( df.diaobjectid.unique() ) == 2
-    assert set( df.diaobjectid ) == { 201, 202 }
+    df, objdf, _ = ltcv.get_hot_ltcvs( 'pvc_pv3', detected_in_last_days=2, mjd_now=60041 )
+    assert set( df.index.get_level_values('diaobjectid') ) == { 201, 202 }
+    assert set( objdf.index.get_level_values('diaobjectid') ) == set( df.index.get_level_values('diaobjectid') )
 
     # detected_in_last_days defaults to 30
-    df, _ = ltcv.get_hot_ltcvs( 'pvc_pv3', mjd_now=60085 )
-    assert set( df.diaobjectid ) == { 201, 202, 203 }
-    df, _ = ltcv.get_hot_ltcvs( 'pvc_pv3', mjd_now=60095 )
-    assert set( df.diaobjectid ) == { 202 }
+    df, objdf, _ = ltcv.get_hot_ltcvs( 'pvc_pv3', mjd_now=60085 )
+    assert set( df.index.get_level_values('diaobjectid') ) == { 201, 202, 203 }
+    assert set( objdf.index.get_level_values('diaobjectid') ) == set( df.index.get_level_values('diaobjectid') )
+    df, objdf, _ = ltcv.get_hot_ltcvs( 'pvc_pv3', mjd_now=60095 )
+    assert set( df.index.get_level_values('diaobjectid') ) == { 202 }
+    assert set( objdf.index.get_level_values('diaobjectid') ) == set( df.index.get_level_values('diaobjectid') )
 
     # Now let's look a the pulled forced photometry
-    df, _ = ltcv.get_hot_ltcvs( 'pvc_pv3', detected_in_last_days=2, mjd_now=60041 )
-    assert ( df.midpointmjdtai <= 60041. ).all()
-    assert ( df.groupby( 'diaobjectid' ).max().midpointmjdtai == 60040. ).all()
-    assert len( df[ df.diaobjectid==201 ] ) == 13
-    assert len( df[ df.diaobjectid==202 ] ) == 5
-    assert ( ~df.is_source ).all()
+    df, _, _ = ltcv.get_hot_ltcvs( 'pvc_pv3', detected_in_last_days=2, mjd_now=60041 )
+    assert ( df.index.get_level_values('mjd') <= 60041. ).all()
+    assert ( df.reset_index().groupby( 'diaobjectid' ).max().mjd == 60040. ).all()
+    assert len( df.xs( 201, level='diaobjectid' ) ) == 13
+    assert len( df.xs( 202, level='diaobjectid' ) ) == 5
     # ...should I look at the actual values?  I should.
 
-    # Test source patch.  Gotta use pvc_pv1 for this.
+    # Test source patch.  Gotta use pvc_pv1 for this.  (I guess we coulda also used realtime.)
 
-    df, _ = ltcv.get_hot_ltcvs( 'pvc_pv1', mjd_now=60031 )
-    assert set( df.diaobjectid ) == { 100 }
-    assert df.midpointmjdtai.max() == 60025.
+    df, objdf, _ = ltcv.get_hot_ltcvs( 'pvc_pv1', mjd_now=60031 )
+    assert set( df.index.get_level_values('diaobjectid') ) == { 100 }
+    assert set( objdf.index.get_level_values('diaobjectid') ) == set( df.index.get_level_values('diaobjectid') )
+    assert df.index.get_level_values('mjd').max() == 60025.
 
-    df2, _ = ltcv.get_hot_ltcvs( 'pvc_pv1', mjd_now=60031, source_patch=True )
-    assert set( df2.diaobjectid ) == { 100 }
-    assert df2.midpointmjdtai.max() == 60030.
+    df2, objdf2, _ = ltcv.get_hot_ltcvs( 'pvc_pv1', mjd_now=60031, source_patch=True )
+    assert set( df2.columns ) == { 'visit', 'band', 'flux', 'fluxerr', 'isdet', 'ispatch' }
+    assert set( df2.index.get_level_values('diaobjectid') ) == { 100 }
+    assert set( objdf2.index.get_level_values('diaobjectid') ) == set( df2.index.get_level_values('diaobjectid') )
+    assert df2.index.get_level_values('mjd').max() == 60030.
     assert len(df2) == len(df) + 2
-    assert ( df == df2[ df2.midpointmjdtai <= 60025. ] ).all().all()
-    assert df2[ df2.midpointmjdtai > 60025. ].is_source.all()
+    assert ( df == df2.loc[ df2.index.get_level_values('mjd') <= 60025., df2.columns != 'ispatch' ] ).all().all()
+    assert df2[ df2.index.get_level_values('mjd') > 60025. ].isdet.all()
+    assert not df2[ df2.index.get_level_values('mjd') <= 20025. ].ispatch.any()
+    assert df2[ df2.index.get_level_values('mjd') > 60025. ].ispatch.all()

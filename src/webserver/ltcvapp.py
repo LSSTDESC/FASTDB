@@ -219,8 +219,8 @@ class GetHotTransients( BaseView ):
          return_format = 0:
             Returns a list of dictionaries.  Each row corresponds to a single
             detected transients, and will have keys:
-               rootid : string UUID
                diaobjectid : bigint
+               rootid : string UUID
                ra : float, ra of the object
                dec : float, dec of the object
                zp : float, always 31.4
@@ -231,7 +231,9 @@ class GetHotTransients( BaseView ):
                     band : str, one if u, g, r, i, z, or Y
                     flux : float, psf flux in nJy
                     fluxerr : uncertainty on flux
-                    is_source : bool; if False, this is forced photometry, if true it's a detection
+                    isdet : bool; if True, this point was detected (i.e. a source exists)
+                    ispatch : bool; if False, the flux is forced photometry, if True, the flux is
+                              from the detection.  Will only be present if source_patch is True.
 
                If include_hostinfo was True, then each row also includes the following fields:
 
@@ -314,23 +316,26 @@ class GetHotTransients( BaseView ):
         else:
             return_format = 0
 
-        df, hostdf = ltcv.get_hot_ltcvs( **kwargs )
+        ltcvdf, objdf, hostdf = ltcv.get_hot_ltcvs( **kwargs )
+        source_patch = ( 'source_patch' in kwargs ) and ( kwargs['source_patch'] )
 
         if ( return_format == 0 ) or ( return_format == 1 ):
             sne = []
         elif ( return_format == 2 ):
-            sne = { 'rootid': [],
-                    'diaobjectid': [],
+            sne = { 'diaobjectid': [],
+                    'rootid': [],
                     'ra': [],
                     'dec': [],
                     'mjd': [],
                     'band': [],
                     'flux': [],
                     'fluxerr': [],
-                    'is_source': [],
+                    'isdet': [],
                     'zp': [],
                     'redshift': [],
                     'sncode': [] }
+            if source_patch:
+                sne[ 'ispatch' ] = []
             if hostdf is not None:
                 sne[ 'hostgal_petroflux_r' ] = []
                 sne[ 'hostgal_petroflux_r_err' ] = []
@@ -355,22 +360,19 @@ class GetHotTransients( BaseView ):
         #        = -2.5 ( log_10( f_ν / nJy ) - 9 ) + 8.90
         #        = -2.5 log_10( f_ν / nJy ) + 31.4
 
-        if len(df) > 0:
-            objids = df['rootid'].unique()
-            logger.debug( f"GetHotSNEView: got {len(objids)} objects in a df of length {len(df)}" )
-            df.set_index( [ 'rootid', 'visit' ], inplace=True )
-            if hostdf is not None:
-                hostdf.set_index( 'rootid', inplace=True )
+        if len(ltcvdf) > 0:
+            objids = objdf.index.get_level_values( 'diaobjectid' ).unique()
+            logger.debug( f"GetHotSNEView: got {len(objids)} objects in a df of length {len(ltcvdf)}" )
 
             for objid in objids:
-                subdf = df.xs( objid, level='rootid' )
+                subdf = ltcvdf.xs( objid, level='diaobjectid' )
                 if hostdf is not None:
                     subhostdf = hostdf.xs( objid )
                 if ( return_format == 0 ) or ( return_format == 1 ):
-                    toadd = { 'rootid': str(objid),
-                              'diaobjectid': subdf.diaobjectid.values[0],
-                              'ra': subdf.ra.values[0],
-                              'dec': subdf.dec.values[0],
+                    toadd = { 'diaobjectid': int( objid ),
+                              'rootid': str( objdf.loc[objid].rootid ),
+                              'ra': float( objdf.loc[objid].ra ),
+                              'dec': float( objdf.loc[objid].dec ),
                               'zp': 31.4,
                               'redshift': -99.,
                               'sncode': -99 }
@@ -387,27 +389,34 @@ class GetHotTransients( BaseView ):
                                 subhostdf[ f'stdcolor_{bands[bandi]}_{bands[bandi+1]}_err' ] )
 
                     if return_format == 0:
-                        toadd['photometry'] = { 'mjd': list( subdf['midpointmjdtai'] ),
+                        toadd['photometry'] = { 'mjd': list( subdf.index.values ),
+                                                'visit': list( subdf['visit'] ),
                                                 'band': list( subdf['band'] ),
-                                                'flux': list( subdf['psfflux'] ),
-                                                'fluxerr': list( subdf['psffluxerr'] ),
-                                                'is_source': list( subdf['is_source'] ) }
+                                                'flux': list( subdf['flux'] ),
+                                                'fluxerr': list( subdf['fluxerr'] ),
+                                                'isdet': list( subdf['isdet'] ) }
+                        if source_patch:
+                            toadd['photometry']['ispatch'] = list( subdf['ispatch'] )
                     else:
-                        toadd['mjd'] = list( subdf['midpointmjdtai'] )
+                        toadd['mjd'] = list( subdf.index.values ),
                         toadd['band'] = list( subdf['band'] )
                         toadd['flux'] = list( subdf['psfflux'] )
                         toadd['fluxerr'] = list( subdf['psffluxerr'] )
-                        toadd['is_source'] = list( subdf['is_source'] )
+                        toadd['isdet'] = list( subdf['isdet'] )
+                        if source_patch:
+                            toadd['ispatch'] = list( subdf['ispatch'] )
                     sne.append( toadd )
                 elif return_format == 2:
                     sne['objectid'].append( str(objid) )
                     sne['ra'].append( subdf.ra.values[0] )
                     sne['dec'].append( subdf.dec.values[0] )
-                    sne['mjd'].append( list( subdf['midpointmjdtai'] ) )
+                    sne['mjd'].append( subdf.index.values ),
                     sne['band'].append( list( subdf['band'] ) )
-                    sne['flux'].append( list( subdf['psfflux'] ) )
-                    sne['fluxerr'].append( list( subdf['psffluxerr'] ) )
-                    sne['is_source'].append( list( subdf['is_source'] ) )
+                    sne['flux'].append( list( subdf['flux'] ) )
+                    sne['fluxerr'].append( list( subdf['fluxerr'] ) )
+                    sne['isdet'].append( list( subdf['isdet'] ) )
+                    if source_patch:
+                        sne['ispatch'].append( list( subdf['ispatch'] ) )
                     sne['zp'].append( 31.4 )
                     sne['redshift'].append( -99 )
                     sne['sncode'].append( -99 )

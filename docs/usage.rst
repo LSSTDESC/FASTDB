@@ -285,8 +285,8 @@ This is the endpoint you hit in order to find currently active lightcurves.  Pas
 
 You will get back JSON, whose format depends on the value of ``return_format``.  For ``return_format=0`` (the default), you get a list of dictionaries.  Each row corresponds to a single detected transient, and will have keys:
 
-* ``rotid`` : string uuid
 * ``diaobjectid`` : bigint
+* ``rootid`` : string uuid
 * ``ra`` : float, nominal ra of the object.  (May not be the best position!)
 * ``dec`` : float, nominal dec of the object.  (May not be the best position!)
 * ``zp`` : float, always 31.4
@@ -298,7 +298,8 @@ You will get back JSON, whose format depends on the value of ``return_format``. 
   * ``band`` : string, one of u, g, r, i, z, or Y
   * ``flux`` : flux, psf flux in nJy
   * ``fluxerr`` : undertainty on flux
-  * ``is_source`` : bool; if False, there is no diasource associated with this point (it wasn't detected).
+  * ``isdet`` : bool; if False, there is no diasource associated with this point (it wasn't detected).
+  * ``ispatch`` : bool; if False, flux values are from forced photometry.  If True, flux values are from the detection.  Will only be included if ``source_patch`` is True.
 
 If ``include_hostinfo`` is True, then each row of the top-level list also includes the following fields:
 

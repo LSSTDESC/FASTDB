@@ -12,17 +12,32 @@ import db
 import util
 
 
-def get_object_infos( objids, processing_version=None, return_format='json', dbcon=None ):
+def get_object_infos( objids=None, objids_table=None, processing_version=None,
+                      columns=None, return_format='json', dbcon=None ):
     """Get information from the diaobject table.
 
     Parameters
     ----------
       objids : list of int or uuid
         Either the diaobejctid or rootid values for the objects to get.
+        Either this or objids_table is required.
+
+      objids_table : str, default None
+        The name of a table (probably a temporary table) with the
+        objects whose info to get in its diaobjectid column.  Cannot
+        pass objids if you pass this.  Requires dbcon to be passed (so
+        that temporary tables are meaningful).
 
       processing_version : str, uuid, or None
         If objids is a list of rootids, then this is required.  If
         objids is a list of int, then this is ignored.
+
+      columns : list of str, default None
+        If given only include these columns from the diaobject table.
+        Otherwise, include all of them.  If 'diaobjectid' is not
+        included in this list, it will be prepended to it.  (You can't
+        not get diaobjectid back, because it's the index of the returned
+        dataframe or the keys of the returned dictionary.)
 
       return_format : str, default 'json'
         Either 'pandas' or 'json'
@@ -41,43 +56,73 @@ def get_object_infos( objids, processing_version=None, return_format='json', dbc
         the columns of diaobject, and whose values are lists all of the same length.
 
     """
-    if not util.isSequence( objids ):
-        objids = [ objids ]
-    if all( isinstance( o, numbers.Integral ) for o in objids ):
-        # Make sure they're int, because if it's something like np.int64, postgres will choke
-        objids = [ int(o) for o in objids ]
+    if objids_table is not None:
+        if dbcon is None:
+            raise ValueError( "objids_table requires dbcon" )
+        if objids is not None:
+            raise ValueError( "objids_table and objids cannot be used together" )
         if processing_version is not None:
-            raise ValueError( "Cannot pass processing_version when passing integer objids" )
-        obj_is_root = False
+            raise ValueError( "Cannot pass processing_version when passing objids_table" )
     else:
-        try:
-            objids = [ util.asUUID(o) for o in objids ]
-        except ValueError:
-            raise ValueError( "objids must be a list of integers or a list of uuids" )
-        obj_is_root = True
-        if processing_version is None:
-            raise ValueError( "Passing root ids requires a processing_version" )
-        pv = db.ProcessingVersion.procver_id( processing_version )
-    if len(objids) == 0:
-        raise ValueError( "no objids requested" )
+        if not util.isSequence( objids ):
+            objids = [ objids ]
+        if all( isinstance( o, numbers.Integral ) for o in objids ):
+            # Make sure they're int, because if it's something like np.int64, postgres may choke
+            objids = [ int(o) for o in objids ]
+            if processing_version is not None:
+                raise ValueError( "Cannot pass processing_version when passing integer objids" )
+            obj_is_root = False
+        else:
+            try:
+                objids = [ util.asUUID(o) for o in objids ]
+            except ValueError:
+                raise ValueError( "objids must be a list of integers or a list of uuids" )
+            obj_is_root = True
+            if processing_version is None:
+                raise ValueError( "Passing root ids requires a processing_version" )
+            pv = db.ProcessingVersion.procver_id( processing_version )
+        if len(objids) == 0:
+            raise ValueError( "no objids requested" )
 
     if return_format not in ( 'pandas', 'json' ):
         raise ValueError( f"return_format must be pandas or json, not {return_format}" )
 
-    with db.DBCon( dbcon ) as dbcon:
-        if obj_is_root:
-            q = sql.SQL(
-                """
-                SELECT DISTINCT ON(o.diaobjectid) o.*
-                FROM diaobject o
-                INNER JOIN base_procver_of_procver pv ON o.base_procver_id=pv.base_procver_id
-                                                     AND pv.procver_id={pv}
-                WHERE o.rootid=ANY(%(objids)s)
-                ORDER BY o.diaobjectid, pv.priority DESC
-                """
-            ).format( pv=pv )
+    if columns is None:
+        columns = db.DiaObject.all_columns_sql( prefix='o' )
+    else:
+        if not util.isSequence( columns ):
+            columns = [ columns ]
         else:
-            q = sql.SQL( "SELECT * FROM diaobject WHERE diaobjectid=ANY(%(objids)s)" )
+            columns = list( columns )
+        if 'diaobjectid' not in columns:
+            columns = columns.copy()
+            columns.insert( 0, 'diaobjectid' )
+        columns = sql.SQL(',').join( sql.Identifier('o', i) for i in columns )
+
+
+    with db.DBCon( dbcon ) as dbcon:
+        if objids_table is not None:
+            q = sql.SQL(
+                """/*+ IndexScan(o, idx_diaobject_diaobjectid) */
+                SELECT {columns}
+                FROM {objids_table} t
+                INNER JOIN diaobject o ON o.diaobjectid=t.diaobjectid
+                """ ).format( columns=columns, objids_table=sql.Identifier(objids_table) )
+        else:
+            if obj_is_root:
+                q = sql.SQL(
+                    """
+                    SELECT DISTINCT ON(o.diaobjectid) {columns}
+                    FROM diaobject o
+                    INNER JOIN base_procver_of_procver pv ON o.base_procver_id=pv.base_procver_id
+                                                         AND pv.procver_id={pv}
+                    WHERE o.rootid=ANY(%(objids)s)
+                    ORDER BY o.diaobjectid, pv.priority DESC
+                    """
+                ).format( columns=columns, pv=pv )
+            else:
+                q = sql.SQL( "SELECT {columns} FROM diaobject o WHERE diaobjectid=ANY(%(objids)s)"
+                            ).format( columns=columns )
 
         rows, cols = dbcon.execute( q, { 'objids': objids } )
 
@@ -91,7 +136,7 @@ def get_object_infos( objids, processing_version=None, return_format='json', dbc
             raise RuntimeError( "This should never happen" )
 
 
-def many_object_ltcvs( processing_version='default', objids=None,
+def many_object_ltcvs( processing_version='default', objids=None, objids_table=None,
                        bands=None, which='patch', include_base_procver=False,
                        return_format='json', string_keys=False, mjd_now=None, dbcon=None ):
     """Get lightcurves for objects.
@@ -109,6 +154,12 @@ def many_object_ltcvs( processing_version='default', objids=None,
          processing_version, or nothing will be found.  If uuids, then
          the diaobjectids found will be the ones that match the
          photometry with the right processing_version.
+
+      objid_table : str, default None
+         If not None, then this is the name of a table (probably a
+         temporary table) that has the object ids already loaded into it
+         in the column "diaobjectid".  Use of this requires dbcon to be
+         non None.
 
       # Offset and limit don't work right, I have to think harder
       # offset: int, default None
@@ -168,7 +219,7 @@ def many_object_ltcvs( processing_version='default', objids=None,
     -------
       retval: pandas.DataFrame or dict
         If return_format is 'pandas', then you get back a DataFrame with
-        indexes (diaobjectid, mjd) and columns (rootid, band, flux,
+        indexes (diaobjectid, mjd) and columns (band, flux,
         fluxerr, isdet, [ispatch]).  (ispatch will only be included if
         which is 'patch').
 
@@ -187,22 +238,30 @@ def many_object_ltcvs( processing_version='default', objids=None,
     """
 
     # Parse objids, set objfield
-    if objids is None:
-        raise ValueError( "objids is required" )
-    if not util.isSequence( objids ):
-        objids = [ objids ]
-    if all( isinstance( o, numbers.Integral ) for o in objids ):
-        # Make sure they're int, because if it's something like np.int64, postgres will choke
-        objids = [ int(o) for o in objids ]
+    if objids_table is not None:
+        if dbcon is None:
+            raise ValueError( "objids_table requires dbcon" )
+        if objids is not None:
+            raise ValueError( "objids_table and objids cannot be used together" )
         objfield = 'diaobjectid'
     else:
-        objfield = 'rootid'
-        try:
-            objids = [ util.asUUID(o) for o in objids ]
-        except ValueError:
-            raise ValueError( "objids must be a list of integers or a list of uuids" )
-    if len(objids) == 0:
-        raise ValueError( "no objids requested" )
+        objids_table = "tmp_objids"
+        if objids is None:
+            raise ValueError( "objids is required" )
+        if not util.isSequence( objids ):
+            objids = [ objids ]
+        if all( isinstance( o, numbers.Integral ) for o in objids ):
+            # Make sure they're int, because if it's something like np.int64, postgres will choke
+            objids = [ int(o) for o in objids ]
+            objfield = 'diaobjectid'
+        else:
+            objfield = 'rootid'
+            try:
+                objids = [ util.asUUID(o) for o in objids ]
+            except ValueError:
+                raise ValueError( "objids must be a list of integers or a list of uuids" )
+        if len(objids) == 0:
+            raise ValueError( "no objids requested" )
 
     # Parse bands
     if bands is not None:
@@ -223,48 +282,51 @@ def many_object_ltcvs( processing_version='default', objids=None,
     with db.DBCon( dbcon ) as dbcon:
         pvid = db.ProcessingVersion.procver_id( processing_version, dbcon=dbcon )
 
-        # For efficiency, we're going to make a first pass and extract just the object ids.
-        # If these are root ids, then we can't be sure which diaobjectid will correspond
-        # to them, so we will pull the *all* out.  (Think about this.  It's possible we
-        # could be doing something with the object's processing version, but consisder
-        # all the complicated messy cases.)
+        if objids is not None:
+            # For efficiency, we're going to make a first pass and extract just the object ids.
+            # If these are root ids, then we can't be sure which diaobjectid will correspond
+            # to them, so we will pull the *all* out.  (Think about this.  It's possible we
+            # could be doing something with the object's processing version, but consisder
+            # all the complicated messy cases.)
 
-        dbcon.execute( "CREATE TEMP TABLE tmp_objids( diaobjectid bigint )", explain=False )
-        if objfield == 'rootid':
-            q = sql.SQL(
-                """INSERT INTO tmp_objids (
-                     SELECT diaobjectid FROM diaobject
-                     WHERE rootid=ANY(%(roots)s)
-                   )
-                """
-            )
-            dbcon.execute( q, { 'roots': objids } )
-        else:
-            with dbcon.cursor.copy( "COPY tmp_objids(diaobjectid) FROM STDIN" ) as copier:
-                for objid in objids:
-                    copier.write_row( [ objid ] )
+            q = sql.SQL( "CREATE TEMP TABLE {objids_table}( diaobjectid bigint )"
+                        ).format( objids_table=sql.Identifier( objids_table ) )
+            dbcon.execute( q, explain=False )
+            if objfield == 'rootid':
+                q = sql.SQL(
+                    """INSERT INTO {objids_table} (
+                         SELECT diaobjectid FROM diaobject
+                         WHERE rootid=ANY(%(roots)s)
+                       )
+                    """
+                ).format( objids_table=sql.Identifier(objids_table) )
+                dbcon.execute( q, { 'roots': objids } )
+            else:
+                q = sql.SQL( "COPY {objids_table}(diaobjectid) FROM STDIN"
+                            ).format( objids_table=sql.Identifier( objids_table ) )
+                with dbcon.cursor.copy( q ) as copier:
+                    for objid in objids:
+                        copier.write_row( [ objid ] )
 
         # Extract detections
-        dbcon.execute( "CREATE TEMP TABLE tmp_sources( diaobjectid bigint, rootid uuid, visit bigint,"
+        dbcon.execute( "CREATE TEMP TABLE tmp_sources( diaobjectid bigint, visit bigint,"
                        "                               mjd double precision, band text, flux real, fluxerr real,"
                        "                               isdet bool, base_procver text )",
                        explain=False )
         q = sql.SQL(
-            """/*+ IndexScan(o idx_diaobject_diaobjectid)
-                   IndexScan(s idx_diasource_diaobjectid) */
+            """/*+ IndexScan(s idx_diasource_diaobjectid) */
                INSERT INTO tmp_sources
-               SELECT DISTINCT ON (o.diaobjectid, s.visit)
-                 o.diaobjectid, o.rootid, s.visit, s.midpointmjdtai AS mjd,
+               SELECT DISTINCT ON (s.diaobjectid, s.visit)
+                 s.diaobjectid, s.visit, s.midpointmjdtai AS mjd,
                  s.band, s.psfflux AS flux, s.psffluxerr AS fluxerr,
                  TRUE as isdet, p.description AS base_procver
-               FROM tmp_objids t
-               INNER JOIN diaobject o ON t.diaobjectid=o.diaobjectid
-               INNER JOIN diasource s ON s.diaobjectid=o.diaobjectid
+               FROM {objids_table} t
+               INNER JOIN diasource s ON s.diaobjectid=t.diaobjectid
                INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id
                                                     AND pv.procver_id={procver}
                INNER JOIN base_processing_version p ON pv.base_procver_id=p.id
             """
-        ).format( procver=pvid )
+        ).format( procver=pvid, objids_table=sql.Identifier(objids_table) )
         _and = "WHERE"
         if mjd_now is not None:
             q += sql.SQL( f"                   {_and} s.midpointmjdtai<={{t0}}" ).format( t0=mjd_now )
@@ -274,7 +336,7 @@ def many_object_ltcvs( processing_version='default', objids=None,
             _and = "  AND"
         q += sql.SQL(
             """
-               ORDER BY o.diaobjectid, s.visit, pv.priority DESC
+               ORDER BY s.diaobjectid, s.visit, pv.priority DESC
             """ )
         dbcon.execute( q, { 'bands': bands } )
 
@@ -283,26 +345,24 @@ def many_object_ltcvs( processing_version='default', objids=None,
 
         else:
             # Extract forced photometry if necessary
-            dbcon.execute( "CREATE TEMP TABLE tmp_forced( diaobjectid bigint, rootid uuid, visit bigint,"
+            dbcon.execute( "CREATE TEMP TABLE tmp_forced( diaobjectid bigint, visit bigint,"
                            "                              mjd double precision, band text, flux real, fluxerr real,"
                            "                              isdet bool, base_procver text )",
                            explain=False )
             q = sql.SQL(
-                """/*+ IndexScan(o idx_diaobject_diaobjectid)
-                       IndexScan(s idx_diaforcedsource_diaobjectid) */
+                """/*+ IndexScan(s idx_diaforcedsource_diaobjectid) */
                    INSERT INTO tmp_forced
-                   SELECT DISTINCT ON (o.diaobjectid, s.visit)
-                     o.diaobjectid, o.rootid, s.visit, s.midpointmjdtai AS mjd,
+                   SELECT DISTINCT ON (s.diaobjectid, s.visit)
+                     s.diaobjectid, s.visit, s.midpointmjdtai AS mjd,
                      s.band, s.psfflux AS flux, s.psffluxerr AS fluxerr,
                      FALSE as isdet, p.description AS base_procver
-                   FROM tmp_objids t
-                   INNER JOIN diaobject o ON t.diaobjectid=o.diaobjectid
-                   INNER JOIN diaforcedsource s ON s.diaobjectid=o.diaobjectid
+                   FROM {objids_table} t
+                   INNER JOIN diaforcedsource s ON s.diaobjectid=t.diaobjectid
                    INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id
                                                         AND pv.procver_id={procver}
                    INNER JOIN base_processing_version p ON pv.base_procver_id=p.id
                 """
-            ).format( procver=pvid )
+            ).format( procver=pvid, objids_table=sql.Identifier(objids_table) )
             _and = "WHERE"
             if mjd_now is not None:
                 q += sql.SQL( f"                   {_and} s.midpointmjdtai<={{t0}}" ).format( t0=mjd_now )
@@ -312,14 +372,13 @@ def many_object_ltcvs( processing_version='default', objids=None,
                 _and = "  AND"
             q += sql.SQL(
                 """
-                   ORDER BY o.diaobjectid, s.visit, pv.priority DESC
+                   ORDER BY s.diaobjectid, s.visit, pv.priority DESC
                 """ )
             dbcon.execute( q, { 'bands': bands } )
 
             # Join detections to forced photometry to set the 'isdet' and 'ispatch' flags
             q = sql.SQL(
                 """SELECT CASE WHEN f.diaobjectid IS NULL THEN s.diaobjectid ELSE f.diaobjectid END AS diaobjectid,
-                          CASE WHEN f.rootid IS NULL THEN s.rootid ELSE f.rootid END AS rootid,
                           CASE WHEN f.visit IS NULL THEN s.visit ELSE f.visit END AS visit,
                           CASE WHEN f.mjd IS NULL THEN s.mjd ELSE f.mjd END AS mjd,
                           CASE WHEN f.band IS NULL THEN s.band ELSE f.band END AS band,
@@ -448,7 +507,7 @@ def object_ltcv( processing_version='default', diaobjectid=None,
 
     if return_format == 'pandas':
         rval.reset_index( inplace=True )
-        rval.drop( [ 'diaobjectid', 'rootid' ], axis='columns', inplace=True )
+        rval.drop( 'diaobjectid', axis='columns', inplace=True )
         return rval
 
     elif return_format == 'json':
@@ -1155,8 +1214,7 @@ def get_hot_ltcvs( processing_version, detected_since_mjd=None, detected_in_last
     ----------
       processing_version: string
         The description of the processing version, or processing version
-        alias, to use for searching diasource, diaforcedsource, and
-        (maybe) host_galaxy tables.
+        alias, to use for searching diasource and diaforcedsource tables.
 
       detected_since_mjd: float, default None
         If given, will search for all objects detected (i.e. with an
@@ -1193,8 +1251,9 @@ def get_hot_ltcvs( processing_version, detected_since_mjd=None, detected_in_last
         If true, return a second data frame with information about the hosts.
 
       host_processing_version : str, default None
-        Use this processing version for the host table.  If None, uses
-        processing_version for the host galaxy table.
+        WARNING : not currently supported.  Right now, it just assumes
+        the base processing version of the host is the same as that of
+        the diaobject.
 
       dbcon: psycopg.Connection, db.DBCon, or None
          Database connection to use.  If None, will make a new
@@ -1202,65 +1261,55 @@ def get_hot_ltcvs( processing_version, detected_since_mjd=None, detected_in_last
 
       Returns
       -------
-        ( pandas.DataFrame, pandas.DataFrame or None )
+        ltcvdf, objinfo, hostdf
 
-        A 2-element tuple.  The first will be a pandas DataFrame, the
-        second will either be another DataFrame or None.  No indexes
-        will have been set in the dataframes.
+        ltcvdf: pandas.DataFrame
+           A dataframe with lightcurves. It is sorted and indexed by
+           diaobjectid (bigint) and mjd (float), and has columns:
 
-        The first one has the lightcurves.  It has columns:
-           rootid -- the object root ID from the database.  (TODO: document.)
-           diaobjectid -- object id
-           ra -- the ra of the *object* (interpretation complicated).
-                   Will be the same for all rows with the same rootid.
-                   Decimal degrees, J2000.
-           dec -- the dec of the *object* (goes with ra).  Decmial degrees, J2000.
-           visit -- the visit number
-           detector -- the detector number
-           midpointmjdtai -- the MJD of the obervation
-           band -- the filter (u, g, r, i, z, or Y)
-           psfflux -- the PSF flux in nJy
-           psffluxerr --- uncertaintly on psfflux in nJy
-           is_source -- bool.  If you specified source_aptch=False, this
-                          will be False for all rows.  Otherwise, it's
-                          True for rows pulled from the diasource table,
-                          and False for rows pulled from the
-                          diaforcedsource table.
+             visit -- the visit number
+             mjd -- the MJD of the obervation
+             band -- the filter (u, g, r, i, z, or Y)
+             flux -- the PSF flux in nJy
+             fluxerr -- uncertaintly on psfflux in nJy
+             istdet -- bool, True if this was detected (i.e. has an associated source)
+             ispatch -- bool, True if this data is from a source rather than a forced source
+                        (only included if source_patch is True)
 
-       The second member of the tuple will be None unless you specified
-       include_hostinfo.  If include_hostinfo is true, then it's a
-       dataframe with the following columns.  Note that the root id does
-       *not* uniquely specify the host properties!  The
-       processing_version you gave will affect which rows were actually
-       pulled from the diaobject table.  (And it's potentially more
-       complicated than that....)  These are mostly defined based on
-       looking at the Object table as defined in the 2023-07-10 version
-       of the DPDD in Table 4.3.1, with some columns coming from the
-       DiaObject table defined by https://sdm-schemas.lsst.io/apdb.html
-       (accessed on 2024-04-30).
+        objinfo: pandas.DataFrame
+           Information about the objects.  Sorted and indexed by diaobjectid,
+           with all the columns from diaobject.
 
-           rootid --- the object root ID from the database.  Use this to
-                        match to the lightcurve data frame.
-           stdcolor_u_g -- "standard" colors as (not really) defined by the DPDD, in AB mags
-           stdcolor_g_r --
-           stdcolor_r_i --
-           stdcolor_i_z --
-           stdcolor_z_y --
-           stdcolor_u_g_err -- uncertainty on standard colors
-           stdcolor_g_r_err --
-           stdcolor_r_i_err --
-           stdcolor_i_z_err --
-           stdcolor_z_y_err --
-           petroflux_r -- the flux in nJy within some standard multiple of the petrosian radius
-           petroflux_r_err -- uncertainty on petroflux_r
-           nearbyextobj1sep -- "Second moment-based separation of nearbyExtObj1 (unitless)" [????]
-                               For SNANA-based sims, this is ROB FIGURE THIS OUT
-           pzmean -- mean photoredshift (nominally from the "photoZ_pest" column of the DPD Object table)
-           pzstd -- standard deviation of photoredshift (also nominally from "photoZ_pest")
+        hostdf: pandas.DataFrame or None
+           If include_hostinfo is True, then this is a dataframe indexed by diaobjectid with the following columns:
+           the following columns
+
+             id -- UUID, the unique UUID primary key of the host galaxy
+             objectid -- the objectid of the host galaxy
+             base_procver_id -- the processing version of the host galaxy.
+             stdcolor_u_g -- "standard" colors as (not really) defined by the DPDD, in AB mags
+             stdcolor_g_r --
+             stdcolor_r_i --
+             stdcolor_i_z --
+             stdcolor_z_y --
+             stdcolor_u_g_err -- uncertainty on standard colors
+             stdcolor_g_r_err --
+             stdcolor_r_i_err --
+             stdcolor_i_z_err --
+             stdcolor_z_y_err --
+             petroflux_r -- the flux in nJy within some standard multiple of the petrosian radius
+             petroflux_r_err -- uncertainty on petroflux_r
+             nearbyextobj1sep -- "Second moment-based separation of nearbyExtObj1 (unitless)" [????]
+                                 For SNANA-based sims, this is ROB FIGURE THIS OUT
+             pzmean -- mean photoredshift (nominally from the "photoZ_pest" column of the DPD Object table)
+             pzstd -- standard deviation of photoredshift (also nominally from "photoZ_pest")
 
     """
 
     mjd0 = None
+
+    if host_processing_version is not None:
+        raise NotImplementedError( "Error, host processing version is not currently supported." )
 
     if detected_since_mjd is not None:
         if detected_in_last_days is not None:
@@ -1288,117 +1337,44 @@ def get_hot_ltcvs( processing_version, detected_since_mjd=None, detected_in_last
         #   that have a detection (i.e. a diasource) in the
         #   desired time period.
 
-        q = ( "/*+ IndexScan(s idx_diasource_diaobjectid)\n"
-              "*/\n"
-              "SELECT DISTINCT ON(o.diaobjectid) o.rootid, o.diaobjectid\n"
+        q = ( "/*+ IndexScan(s idx_diasource_mjd) */\n"
+              "SELECT DISTINCT ON(s.diaobjectid) s.diaobjectid\n"
               "INTO TEMP TABLE tmp_objids\n"
-              "FROM diaobject o\n"
-              "INNER JOIN (\n"
-              "  SELECT DISTINCT ON (src.diaobjectid,src.visit) src.*\n"
-              "  FROM diasource src\n"
-              "  INNER JOIN base_procver_of_procver pv ON src.base_procver_id=pv.base_procver_id\n"
-              "    AND pv.procver_id=%(procver)s\n"
-              "  ORDER BY src.diaobjectid, src.visit, pv.priority DESC\n"
-              ") s ON s.diaobjectid=o.diaobjectid\n"
+              "FROM diasource s\n"
+              "INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id\n"
+              "                                     AND pv.procver_id=%(procver)s\n"
               "WHERE s.midpointmjdtai>=%(t0)s\n" )
         if mjd_now is not None:
-            q += "  AND midpointmjdtai<=%(t1)s\n"
-        q += "ORDER BY o.diaobjectid"
-        con.execute_nofetch( q, { 'procver': procver, 't0': mjd0, 't1': mjd_now } )
+            q += "  AND s.midpointmjdtai<=%(t1)s\n"
+        q += "ORDER BY s.diaobjectid\n"
+        con.execute( q, { 'procver': procver, 't0': mjd0, 't1': mjd_now } )
 
-        # Second : pull out host info for those objects if requested
+        # Second: pull out the object info for these objects
+        objdf = get_object_infos( objids_table='tmp_objids', dbcon=con, return_format='pandas' )
+
+        # Third : pull out host info for those objects if requested
         # TODO : right now it just pulls out nearby extended object 1.
         # make it configurable to get up to all three.
         # TODO : is distinct on objectid the right thing to do?
+        # TODO : think about host processing versions!  Issue #64
         hostdf = None
         if include_hostinfo:
-            if host_processing_version is None:
-                host_pv = procver
-            else:
-                host_pv = util.procver_id( host_processing_version, dbcon=con.con )
-            q = "SELECT DISTINCT ON (o.diaobjectid) o.rootid,o.diaobjectid,"
+            q = "SELECT o.diaobjectid,\n"
             for bandi in range( len(bands)-1 ):
-                q += ( f"h.stdcolor_{bands[bandi]}_{bands[bandi+1]},"
+                q += ( f"       h.stdcolor_{bands[bandi]}_{bands[bandi+1]},"
                        f"h.stdcolor_{bands[bandi]}_{bands[bandi+1]}_err,\n" )
-            q += ( "h.petroflux_r,h.petroflux_r_err,o.nearbyextobj1sep,h.pzmean,h.pzstd\n"
-                   "FROM diaobject o\n"
-                   "INNER JOIN (\n"
-                   "  SELECT DISTINCT ON (host.objectid) host.* FROM host_galaxy host\n"
-                   "  INNER JOIN base_procver_of_procver pv ON host.base_procver_id=pv.base_procver_id\n"
-                   "    AND pv.procver_id=%(procver)s\n"
-                   "  ORDER BY host.objectid, pv.priority DESC\n"
-                   ") h ON h.id=o.nearbyextobj1id\n"
-                   "WHERE o.rootid IN (SELECT rootid FROM tmp_objids)\n"
+            q += ( "       h.petroflux_r, h.petroflux_r_err, o.nearbyextobj1sep, h.pzmean, h.pzstd\n"
+                   "FROM tmp_objids t\n"
+                   "INNER JOIN diaobject o ON t.diaobjectid=o.diaobjectid\n"
+                   "LEFT JOIN host_galaxy h ON o.nearbyextobj1id=h.objectid\n"
+                   "                       AND o.base_procver_id=h.base_procver_id\n"
                    "ORDER BY o.diaobjectid" )
-            rows, columns = con.execute( q, { 'procver': host_pv } )
+            rows, columns = con.execute( q )
             hostdf = pandas.DataFrame( rows, columns=columns )
 
+        # Fourth: get the lightcurves
+        df = many_object_ltcvs( processing_version=processing_version, objids_table='tmp_objids',
+                                which='patch' if source_patch else 'forced',
+                                return_format='pandas', mjd_now=mjd_now, dbcon=con )
 
-        # Third : pull out all the forced photometry
-        # THOUGHT REQUIRED : do we want midmpointmjdtai to stop at mjd_now-1 rather
-        #   than mjd_now?  It depends what you mean.  If you want mjd_now to mean
-        #   "data through this date" then don't stop a day early.  If you mean
-        #   "simulate what we knew on this date"), then do stop a day early, because
-        #   forced photometry will be coming out with a delay of a ~day.
-        #   For now (and probably forever), just stop at mjd_now, because I predict
-        #   that reconstruction is hopeless as the delay for forced photometry won't
-        #   be 100% reliably 1 day for sundry reasons (both project and ours).
-        q = ( "/*+ IndexScan(f idx_diaforcedsource_diaobjectid)\n"
-              "    IndexScan(o)\n"
-              "*/\n"
-              "SELECT DISTINCT ON(o.diaobjectid, f.visit) o.rootid AS rootid, o.diaobjectid as diaobjectid,\n"
-              "     o.ra AS ra, o.dec AS dec,\n"
-              "     f.visit,f.detector,f.midpointmjdtai,f.band,f.psfflux,f.psffluxerr\n"
-              "FROM diaforcedsource f\n"
-              "INNER JOIN base_procver_of_procver pv ON pv.base_procver_id=f.base_procver_id\n"
-              "  AND pv.procver_id=%(procver)s\n"
-              "INNER JOIN diaobject o ON f.diaobjectid=o.diaobjectid\n"
-              "WHERE o.rootid IN (SELECT rootid FROM tmp_objids)\n" )
-        if mjd_now is not None:
-            q += "  AND f.midpointmjdtai<=%(t1)s "
-        q += "ORDER BY o.diaobjectid, f.visit, pv.priority DESC\n"
-        rows, columns = con.execute( q, { "procver": procver, "t1": mjd_now } )
-        forceddf = pandas.DataFrame( rows, columns=columns )
-        forceddf.sort_values( [ 'diaobjectid', 'midpointmjdtai' ], inplace=True )
-        forceddf['is_source'] = False
-
-        # Fourth: if we've been asked to patch in sources where forced sources are
-        #   missing, pull those down and concatenate them into the dataframe.
-        # TODO : figure out the right hints to give when these tables
-        #   are big!
-        sourcedf = None
-        if source_patch:
-            q = ( "/*+ IndexScan(src idx_diasource_diaobjectid)\n"
-                  "    IndexScan(frc idx_diaforcedsource_diaobjectid)\n"
-                  "    IndexScan(o)\n"
-                  "*/\n"
-                  "SELECT o.rootid,o.diaobjectid,o.ra,o.dec,s.visit,s.detector,\n"
-                  "       s.midpointmjdtai,s.band,s.psfflux,s.psffluxerr\n"
-                  "FROM (\n"
-                  "  SELECT DISTINCT ON(src.diaobjectid,src.visit)\n"
-                  "    src.diaobjectid,src.visit,src.detector,src.midpointmjdtai,src.band,src.psfflux,src.psffluxerr\n"
-                  "  FROM diasource src "
-                  "  INNER JOIN base_procver_of_procver pv ON src.base_procver_id=pv.base_procver_id\n"
-                  "    AND pv.procver_id=%(procver)s\n"
-                  "  ORDER BY src.diaobjectid, src.visit, pv.priority DESC\n"
-                  ") s\n"
-                  "INNER JOIN diaobject o ON s.diaobjectid=o.diaobjectid\n"
-                  "LEFT JOIN (\n"
-                  "  SELECT DISTINCT ON(frc.diaobjectid,frc.visit) frc.*\n"
-                  "  FROM diaforcedsource frc\n"
-                  "  INNER JOIN base_procver_of_procver fpv ON frc.base_procver_id=fpv.base_procver_id\n"
-                  "    AND fpv.procver_id=%(procver)s\n"
-                  "  ORDER BY frc.diaobjectid, frc.visit, fpv.priority DESC\n"
-                  ") f ON f.diaobjectid=s.diaobjectid AND f.visit=s.visit\n"
-                  "WHERE o.rootid IN (SELECT rootid FROM tmp_objids)\n"
-                  "  AND f.diaobjectid IS NULL\n" )
-            if mjd_now is not None:
-                q += "  AND s.midpointmjdtai<=%(t1)s\n"
-            q += "ORDER BY o.diaobjectid,s.midpointmjdtai"
-            rows, columns = con.execute( q, { "procver": procver, "t1": mjd_now } )
-            sourcedf = pandas.DataFrame( rows, columns=columns )
-            sourcedf['is_source'] = True
-            forceddf = pandas.concat( [ forceddf, sourcedf ], axis='index' )
-            forceddf.sort_values( [ 'rootid', 'midpointmjdtai' ], inplace=True )
-
-    return forceddf, hostdf
+    return df, objdf, hostdf

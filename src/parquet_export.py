@@ -36,6 +36,8 @@ def create_diaobject_sources_query(connection, procver, diaobjs=None, offset=Non
 
     procver = db.ProcessingVersion.procver_id( procver )
     with db.DBCon( connection ) as dbcon:
+        dbcon.alwaysexplain = False
+
         # When Kostya originally wrote this, this wasn't necessary, but somehow an
         #   additional level of subqueries made postgres start spitting about
         #   not being able to create a column with pseudo-type record[], so
@@ -47,7 +49,6 @@ def create_diaobject_sources_query(connection, procver, diaobjs=None, offset=Non
 
         dbcon.execute( "CREATE TYPE pg_temp.srcrow AS (visit bigint, midpointmjdtai double precision,"
                        "                               band character(1), psfflux real, psffluxerr real)" )
-
         q = sql.SQL(
             """CREATE TEMPORARY VIEW diaobject_with_sources AS
                    SELECT o.*, ds.diasource, dfs.diaforcedsource
@@ -118,12 +119,7 @@ def dump_to_parquet(filehandler, procver, diaobjs=None, offset=None, limit=None,
 
         create_diaobject_sources_query(conn, procver=procver, diaobjs=diaobjs, offset=offset, limit=limit)
 
-        conn.execute(
-            """
-            DROP EXTENSION IF EXISTS pg_parquet;
-            CREATE EXTENSION pg_parquet;
-            """
-        )
+        conn.execute("DROP EXTENSION IF EXISTS pg_parquet; CREATE EXTENSION pg_parquet;", explain=False )
         with conn.cursor.copy(
             """
             COPY (SELECT * FROM diaobject_with_sources)
