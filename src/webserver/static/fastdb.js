@@ -134,15 +134,15 @@ fastdbap.Context = class
 
         this.connector.sendHttpRequest( "/count/object/" + encodeURIComponent( pv ), { 'estimate': true },
                                         (data) => {
-                                            self.objects_span.innerHTML = data.count.toString() + " objects";
+                                            self.objects_span.innerHTML = data.count.toString() + "(?) objects";
                                         } );
         this.connector.sendHttpRequest( "/count/source/" + encodeURIComponent( pv ), { 'estimate': true },
                                         (data) => {
-                                            self.sources_span.innerHTML = data.count.toString() + " sources";
+                                            self.sources_span.innerHTML = data.count.toString() + "(?) sources";
                                         } );
         this.connector.sendHttpRequest( "/count/forced/" + encodeURIComponent( pv ), { 'estimate': true },
                                         (data) => {
-                                            self.forced_span.innerHTML = data.count.toString() + " forced";
+                                            self.forced_span.innerHTML = data.count.toString() + "(?) forced";
                                         } );
     }
 
