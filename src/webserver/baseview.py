@@ -7,6 +7,7 @@ import flask
 import flask.views
 
 from db import DB
+from util import FDBLogger
 
 
 # ======================================================================
@@ -100,6 +101,6 @@ class BaseView( flask.views.View ):
         except Exception as ex:
             # sio = io.StringIO()
             # traceback.print_exc( file=sio )
-            # app.logger.debug( sio.getvalue() )
-            flask.current_app.logger.exception( str(ex) )
+            # FDBLogger.debug( sio.getvalue() )
+            FDBLogger.exception( str(ex) )
             return str(ex), 500

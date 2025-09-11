@@ -8,6 +8,7 @@ import astropy.time
 import db
 import spectrum
 from webserver.baseview import BaseView
+from util import FDBLogger
 
 # Want this to be False except when
 #  doing deep-in-the-weeds debugging
@@ -19,7 +20,6 @@ _show_way_too_much_debug_info = False
 
 class AskForSpectrum( BaseView ):
     def do_the_things( self ):
-        # logger = flask.current_app.logger
         userid = flask.session['useruuid']
 
         data = flask.request.json
@@ -101,7 +101,7 @@ class WhatSpectraAreWanted( BaseView ):
         df = spectrum.what_spectra_are_wanted( procver=procver, wantsince=wantsince, requester=requester,
                                                notclaimsince=notclaimsince, nospecsince=nospecsince,
                                                detsince=detsince, lim_mag=lim_mag, lim_mag_band=lim_mag_band,
-                                               mjdnow=mjdnow, logger=flask.current_app.logger )
+                                               mjdnow=mjdnow, logger=FDBLogger )
 
         # Build the return structure
         retarr = []
@@ -207,7 +207,7 @@ class GetSpectrumInfo( BaseView ):
             data['rootids'] = data['oid']
             del data['oid']
 
-        df = spectrum.get_spectrum_info( logger=flask.current_app.logger, **data )
+        df = spectrum.get_spectrum_info( logger=FDBLogger, **data )
         df.rename( columns={ 'root_diaobject_id': 'oid' }, inplace=True )
         df['inserted_at'] = df['inserted_at'].apply( lambda x: x.isoformat() )
         return df.to_dict( 'records' )

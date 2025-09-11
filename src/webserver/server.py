@@ -6,6 +6,7 @@ import flask_session
 
 import db
 import ltcv
+from util import FDBLogger
 import webserver.rkauth_flask as rkauth_flask
 import webserver.dbapp as dbapp
 import webserver.ltcvapp as ltcvapp
@@ -24,10 +25,6 @@ with open( config.secretkeyfile ) as ifp:
 
 class MainPage( BaseView ):
     def dispatch_request( self ):
-        app.logger.error( "Hello error." )
-        app.logger.warning( "Hello warning." )
-        app.logger.info( "Hello info." )
-        app.logger.debug( "Hello debug." )
         return flask.render_template( "fastdb_webap.html" )
 
 
@@ -125,23 +122,54 @@ class CountThings( BaseView ):
         table = tablemap[ which ][0]
         objfields = tablemap[ which ][1]
 
+        estimate = False
+        if flask.request.is_json:
+            data = flask.request.json
+            estimate = ( 'estimate' in data ) and ( data['estimate'] )
+            # IN PROGRESS
+
         with db.DBCon() as dbcon:
             pvid = db.ProcessingVersion.procver_id( procver )
-            flask.current_app.logger.debug( f"Counting {which} for {pvid}" )
-            q = sql.SQL(
+
+            baseq = sql.SQL(
                 """
                 SELECT COUNT(*) FROM (
-                  SELECT DISTINCT ON({pk}) * FROM {table} t
+                  SELECT DISTINCT ON({{pk}}) t.base_procver_id FROM {{table}} t
                   INNER JOIN base_procver_of_procver pv ON t.base_procver_id=pv.base_procver_id
-                                                       AND pv.procver_id={pvid}
-                  ORDER BY {pk},pv.priority DESC
+                                                       AND pv.procver_id={{pvid}}
+                  ORDER BY {{pk}},pv.priority DESC
                 ) subq;
                 """
             ).format( pk=sql.SQL(',').join( sql.Identifier(i) for i in objfields ),
                       table=sql.Identifier(table), pvid=pvid )
+
+            if estimate:
+                # cf: https://wiki.postgresql.org/wiki/Count_estimate
+                # TODO : put this in the postgres docker file so we don't have to compile on the fly
+                FDBLogger.debug( f"Getting estimate of count of {which} for {pvid}" )
+                q = """CREATE OR REPLACE FUNCTION pg_temp.count_estimate(
+                           query text
+                       ) RETURNS integer LANGUAGE plpgsql AS $$
+                       DECLARE
+                           plan jsonb;
+                       BEGIN
+                           EXECUTE FORMAT('EXPLAIN (FORMAT JSON %s', query) INTO plan;
+                           RETURN plan->0->'Plan'->'Plan Rows';
+                       END;
+                       $$;
+                    """
+x                dbcon.execute( q, explain=False )
+                FDBLogger.debug( f"baseq.as_string()={baseq.as_string()}" )
+                q = sql.SQL( "SELECT pg_temp.count_estimate({baseq})" ).format( baseq=baseq.as_string() )
+
+            else:
+                # Would an index scan help?
+                q = baseq
+
             rows, _ = dbcon.execute( q )
             return { 'status': 'ok',
                      'table': table,
+                     'isestimate': estimate,
                      'count': rows[0][0] }
 
 
@@ -174,6 +202,7 @@ class ObjectSearch( BaseView ):
 # **********************************************************************
 # Configure and create the web app in global variable "app"
 
+FDBLogger.multiprocessing_replace( pid=True )
 
 app = flask.Flask(  __name__ )
 # app.logger.setLevel( logging.INFO )

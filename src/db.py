@@ -10,6 +10,7 @@ import os
 import uuid
 import collections
 import types
+import logging
 
 from contextlib import contextmanager
 
@@ -21,6 +22,7 @@ import psycopg.types.json
 import pymongo
 
 import util
+from util import FDBLogger
 
 # These next two are for debugging.  They are used in DBCon.__init__.
 # For normal use, they should be False, as they bloat the logs a lot.
@@ -253,26 +255,29 @@ class DBCon:
         Parameters are the same as execute().  Returns nothing.
 
         """
-        echo = echo if echo is not None else self.echoqueries
-        explain = explain if explain is not None else self.alwaysexplain
-        if echo:
-            if isinstance( q, ( psycopg.sql.SQL, psycopg.sql.Composed ) ):
-                util.logger.debug( f"Sending query\n{q.as_string()}" )
-            else:
-                util.logger.debug( f"Sending query\n{q}\nwith substitutions: {subdict}" )
+        if FDBLogger.instance().get().level <= logging.DEBUG:
+            echo = echo if echo is not None else self.echoqueries
+            explain = explain if explain is not None else self.alwaysexplain
+            if echo:
+                if isinstance( q, ( psycopg.sql.SQL, psycopg.sql.Composed ) ):
+                    FDBLogger.debug( f"Sending query\n{q.as_string()}" )
+                else:
+                    FDBLogger.debug( f"Sending query\n{q}\nwith substitutions: {subdict}" )
 
-        if explain:
-            if isinstance( q, ( psycopg.sql.SQL, psycopg.sql.Composed ) ):
-                self.cursor.execute( f"EXPLAIN {q.as_string()}", subdict )
-            else:
-                self.cursor.execute( f"EXPLAIN {q}", subdict )
-            rows = self.cursor.fetchall()
-            dex = 'QUERY PLAN' if self.curcursorisdict else 0
-            nl = '\n'
-            util.logger.debug( f"Query plan:\n{nl.join([r[dex] for r in rows])}" )
+            if explain:
+                if isinstance( q, ( psycopg.sql.SQL, psycopg.sql.Composed ) ):
+                    self.cursor.execute( f"EXPLAIN {q.as_string()}", subdict )
+                else:
+                    self.cursor.execute( f"EXPLAIN {q}", subdict )
+                rows = self.cursor.fetchall()
+                dex = 'QUERY PLAN' if self.curcursorisdict else 0
+                nl = '\n'
+                FDBLogger.debug( f"Query plan:\n{nl.join([r[dex] for r in rows])}" )
 
         self.cursor.execute( q, subdict )
 
+        if ( FDBLogger.instance().get().level <= logging.DEBUG ) and ( echo or explain ):
+            FDBLogger.debug( "Query complete." )
 
     def execute( self, q, subdict={}, silent=False, echo=None, explain=None ):
         """Runs a query, and returns either (rows, columns) or just rows.

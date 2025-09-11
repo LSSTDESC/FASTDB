@@ -4,6 +4,7 @@ import flask
 import db
 import ltcv
 import util
+from util import FDBLogger
 from webserver.baseview import BaseView
 
 
@@ -80,13 +81,13 @@ class GetManyLtcvs( BaseView ):
                 mjd_now = float( data['mjd_now'] )
 
         with db.DBCon() as dbcon:
-            flask.current_app.logger.debug( f"Asking for lightcurves for {objids}, processing version {procver}, "
-                                            f"which {which}, bands {bands}" )
+            FDBLogger.debug( f"Asking for lightcurves for {objids}, processing version {procver}, "
+                             f"which {which}, bands {bands}" )
             ltcvs = ltcv.many_object_ltcvs( procver, objids, bands=bands, which=which,
                                             return_format='json', string_keys=True,
                                             mjd_now=mjd_now, dbcon=dbcon )
             if len(ltcvs) != len(objids):
-                flask.current_app.logger.warning( f"Asked for {len(objids)} lightcurves, got {len(ltcvs)}" )
+                FDBLogger.warning( f"Asked for {len(objids)} lightcurves, got {len(ltcvs)}" )
             if len(ltcvs) == 0:
                 return {}
             objids = list( int(i) for i in ltcvs.keys() )
@@ -299,7 +300,6 @@ class GetHotTransients( BaseView ):
     """
 
     def do_the_things( self ):
-        logger = flask.current_app.logger
         bands = [ 'u', 'g', 'r', 'i', 'z', 'y' ]
 
         if not flask.request.is_json:
@@ -363,7 +363,7 @@ class GetHotTransients( BaseView ):
 
         if len(ltcvdf) > 0:
             objids = objdf.index.get_level_values( 'diaobjectid' ).unique()
-            logger.debug( f"GetHotSNEView: got {len(objids)} objects in a df of length {len(ltcvdf)}" )
+            FDBLogger.debug( f"GetHotSNEView: got {len(objids)} objects in a df of length {len(ltcvdf)}" )
 
             for objid in objids:
                 subdf = ltcvdf.xs( objid, level='diaobjectid' )
@@ -436,7 +436,7 @@ class GetHotTransients( BaseView ):
                     raise RuntimeError( "This should never happen." )
 
 
-        # logger.info( "GetHotTransients; returning" )
+        # FDBLogger.info( "GetHotTransients; returning" )
         return sne
 
 
