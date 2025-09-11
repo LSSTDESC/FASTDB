@@ -14,6 +14,7 @@ if [ ! -f $POSTGRES_DATA_DIR/PG_VERSION ]; then
     psql --command "GRANT CONNECT ON DATABASE fastdb TO postgres_ro"
     psql --command "GRANT USAGE ON SCHEMA public TO postgres_ro" fastdb
     psql --command "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO postgres_ro" fastdb
+    psql --command "CREATE TABLESPACE postgres_temp LOCATION '/tmp/postgres_temp'" fastdb
     /usr/lib/postgresql/15/bin/pg_ctl -D $POSTGRES_DATA_DIR stop
 fi
 exec /usr/lib/postgresql/15/bin/postgres -c config_file=/etc/postgresql/15/main/postgresql.conf

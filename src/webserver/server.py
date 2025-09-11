@@ -158,7 +158,7 @@ class CountThings( BaseView ):
                        END;
                        $$;
                     """
-x                dbcon.execute( q, explain=False )
+                dbcon.execute( q, explain=False )
                 FDBLogger.debug( f"baseq.as_string()={baseq.as_string()}" )
                 q = sql.SQL( "SELECT pg_temp.count_estimate({baseq})" ).format( baseq=baseq.as_string() )
 
