@@ -22,8 +22,8 @@ fastdbap.ObjectInfo = class
         this.combined_plot_is_rel = false;
 
         this.data.ltcv['s/n'] = [];
-        for ( let i in this.data.ltcv.psfflux ) {
-            this.data.ltcv['s/n'].push( this.data.ltcv.psfflux[i] / this.data.ltcv.psffluxerr[i] );
+        for ( let i in this.data.ltcv.flux ) {
+            this.data.ltcv['s/n'].push( this.data.ltcv.flux[i] / this.data.ltcv.fluxerr[i] );
         }
 
         let knownbands = [ 'u', 'g', 'r', 'i', 'z', 'Y' ];
@@ -78,12 +78,12 @@ fastdbap.ObjectInfo = class
             let which = 'undetected';
             if ( data.ltcv.isdet[i] ) which = "detected";
             this.ltcvs[data.ltcv.band[i]][which].mjd.push( data.ltcv.mjd[i] );
-            this.ltcvs[data.ltcv.band[i]][which].flux.push( data.ltcv.psfflux[i] );
-            this.ltcvs[data.ltcv.band[i]][which].dflux.push( data.ltcv.psffluxerr[i] );
-            if ( data.ltcv.psfflux[i] > this.ltcvs[data.ltcv.band[i]].max )
-                this.ltcvs[data.ltcv.band[i]].max = data.ltcv.psfflux[i];
-            if ( data.ltcv.psfflux[i] < this.ltcvs[data.ltcv.band[i]].min )
-                this.ltcvs[data.ltcv.band[i]].min = data.ltcv.psfflux[i];
+            this.ltcvs[data.ltcv.band[i]][which].flux.push( data.ltcv.flux[i] );
+            this.ltcvs[data.ltcv.band[i]][which].dflux.push( data.ltcv.fluxerr[i] );
+            if ( data.ltcv.flux[i] > this.ltcvs[data.ltcv.band[i]].max )
+                this.ltcvs[data.ltcv.band[i]].max = data.ltcv.flux[i];
+            if ( data.ltcv.flux[i] < this.ltcvs[data.ltcv.band[i]].min )
+                this.ltcvs[data.ltcv.band[i]].min = data.ltcv.flux[i];
         }
 
         this.allbands = [];
@@ -166,26 +166,26 @@ fastdbap.ObjectInfo = class
 
         // Object info on the left
 
-        rkWebUtil.elemaker( "h4", infodiv, { "text": "diaobject " + this.data.objinfo.diaobjectid } );
+        rkWebUtil.elemaker( "h4", infodiv, { "text": "diaobject " + this.data.diaobjectid } );
         table = rkWebUtil.elemaker( "table", infodiv, { "classes": [ "borderless" ] } );
         tr = rkWebUtil.elemaker( "tr", table );
         td = rkWebUtil.elemaker( "td", tr, { "text": "Processing Version:",
                                              "classes": [ "right", "xmarginright" ] } );
-        td = rkWebUtil.elemaker( "td", tr, { "text": this.data.objinfo.processing_version } );
+        td = rkWebUtil.elemaker( "td", tr, { "text": this.data.base_procver_id } );
         tr = rkWebUtil.elemaker( "tr", table );
         td = rkWebUtil.elemaker( "td", tr, { "text": "RA:",
                                              "classes": [ "right", "xmarginright" ] } );
-        td = rkWebUtil.elemaker( "td", tr, { "text": this.data.objinfo.ra.toFixed(5) } );
+        td = rkWebUtil.elemaker( "td", tr, { "text": this.data.ra.toFixed(5) } );
         tr = rkWebUtil.elemaker( "tr", table );
         td = rkWebUtil.elemaker( "td", tr, { "text": "Dec:",
                                              "classes": [ "right", "xmarginright" ] } );
-        td = rkWebUtil.elemaker( "td", tr, { "text": this.data.objinfo.dec.toFixed(5) } );
+        td = rkWebUtil.elemaker( "td", tr, { "text": this.data.dec.toFixed(5) } );
 
         // Todo: info about nearby objects?  Probably need the server side to return that too
 
-        let fields = [ 'mjd', 'band', 'psfflux', 'psffluxerr', 's/n', 'isdet' ];
-        let hdrs = { 'psfflux': 'Flux (nJy)',
-                     'psffluxerr': 'ΔFlux (nJy)',
+        let fields = [ 'mjd', 'band', 'flux', 'fluxerr', 's/n', 'isdet' ];
+        let hdrs = { 'flux': 'Flux (nJy)',
+                     'fluxerr': 'ΔFlux (nJy)',
                      'isdet': 'Detected?' }
         let rowrenderer = function( data, fields, i ) {
             let tr, td;
@@ -195,8 +195,8 @@ fastdbap.ObjectInfo = class
             let args = {
                 'mjd':        [ "td", tr, { "text": data.mjd[i].toFixed(2) } ],
                 'band':       [ "td", tr, { "text": data.band[i] } ],
-                'psfflux':    [ "td", tr, { "text": data.psfflux[i].toExponential(4) } ],
-                'psffluxerr': [ "td", tr, { "text": data.psffluxerr[i].toExponential(4) } ],
+                'flux':    [ "td", tr, { "text": data.flux[i].toExponential(4) } ],
+                'fluxerr': [ "td", tr, { "text": data.fluxerr[i].toExponential(4) } ],
                 's/n':        [ "td", tr, { "text": data['s/n'][i].toFixed(1) } ],
                 'isdet':      [ "td", tr, { "text": dettext } ],
             };

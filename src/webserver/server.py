@@ -142,6 +142,7 @@ class CountThings( BaseView ):
                       table=sql.Identifier(table), pvid=pvid )
 
             if estimate:
+                # THIS DOES A REALLY TERRIBLE JOB.
                 # cf: https://wiki.postgresql.org/wiki/Count_estimate
                 # TODO : put this in the postgres docker file so we don't have to compile on the fly
                 # TODO : figure out how accurate this count estimate really is.  I have
@@ -154,8 +155,17 @@ class CountThings( BaseView ):
                 count = rows[0][0][0]['Plan']['Plan Rows']
 
             else:
-                # Would an index scan help?
-                q = sql.SQL( "SELECT COUNT(*) FROM ( {baseq} ) subq".format( baseq=baseq ) )
+                # Gah.  I'm thrashing about a lot with these query
+                #   optimization thingies that I'm doing.  After bumping
+                #   the memory postgres had for buffers, the queries got
+                #   *slower*, for reasons I don't understand.  One thing
+                #   it did was assign fewer workers; the postgres query
+                #   optimizer is so strange..  So, I'm forcing parallel
+                #   workers, to make it faster.  For this count query,
+                #   this is probably not going to be a problem, but it
+                #   is of course scary.
+                q = sql.SQL( f"/*+ IndexScan(t idx_{table}_procver) Parallel(t 4) */\n"
+                             f"SELECT COUNT(*) FROM (\n{{baseq}}\n) subq" ).format( baseq=baseq )
                 rows, _ = dbcon.execute( q )
                 count = rows[0][0]
 
@@ -174,6 +184,7 @@ class ObjectSearch( BaseView ):
             raise TypeError( "POST data was not JSON; send search criteria as a JSON dict" )
         searchdata = flask.request.json
 
+        FDBLogger.debug( f"ObjectSearch on processing version {processing_version} with search data {searchdata}" )
         rval = ltcv.object_search( processing_version, return_format='json', **searchdata )
 
         # JSON dysfunctionality... convert to strings and back,

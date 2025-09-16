@@ -29,8 +29,8 @@ from util import FDBLogger
 # (They will only actually add things to the logs the debug level,
 # Set near the bottom of webserver/server.py, is DEBUG.)
 # We should replace them with configurable options.
-_echoqueries = True
-_alwaysexplain = True
+_echoqueries = False
+_alwaysexplain = False
 
 # The tables here should be in the order they safe to drop.
 # (Insofar as it's safe to drop all your tables....)

@@ -996,7 +996,7 @@ def object_search( processing_version='default', object_processing_version=None,
         con.execute_nofetch( q, subdict )
 
         # Add in last detection
-        q = ( f"/*+ IndexScan(src idx_diasource_diaobjectid) */\n"
+        q = ( f"/*+ IndexScan(s idx_diasource_diaobjectid) */\n"
               f"UPDATE objsearch_stattab ost\n"
               f"SET lastdetmjd=midpointmjdtai, lastdetband=band,\n"
               f"    lastdetflux=psfflux, lastdetfluxerr=psffluxerr\n"
