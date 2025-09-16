@@ -133,12 +133,10 @@ class CountThings( BaseView ):
 
             baseq = sql.SQL(
                 """
-                SELECT COUNT(*) FROM (
-                  SELECT DISTINCT ON({{pk}}) t.base_procver_id FROM {{table}} t
+                  SELECT DISTINCT ON({pk}) t.base_procver_id FROM {table} t
                   INNER JOIN base_procver_of_procver pv ON t.base_procver_id=pv.base_procver_id
-                                                       AND pv.procver_id={{pvid}}
-                  ORDER BY {{pk}},pv.priority DESC
-                ) subq;
+                                                       AND pv.procver_id={pvid}
+                  ORDER BY {pk},pv.priority DESC
                 """
             ).format( pk=sql.SQL(',').join( sql.Identifier(i) for i in objfields ),
                       table=sql.Identifier(table), pvid=pvid )
@@ -146,31 +144,25 @@ class CountThings( BaseView ):
             if estimate:
                 # cf: https://wiki.postgresql.org/wiki/Count_estimate
                 # TODO : put this in the postgres docker file so we don't have to compile on the fly
+                # TODO : figure out how accurate this count estimate really is.  I have
+                #    a suspicion that it's not very good when there are multiple
+                #    different processing versions.
                 FDBLogger.debug( f"Getting estimate of count of {which} for {pvid}" )
-                q = """CREATE OR REPLACE FUNCTION pg_temp.count_estimate(
-                           query text
-                       ) RETURNS integer LANGUAGE plpgsql AS $$
-                       DECLARE
-                           plan jsonb;
-                       BEGIN
-                           EXECUTE FORMAT('EXPLAIN (FORMAT JSON %s', query) INTO plan;
-                           RETURN plan->0->'Plan'->'Plan Rows';
-                       END;
-                       $$;
-                    """
-                dbcon.execute( q, explain=False )
-                FDBLogger.debug( f"baseq.as_string()={baseq.as_string()}" )
-                q = sql.SQL( "SELECT pg_temp.count_estimate({baseq})" ).format( baseq=baseq.as_string() )
+                q = sql.SQL( "EXPLAIN (FORMAT JSON) {baseq}" ).format( baseq=baseq )
+                rows, _  = dbcon.execute( q, explain=False )
+                FDBLogger.debug( f"rows is {rows}" )
+                count = rows[0][0][0]['Plan']['Plan Rows']
 
             else:
                 # Would an index scan help?
-                q = baseq
+                q = sql.SQL( "SELECT COUNT(*) FROM ( {baseq} ) subq".format( baseq=baseq ) )
+                rows, _ = dbcon.execute( q )
+                count = rows[0][0]
 
-            rows, _ = dbcon.execute( q )
             return { 'status': 'ok',
                      'table': table,
                      'isestimate': estimate,
-                     'count': rows[0][0] }
+                     'count': count }
 
 
 # ======================================================================
