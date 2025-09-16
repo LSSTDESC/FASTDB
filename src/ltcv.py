@@ -949,10 +949,33 @@ def object_search( processing_version='default', object_processing_version=None,
         #   there will ALWAYS be at least one diasource for any diaobject, otherwise
         #   the diaobject would never have been defined in the first place.
         # TODO THINK : what about when statbands is given?  ROB THINK A LOT.
+
+        # Another note: we're putting in hints to make sure postgres is
+        #   using indicies where it should, because sometimes the
+        #   postgres query planner does the wrong thing.  Additionally,
+        #   we specify the join order to force it first to join our
+        #   table of objects (which, presumably, has many fewer objects
+        #   than exist in the database) to the source or forced source
+        #   table, and only then join to processing versions.  We do
+        #   *not* want it scanning all the way through a source or
+        #   forced source index to filter out processing verions first,
+        #   because it will consider millions of rows that could be
+        #   ignored once we filtered by object.
+        # Also, analyze the latest table on column diaobjectid,
+        #   so where the postgres query optimizer is still doing
+        #   things it will work with reasonable data.  (It's possible
+        #   that this is enough, and we don't need the hints,
+        #   but this is a case where we are quite sure which join
+        #   order is going to be best.)  (Hurm; I still felt the
+        #   need to specify the join type sometimes....)
+
         subdict = { 'pv': procver }
 
+        con.execute( f"ANALYZE {nexttable}(diaobjectid)", explain=False )
+
         # First: build the table, put in first detection
-        q = ( "/*+ IndexScan(s idx_diasource_diaobjectid) */\n"
+        q = ( "/*+ IndexScan(s idx_diasource_diaobjectid)\n"
+              "    Leading( ( (o s) pv ) ) */\n"
               "SELECT * INTO TEMP TABLE objsearch_stattab FROM (\n"
               "  SELECT DISTINCT ON (diaobjectid)\n"
               "         diaobjectid,ra,dec,\n" )
@@ -968,13 +991,13 @@ def object_search( processing_version='default', object_processing_version=None,
                "  FROM (\n"
                "    SELECT diaobjectid, ra, dec, midpointmjdtai, band, psfflux, psffluxerr\n" )
         if len(addlfields) > 0:
-            q += f",{','.join(addlfields)}\n"
+            q += f"           ,{','.join(addlfields)}\n"
         q += ( "    FROM (\n"
                "      SELECT DISTINCT ON (o.diaobjectid,s.visit) o.diaobjectid, o.ra, o.dec,\n"
                "                                                 s.midpointmjdtai, s.band, s.psfflux, s.psffluxerr\n"
               )
         if len(addlfields) > 0:
-            q += f",{','.join( [ f'o.{x}' for x in addlfields ] )}"
+            q += f"           ,{','.join( [ f'o.{x}' for x in addlfields ] )}\n"
         q += ( f"      FROM {nexttable} o\n"
                f"      INNER JOIN diasource s ON o.diaobjectid=s.diaobjectid\n"
                f"      INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id\n"
@@ -995,8 +1018,12 @@ def object_search( processing_version='default', object_processing_version=None,
                ") outersubq" )
         con.execute_nofetch( q, subdict )
 
+        # Analyze the objsearch_stattab table to help postgres do the right thing
+        con.execute( f"ANALYZE {nexttable}(diaobjectid)", explain=False )
+
         # Add in last detection
-        q = ( f"/*+ IndexScan(s idx_diasource_diaobjectid) */\n"
+        q = ( f"/*+ IndexScan(s idx_diasource_diaobjectid)\n"
+              f"    Leading( ( (o s) pv ) ) */\n"
               f"UPDATE objsearch_stattab ost\n"
               f"SET lastdetmjd=midpointmjdtai, lastdetband=band,\n"
               f"    lastdetflux=psfflux, lastdetfluxerr=psffluxerr\n"
@@ -1024,7 +1051,8 @@ def object_search( processing_version='default', object_processing_version=None,
         con.execute_nofetch( q, subdict )
 
         # Add in max detection
-        q = ( f"/*+ IndexScan(s idx_diasource_diaobjectid) */\n"
+        q = ( f"/*+ IndexScan(s idx_diasource_diaobjectid)\n"
+              f"    Leading( ( ( o s ) pv ) ) */\n"
               f"UPDATE objsearch_stattab ost\n"
               f"SET maxdetmjd=midpointmjdtai, maxdetband=band,\n"
               f"    maxdetflux=psfflux, maxdetfluxerr=psffluxerr\n"
@@ -1052,7 +1080,8 @@ def object_search( processing_version='default', object_processing_version=None,
         con.execute_nofetch( q, subdict )
 
         # Add in number of detections
-        q = ( f"/*+ IndexScan(s idx_diasource_diaobjectid) */\n"
+        q = ( f"/*+ IndexScan(s idx_diasource_diaobjectid)\n"
+              f"    Leading( ( (o s) pv ) ) */\n"
               f"UPDATE objsearch_stattab o\n"
               f"SET numdet=n "
               f"FROM (\n"
@@ -1146,8 +1175,20 @@ def object_search( processing_version='default', object_processing_version=None,
 
         nexttable = 'objsearch_stattab'
 
+        # Because the diaforcedsource table is going to be the hugest one,
+        #   create an index diabojectid of {nexttable} here to help
+        #   this next query along.  We hope.
+        con.execute( f"CREATE INDEX idx_t_diaobjectid ON {nexttable}(diaobjectid)", explain=False )
+
+        # Reanalyze this table to help postgres do the right thing
+        con.execute( f"ANALYZE {nexttable}(diaobjectid)", explain=False )
+
         # Get the last forced source
-        q = ( f"/*+ IndexScan(f idx_diaforcedsource_diaobjectid ) */\n"
+        q = ( f"/*+ IndexScan(f idx_diaforcedsource_diaobjectid )\n"
+              # f"    HashJoin( f t )\n"
+              f"    Leading( ( (f t) pv ) )\n"
+              f"    Parallel( f 3 hard )\n"
+              f"*/\n"
               f"SELECT * INTO TEMP TABLE objsearch_final FROM (\n"
               f"  SELECT DISTINCT ON (diaobjectid) *\n"
               f"  FROM (\n"

@@ -29,8 +29,8 @@ from util import FDBLogger
 # (They will only actually add things to the logs the debug level,
 # Set near the bottom of webserver/server.py, is DEBUG.)
 # We should replace them with configurable options.
-_echoqueries = False
-_alwaysexplain = False
+_echoqueries = True
+_alwaysexplain = True
 
 # The tables here should be in the order they safe to drop.
 # (Insofar as it's safe to drop all your tables....)
@@ -265,10 +265,17 @@ class DBCon:
                     FDBLogger.debug( f"Sending query\n{q}\nwith substitutions: {subdict}" )
 
             if explain:
-                if isinstance( q, ( psycopg.sql.SQL, psycopg.sql.Composed ) ):
-                    self.cursor.execute( f"EXPLAIN {q.as_string()}", subdict )
+                tmpq = q.as_string() if isinstance( q, ( psycopg.sql.SQL, psycopg.sql.Composed ) ) else q
+                tmpq = tmpq.strip()
+                # If there are hints, we want the EXPLAIN after the hints
+                # (Does it matter?)
+                if tmpq[0:3] == '/*+':
+                    enddex = tmpq.find( '*/' )
+                    if enddex >= 0:
+                        tmpq = tmpq[0:enddex+2] + '\nEXPLAIN\n' + tmpq[enddex+2:]
                 else:
-                    self.cursor.execute( f"EXPLAIN {q}", subdict )
+                    tmpq = 'EXPLAIN\n' + tmpq
+                self.cursor.execute( tmpq, subdict )
                 rows = self.cursor.fetchall()
                 dex = 'QUERY PLAN' if self.curcursorisdict else 0
                 nl = '\n'

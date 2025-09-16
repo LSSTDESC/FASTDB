@@ -144,7 +144,6 @@ class CountThings( BaseView ):
             if estimate:
                 # THIS DOES A REALLY TERRIBLE JOB.
                 # cf: https://wiki.postgresql.org/wiki/Count_estimate
-                # TODO : put this in the postgres docker file so we don't have to compile on the fly
                 # TODO : figure out how accurate this count estimate really is.  I have
                 #    a suspicion that it's not very good when there are multiple
                 #    different processing versions.
@@ -160,7 +159,7 @@ class CountThings( BaseView ):
                 #   the memory postgres had for buffers, the queries got
                 #   *slower*, for reasons I don't understand.  One thing
                 #   it did was assign fewer workers; the postgres query
-                #   optimizer is so strange..  So, I'm forcing parallel
+                #   optimizer is so strange.  So, I'm forcing parallel
                 #   workers, to make it faster.  For this count query,
                 #   this is probably not going to be a problem, but it
                 #   is of course scary.
