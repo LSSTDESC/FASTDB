@@ -123,7 +123,7 @@ def what_spectra_are_wanted( procver='realtime', wantsince=None, requester=None,
         #   constraint in wantedspectra?
 
         con.execute_nofetch( "CREATE TEMP TABLE tmp_wanted( root_diaobject_id UUID, requester text, priority int )",
-                             explain=False )
+                             explain=False, analyze=False )
         q = ( f"INSERT INTO tmp_wanted (\n"
               f"  SELECT DISTINCT ON(root_diaobject_id,requester,priority) root_diaobject_id, requester, priority\n"
               f"  FROM (\n"
@@ -170,11 +170,11 @@ def what_spectra_are_wanted( procver='realtime', wantsince=None, requester=None,
         # Filter that table by throwing out things that have a spectruminfo whose mjd is greater than
         #   obstime.
         if nospecsince is None:
-            con.execute_nofetch( "ALTER TABLE tmp_wanted RENAME TO tmp_wanted_no_spec", explain=False )
+            con.execute_nofetch( "ALTER TABLE tmp_wanted RENAME TO tmp_wanted_no_spec", explain=False, analyze=False )
         else:
             con.execute_nofetch( "CREATE TEMP TABLE tmp_wanted_no_spec( root_diaobject_id UUID,\n"
                                  "                                      requester text, priority int )\n",
-                                 explain=False )
+                                 explain=False, analyze=False )
             q = ( "/*+ IndexScan(s idx_spectruminfo_root_diaobject_id) */"
                   "INSERT INTO tmp_wanted_no_spec (\n"
                   "  SELECT DISTINCT ON(root_diaobject_id,requester,priority) root_diaobject_id, requester,\n"
@@ -209,11 +209,12 @@ def what_spectra_are_wanted( procver='realtime', wantsince=None, requester=None,
 
         # Filter that table by throwing out things that do not have a detection since detsince
         if detsince is None:
-            con.execute_nofetch( "ALTER TABLE tmp_wanted_no_spec RENAME TO tmp_wanted_detected", explain=False )
+            con.execute_nofetch( "ALTER TABLE tmp_wanted_no_spec RENAME TO tmp_wanted_detected",
+                                 explain=False, analyze=False )
         else:
             con.execute_nofetch( "CREATE TEMP TABLE tmp_wanted_detected( root_diaobject_id UUID, requester text, "
                                  "                                       priority int )\n",
-                                 explain=False)
+                                 explain=False, analyze=False )
             q = ( "/*+ IndexScan(src idx_diasource_diaobjectid) */\n"
                   "INSERT INTO tmp_wanted_detected (\n"
                   "  SELECT DISTINCT ON(t.root_diaobject_id,requester,priority)\n"
@@ -256,7 +257,7 @@ def what_spectra_are_wanted( procver='realtime', wantsince=None, requester=None,
                              "                                        diaobjectid bigint,\n"
                              "                                        mjd double precision,\n"
                              "                                        band text, mag real )",
-                             explain=False )
+                             explain=False, analyze=False )
         q = ( "/*+ IndexScan(src idx_diasource_diaobjectid) */\n"
               "INSERT INTO tmp_latest_detection (\n"
               "  SELECT root_diaobject_id, diaobjectid, mjd, band, mag\n"
@@ -299,7 +300,7 @@ def what_spectra_are_wanted( procver='realtime', wantsince=None, requester=None,
                              "                                     diaobjectid bigint,\n"
                              "                                     mjd double precision,\n"
                              "                                     band text, mag real )\n",
-                             explain=False )
+                             explain=False, analyze=False )
         q = ( "/*+ IndexScan(frc idx_diaforcedsource_diaobjectid) */\n"
               "INSERT INTO tmp_latest_forced (\n"
               "  SELECT root_diaobject_id, diaobjectid, mjd, band, mag\n"
@@ -342,7 +343,7 @@ def what_spectra_are_wanted( procver='realtime', wantsince=None, requester=None,
         #   the root diaobject.
         con.execute_nofetch( "CREATE TEMP TABLE tmp_object_info( root_diaobject_id UUID, diaobjectid bigint,\n"
                              "                                   ra double precision, dec double precision )",
-                             explain=False )
+                             explain=False, analyze=False )
         q = ( "INSERT INTO tmp_object_info (\n"
               "  SELECT DISTINCT ON (t.root_diaobject_id) t.root_diaobject_id, t.diaobjectid, o.ra, o.dec\n"
               "  FROM tmp_latest_detection t\n"

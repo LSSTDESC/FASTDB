@@ -24,13 +24,24 @@ import pymongo
 import util
 from util import FDBLogger
 
-# These next two are for debugging.  They are used in DBCon.__init__.
+# These next three are for debugging.  They are used in DBCon.__init__.
 # For normal use, they should be False, as they bloat the logs a lot.
-# (They will only actually add things to the logs the debug level,
-# Set near the bottom of webserver/server.py, is DEBUG.)
+# They will be ignored if the logging level of FGDBLogger is not DEBUG.
+#
+# ALSO : use of alwaysexplain and alwaysanalyze makes us susceptible to
+# SQL injection attacks, so we REALLY don't want these set in production
+# databases!!!!!!!  They are for debugging purposes only.  Do not try
+# this at home.  Do not eat, multilate, or spindle.  Consult your doctor
+# if you do not feel extreme anxiety when using these.
+#
+# explaining can slow down queries as sometimes it seems that
+# postgres really wants to think about what it's doing before giving you
+# a query plan (I don't know why; is it a pg_hint_plan thing?)
+#
 # We should replace them with configurable options.
 _echoqueries = True
 _alwaysexplain = True
+_alwaysanalyze = True
 
 # The tables here should be in the order they safe to drop.
 # (Insofar as it's safe to drop all your tables....)
@@ -171,7 +182,7 @@ class DBCon:
         global dbuser, dbpasswd, dbhost, dbport, dbname
         # TODO : make these next two configurable rather than hardcoded
         # These are useful for debugging, but are profligate for production
-        global _echoqueries, _alwaysexplain
+        global _echoqueries, _alwaysexplain, _alwaysanalyze
 
         if con is not None:
             if isinstance( con, DBCon ):
@@ -188,6 +199,7 @@ class DBCon:
         self.dictcursor = dictcursor
         self.echoqueries = _echoqueries
         self.alwaysexplain = _alwaysexplain
+        self.alwaysanalyze = _alwaysanalyze
         self.remake_cursor()
 
 
@@ -249,39 +261,45 @@ class DBCon:
         self.remake_cursor( self.curcursorisdict )  # ...is this necessary?
 
 
-    def execute_nofetch( self, q, subdict={}, echo=None, explain=None ):
+    def execute_nofetch( self, q, subdict={}, echo=None, explain=None, analyze=None ):
         """Runs a query where you don't expect to fetch results.
 
         Parameters are the same as execute().  Returns nothing.
 
         """
+
+        alreadydid = False
+        if not isinstance( q, ( psycopg.sql.SQL, psycopg.sql.Composed ) ):
+            q = psycopg.sql.SQL( q )
+
         if FDBLogger.instance().get().level <= logging.DEBUG:
             echo = echo if echo is not None else self.echoqueries
             explain = explain if explain is not None else self.alwaysexplain
+            analyze = analyze if analyze is not None else self.alwaysanalyze
             if echo:
-                if isinstance( q, ( psycopg.sql.SQL, psycopg.sql.Composed ) ):
-                    FDBLogger.debug( f"Sending query\n{q.as_string()}" )
-                else:
-                    FDBLogger.debug( f"Sending query\n{q}\nwith substitutions: {subdict}" )
+                FDBLogger.debug( f"Sending query\n{q.as_string()}\nwith substitutions: {subdict}" )
 
+            nl = '\n'
             if explain:
-                tmpq = q.as_string() if isinstance( q, ( psycopg.sql.SQL, psycopg.sql.Composed ) ) else q
-                tmpq = tmpq.strip()
-                # If there are hints, we want the EXPLAIN after the hints
-                # (Does it matter?)
-                if tmpq[0:3] == '/*+':
-                    enddex = tmpq.find( '*/' )
-                    if enddex >= 0:
-                        tmpq = tmpq[0:enddex+2] + '\nEXPLAIN\n' + tmpq[enddex+2:]
-                else:
-                    tmpq = 'EXPLAIN\n' + tmpq
-                self.cursor.execute( tmpq, subdict )
+                FDBLogger.debug( "Explaining..." )
+                self.cursor.execute( psycopg.sql.SQL("EXPLAIN ") + q, subdict )
                 rows = self.cursor.fetchall()
                 dex = 'QUERY PLAN' if self.curcursorisdict else 0
-                nl = '\n'
+                FDBLogger.debug( f"Query plan:\n{nl.join([r[dex] for r in rows])}" )
+            if analyze:
+                FDBLogger.debug( "Doing EXPLAIN ANALYZE..." )
+                self.cursor.execute( psycopg.sql.SQL("EXPLAIN ANALYZE ") + q, subdict )
+                alreadydid = True
+                rows = self.cursor.fetchall()
+                dex = 'QUERY PLAN' if self.curcursorisdict else 0
                 FDBLogger.debug( f"Query plan:\n{nl.join([r[dex] for r in rows])}" )
 
-        self.cursor.execute( q, subdict )
+        # NOTE: if we ran with EXPLAIN ANALYZE, any side effects of the query happened!
+        # So don't run the query again.  This is why execute() forces analyze to
+        # be false, because you can't EXPLAIN ANALYZE the query and get the results
+        # all in one call.
+        if not alreadydid:
+            self.cursor.execute( q, subdict )
 
         if ( FDBLogger.instance().get().level <= logging.DEBUG ) and ( echo or explain ):
             FDBLogger.debug( "Query complete." )
@@ -314,7 +332,8 @@ class DBCon:
             the _alwaysexplain variable at the top of this module).
 
             WARNING: use of this makes you susceptible to SQL injection
-            attacks.  Do not get bobby tablesed!
+            attacks if you aren't completely and totally confident about
+            where your SQL came from.  Do not get bobby tablesed!
 
         Returns
         -------
@@ -325,7 +344,7 @@ class DBCon:
           dictionary.  The second is a list of column names.
 
         """
-        self.execute_nofetch( q, subdict, echo=echo, explain=explain )
+        self.execute_nofetch( q, subdict, echo=echo, explain=explain, analyze=False )
         if self.curcursorisdict:
             return self.cursor.fetchall()
         else:
@@ -1123,8 +1142,9 @@ class DBBase:
             raise TypeError( f"Invalid type for data: {type(data)}" )
 
         with DBCon( dbcon ) as con:
-            con.execute_nofetch( "DROP TABLE IF EXISTS temp_bulk_upsert", explain=False )
-            con.execute_nofetch( f"CREATE TEMP TABLE temp_bulk_upsert (LIKE {cls.__tablename__})", explain=False )
+            con.execute_nofetch( "DROP TABLE IF EXISTS temp_bulk_upsert", explain=False, analyze=False )
+            con.execute_nofetch( f"CREATE TEMP TABLE temp_bulk_upsert (LIKE {cls.__tablename__})",
+                                 explain=False, analyze=False )
             with con.cursor.copy( f"COPY temp_bulk_upsert({','.join(columns)}) FROM STDIN" ) as copier:
                 for v in values:
                     copier.write_row( v )
@@ -1145,7 +1165,7 @@ class DBBase:
             else:
                 con.execute_nofetch( q )
                 ninserted = con.cursor.rowcount
-                con.execute_nofetch( "DROP TABLE temp_bulk_upsert", explain=False )
+                con.execute_nofetch( "DROP TABLE temp_bulk_upsert", explain=False, analyze=False )
                 con.commit()
                 return ninserted
 

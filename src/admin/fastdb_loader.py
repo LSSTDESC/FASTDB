@@ -47,7 +47,7 @@ class FastDBLoader:
             return
 
         with db.DBCon( dictcursor=True ) as dbcon:
-            dbcon.execute_nofetch( "LOCK TABLE processing_version", explain=False )
+            dbcon.execute_nofetch( "LOCK TABLE processing_version", explain=False, analyze=False )
             rows = dbcon.execute( "SELECT * FROM processing_version WHERE description=%(pv)s",
                                   { 'pv': self.processing_version_name } )
             if len(rows) >= 1:

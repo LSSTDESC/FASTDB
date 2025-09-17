@@ -301,7 +301,7 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                        )
                     """
                 ).format( objids_table=sql.Identifier(objids_table) )
-                dbcon.execute( q, { 'roots': objids } )
+                dbcon.execute_nofetch( q, { 'roots': objids } )
             else:
                 q = sql.SQL( "COPY {objids_table}(diaobjectid) FROM STDIN"
                             ).format( objids_table=sql.Identifier( objids_table ) )
@@ -339,7 +339,7 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
             """
                ORDER BY s.diaobjectid, s.visit, pv.priority DESC
             """ )
-        dbcon.execute( q, { 'bands': bands } )
+        dbcon.execute_nofetch( q, { 'bands': bands } )
 
         if which == 'detections':
             rows, cols = dbcon.execute( "SELECT * FROM tmp_sources" )
@@ -347,7 +347,8 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
         else:
             # Extract forced photometry if necessary
             dbcon.execute( "CREATE TEMP TABLE tmp_forced( diaobjectid bigint, visit bigint,"
-                           "                              mjd double precision, band text, flux real, fluxerr real,"
+                           "                              mjd double precision, band text, "
+                           "                              flux real, fluxerr real,"
                            "                              isdet bool, base_procver text )",
                            explain=False )
             q = sql.SQL(
@@ -375,7 +376,7 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                 """
                    ORDER BY s.diaobjectid, s.visit, pv.priority DESC
                 """ )
-            dbcon.execute( q, { 'bands': bands } )
+            dbcon.execute_nofetch( q, { 'bands': bands } )
 
             # Join detections to forced photometry to set the 'isdet' and 'ispatch' flags
             q = sql.SQL(
@@ -851,6 +852,7 @@ def object_search( processing_version='default', object_processing_version=None,
 
         # Filter by ra and dec if given
         if ra is not None:
+            FDBLogger.debug( "Object search filtering by ra/dec" )
             radius = util.float_or_none_from_dict( kwargs, 'radius' )
             radius = radius if radius is not None else 10.
             # For reasons I don't understand, adding the hint slows this next query down.
@@ -873,9 +875,11 @@ def object_search( processing_version='default', object_processing_version=None,
         # Count (and maybe filter) by number of detections within the time window
         # ROB TODO : use processing version index
         if window_t0 is not None:
+            FDBLogger.debug( "Object search finding detections within window" )
             if nexttable != 'diaobject':
                 # Make a primary key so we can group by
-                con.execute_nofetch( f"ALTER TABLE {nexttable} ADD PRIMARY KEY (diaobjectid)", explain=False )
+                con.execute_nofetch( f"ALTER TABLE {nexttable} ADD PRIMARY KEY (diaobjectid)",
+                                     explain=False, analyze=False )
             subdict = { 'pv': procver, 't0': window_t0, 't1': window_t1 }
             q = ( f"/*+ IndexScan(s idx_diasource_diaobjectid idx_diasource_mjd) */\n"
                   f"SELECT diaobjectid, ra, dec, numdetinwindow\n"
@@ -921,6 +925,7 @@ def object_search( processing_version='default', object_processing_version=None,
             if ( ( maxt_lastdetection is not None ) and ( mint_firstdetection is not None ) and
                  ( mint_firstdetection < maxt_lastdetection ) ):
                 raise RuntimeError( "maxt_lastdetection > mint_firstdetection, which makes no sense." )
+            FDBLogger.debug( "Object search doing first rough cut on detection times" )
             subdict = { 'pv': procver }
             q = ( "/*+ IndexScan(s idx_diasource_diaobjectid idx_diasource_mjd) */\n"
                   "SELECT * INTO TEMP TABLE objsearch_detcut FROM (\n"
@@ -987,6 +992,7 @@ def object_search( processing_version='default', object_processing_version=None,
         con.execute( f"ANALYZE {nexttable}(diaobjectid)", explain=False )
 
         # First: build the table, put in first detection
+        FDBLogger.debug( "Object search making stat tab with first detection" )
         q = ( "/*+ IndexScan(s idx_diasource_diaobjectid)\n"
               "    Leading( ( (o s) pv ) ) */\n"
               "SELECT * INTO TEMP TABLE objsearch_stattab FROM (\n"
@@ -1032,9 +1038,11 @@ def object_search( processing_version='default', object_processing_version=None,
         con.execute_nofetch( q, subdict )
 
         # Analyze the objsearch_stattab table to help postgres do the right thing.
+        FDBLogger.debug( f"Object search analyzing diaobjectid on {nexttable}" )
         con.execute( f"ANALYZE {nexttable}(diaobjectid)", explain=False )
 
         # Add in last detection
+        FDBLogger.debug( "Object search adding last detection to stat tab" )
         q = ( f"/*+ IndexScan(s idx_diasource_diaobjectid)\n"
               f"    Leading( ( (o s) pv ) ) */\n"
               f"UPDATE objsearch_stattab ost\n"
@@ -1064,6 +1072,7 @@ def object_search( processing_version='default', object_processing_version=None,
         con.execute_nofetch( q, subdict )
 
         # Add in max detection
+        FDBLogger.debug( "Object search adding max detection to stat tab" )
         q = ( f"/*+ IndexScan(s idx_diasource_diaobjectid)\n"
               f"    Leading( ( ( o s ) pv ) ) */\n"
               f"UPDATE objsearch_stattab ost\n"
@@ -1093,6 +1102,7 @@ def object_search( processing_version='default', object_processing_version=None,
         con.execute_nofetch( q, subdict )
 
         # Add in number of detections
+        FDBLogger.debug( "Object search adding detection count to stat tab" )
         q = ( f"/*+ IndexScan(s idx_diasource_diaobjectid)\n"
               f"    Leading( ( (o s) pv ) ) */\n"
               f"UPDATE objsearch_stattab o\n"
@@ -1123,6 +1133,7 @@ def object_search( processing_version='default', object_processing_version=None,
         # ****
 
         # Delete from this table based on numdet and detection time as appropriate
+        FDBLogger.debug( "Object search applying cuts" )
         if min_numdetections is not None:
             con.execute_nofetch( "DELETE FROM objsearch_stattab WHERE numdet<%(n)s",
                                  { 'n': min_numdetections } )
@@ -1187,6 +1198,7 @@ def object_search( processing_version='default', object_processing_version=None,
             debug_count_temp_table( con, 'objsearch_stattab' )
 
         if ( just_objids or noforced ) and ( min_lastmag is None ) and ( max_lastmag is None ):
+            FDBLogger.debug( "Object search pulling down results" )
             # No need to search the forced source table, and that can be slow because the
             #  forced photometry table is huge, so just skip it.
             if just_objids:
@@ -1195,6 +1207,7 @@ def object_search( processing_version='default', object_processing_version=None,
                 rows, columns = con.execute( "SELECT * FROM objsearch_stattab" )
 
         else:
+            FDBLogger.debug( "Object search adding last forced photometry to stat tab" )
             # In this else block, we need to get the latest forced photometry, so do that.
             nexttable = 'objsearch_stattab'
 
@@ -1247,6 +1260,7 @@ def object_search( processing_version='default', object_processing_version=None,
                 debug_count_temp_table( con, 'objsearch_final' )
 
             # Pull down the results
+            FDBLogger.debug( "Object search pulling down results" )
             if just_objids:
                 rows, columns = con.execute( "SELECT diaobjectid FROM objsearch_final" )
             else:
@@ -1415,7 +1429,7 @@ def get_hot_ltcvs( processing_version, detected_since_mjd=None, detected_in_last
         if mjd_now is not None:
             q += "  AND s.midpointmjdtai<=%(t1)s\n"
         q += "ORDER BY s.diaobjectid\n"
-        con.execute( q, { 'procver': procver, 't0': mjd0, 't1': mjd_now } )
+        con.execute_nofetch( q, { 'procver': procver, 't0': mjd0, 't1': mjd_now } )
 
         # Second: pull out the object info for these objects
         objdf = get_object_infos( objids_table='tmp_objids', dbcon=con, return_format='pandas' )
