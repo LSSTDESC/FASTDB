@@ -175,6 +175,32 @@ class CountThings( BaseView ):
 
 
 # ======================================================================
+# /getdiaobjectinfo
+# /getdiaobjectinfo/<procver>
+# /getdiaobjectinfo/<procver>/<objid>
+
+class GetDiaObjectInfo( BaseView ):
+    def do_the_things( self, procver=None, objid=None ):
+        columns = None
+        if flask.request.is_json:
+            data = flask.request.json
+            if ( ( procver is not None ) and ( 'processing_version' in data ) and
+                 ( data['processing_version'] != procver ) ):
+                raise ValueError( f"Conflicting processing versions; {procver} specified in the URL, "
+                                  f"but {data['processing_version']} passed in the body!" )
+            procver = data['processing_version' ] if 'processing_version' in data else procver
+            procver = 'default' if procver is None else procver
+
+            if ( objid is not None ) and ( 'objectids' in data ):
+                raise ValueError( "Error, object id given in both URL and body.  Only do one." )
+            objid = data['objectids'] if objid is None else objid
+            columns = data['columns'] if 'columns' in data else None
+
+        procver = 'default' if procver is None else procver
+        return ltcv.get_object_infos( objid, processing_version=procver, columns=columns, return_format='json' )
+
+
+# ======================================================================
 
 class ObjectSearch( BaseView ):
     def do_the_things( self, processing_version='default' ):
@@ -251,6 +277,9 @@ urls = {
     "/baseprocver/<procver>": BaseProcVer,
     "/count/<which>": CountThings,
     "/count/<which>/<procver>": CountThings,
+    "/getdiaobjectinfo": GetDiaObjectInfo,
+    "/getdiaobjectinfo/<procver>": GetDiaObjectInfo,
+    "/getdiaobjectinfo/<procver>/<objid>": GetDiaObjectInfo,
     "/objectsearch": ObjectSearch,
     "/objectsearch/<processing_version>": ObjectSearch
 }

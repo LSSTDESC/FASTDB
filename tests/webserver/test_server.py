@@ -129,3 +129,51 @@ def test_countthings( set_of_lightcurves, test_user, fastdb_client ):
             res = fastdb_client.post( '/count/this_table_does_not_exist' )
     finally:
         fastdb_client.retries = orig_retries
+
+
+def test_getdiaobjectinfo( fastdb_client, procver_collection, set_of_lightcurves ):
+    roots = set_of_lightcurves
+
+    # Temporarily reduce retries to 0 so the ones that are supposed to fail will fail fast
+    orig_retries = fastdb_client.retries
+    fastdb_client.retries = 0
+
+    try:
+        with pytest.raises( RuntimeError ):
+            res = fastdb_client.post( '/getdiaobjectinfo' )
+        with pytest.raises( RuntimeError ):
+            res = fastdb_client.post( '/getdiaobjectinfo/realtime' )
+
+        res = fastdb_client.post( f"/getdiaobjectinfo/pvc_pv2/{str(roots[0]['root'].id)}" )
+        assert res['diaobjectid'] == [ 200 ]
+        res2 = fastdb_client.post( "/getdiaobjectinfo/pvc_pv2", json={ 'objectids': [ str(roots[0]['root'].id) ] } )
+        assert res2 == res
+        res2 = fastdb_client.post( "/getdiaobjectinfo/pvc_pv2", json={ 'objectids': str(roots[0]['root'].id) } )
+        assert res2 == res
+        res2 = fastdb_client.post( "/getdiaobjectinfo", json={ 'processing_version': 'pvc_pv2',
+                                                               'objectids': [ str(roots[0]['root'].id) ] } )
+        assert res2 == res
+
+        # BROKEN.  Right now the set_of_lightcurves doesn't have objects inthe
+        #   default processing version.  Issue #70
+        # res = fasdtb_client.post( "/getdiaobjectinfo", json={ 'objectids': [ str(roots[0]['root'].id) ] } )
+
+        res = fastdb_client.post( "/getdiaobjectinfo", json={ 'objectids': [ 200, 201, 202 ] } )
+        assert res['diaobjectid'] == [ 200, 201, 202 ]
+        assert res['rootid'] == [ str(roots[0]['root'].id), str(roots[1]['root'].id), str(roots[2]['root'].id) ]
+        assert set( res.keys() ) == { 'diaobjectid', 'rootid', 'base_procver_id', 'radecmjdtai', 'validitystart',
+                                      'validityend', 'ra', 'raerr', 'dec', 'decerr', 'ra_dec_cov',
+                                      'nearbyextobj1', 'nearbyextobj1id', 'nearbyextobj1sep',
+                                      'nearbyextobj2', 'nearbyextobj2id', 'nearbyextobj2sep',
+                                      'nearbyextobj3', 'nearbyextobj3id', 'nearbyextobj3sep',
+                                      'nearbylowzgal', 'nearbylowzgalsep', 'parallax', 'parallaxerr',
+                                      'pmra', 'pmraerr', 'pmra_parallax_cov',
+                                      'pmdec', 'pmdecerr', 'pmdec_parallax_cov', 'pmra_pmdec_cov' }
+
+        res = fastdb_client.post( "/getdiaobjectinfo", json={ 'objectids': [ 200, 201, 202 ],
+                                                              'columns': [ 'diaobjectid', 'ra', 'dec' ] } )
+        assert res['diaobjectid'] == [ 200, 201, 202 ]
+        assert set( res.keys() ) == { 'diaobjectid', 'ra', 'dec' }
+
+    finally:
+        fastdb_client.retries = orig_retries
