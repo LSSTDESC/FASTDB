@@ -21,8 +21,9 @@ def test_get_object_infos( set_of_lightcurves ):
     for col in info.columns:
         assert ( info.loc[ :, col ].values == np.array( jsinfo[col] ) ).all()
 
-    with pytest.raises( ValueError, match='Passing root ids requires a processing_version' ):
-        info = ltcv.get_object_infos( [ roots[i]['root'].id for i in [0, 1, 2] ] )
+    info = ltcv.get_object_infos( [ roots[i]['root'].id for i in [0, 1, 2] ] )
+    # TODO : right now there are no diaobjects in the default processing version!  Fix that in Issue #70.
+    assert info['diaobjectid'] == []
 
     info = ltcv.get_object_infos( [ roots[i]['root'].id for i in [0, 1, 2] ], processing_version='pvc_pv2' )
     assert info['diaobjectid'] == [ 200, 201, 202 ]

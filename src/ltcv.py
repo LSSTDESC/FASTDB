@@ -30,7 +30,7 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None,
         that temporary tables are meaningful).
 
       processing_version : str, uuid, or None
-        If objids is a list of rootids, then this is required.  If
+        If objids is a list of rootids, then defaults to 'default'.  If
         objids is a list of int, then this is ignored.
 
       columns : list of str, default None
@@ -57,6 +57,7 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None,
         the columns of diaobject, and whose values are lists all of the same length.
 
     """
+    obj_is_root = False
     if objids_table is not None:
         if dbcon is None:
             raise ValueError( "objids_table requires dbcon" )
@@ -65,25 +66,28 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None,
         if processing_version is not None:
             raise ValueError( "Cannot pass processing_version when passing objids_table" )
     else:
-        if not util.isSequence( objids ):
+        if ( objids is not None ) and ( not util.isSequence( objids ) ):
             objids = [ objids ]
         if all( isinstance( o, numbers.Integral ) for o in objids ):
             # Make sure they're int, because if it's something like np.int64, postgres may choke
             objids = [ int(o) for o in objids ]
-            if processing_version is not None:
-                raise ValueError( "Cannot pass processing_version when passing integer objids" )
-            obj_is_root = False
         else:
             try:
+                # See if we they're all uuids
                 objids = [ util.asUUID(o) for o in objids ]
+                obj_is_root = True
             except ValueError:
-                raise ValueError( "objids must be a list of integers or a list of uuids" )
-            obj_is_root = True
-            if processing_version is None:
-                raise ValueError( "Passing root ids requires a processing_version" )
-            pv = db.ProcessingVersion.procver_id( processing_version )
+                try:
+                    # Check to see if they were stringified integers (e.g. from a webap)
+                    objids = [ int(o) for o in objids ]
+                    obj_is_root = False
+                except ValueError:
+                    raise ValueError( "objids must be a list of integers or a list of uuids" )
         if len(objids) == 0:
             raise ValueError( "no objids requested" )
+
+    if obj_is_root:
+        pv = db.ProcessingVersion.procver_id( processing_version if processing_version is not None else 'default' )
 
     if return_format not in ( 'pandas', 'json' ):
         raise ValueError( f"return_format must be pandas or json, not {return_format}" )
