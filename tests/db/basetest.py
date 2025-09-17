@@ -22,6 +22,10 @@ class BaseTestDB:
     #
     # They will then have access to two additional fixtures,
     #   obj1_inserted and obj2_inserted
+    #
+    # These tests explicitly do NOT assume that the tables they're testing are empty.
+    # If all is working right, they will delete anything that they add, so that at
+    # the end of the tests, the database table structure will have been restored.
 
     @pytest.fixture
     def obj1_inserted( self, basetest_setup ):

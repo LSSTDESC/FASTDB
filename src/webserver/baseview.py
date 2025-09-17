@@ -1,20 +1,29 @@
 import uuid
 from types import SimpleNamespace
 import simplejson
+import numbers
 
 import flask
 import flask.views
 
 from db import DB
+from util import FDBLogger
 
 
 # ======================================================================
-# UUID encoder for simplejson
+# Encoder for simplejson
+#
+# Handels UUID (which is why it was named this, as it originally only did this),
+#   floats, and integers, converting numpy types to regular floats and ints
 
 class UUIDJSONEncoder( simplejson.JSONEncoder ):
     def default( self, obj ):
         if isinstance( obj, uuid.UUID ):
             return str(obj)
+        elif isinstance( obj, numbers.Integral ):
+            return int(obj)
+        elif isinstance( obj, numbers.Real ):
+            return float(obj)
         else:
             return super().default( obj )
 
@@ -92,6 +101,6 @@ class BaseView( flask.views.View ):
         except Exception as ex:
             # sio = io.StringIO()
             # traceback.print_exc( file=sio )
-            # app.logger.debug( sio.getvalue() )
-            flask.current_app.logger.exception( str(ex) )
+            # FDBLogger.debug( sio.getvalue() )
+            FDBLogger.exception( str(ex) )
             return str(ex), 500

@@ -6,7 +6,7 @@ import flask
 import psycopg
 
 import db
-from util import asUUID
+from util import asUUID, FDBLogger
 from webserver.baseview import BaseView
 
 
@@ -71,8 +71,6 @@ def _dbcon():
 
 class RunSQLQuery( BaseView ):
     def do_the_things( self ):
-        logger = flask.current_app.logger
-
         if not flask.request.is_json:
             raise TypeError( "POST data was not JSON" )
         data = flask.request.json
@@ -84,17 +82,17 @@ class RunSQLQuery( BaseView ):
                 conn = _dbcon()
                 cursor = conn.cursor()
 
-                logger.debug( "Starting query sequence" )
-                logger.debug( f"queries={queries}" )
-                logger.debug( f"subdicts={subdicts}" )
+                FDBLogger.debug( "Starting query sequence" )
+                FDBLogger.debug( f"queries={queries}" )
+                FDBLogger.debug( f"subdicts={subdicts}" )
 
                 for query, subdict in zip( queries, subdicts ):
-                    logger.debug( f"Query is {query}, subdict is {subdict}, "
+                    FDBLogger.debug( f"Query is {query}, subdict is {subdict}, "
                                   f"user is {flask.session['useruuid']} ({flask.session['username']})" )
                     cursor.execute( query, subdict )
-                    logger.debug( 'Query done' )
+                    FDBLogger.debug( 'Query done' )
 
-                logger.debug( "Fetching" )
+                FDBLogger.debug( "Fetching" )
                 columns = [ c.name for c in cursor.description ]
                 rows = cursor.fetchall()
 
@@ -113,11 +111,11 @@ class RunSQLQuery( BaseView ):
             else:
                 raise ValueError( f"Unknown return format {return_format}" )
 
-            logger.debug( f"Returning {len(rows)} rows from query sequence." )
+            FDBLogger.debug( f"Returning {len(rows)} rows from query sequence." )
             return retval
 
         except Exception as ex:
-            logger.exception( ex )
+            FDBLogger.exception( ex )
             return { 'status': 'error', 'error': str(ex) }
 
 
@@ -127,8 +125,6 @@ class RunSQLQuery( BaseView ):
 
 class SubmitLongSQLQuery( BaseView ):
     def do_the_things( self ):
-        logger = flask.current_app.logger
-
         if not flask.request.is_json:
             raise TypeError( "POST data was not JSON" )
         data = flask.request.json
@@ -147,7 +143,7 @@ class SubmitLongSQLQuery( BaseView ):
                          f"for user {flask.session['useruuid']} ({flask.session['username']})\n" )
             for q, s in zip( queries, subdicts ):
                 strio.write( f"  ====> query={q}   ;   subdict={s}\n" )
-            logger.debug( strio.getvalue() )
+            FDBLogger.debug( strio.getvalue() )
 
             qq = db.QueryQueue( queryid = queryid,
                                 userid = asUUID( flask.session['useruuid'] ),
@@ -160,7 +156,7 @@ class SubmitLongSQLQuery( BaseView ):
             return { 'status': 'ok', 'queryid': str(queryid) }
 
         except Exception as ex:
-            logger.exception( ex )
+            FDBLogger.exception( ex )
             return { 'status': 'error', 'error': str(ex) }
 
 
@@ -169,7 +165,6 @@ class SubmitLongSQLQuery( BaseView ):
 
 class CheckLongSQLQuery( BaseView ):
     def do_the_things( self, queryid ):
-        logger = flask.current_app.logger
         try:
             qq = db.QueryQueue.get( queryid )
             if qq is None:
@@ -202,7 +197,7 @@ class CheckLongSQLQuery( BaseView ):
             return response
 
         except Exception as ex:
-            logger.exception( ex )
+            FDBLogger.exception( ex )
             return { 'status': 'error', 'error': str(ex) }
 
 
@@ -211,7 +206,6 @@ class CheckLongSQLQuery( BaseView ):
 
 class GetLongSQLQueryResults( BaseView ):
     def do_the_things( self, queryid ):
-        logger = flask.current_app.logger
         try:
             qq = db.QueryQueue.get( queryid )
             if qq is None:
@@ -234,7 +228,7 @@ class GetLongSQLQueryResults( BaseView ):
                 raise ValueError( f"Query {queryid} is finished, but results are in an unknown format {qq.format}" )
 
         except Exception as ex:
-            logger.exception( ex )
+            FDBLogger.exception( ex )
             raise
 
 

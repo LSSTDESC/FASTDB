@@ -10,24 +10,38 @@ import os
 import uuid
 import collections
 import types
+import logging
 
 from contextlib import contextmanager
 
 import numpy as np
 import psycopg
 import psycopg.rows
+import psycopg.sql
 import psycopg.types.json
 import pymongo
 
 import util
+from util import FDBLogger
 
-# These next two are for debugging.  They are used in DBCon.__init__.
+# These next three are for debugging.  They are used in DBCon.__init__.
 # For normal use, they should be False, as they bloat the logs a lot.
-# (They will only actually add things to the logs the debug level,
-# Set near the bottom of webserver/server.py, is DEBUG.)
+# They will be ignored if the logging level of FGDBLogger is not DEBUG.
+#
+# ALSO : use of alwaysexplain and alwaysanalyze makes us susceptible to
+# SQL injection attacks, so we REALLY don't want these set in production
+# databases!!!!!!!  They are for debugging purposes only.  Do not try
+# this at home.  Do not eat, multilate, or spindle.  Consult your doctor
+# if you do not feel extreme anxiety when using these.
+#
+# explaining can slow down queries as sometimes it seems that
+# postgres really wants to think about what it's doing before giving you
+# a query plan (I don't know why; is it a pg_hint_plan thing?)
+#
 # We should replace them with configurable options.
 _echoqueries = True
-_alwaysexplain = False
+_alwaysexplain = True
+_alwaysanalyze = True
 
 # The tables here should be in the order they safe to drop.
 # (Insofar as it's safe to drop all your tables....)
@@ -36,7 +50,8 @@ all_table_names = [ 'query_queue',
                     'ppdb_alerts_sent', 'ppdb_diaforcedsource', 'ppdb_diasource', 'ppdb_diaobject', 'ppdb_host_galaxy',
                     'diaforcedsource', 'diasource', 'diaobject', 'root_diaobject','host_galaxy',
                     'diasource_import_time',
-                    'processing_version_alias', 'processing_version',
+                    'processing_version_alias', 'base_procver_of_procver',
+                    'processing_version', 'base_processing_version',
                     'passwordlink', 'authuser',
                     'migrations_applied' ]
 
@@ -134,15 +149,27 @@ class DBCon:
 
     Send queries using DBCon.execute_nofetch() and DBCon.execute().
 
+    If for some reason you need access to the underyling cursor, you can
+    get it from the cursor property.
+
     """
 
-    def __init__( self, dictcursor=False ):
+    def __init__( self, con=None, dictcursor=False ):
         """Instantiate.
 
         If you use this, you should also use close(), and soon.
 
         Parameters
         ----------
+          con : psycopg.Connection or DBCon
+            If None (the default), will make a new connection, and will
+            roll back and close it when done.  If not None, then will
+            instead wrap this connection; when close() is called, or
+            when the context manager that created this object ends, will
+            roll back and close the connection.  However, if con is not
+            None, then the assumption is that somebody else is managing
+            the connection, so will not rollback or close.
+
           dictcursor : bool, default False
             If True, then the cursor uses psycopg.rows.dict_row as its
             row factory.  execite() will return a list of dictionaries,
@@ -153,16 +180,26 @@ class DBCon:
         """
 
         global dbuser, dbpasswd, dbhost, dbport, dbname
-
         # TODO : make these next two configurable rather than hardcoded
         # These are useful for debugging, but are profligate for production
-        global _echoqueries, _alwaysexplain
-        self.echoqueries = _echoqueries
-        self.alwaysexplain = _alwaysexplain
+        global _echoqueries, _alwaysexplain, _alwaysanalyze
+
+        if con is not None:
+            if isinstance( con, DBCon ):
+                self.con = con.con
+            elif isinstance( con, psycopg.Connection ):
+                self.con = con
+            else:
+                raise TypeError( f"con must be None, a DBCon, or a psycopg.Connection, not a {type(con)}" )
+            self._con_is_mine = False
+        else:
+            self.con = psycopg.connect( dbname=dbname, user=dbuser, password=dbpasswd, host=dbhost, port=dbport )
+            self._con_is_mine = True
 
         self.dictcursor = dictcursor
-
-        self.con = psycopg.connect( dbname=dbname, user=dbuser, password=dbpasswd, host=dbhost, port=dbport )
+        self.echoqueries = _echoqueries
+        self.alwaysexplain = _alwaysexplain
+        self.alwaysanalyze = _alwaysanalyze
         self.remake_cursor()
 
 
@@ -198,12 +235,18 @@ class DBCon:
 
 
     def close( self ):
-        """Rolls back and closes the connection.
+        """Rolls back and closes the connection if appropriate.
 
         If you did stuff you want kept, make sure to call commit.
+
+        If the constructor was called with con=None, then the connection
+        will be rolled back.  If the constructor was callled with a
+        non-None none, then this method does nothing.
+
         """
-        self.con.rollback()
-        self.con.close()
+        if self._con_is_mine:
+            self.con.rollback()
+            self.con.close()
 
 
     def commit( self ):
@@ -215,40 +258,82 @@ class DBCon:
 
         """
         self.con.commit()
-        self.remake_cursor( self, self.curcursorisdict )  # ...is this necessary?
+        self.remake_cursor( self.curcursorisdict )  # ...is this necessary?
 
 
-    def execute_nofetch( self, q, subdict={}, silent=False):
-        """Runs a query where you don't expect to fetch results."""
-        if self.echoqueries and not silent:
-            util.logger.debug( f"Sending query\n{q}\nwith substitutions: {subdict}" )
+    def execute_nofetch( self, q, subdict={}, echo=None, explain=None, analyze=None ):
+        """Runs a query where you don't expect to fetch results.
 
-        if self.alwaysexplain and not silent:
-            self.cursor.execute( f"EXPLAIN {q}", subdict )
-            rows = self.cursor.fetchall()
-            dex = 'QUERY PLAN' if self.curcursorisdict else 0
+        Parameters are the same as execute().  Returns nothing.
+
+        """
+
+        alreadydid = False
+        if not isinstance( q, ( psycopg.sql.SQL, psycopg.sql.Composed ) ):
+            q = psycopg.sql.SQL( q )
+
+        if FDBLogger.instance().get().level <= logging.DEBUG:
+            echo = echo if echo is not None else self.echoqueries
+            explain = explain if explain is not None else self.alwaysexplain
+            analyze = analyze if analyze is not None else self.alwaysanalyze
+            if echo:
+                FDBLogger.debug( f"Sending query\n{q.as_string()}\nwith substitutions: {subdict}" )
+
             nl = '\n'
-            util.logger.debug( f"Query plan:\n{nl.join([r[dex] for r in rows])}" )
+            if explain:
+                FDBLogger.debug( "Explaining..." )
+                self.cursor.execute( psycopg.sql.SQL("EXPLAIN ") + q, subdict )
+                rows = self.cursor.fetchall()
+                dex = 'QUERY PLAN' if self.curcursorisdict else 0
+                FDBLogger.debug( f"Query plan:\n{nl.join([r[dex] for r in rows])}" )
+            if analyze:
+                FDBLogger.debug( "Doing EXPLAIN ANALYZE..." )
+                self.cursor.execute( psycopg.sql.SQL("EXPLAIN ANALYZE ") + q, subdict )
+                alreadydid = True
+                rows = self.cursor.fetchall()
+                dex = 'QUERY PLAN' if self.curcursorisdict else 0
+                FDBLogger.debug( f"Query plan:\n{nl.join([r[dex] for r in rows])}" )
 
-        self.cursor.execute( q, subdict )
+        # NOTE: if we ran with EXPLAIN ANALYZE, any side effects of the query happened!
+        # So don't run the query again.  This is why execute() forces analyze to
+        # be false, because you can't EXPLAIN ANALYZE the query and get the results
+        # all in one call.
+        if not alreadydid:
+            self.cursor.execute( q, subdict )
 
+        if ( FDBLogger.instance().get().level <= logging.DEBUG ) and ( echo or explain ):
+            FDBLogger.debug( "Query complete." )
 
-    def execute( self, q, subdict={}, silent=False ):
+    def execute( self, q, subdict={}, silent=False, echo=None, explain=None ):
         """Runs a query, and returns either (rows, columns) or just rows.
 
         Parmaeters
         ----------
-          q : str
-            The query.  Use %(var)s in the string for a substitution.
-            The key "var" must then show up in subdict.
+          q : str or psycopg.sql.Composed
+            The query.  Use %(var)s in the string for a substitution, if
+            necessary.  The key "var" must then show up in subdict.
 
           subdict : dict
-            Substitution dictionary. For every %(var)s that shows up in q,
-            there must be a key "var" in this dictionary with the value to
-            be substituted.  Extra keys are ignored.
+            Substitution dictionary. For every %(var)s that shows up in
+            q, there must be a key "var" in this dictionary with the
+            value to be substituted.  Extra keys are ignored.  Do not
+            pass this if q is a Composed; in that case, you've already
+            built in the substitutions.
 
-          silent : bool, default False
-            If True, don't echo the query or the explain even if we normally would.
+          echo : bool, default None
+            If True, echo queries before sending them.  If False, don't.
+            If None, use the default (self.echoqueries, initialized from
+            the _echoqueries variable at the top of this module).
+
+          explain : bool, default None
+            If True, before running the query run an EXPLAIN on it and
+            send the output to debug logging.  If False, don't.  If
+            None, use the default (self.alwaysexplain, initialized from
+            the _alwaysexplain variable at the top of this module).
+
+            WARNING: use of this makes you susceptible to SQL injection
+            attacks if you aren't completely and totally confident about
+            where your SQL came from.  Do not get bobby tablesed!
 
         Returns
         -------
@@ -259,12 +344,14 @@ class DBCon:
           dictionary.  The second is a list of column names.
 
         """
-        self.execute_nofetch( q, subdict, silent=silent )
+        self.execute_nofetch( q, subdict, echo=echo, explain=explain, analyze=False )
         if self.curcursorisdict:
             return self.cursor.fetchall()
         else:
-            cols = [ desc[0] for desc in self.cursor.description ]
+            if self.cursor.description is None:
+                return None, None
             rows = self.cursor.fetchall()
+            cols = [ desc[0] for desc in self.cursor.description ]
             return rows, cols
 
 
@@ -355,7 +442,7 @@ class ColumnMeta:
     # If a function is "None", it means the identity function.  (So 0=1, P=NP, and Δs<0.)
 
     typeconverters = {
-        # 'uuid': ( str, util.asUUID ),      # Doesn't seem to be needed any more for psycopg3
+        'uuid': ( util.asUUID, None ),
         'jsonb': ( psycopg.types.json.Jsonb, None )
     }
 
@@ -464,7 +551,7 @@ class DBBase:
     def tablemeta( self ):
         """A dictionary of colum_name : ColumMeta."""
         if self._tablemeta is None:
-            self._load_table_meta()
+            self.load_table_meta()
         return self._tablemeta
 
     @property
@@ -473,24 +560,31 @@ class DBBase:
 
 
     @classmethod
+    def all_columns_sql( cls, prefix=None ):
+        """Returns a psycopg.sql.SQL thingy with all columns comma separated."""
+        if cls._tablemeta is None:
+            cls.load_table_meta()
+        if prefix is None:
+            return psycopg.sql.SQL(',').join( psycopg.sql.Identifier(i) for i in cls._tablemeta.keys() )
+        else:
+            return psycopg.sql.SQL(',').join( psycopg.sql.Identifier(prefix, i) for i in cls._tablemeta.keys() )
+
+    @classmethod
     def load_table_meta( cls, dbcon=None ):
         if cls._tablemeta is not None:
             return
 
-        with DB( dbcon ) as con:
-            cursor = con.cursor( row_factory=psycopg.rows.dict_row )
-            cursor.execute( "SELECT c.column_name,c.data_type,c.column_default,c.is_nullable,"
-                            "       e.data_type AS element_type "
-                            "FROM information_schema.columns c "
-                            "LEFT JOIN information_schema.element_types e "
-                            "  ON ( (c.table_catalog, c.table_schema, c.table_name, "
-                            "        'TABLE', c.dtd_identifier) "
-                            "      =(e.object_catalog, e.object_schema, e.object_name, "
-                            "        e.object_type, e.collection_type_identifier) ) "
-                            "WHERE table_name=%(table)s",
-                            { 'table': cls.__tablename__ } )
-            cols = cursor.fetchall()
-
+        with DBCon( dbcon, dictcursor=True ) as dbcon:
+            cols = dbcon.execute( "SELECT c.column_name,c.data_type,c.column_default,c.is_nullable,"
+                                  "       e.data_type AS element_type "
+                                  "FROM information_schema.columns c "
+                                  "LEFT JOIN information_schema.element_types e "
+                                  "  ON ( (c.table_catalog, c.table_schema, c.table_name, "
+                                  "        'TABLE', c.dtd_identifier) "
+                                  "      =(e.object_catalog, e.object_schema, e.object_name, "
+                                  "        e.object_type, e.collection_type_identifier) ) "
+                                  "WHERE table_name=%(table)s",
+                                  { 'table': cls.__tablename__ } )
             cls._tablemeta = { c['column_name']: ColumnMeta(**c) for c in cols }
 
             # See Issue #4!!!!
@@ -508,10 +602,45 @@ class DBBase:
 
 
     def __init__( self, dbcon=None, cols=None, vals=None, _noinit=False, noconvert=True, **kwargs):
-        """Create an object based on a row returned from psycopg's cursor.fetch*.
+        """Create an object.
 
-        You could probably use this also just to create an object fresh; in
-        that case, you *probably* want to set noconvert to True.
+        If this is based on a fetch from a postgres connection, then you
+        want to set noconvert=False (see below).
+
+        Set properties of the object either by passing cols and vals
+        (see below), or just by passing additional arguments to the
+        constructor (in which case cols and vals should be left at their
+        default of None).  Additional arguments will be set as
+        properties of the object.  However, the names of the additional
+        arguments must all be columns of the table.
+
+        Properties
+        ----------
+          dbcon : DBCon or psycopg.Connection, default None
+            Database connection to use.  If None (default), will open a
+            new connection if necessary (to pull down the class' table
+            metadata if that hasn't been done already) and close it.
+
+          cols : list of str, default None
+            Attributes of the object to set.  Each should be a column
+            name in the database table.  Instead of using this and vals,
+            you can just pass additional arguments to the construtor.
+            (See above.)
+
+          vals : list, default None
+            Values to set; length should be the same as cols, or should
+            be None if cols is None.
+
+          _noinit : bool, default False
+            Don't use this, it's used internally.
+
+          noconvert : bool, default True
+            Normally, the assumption is that the values of the
+            attributes to set are regular python objects.  If instead
+            vals are things that have just been read from a postgres
+            database, pass False for noconvert, and then they will be
+            run through a type converter to convert postgres types to
+            python types as necessary.
 
         """
 
@@ -524,15 +653,12 @@ class DBBase:
         if not ( ( cols is None ) and ( vals is None ) ):
             if ( cols is None ) or ( vals is None ):
                 raise ValueError( "Both or neither of cols and vals must be none." )
-            if ( ( not isinstance( cols, collections.abc.Sequence ) ) or ( isinstance( cols, str ) ) or
-                 ( not isinstance( vals, collections.abc.Sequence ) ) or ( isinstance( vals, str ) ) or
-                 ( len( cols ) != len( vals ) )
-                ):
+            if ( not util.isSequence( cols ) ) or ( not util.isSequence( vals ) ) or ( len( cols ) != len( vals ) ):
                 raise ValueError( "cols and vals most both be lists of the same length" )
 
         if cols is not None:
             if len(kwargs) > 0:
-                raise ValueError( "Can only column values as named arguments "
+                raise ValueError( "Can only pass column values as named arguments "
                                   "if cols and vals are both None" )
         else:
             cols = kwargs.keys()
@@ -545,7 +671,7 @@ class DBBase:
         for col in mycols:
             setattr( self, col, None )
 
-        self._set_self_from_fetch_cols_row( cols, vals )
+        self._set_self_from_fetch_cols_row( cols, vals, noconvert=noconvert )
 
 
     def _set_self_from_fetch_cols_row( self, cols, fetchrow, noconvert=False, dbcon=None ):
@@ -647,15 +773,22 @@ class DBBase:
 
     @classmethod
     def get( cls, *args, dbcon=None ):
-        """Get an object from a table row with the specified primary key(s)."""
+        """Get an object from a table row with the specified primary key(s).
+
+        There should be as many positional arguments as there are primary keys for the table.
+
+        Parameters
+        ----------
+          dbcon : DBCon or psycopg.Connection, default None
+            If given, use this database connection.  Otherwise, it will
+            open and close a new database connection.
+
+        """
 
         q, subdict = cls._construct_pk_query_where( *args )
         q = f"SELECT * FROM {cls.__tablename__} {q}"
-        with DB( dbcon ) as con:
-            cursor = con.cursor()
-            cursor.execute( q, subdict )
-            cols = [ desc[0] for desc in cursor.description ]
-            rows = cursor.fetchall()
+        with DBCon( dbcon ) as dbcon:
+            rows, cols = dbcon.execute( q, subdict )
 
         if len(rows) > 1:
             raise RuntimeError( f"Found multiple rows of {cls.__tablename__} with primary keys {args}; "
@@ -675,6 +808,10 @@ class DBBase:
           pks : list of lists
             Each element of the list must be a list whose length matches
             the length of self._pk.
+
+          dbcon : DBCon or psycopg.Connection, default None
+            If given, use this database connection.  Otherwise, it will
+            open and close a new database connection.
 
         Returns
         -------
@@ -722,12 +859,9 @@ class DBBase:
             _and = "AND"
             comma = ","
 
-        with DB( dbcon ) as con:
-            cursor = con.cursor()
+        with DBCon( dbcon ) as dbcon:
             q = f"SELECT * FROM {cls.__tablename__} JOIN (VALUES {mess}) AS t({collist}) ON {onlist} "
-            cursor.execute( q, subdict )
-            cols = [ desc[0] for desc in cursor.description ]
-            rows = cursor.fetchall()
+            rows, cols = dbcon.execute( q, subdict )
 
         objs = []
         for row in rows:
@@ -739,6 +873,15 @@ class DBBase:
 
     @classmethod
     def getbyattrs( cls, dbcon=None, **attrs ):
+        """Get a list of objects whose attributes match the keyword arguments passed to this function.
+
+        Parameters
+        ----------
+          dbcon : DBCon or psycopg.Connection, default None
+            If given, use this database connection.  Otherwise, it will
+            open and close a new database connection.
+
+        """
         if cls._tablemeta is None:
             cls.load_table_meta( dbcon )
 
@@ -751,11 +894,8 @@ class DBBase:
             q += f"{_and} {k}=%({k})s "
             _and = "AND"
 
-        with DB( dbcon ) as con:
-            cursor = con.cursor()
-            cursor.execute( q, attrs )
-            cols = [ desc[0] for desc in cursor.description ]
-            rows = cursor.fetchall()
+        with DBCon( dbcon ) as con:
+            rows, cols = con.execute( q, attrs )
 
         objs = []
         for row in rows:
@@ -766,14 +906,28 @@ class DBBase:
         return objs
 
     def refresh( self, dbcon=None ):
+        """Reload the object from the database.
+
+        Will set the attributes of the object based on the row from the
+        database whose primary keys match the primary key of the object.
+        (BE CAREFUL: this may not work if the table has a default for
+        the primary key column, and you depended on the database to set
+        that default, e.g. when using the insert() method.  In that
+        case, the object may not know its own primary key!)
+
+        Parameters
+        ----------
+          dbcon : DBCon or psycopg.Connection, default None
+            If given, use this database connection.  Otherwise, it will
+            open and close a new database connection.
+
+        """
+
         q, subdict = self._construct_pk_query_where( *self.pks )
         q = f"SELECT * FROM {self.__tablename__} {q}"
 
-        with DB( dbcon ) as con:
-            cursor = con.cursor()
-            cursor.execute( q, subdict )
-            cols = [ desc[0] for desc in cursor.description ]
-            rows = cursor.fetchall()
+        with DBCon( dbcon ) as con:
+            rows, cols = con.execute( q, subdict )
 
         if len(rows) > 1:
             raise RuntimeError( f"Found more than one row in {self.__tablename__} with primary keys "
@@ -785,6 +939,38 @@ class DBBase:
 
 
     def insert( self, dbcon=None, refresh=True, nocommit=False ):
+        """Insert an object into the database.
+
+        Columns in the database will be set based on attributes of the
+        object.
+
+        Parameters
+        ----------
+          dbcon : DBCon or psycopg.Connection, default None
+            If given, use this database connection.  Otherwise, it will
+            open and close a new database connection.
+
+          refresh : bool, default True
+            After inserting the object into the database, reread the
+            parameters back from the database.  This will pick up any
+            colums set from defaults.  WARNING: if you're depending on
+            the database default to set the primary key, then there will
+            be an exception if you don't set refresh=False!  Reason: the
+            object has to know its own primary key in order to refresh
+            itself from the database, but if you're using a databse
+            default, then the object python-side won't know what the
+            database set.
+
+            Ignored if nocommit=True.
+
+          nocommit : bool, default False
+            Normally, after inserting, the database connection is
+            committed so that the object will really be on the database.
+            Set this to True to skip that step.  (You might do that,
+            e.g., if you make a whole bunch of insert calls at once.)
+
+        """
+
         if refresh and nocommit:
             raise RuntimeError( "Can't refresh with nocommit" )
 
@@ -793,24 +979,68 @@ class DBBase:
         q = ( f"INSERT INTO {self.__tablename__}({','.join(subdict.keys())}) "
               f"VALUES ({','.join( [ f'%({c})s' for c in subdict.keys() ] )})" )
 
-        with DB( dbcon ) as con:
-            cursor = con.cursor()
-            cursor.execute( q, subdict )
+        with DBCon( dbcon ) as con:
+            con.execute_nofetch( q, subdict )
             if not nocommit:
                 con.commit()
                 if refresh:
                     self.refresh( con )
 
     def delete_from_db( self, dbcon=None, nocommit=False ):
+        """Delete the row from the database with the object's primary keys.
+
+        Won't work if the object's primary key attributes aren't set, or are None.
+
+        Paramaeters
+        -----------
+          dbcon : DBCon or psycopg.Connection, default None
+            If given, use this database connection.  Otherwise, it will
+            open and close a new database connection.
+
+          nocmmit : bool, default False
+            Normally, the connection is committed after the DELETE
+            command is sent, so the row will really be removed.  Set
+            this to True to skip the commit step (e.g. if you want to do
+            several deletes in one commit).
+
+        """
         where, subdict = self._construct_pk_query_where( me=self )
         q = f"DELETE FROM {self.__tablename__} {where}"
-        with DB( dbcon ) as con:
-            cursor = con.cursor()
-            cursor.execute( q, subdict )
-            con.commit()
+        with DBCon( dbcon ) as con:
+            con.execute_nofetch( q, subdict )
+            if not nocommit:
+                con.commit()
 
 
     def update( self, dbcon=None, refresh=False, nocommit=False ):
+        """Update the database row with attributes from the object.
+
+        The object's primary keys must be set so this method can figure
+        out which row to update!
+
+        See the docs on _build_subdict for the complicated behavior for
+        columns with no corresponding attribute, or when attributes are
+        None.
+
+        Parameters
+        ----------
+          dbcon : DBCon or psycopg.Connection, default None
+            If given, use this database connection.  Otherwise, it will
+            open and close a new database connection.
+
+          refresh : bool, default False
+            After updating, refresh the object from the database.  This
+            is useful if, for instance, some attributes don't exist in
+            the object for which there are columns in the database with
+            defaults.  Requires nocommit=False.
+
+          nocommit : bool, default False.
+            Normally, the connection is committed after the UPDATE
+            command is sent, so the row will really be updated.  Set
+            this to True to skip the commit step (e.g. if you want to do
+            several updates all in one commit).
+
+        """
         if refresh and nocommit:
             raise RuntimeError( "Can't refresh with nocommit" )
 
@@ -821,9 +1051,8 @@ class DBBase:
         subdict.update( wheresubdict )
         q += where
 
-        with DB( dbcon) as con:
-            cursor = con.cursor()
-            cursor.execute( q, subdict )
+        with DBCon( dbcon ) as con:
+            con.execute_nofetch( q, subdict )
             if not nocommit:
                 con.commit()
                 if refresh:
@@ -851,13 +1080,17 @@ class DBBase:
              the values in dict.  (SQL will have ON CONFLICT DO NOTHING
              if False, ON CONFLICT DO UPDATE if True.)
 
-          assume_no_conflict: bool, default Falsea
+          assume_no_conflict: bool, default False
              Usually you just want to leave this False.  There are
              obscure kludge cases (e.g. if you're playing games and have
              removed primary key constraints and you know what you're
              doing-- this happens in load_snana_fits.py, for instance)
              where the conflict clauses cause the sql to fail.  Set this
              to True to avoid having those clauses.
+
+          dbcon : DBCon or psycopg.Connection, default None
+            If given, use this database connection.  Otherwise, it will
+            open and close a new database connection.
 
           nocommit : bool, default False
              This one is very scary and you should only use it if you
@@ -892,6 +1125,8 @@ class DBBase:
         elif isinstance( data, dict ):
             columns = list( data.keys() )
             values = [ [ data[c][i] for c in columns ] for i in range(len(data[columns[0]])) ]
+            # TODO : check that the lenght of all the lists in values is the
+            #   same as the length of columns
         elif isinstance( data, list ) and isinstance( data[0], cls ):
             # This isn't entirely satisfying.  But, we're going
             #   to assume that things that are None because they
@@ -904,13 +1139,13 @@ class DBBase:
             #   so we can't just pass it d.values()
             values = [ list( d.values() ) for d in data ]
         else:
-            raise TypeError( f"data must be something other than a {cls.__name__}" )
+            raise TypeError( f"Invalid type for data: {type(data)}" )
 
-        with DB( dbcon ) as con:
-            cursor = con.cursor()
-            cursor.execute( "DROP TABLE IF EXISTS temp_bulk_upsert" )
-            cursor.execute( f"CREATE TEMP TABLE temp_bulk_upsert (LIKE {cls.__tablename__})" )
-            with cursor.copy( f"COPY temp_bulk_upsert({','.join(columns)}) FROM STDIN" ) as copier:
+        with DBCon( dbcon ) as con:
+            con.execute_nofetch( "DROP TABLE IF EXISTS temp_bulk_upsert", explain=False, analyze=False )
+            con.execute_nofetch( f"CREATE TEMP TABLE temp_bulk_upsert (LIKE {cls.__tablename__})",
+                                 explain=False, analyze=False )
+            with con.cursor.copy( f"COPY temp_bulk_upsert({','.join(columns)}) FROM STDIN" ) as copier:
                 for v in values:
                     copier.write_row( v )
 
@@ -928,9 +1163,9 @@ class DBBase:
             if nocommit:
                 return q
             else:
-                cursor.execute( q )
-                ninserted = cursor.rowcount
-                cursor.execute( "DROP TABLE temp_bulk_upsert" )
+                con.execute_nofetch( q, explain=False, analyze=False )
+                ninserted = con.cursor.rowcount
+                con.execute_nofetch( "DROP TABLE temp_bulk_upsert", explain=False, analyze=False )
                 con.commit()
                 return ninserted
 
@@ -956,10 +1191,133 @@ class PasswordLink( DBBase ):
 
 # ======================================================================
 
+class BaseProcessingVersion( DBBase ):
+    __tablename__ = "base_processing_version"
+    _tablemeta = None
+    _pk = [ 'id' ]
+
+    @classmethod
+    def base_procver_id( cls, base_processing_version, dbcon=None ):
+        """Return the uuid of base_processing_version.
+
+        Parameters
+        ----------
+          base_processing_version: str or UUID
+            If a UUID, just return it straight.  If a str that is a string
+            version of a UUID, UUIDifies it and returns it.  Otherwise,
+            queries the database for the base processing version and returns
+            the UUID.
+
+         dbcon: db.DBCon or psycopg2.connection or NOne
+           Databse connection to use.  If None, and one is needed, will
+           open a new one and close it when done.
+
+        Returns
+        -------
+          UUID
+
+        """
+
+        if isinstance( base_processing_version, uuid.UUID ):
+            return base_processing_version
+        try:
+            bpv = uuid.UUID( base_processing_version )
+            return bpv
+        except Exception:
+            pass
+        with DBCon( dbcon ) as con:
+            rows, _cols = con.execute( "SELECT id FROM base_processing_version WHERE description=%(pv)s",
+                                       { 'pv': base_processing_version } )
+            if len(rows) == 0:
+                raise ValueError( f"Unknown base processing version {base_processing_version}" )
+            return rows[0][0]
+
+
+# ======================================================================
+
 class ProcessingVersion( DBBase ):
     __tablename__ = "processing_version"
     _tablemeta = None
     _pk = [ 'id' ]
+
+    @classmethod
+    def procver_id( cls, processing_version, dbcon=None ):
+        """Return the uuid of processing_version.
+
+        Will also search procesing version aliases if necessary.
+
+        Parameters
+        ----------
+          processing_version: str or UUID
+            If a UUID, just return it straight.  If a str that is a string
+            version of a UUID, UUIDifies it and returns it.  Otherwise,
+            queries the database for the processing version and returns the
+            UUID.
+
+          dbcon: db.DBCon or psycopg.Connection or None
+            Database connection to use.  If None, and one is needed, will
+            open a new one and close it when done.
+
+        Returns
+        -------
+          UUID
+
+        """
+
+        if isinstance( processing_version, uuid.UUID ):
+            return processing_version
+        try:
+            ipv = uuid.UUID( processing_version )
+            return ipv
+        except Exception:
+            pass
+        with DBCon( dbcon ) as con:
+            rows, _cols = con.execute( "SELECT id FROM processing_version WHERE description=%(pv)s",
+                                       { 'pv': processing_version } )
+            if len(rows) > 0:
+                return rows[0][0]
+            rows, _cols = con.execute( "SELECT procver_id FROM processing_version_alias WHERE description=%(pv)s",
+                                       { 'pv': processing_version } )
+            if len(rows) == 0:
+                raise ValueError( f"Unknown processing version {processing_version}" )
+            return rows[0][0]
+
+
+    def highest_prio_base_procver( self, dbcon=None ):
+        """Returns the highest priority base_processing_version associated with this processing version.
+
+        Be careful with this.  If you don't fully understand the
+        processing version scheme (and, Rob, if you haven't thought
+        about it recently, that probably includes you), you can use this
+        wrong.  Because there are multiple base processing versions for
+        one processing version, using this to search for things is
+        almost certainly the wrong thing to do; it undercuts the whole
+        "fall back to other versions" nature of processing_version.
+        This method may be useful for figuring out the base processing
+        version to insert something under.
+
+        Parameters
+        ----------
+          dbcon : DBCon or psycopg.Connection, default None
+            Database connection to use.  If not given, will open a new
+            one and close it when done.
+
+        Returns
+        -------
+          BaseProcessingVersion
+
+        """
+        with DBCon( dbcon, dictcursor=True ) as con:
+            bpv = con.execute( "SELECT b.* FROM base_processing_version b\n"
+                               "INNER JOIN base_procver_of_procver j ON j.base_procver_id=b.id\n"
+                               "WHERE j.procver_id=%(pv)s\n"
+                               "ORDER BY j.priority DESC\n"
+                               "LIMIT 1",
+                               { 'pv': self.id } )
+            if len(bpv) == 0:
+                raise ValueError( f"Can't find base processing version for processing version {self.description}" )
+            bpv = bpv[0]
+            return BaseProcessingVersion( **bpv, noconvert=False )
 
 
 # ======================================================================
@@ -991,7 +1349,7 @@ class RootDiaObject( DBBase ):
 class DiaObject( DBBase ):
     __tablename__ = "diaobject"
     _tablemeta = None
-    _pk = [ 'diaobjectid', 'processing_version' ]
+    _pk = [ 'diaobjectid', 'base_procver_id' ]
 
 
 # ======================================================================
@@ -999,7 +1357,7 @@ class DiaObject( DBBase ):
 class DiaSource( DBBase ):
     __tablename__ = "diasource"
     _tablemeta = None
-    _pk = [ 'processing_version', 'diaobjectid', 'visit' ]
+    _pk = [ 'base_procver_id', 'diaobjectid', 'visit' ]
 
 
 # ======================================================================
@@ -1007,7 +1365,7 @@ class DiaSource( DBBase ):
 class DiaForcedSource( DBBase ):
     __tablename__ = "diaforcedsource"
     _tablemeta = None
-    _pk = [ 'processing_version', 'diaobjectid', 'visit' ]
+    _pk = [ 'base_procver_id', 'diaobjectid', 'visit' ]
 
 
 # ======================================================================

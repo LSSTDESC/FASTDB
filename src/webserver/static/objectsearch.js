@@ -234,7 +234,7 @@ fastdbap.ObjectSearch = class
         
         
         rkWebUtil.wipeDiv( this.context.objectlistdiv );
-        this.context.searchtabs.selectTab( "objectsearch" );
+        this.context.maintabs.selectTab( "objectlist" );
         rkWebUtil.elemaker( "p", this.context.objectlistdiv, { "text": "Searching for objects...",
                                                                 "classes": [ "bold", "italic", "warning" ] } );
         this.context.connector.sendHttpRequest( "/objectsearch/" + procver, searchcriteria,

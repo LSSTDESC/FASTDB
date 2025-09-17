@@ -1,50 +1,454 @@
+__all__ = [ "object_ltcv", "object_search", "get_hot_ltcvs" ]
+
 import datetime
 import numbers
 import json   # noqa: F401
 
-import numpy
+from psycopg import sql
 import pandas
 import astropy.time
 
 import db
 import util
+from util import FDBLogger
 
 
-def procver_int( processing_version, dbcon=None ):
-    if isinstance( processing_version, numbers.Integral ):
-        return processing_version
-    try:
-        ipv = int( processing_version )
-        return ipv
-    except Exception:
-        pass
-    with db.DB( dbcon ) as con:
-        cursor = con.cursor()
-        cursor.execute( "SELECT id FROM processing_version WHERE description=%(pv)s", { 'pv': processing_version } )
-        row = cursor.fetchone()
-        if row is not None:
-            return row[0]
-        cursor.execute( "SELECT id FROM processing_version_alias WHERE description=%(pv)s",
-                        { 'pv': processing_version } )
-        row = cursor.fetchone()
-        if row is None:
-            raise ValueError( f"Unknown processing version {processing_version}" )
-        return row[0]
-
-
-def object_ltcv( processing_version, diaobjectid, return_format='json', bands=None, which='patch', dbcon=None ):
-    """Get the lightcurve for an object
+def get_object_infos( objids=None, objids_table=None, processing_version=None,
+                      columns=None, return_format='json', dbcon=None ):
+    """Get information from the diaobject table.
 
     Parameters
     ----------
-       processing_version : int or str
-          The processing verson (or alias) to search
+      objids : list of int or uuid
+        Either the diaobejctid or rootid values for the objects to get.
+        Either this or objids_table is required.
 
-       diaobjectid : int
-          The object id
+      objids_table : str, default None
+        The name of a table (probably a temporary table) with the
+        objects whose info to get in its diaobjectid column.  Cannot
+        pass objids if you pass this.  Requires dbcon to be passed (so
+        that temporary tables are meaningful).
 
-       return_format : str, default 'json'
-          'json' or 'pandas'
+      processing_version : str, uuid, or None
+        If objids is a list of rootids, then this is required.  If
+        objids is a list of int, then this is ignored.
+
+      columns : list of str, default None
+        If given only include these columns from the diaobject table.
+        Otherwise, include all of them.  If 'diaobjectid' is not
+        included in this list, it will be prepended to it.  (You can't
+        not get diaobjectid back, because it's the index of the returned
+        dataframe or the keys of the returned dictionary.)
+
+      return_format : str, default 'json'
+        Either 'pandas' or 'json'
+
+      dbcon : db.DBCon or psycopg.Connection, default None
+        If given, use this database connection.  If not given,
+        then open a connection, closing it when done.
+
+    Returns
+    -------
+      rval: pandas.DataFrame or dict
+        If return_format is 'pandas', the dataframe is indexed by diaobjectid and has
+        all columns from the diaobject table.
+
+        If return_format is 'json', then the return is a dictionary whose keys are
+        the columns of diaobject, and whose values are lists all of the same length.
+
+    """
+    if objids_table is not None:
+        if dbcon is None:
+            raise ValueError( "objids_table requires dbcon" )
+        if objids is not None:
+            raise ValueError( "objids_table and objids cannot be used together" )
+        if processing_version is not None:
+            raise ValueError( "Cannot pass processing_version when passing objids_table" )
+    else:
+        if not util.isSequence( objids ):
+            objids = [ objids ]
+        if all( isinstance( o, numbers.Integral ) for o in objids ):
+            # Make sure they're int, because if it's something like np.int64, postgres may choke
+            objids = [ int(o) for o in objids ]
+            if processing_version is not None:
+                raise ValueError( "Cannot pass processing_version when passing integer objids" )
+            obj_is_root = False
+        else:
+            try:
+                objids = [ util.asUUID(o) for o in objids ]
+            except ValueError:
+                raise ValueError( "objids must be a list of integers or a list of uuids" )
+            obj_is_root = True
+            if processing_version is None:
+                raise ValueError( "Passing root ids requires a processing_version" )
+            pv = db.ProcessingVersion.procver_id( processing_version )
+        if len(objids) == 0:
+            raise ValueError( "no objids requested" )
+
+    if return_format not in ( 'pandas', 'json' ):
+        raise ValueError( f"return_format must be pandas or json, not {return_format}" )
+
+    if columns is None:
+        columns = db.DiaObject.all_columns_sql( prefix='o' )
+    else:
+        if not util.isSequence( columns ):
+            columns = [ columns ]
+        else:
+            columns = list( columns )
+        if 'diaobjectid' not in columns:
+            columns = columns.copy()
+            columns.insert( 0, 'diaobjectid' )
+        columns = sql.SQL(',').join( sql.Identifier('o', i) for i in columns )
+
+
+    with db.DBCon( dbcon ) as dbcon:
+        if objids_table is not None:
+            q = sql.SQL(
+                """/*+ IndexScan(o idx_diaobject_diaobjectid) */
+                SELECT {columns}
+                FROM {objids_table} t
+                INNER JOIN diaobject o ON o.diaobjectid=t.diaobjectid
+                """ ).format( columns=columns, objids_table=sql.Identifier(objids_table) )
+        else:
+            if obj_is_root:
+                q = sql.SQL(
+                    """
+                    SELECT DISTINCT ON(o.diaobjectid) {columns}
+                    FROM diaobject o
+                    INNER JOIN base_procver_of_procver pv ON o.base_procver_id=pv.base_procver_id
+                                                         AND pv.procver_id={pv}
+                    WHERE o.rootid=ANY(%(objids)s)
+                    ORDER BY o.diaobjectid, pv.priority DESC
+                    """
+                ).format( columns=columns, pv=pv )
+            else:
+                q = sql.SQL( "SELECT {columns} FROM diaobject o WHERE diaobjectid=ANY(%(objids)s)"
+                            ).format( columns=columns )
+
+        rows, cols = dbcon.execute( q, { 'objids': objids } )
+
+        if return_format == 'pandas':
+            return pandas.DataFrame( rows, columns=cols ).set_index( 'diaobjectid' )
+
+        elif return_format == 'json':
+            return { c: [ r[i] for r in rows ] for i, c in enumerate( cols ) }
+
+        else:
+            raise RuntimeError( "This should never happen" )
+
+
+def many_object_ltcvs( processing_version='default', objids=None, objids_table=None,
+                       bands=None, which='patch', include_base_procver=False,
+                       return_format='json', string_keys=False, mjd_now=None, dbcon=None ):
+    """Get lightcurves for objects.
+
+    Parameters
+    ----------
+      processing_version : UUID or str, default 'default'
+         The processing version (or alias) to search photometry.
+
+      objids: int, uuid, list of int, or list of uuid
+         Objects to search for.  If None, will get ALL OBJECTS; if
+         you're doing this, you probably want to use LIMIT (and maybe
+         OFFSET).  If ints, will be diaobjectids.  If uuid, will be
+         rootids.  If ints, the diaobjectid must be consistent with
+         processing_version, or nothing will be found.  If uuids, then
+         the diaobjectids found will be the ones that match the
+         photometry with the right processing_version.
+
+      objid_table : str, default None
+         If not None, then this is the name of a table (probably a
+         temporary table) that has the object ids already loaded into it
+         in the column "diaobjectid".  Use of this requires dbcon to be
+         non None.
+
+      # Offset and limit don't work right, I have to think harder
+      # offset: int, default None
+      #    Only return lightcurves starting this many in from what's found.
+      #    (offset=0 is the same as not passing anything).
+      #
+      # limit: int, default None
+      #    Only return this many objects' lightcurves if given.
+
+      bands: str, list of str or None
+         If not None, only include bands in this list.
+
+      which : str, default 'patch'
+         forced : get forced photometry (i.e. diaforcedsource)
+         detections : get detections (i.e. diasource)
+         patch : get forced photometry, but patch in detections where forced photometry is missing
+
+      include_base_procver : bool, default False
+         If True, the returned data will have a two columns,
+         base_procver_s and base_procver_f, that are the descriptions
+         of the base processing versions of the object for sources and
+         forced sources respectively (or NaN if not defined).
+
+      return_format : str, default 'json'
+         'json' or 'pandas'
+
+      string_keys : bool, default False
+         Ignored unless return_format is 'json'.  Normally, with
+         return_format 'json', the keys of the returned thing are all
+         bigints, as thats what diaobjectids are.  But, if you really
+         want to encode this to actual json, that's a problem, because
+         actual json specifies that keys have to be strings. (Why do we
+         use this format??)  Set string_keys to True, and the diaobjectid
+         keys of the returned dictionary will be wrapped in str().
+
+      mjd_now : float, default None
+         You almost always want to leave this at None.  It's here for
+         testing purposes.  Normally you will get back all data on an
+         object that's in the database.  However, if you want to
+         pretend it's an earlier time, pass an mjd here, and all data
+         later than that mjd will be truncated away.
+
+         Note that this isn't perfect.  For realtime LSST operations,
+         on mjd n, you will have detections through mjd n (assuming
+         that alerts have gone out fast, brokers have kept up with
+         classifications, and we have kept up with injesting broker
+         alerts), but only forced photometry through mjd n-1 at the
+         latest.  With mjd_now, you get everything in the database
+         through mjd n, even forced photometry; it doesn't try to
+         simulate forced photometry coming in late.
+
+      dbcon: psycopg.Connection, db.DBCon, or None
+         Database connection to use.  If None, will make a new
+         connection and close it when done.
+
+    Returns
+    -------
+      retval: pandas.DataFrame or dict
+        If return_format is 'pandas', then you get back a DataFrame with
+        indexes (diaobjectid, mjd) and columns (band, flux,
+        fluxerr, isdet, [ispatch]).  (ispatch will only be included if
+        which is 'patch').
+
+        If return_format is 'json', then you get back a dict of diaobjectid -> dict
+        The inner dict has fields:
+          { 'visit': list of bigint,
+            'mjd': list of float,
+            'band': list of str,
+            'flux': list of float,
+            'fluxerr': list of float
+            'isdet': list of int,      (1 for true, 0 for false; javascript JSON chokes on booleans)
+            [ 'ispatch': list of int, ] (only included if which is 'patch')
+            [ 'base_procver': list of str, ] (only included if include_base_procver is True)
+         }
+
+    """
+
+    # Parse objids, set objfield
+    if objids_table is not None:
+        if dbcon is None:
+            raise ValueError( "objids_table requires dbcon" )
+        if objids is not None:
+            raise ValueError( "objids_table and objids cannot be used together" )
+        objfield = 'diaobjectid'
+    else:
+        objids_table = "tmp_objids"
+        if objids is None:
+            raise ValueError( "objids is required" )
+        if not util.isSequence( objids ):
+            objids = [ objids ]
+        if all( isinstance( o, numbers.Integral ) for o in objids ):
+            # Make sure they're int, because if it's something like np.int64, postgres will choke
+            objids = [ int(o) for o in objids ]
+            objfield = 'diaobjectid'
+        else:
+            objfield = 'rootid'
+            try:
+                objids = [ util.asUUID(o) for o in objids ]
+            except ValueError:
+                raise ValueError( "objids must be a list of integers or a list of uuids" )
+        if len(objids) == 0:
+            raise ValueError( "no objids requested" )
+
+    # Parse bands
+    if bands is not None:
+        if not util.isSequence( bands ):
+            bands = [ bands ]
+
+    # Make sure which is something reasonable
+    if which not in ( 'detections', 'forced', 'patch' ):
+        raise ValueError( f"which must be detections, forced, or patch, not {which}" )
+
+    # Make sure return_format is something reasonable
+    if return_format not in ( 'json', 'pandas' ):
+        raise ValueError( f"return_format must be json or pandas, not {return_format}" )
+
+    # Make sure mjd_now is floatifiable
+    mjd_now = None if mjd_now is None else float( mjd_now )
+
+    with db.DBCon( dbcon ) as dbcon:
+        pvid = db.ProcessingVersion.procver_id( processing_version, dbcon=dbcon )
+
+        if objids is not None:
+            # For efficiency, we're going to make a first pass and extract just the object ids.
+            # If these are root ids, then we can't be sure which diaobjectid will correspond
+            # to them, so we will pull the *all* out.  (Think about this.  It's possible we
+            # could be doing something with the object's processing version, but consisder
+            # all the complicated messy cases.)
+
+            q = sql.SQL( "CREATE TEMP TABLE {objids_table}( diaobjectid bigint )"
+                        ).format( objids_table=sql.Identifier( objids_table ) )
+            dbcon.execute( q, explain=False )
+            if objfield == 'rootid':
+                q = sql.SQL(
+                    """INSERT INTO {objids_table} (
+                         SELECT diaobjectid FROM diaobject
+                         WHERE rootid=ANY(%(roots)s)
+                       )
+                    """
+                ).format( objids_table=sql.Identifier(objids_table) )
+                dbcon.execute_nofetch( q, { 'roots': objids } )
+            else:
+                q = sql.SQL( "COPY {objids_table}(diaobjectid) FROM STDIN"
+                            ).format( objids_table=sql.Identifier( objids_table ) )
+                with dbcon.cursor.copy( q ) as copier:
+                    for objid in objids:
+                        copier.write_row( [ objid ] )
+
+        # Extract detections
+        dbcon.execute( "CREATE TEMP TABLE tmp_sources( diaobjectid bigint, visit bigint,"
+                       "                               mjd double precision, band text, flux real, fluxerr real,"
+                       "                               isdet bool, base_procver text )",
+                       explain=False )
+        q = sql.SQL(
+            """/*+ IndexScan(s idx_diasource_diaobjectid) */
+               INSERT INTO tmp_sources
+               SELECT DISTINCT ON (s.diaobjectid, s.visit)
+                 s.diaobjectid, s.visit, s.midpointmjdtai AS mjd,
+                 s.band, s.psfflux AS flux, s.psffluxerr AS fluxerr,
+                 TRUE as isdet, p.description AS base_procver
+               FROM {objids_table} t
+               INNER JOIN diasource s ON s.diaobjectid=t.diaobjectid
+               INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id
+                                                    AND pv.procver_id={procver}
+               INNER JOIN base_processing_version p ON pv.base_procver_id=p.id
+            """
+        ).format( procver=pvid, objids_table=sql.Identifier(objids_table) )
+        _and = "WHERE"
+        if mjd_now is not None:
+            q += sql.SQL( f"                   {_and} s.midpointmjdtai<={{t0}}" ).format( t0=mjd_now )
+            _and = "  AND"
+        if bands is not None:
+            q += sql.SQL( f"                   {_and} s.band=ANY(%(bands)s)" )
+            _and = "  AND"
+        q += sql.SQL(
+            """
+               ORDER BY s.diaobjectid, s.visit, pv.priority DESC
+            """ )
+        dbcon.execute_nofetch( q, { 'bands': bands } )
+
+        if which == 'detections':
+            rows, cols = dbcon.execute( "SELECT * FROM tmp_sources" )
+
+        else:
+            # Extract forced photometry if necessary
+            dbcon.execute( "CREATE TEMP TABLE tmp_forced( diaobjectid bigint, visit bigint,"
+                           "                              mjd double precision, band text, "
+                           "                              flux real, fluxerr real,"
+                           "                              isdet bool, base_procver text )",
+                           explain=False )
+            q = sql.SQL(
+                """/*+ IndexScan(s idx_diaforcedsource_diaobjectid) */
+                   INSERT INTO tmp_forced
+                   SELECT DISTINCT ON (s.diaobjectid, s.visit)
+                     s.diaobjectid, s.visit, s.midpointmjdtai AS mjd,
+                     s.band, s.psfflux AS flux, s.psffluxerr AS fluxerr,
+                     FALSE as isdet, p.description AS base_procver
+                   FROM {objids_table} t
+                   INNER JOIN diaforcedsource s ON s.diaobjectid=t.diaobjectid
+                   INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id
+                                                        AND pv.procver_id={procver}
+                   INNER JOIN base_processing_version p ON pv.base_procver_id=p.id
+                """
+            ).format( procver=pvid, objids_table=sql.Identifier(objids_table) )
+            _and = "WHERE"
+            if mjd_now is not None:
+                q += sql.SQL( f"                   {_and} s.midpointmjdtai<={{t0}}" ).format( t0=mjd_now )
+                _and = "  AND"
+            if bands is not None:
+                q += sql.SQL( f"                   {_and} s.band=ANY(%(bands)s)" )
+                _and = "  AND"
+            q += sql.SQL(
+                """
+                   ORDER BY s.diaobjectid, s.visit, pv.priority DESC
+                """ )
+            dbcon.execute_nofetch( q, { 'bands': bands } )
+
+            # Join detections to forced photometry to set the 'isdet' and 'ispatch' flags
+            q = sql.SQL(
+                """SELECT CASE WHEN f.diaobjectid IS NULL THEN s.diaobjectid ELSE f.diaobjectid END AS diaobjectid,
+                          CASE WHEN f.visit IS NULL THEN s.visit ELSE f.visit END AS visit,
+                          CASE WHEN f.mjd IS NULL THEN s.mjd ELSE f.mjd END AS mjd,
+                          CASE WHEN f.band IS NULL THEN s.band ELSE f.band END AS band,
+                          CASE WHEN f.flux IS NULL THEN s.flux ELSE f.flux END AS flux,
+                          CASE WHEN f.fluxerr IS NULL THEN s.fluxerr ELSE f.fluxerr END AS fluxerr,
+                          CASE WHEN s.mjd IS NULL THEN FALSE ELSE TRUE END AS isdet,
+                          CASE WHEN f.mjd IS NULL THEN TRUE ELSE FALSE END as ispatch,
+                          CASE WHEN f.base_procver IS NULL THEN s.base_procver ELSE f.base_procver END
+                            AS base_procver
+                   FROM tmp_forced f
+                   FULL OUTER JOIN tmp_sources s ON f.diaobjectid=s.diaobjectid AND s.visit=f.visit
+                ORDER BY diaobjectid, mjd
+                """ )
+            rows, cols = dbcon.execute( q )
+
+    retframe = pandas.DataFrame( rows, columns=cols )
+
+    if not include_base_procver:
+        retframe.drop( 'base_procver', axis='columns', inplace=True )
+
+    if which == 'forced':
+        if len(retframe) > 0:
+            # Pandas annoyance: if retframe has 0 length, this next
+            #   statement wipes out the columns.  Grrr.
+            retframe = retframe[ ~retframe.ispatch ]
+        retframe.drop( 'ispatch', axis='columns', inplace=True )
+
+    if return_format == 'pandas':
+        retframe.set_index( ['diaobjectid', 'mjd'], inplace=True )
+        return retframe
+
+    elif return_format == 'json':
+        retval = {}
+        for objid in retframe.diaobjectid.unique():
+            subf = retframe[ retframe.diaobjectid==objid  ]
+            thisretval = { 'visit': list( subf.visit.values ),
+                           'mjd': list( subf.mjd.values ),
+                           'band': list( subf.band.values ),
+                           'flux': list( subf.flux.values ),
+                           'fluxerr': list( subf.fluxerr.values ),
+                           'isdet': [ int(i) for i in subf.isdet.values ] }
+            if which == 'patch':
+                thisretval['ispatch'] = [ int(i) for i in subf.ispatch.values ]
+            if include_base_procver:
+                thisretval['base_procver'] = list( subf.base_procver )
+            k = str(objid) if string_keys else objid
+            retval[ k ] = thisretval
+        return retval
+
+    else:
+        raise RuntimeError( "This should never happen." )
+
+
+def object_ltcv( processing_version='default', diaobjectid=None,
+                 bands=None, which='patch', include_base_procver=False, return_format='json',
+                 mjd_now=None, dbcon=None ):
+    """Get the lightcurve for an object.
+
+    Parameters
+    ----------
+       processing_version : UUID or str, default 'default'
+          The processing verson (or alias) to search photometry.
+
+       diaobjectid : int or UUID; required
+          The object id -- will be either a diaobjectid or a
+          root_diaobjectid based on the type passed.  If an int,
+          it's a diaobjectid, and it needs to be consistent with
+          what's in processing_verson or you'll get nothing back.
 
        bands : list of str or None
           If not None, only include the bands in this list.
@@ -53,6 +457,35 @@ def object_ltcv( processing_version, diaobjectid, return_format='json', bands=No
           forced : get forced photometry (i.e. diaforcedsource)
           detections : get detections (i.e. diasource)
           patch : get forced photometry, but patch in detections where forced photometry is missing
+
+       include_base_procver : bool, default False
+          If True, the returned data will have a two columns,
+          base_procver_s and base_procver_f, that are the descriptions
+          of the base processing versions of the object for sources and
+          forced sources respectively (or NaN if not defined).
+
+       return_format : str, default 'json'
+          'json' or 'pandas'
+
+       mjd_now : float, default None
+          You almost always want to leave this at None.  It's here for
+          testing purposes.  Normally you will get back all data on an
+          object that's in the database.  However, if you want to
+          pretend it's an earlier time, pass an mjd here, and all data
+          later than that mjd will be truncated away.
+
+          Note that this isn't perfect.  For realtime LSST operations,
+          on mjd n, you will have detections through mjd n (assuming
+          that alerts have gone out fast, brokers have kept up with
+          classifications, and we have kept up with injesting broker
+          alerts), but only forced photometry through mjd n-1 at the
+          latest.  With mjd_now, you get everything in the database
+          through mjd n, even forced photometry; it doesn't try to
+          simulate forced photometry coming in late.
+
+       dbcon: psycopg.Connection, db.DBCon, or None
+          Database connection to use.  If None, will make a new
+          connection and close it when done.
 
     Returns
     -------
@@ -68,118 +501,30 @@ def object_ltcv( processing_version, diaobjectid, return_format='json', bands=No
 
     """
 
-    if which not in ( 'detections', 'forced', 'patch' ):
-        raise ValueError( f"Unknown value of which for object_ltcv: {which}" )
+    rval = many_object_ltcvs( processing_version=processing_version, objids=[ diaobjectid ],
+                              bands=bands, which=which, include_base_procver=include_base_procver,
+                              return_format=return_format, mjd_now=mjd_now, dbcon=dbcon )
+    if len(rval) == 0:
+        raise RuntimeError( f"Could not find object for diaobjectid {diaobjectid}" )
 
-    if return_format not in ( 'json', 'pandas' ):
-        raise ValueError( f"Unknown return_format {return_format}" )
-
-    # Just pull down all sources and forced sources, and do
-    # post-processing in python.  This is going to be hundreds or
-    # thousands of points for a single object, so it's not really
-    # necessary to try to do lots of processing SQL-side to filter stuff
-    # out like we do in get_hot_ltcvs.
-    sources = []
-    forced = []
-    with db.DB( dbcon ) as dbcon:
-        pv = procver_int( processing_version, dbcon=dbcon )
-        cursor = dbcon.cursor()
-        q =  ( "SELECT midpointmjdtai AS mjd, band, psfflux, psffluxerr "
-               "FROM diasource "
-               "WHERE diaobjectid=%(id)s AND processing_version=%(pv)s " )
-        if bands is not None:
-            q += "AND band=ANY(%(bands)s) "
-        q += "ORDER BY mjd "
-        cursor.execute( q, { 'id': diaobjectid, 'pv': pv, 'bands': bands } )
-        columns = [ d[0] for d in cursor.description ]
-        sources = pandas.DataFrame( cursor.fetchall(), columns=columns )
-        if which in ( 'forced', 'patch' ):
-            q = ( "SELECT midpointmjdtai AS mjd, band, psfflux, psffluxerr "
-                  "FROM diaforcedsource "
-                  "WHERE diaobjectid=%(id)s AND processing_version=%(pv)s " )
-            if bands is not None:
-                q += "AND band=ANY(%(bands)s) "
-            q += "ORDER BY mjd "
-            cursor.execute( q, { 'id': diaobjectid, 'pv': pv, 'bands': bands } )
-            columns = [ d[0] for d in cursor.description ]
-            forced = pandas.DataFrame( cursor.fetchall(), columns=columns )
-
-    if which == 'detections':
-        # If we're only asking for detections, this is easy
-        retframe = sources
-        retframe['isdet'] = True
-
-    else:
-        # Otherwise, we have to think a lot.  We need to find
-        # corresponences between forced points and source points.  I
-        # don't trust the floating-point MJDs from corresponding rows of
-        # the two tables to be identical (because you should never trust
-        # floating point numbers to be identical), so multiply them by
-        # 10⁴ and convert to bigints for matching purposes.  That gives
-        # a resolution of ~10 seconds; we're making the implicit
-        # assumption that no two exposures will have been taken less
-        # than 10 seconds apart.  Stick my head in the sand re: the edge
-        # case of two corresponding things flooring in different
-        # directions because of floating point underflow.  Going to 4
-        # decimal places = 10 digits of precision (for 5 digits in the
-        # intger part of MJD), and doubles have 15 or 16 digits of
-        # precision, so presumably we're OK, but there may still be a
-        # rare 99999 vs 000000 edge case.
-        #
-        # FUTURE NOTE : we should probably filter on visit and detector
-        # with actual LSST data!  Presumably those will be properly
-        # unique.  And, I think I populate those with SNANA, so maybe
-        # we should just do that now.  That would save us from thinking
-        # about anything floating point for joining.
-
-        forced['mjde4'] = ( forced.mjd * 10000 ).astype( numpy.int64 )
-        sources['mjde4'] = ( sources.mjd * 10000 ).astype( numpy.int64 )
-        forced.set_index( [ 'mjde4', 'band' ], inplace=True )
-        sources.set_index( [ 'mjde4', 'band' ], inplace=True )
-        joined = forced.join( sources, on=[ 'mjde4', 'band' ], how='outer',
-                              lsuffix='_f', rsuffix='_s' ).reset_index()
-        joined['isdet'] = ~joined.mjd_s.isna()
-        joined['ispatch'] = joined.mjd_f.isna()
-
-        if which == 'patch':
-            # Patch in the detections where there is no forced photometry
-            # (Pandas is mysterious; have to use ".loc" to set columns, can't
-            # use the simpler indexing you'd use to read columns.)
-            joined.loc[ joined['ispatch'], 'mjd_f' ] = joined[ joined['ispatch'] ].mjd_s
-            joined.loc[ joined['ispatch'], 'psfflux_f' ] = joined[ joined['ispatch'] ].psfflux_s
-            joined.loc[ joined['ispatch'], 'psffluxerr_f' ] = joined[ joined['ispatch'] ].psffluxerr_s
-
-        # Remove columns that don't have forced or patched photometry
-        joined = joined[ ~joined.mjd_f.isna() ]
-
-        # Remove columns we don't want to return
-        joined.drop( columns=[ 'mjd_s', 'psfflux_s', 'psffluxerr_s', 'mjde4' ], inplace=True )
-        joined.rename( inplace=True, columns={ 'mjd_f': 'mjd',
-                                               'psfflux_f': 'psfflux',
-                                               'psffluxerr_f': 'psffluxerr' } )
-        retframe = joined
-
-    retframe.sort_values( [ 'mjd', 'band' ], inplace=True )
     if return_format == 'pandas':
-        return retframe
+        rval.reset_index( inplace=True )
+        rval.drop( 'diaobjectid', axis='columns', inplace=True )
+        return rval
+
     elif return_format == 'json':
-        retval = { c: list( joined[c].values ) for c in joined.columns }
-        # Gotta de-bool the bool columns since JSON, sadly, can't handle it
-        retval['isdet'] = [ 1 if r else 0 for r in retval['isdet'] ]
-        if ( 'ispatch' in retval ):
-            retval['ispatch'] = [ 1 if r else 0 for r in retval['ispatch'] ]
-        return retval
-    else:
-        raise RuntimeError( "This should never happen." )
+        rval = rval[ list(rval.keys())[0] ]
+        return rval
 
 
 def debug_count_temp_table( con, table ):
     res = con.execute( f"SELECT COUNT(*) FROM {table}" )
-    util.logger.debug( f"Table {table} has {res[0][0]} rows" )
+    FDBLogger.debug( f"Table {table} has {res[0][0]} rows" )
 
 
-# TODO : allow different object processing_version from source processing_version
-def object_search( processing_version, return_format='json', just_objids=False, **kwargs ):
+def object_search( processing_version='default', object_processing_version=None, return_format='json',
+                   just_objids=False, noforced=False, dbcon=None, mjd_now=None,
+                   **kwargs ):
     """Search for objects.
 
     For parameters that define the search, if they are None, they are
@@ -187,14 +532,49 @@ def object_search( processing_version, return_format='json', just_objids=False, 
 
     Parameters
     ----------
-      processing_version : string or int
-         The processing version you're looking at
+      processing_version : UUID or str
+         The processing version you're looking at (for sources and forced sources).
 
-      return format : string
-         Either "json" or "pandas".  (TODO: pyarrow? polars?)
+      object_processing_version : UUID or str, default None
+          If not None, only consider diaobjects from this processing
+          version.  If None, consider all diaobjects.  Note, however,
+          that only diaobjects that have sources with the given
+          processing_version, some object_processing_versions shouldn't
+          really be considered.  There's no _quick_ automatic way to
+          figure that out, so allow passing that to make the first
+          diaobject cut more efficient.
+
+          (Notice that a None here behaves differently than a None
+          passed to object_ltcv.)
+
+      return_format : string
+         Either "json" or "pandas".  (TODO: pyarrow? polars?)  See "Results" below.
 
       just_objids : bool, default False
          See "Returns" below.
+
+      noforced : bool, default False
+         Do not include forced photometry.  This can speed up the
+         queries.  Ignored if either min_lastmag or max_lastmag is
+         given.
+
+      dbcon: psycopg.Connection, db.DBCon, or None
+         Database connection to use.  If None, will make a new
+         connection and close it when done.
+
+      mjd_now: float, default None
+         Usually you want to leave this at None.  It's useful for
+         testing.  If it's not None, pretend that the current date is
+         mjd_now.  When searching or extracting lightcurves, ignore all
+         data with mjd greater than mjd_now.
+
+         Warning: it's possible to use this inconsistently.  If, for
+         instance, you give a window_t0 and window_t1 that are greater
+         than mjd_now, it will merrily search in in that window, and
+         return you detection counts in that window, ignoring the fact
+         that they aren't consistent with mjd_now.  Similar warnings go
+         for other time cuts (e..g first detection, last detection).
+         It's up to you to pass a self-consistent set of parameters.
 
       ra, dec : float, default None
          RA and Dec for the center of a cone search, in J2000 degrees.
@@ -215,11 +595,16 @@ def object_search( processing_version, return_format='json', just_objids=False, 
          window_t0 and window_t1.  Requires window_t0 and window_t1 to
          be given.
 
+      max_window_numdetections : int, default None
+         Only return objects with at most this many detections between
+         window_t0 and window_t1.  Requires window_t0 and window_t1 to
+         be given.
+
       # relwindow_t0, relwindow_t1 : float, default None
-      #    NOT IMPLEMENTED.  Intended to be a time window around maximum-flux detection.
+      #    NOT IMPLEMENTED.  May never be.  Intended to be a time window
+      #    around maximum-flux detection.
 
-
-      mint_firsdtdetection : float, default None
+      mint_firstdetection : float, default None
          Only return objects whose first detection is on this MJD or later.
 
       maxt_firstdetection : float, default None
@@ -235,7 +620,6 @@ def object_search( processing_version, return_format='json', just_objids=False, 
          magnitude.  It's hard to think of a reason why you'd want to use this,
          as the brightest object in the world might have been just starting
          when first discovered....
-
 
       mint_lastdetection : float, default None
          Only return objects whose last detection is on this MJD or later.
@@ -275,8 +659,8 @@ def object_search( processing_version, return_format='json', just_objids=False, 
          Only return objects with at least this many detections.
 
       # min_bandsdetected : int, default None
-      #    Only return objects that have been detected in at least this many different  bnads.
-      #    (Not yet implemented.)
+      #    Only return objects that have been detected in at least this many different  bands.
+      #    (Not yet implemented.  May never be.)
 
       mindt_firstlastdetection : float, default None
          Only return objects that have at least this many days between the first and last detection.
@@ -286,13 +670,13 @@ def object_search( processing_version, return_format='json', just_objids=False, 
 
 
       min_lastmag : float, default None
-         The most recent measurement (not detection! includes forced
-         sources) must have a magnitude that is at least this.  (Use
+         The most recent measurement (not detection! searches forced
+         photometry) must have a magnitude that is at least this.  (Use
          this to filter out things that are too bright.)
 
       max_lastmag : float, default None
-         The most recent measurement (not detection! includes forced
-         sources) must have a magnitude that is at most this.  (Use this
+         The most recent measurement (not detection! searches forced
+         photometry) must have a magnitude that is at most this.  (Use this
          to filter out things that are too dim.)
 
 
@@ -304,19 +688,19 @@ def object_search( processing_version, return_format='json', just_objids=False, 
          measurements of the g, r, and i bands, pass ['g', 'r', 'i']
          here.
 
-         This parameter also effects what is included in the returned
+         This parameter also affects what is included in the returned
          array; it will ignroe any measurements of bands that aren't
          included in this list.
 
     Returns
-     --------
+    -------
+      retval : pandas.DataFrame or dict
+
       A table of data.  If just_objids is true, this will have a single
       column, "diaobjectid" that has the object ids within the specified
       processing verison of objects that match the search.  Otherwise,
       there will be additional columns.  (For all of these columns,
       assume that there is a "within statbands" in the definition.)
-
-          ROB THIS IS WRONG FIX ALL OF THIS DOCUMENTATION BELOW
 
           diaobjectid — object id (within the specified processing version)
 
@@ -340,25 +724,31 @@ def object_search( processing_version, return_format='json', just_objids=False, 
           maxdetflux — flux (nJy) of max-flux detection
           maxdetfluxerr — uncertainty on maxdetflux
 
-          lastforcedmjd — mjd of last measurement
-          lastforcedband — band of last measurement
-          lastforcedflux — flux (nJy) of last forced detection
+      If noforced is False, and min_lastmag and max_lastmag are both None, there will also be columns:
+
+          lastforcedmjd — mjd of last forced-photometry measurement
+          lastforcedband — band of last forced-photometry measurement
+          lastforcedflux — flux (nJy) of last forced-photometry detection
           lastforcedfluxerr — uncertainty on lastforcedflux
+
+      Note that it is possible that the latest detection will be *later*
+      than the latest forced photometry point!  This will happen when
+      detections have been reported, but forced photometry is not fully
+      up to date.
 
       If return_format is json, then the return is actually a
       dictionary; the keys of the dictionary are the names listed above,
       and the values are lists.  All lists have the same length.
 
-      If return_format is pandas, then the return is a pandas DataFrame
-      with those columns.  (Indexing of the DataFrame is... unclear.
-      Pandas sometimes does stuff automatically, and the author of this
-      code needs to pay more attention to know what's happening.)
+      The table *may* be sorted by diaobjectid, but don't depend on
+      this; this function makes no promises about the sorting of the
+      results.
 
     """
 
-    util.logger.debug( f"In object_search : kwargs = {kwargs}" )
+    FDBLogger.debug( f"In object_search : kwargs = {kwargs}" )
     knownargs = { 'ra', 'dec', 'radius',
-                  'window_t0', 'window_t1', 'min_window_numdetections',
+                  'window_t0', 'window_t1', 'min_window_numdetections', 'max_window_numdetections',
                   'mint_firstdetection', 'maxt_firstdetection', 'minmag_firstdetection', 'maxmag_firstdetection',
                   'mint_lastdetection', 'maxt_lastdetection', 'minmag_lastdetection', 'maxmag_lastdetection',
                   'mint_maxdetection', 'maxt_maxdetection', 'minmag_maxdetection', 'maxmag_maxdetection',
@@ -374,20 +764,19 @@ def object_search( processing_version, return_format='json', just_objids=False, 
     if return_format not in [ 'json', 'pandas' ]:
         raise ValueError( f"Unknown return format {return_format}" )
 
+    mjd_now = None if mjd_now is None else float( mjd_now )
+
     # Parse out statbands, allowing either a single string or a list of strings
     statbands = None
     if 'statbands' in kwargs:
-        if ( ( ( isinstance( kwargs['statbands'], str ) ) and ( len(kwargs['statbands'].strip()) == 0 ) )
-             or
-             ( ( isinstance( kwargs['statbands'], list ) ) and ( len(kwargs['statbands']) == 0 ) ) ):
-            statbands = None
-        else:
-            if isinstance( kwargs['statbands'], list ):
-                statbands = kwargs['statbands']
-            else:
-                statbands = [ kwargs['statbands'] ]
-            if not all( isinstance(b, str) for b in statbands ):
+        if util.isSequence( kwargs['statbands'] ):
+            if not all( isinstance(b, str) for b in kwargs['statbands'] ):
                 return TypeError( 'statbands must be a str or a list of str' )
+            statbands = kwargs['statbands']
+        elif isinstance( kwargs['statbands'], str ):
+            statbands = [ kwargs['statbands'] ]
+        else:
+            return TypeError( 'statbands must be a str or a list of str' )
 
     # WARNING: hardcoding the 31.4 zeropoint for nJy fluxes here.  (The schema do define
     #   flux as being in nJy.)
@@ -401,19 +790,23 @@ def object_search( processing_version, return_format='json', just_objids=False, 
     window_t0 = util.float_or_none_from_dict( kwargs, 'window_t0' )
     window_t1 = util.float_or_none_from_dict( kwargs, 'window_t1' )
     min_window_numdetections = util.int_or_none_from_dict( kwargs, 'min_window_numdetections' )
+    max_window_numdetections = util.int_or_none_from_dict( kwargs, 'max_window_numdetections' )
 
     mint_firstdetection = util.float_or_none_from_dict( kwargs, 'mint_firstdetection' )
     maxt_firstdetection = util.float_or_none_from_dict( kwargs, 'maxt_firstdetection' )
+    maxt_firstdetection = mjd_now if maxt_firstdetection is None else maxt_firstdetection
     minmag_firstdetection = util.float_or_none_from_dict( kwargs, 'minmag_firstdetection' )
     maxmag_firstdetection = util.float_or_none_from_dict( kwargs, 'maxmag_firstdetection' )
 
     mint_lastdetection = util.float_or_none_from_dict( kwargs, 'mint_lastdetection' )
     maxt_lastdetection = util.float_or_none_from_dict( kwargs, 'maxt_lastdetection' )
+    maxt_lastdetection = mjd_now if maxt_lastdetection is None else maxt_lastdetection
     minmag_lastdetection = util.float_or_none_from_dict( kwargs, 'minmag_lastdetection' )
     maxmag_lastdetection = util.float_or_none_from_dict( kwargs, 'maxmag_lastdetection' )
 
     mint_maxdetection = util.float_or_none_from_dict( kwargs, 'mint_maxdetection' )
     maxt_maxdetection = util.float_or_none_from_dict( kwargs, 'maxt_maxdetection' )
+    maxt_maxdetection = mjd_now if maxt_maxdetection is None else maxt_maxdetection
     minmag_maxdetection = util.float_or_none_from_dict( kwargs, 'minmag_maxdetection' )
     maxmag_maxdetection = util.float_or_none_from_dict( kwargs, 'maxmag_maxdetection' )
 
@@ -431,8 +824,9 @@ def object_search( processing_version, return_format='json', just_objids=False, 
         raise NotImplementedError( "min_bandsdetected is not yet implemented" )
 
 
-    with db.DBCon() as con:
-        procver = procver_int( processing_version )
+    with db.DBCon( dbcon ) as con:
+        procver = util.procver_id( processing_version, dbcon=con.con )
+        objprocver = None if object_processing_version is None else util.procver_id( object_processing_version )
 
         # Search criteria consistency checks
         if ( any( [ ( ra is None ), ( dec is None ), ( radius is None ) ] )
@@ -441,8 +835,9 @@ def object_search( processing_version, return_format='json', just_objids=False, 
 
         if ( window_t0 is None ) != ( window_t1 is None ):
             raise ValueError( "Must give both or neither of window_t0, window_t1, not just one" )
-        if ( min_window_numdetections is not None ) and ( window_t0 is None ):
-            raise ValueError( "min_window_numdetections requires window_t0 and window_t1" )
+        if ( ( ( min_window_numdetections is not None ) or ( max_window_numdetections is not None) )
+             and ( window_t0 is None ) ):
+            raise ValueError( "(min|max)_window_numdetections requires window_t0 and window_t1" )
         if ( ( window_t0 is not None ) and ( maxt_lastdetection is not None )
              and ( maxt_lastdetection < window_t0 ) ):
             raise ValueError( f"window_t0={window_t0} and maxt_lastdetection={maxt_lastdetection} inconsistent" )
@@ -453,78 +848,118 @@ def object_search( processing_version, return_format='json', just_objids=False, 
         # TODO : compare max detection time to first and last detection time
 
         nexttable = 'diaobject'
+        addlfields = []
 
         # Filter by ra and dec if given
         if ra is not None:
+            FDBLogger.debug( "Object search filtering by ra/dec" )
             radius = util.float_or_none_from_dict( kwargs, 'radius' )
             radius = radius if radius is not None else 10.
-            q = ( "SELECT diaobjectid,ra,dec INTO TEMP TABLE objsearch_radeccut\n"
-                  "FROM diaobject\n"
-                  "WHERE processing_version=%(pv)s\n"
-                  "AND q3c_radial_query( ra, dec, %(ra)s, %(dec)s, %(rad)s )" )
-            subdict = { 'pv': procver, 'ra': ra, 'dec': dec, 'rad': radius/3600. }
-            util.logger.debug( f"Sending query: {q} with subdict {subdict}" )
+            # For reasons I don't understand, adding the hint slows this next query down.
+            # q3c / pg_hint_plan interaction weirdness?
+            q = ( # "/*+ IndexScan(o idx_diaobject_q3c) */"
+                  "SELECT DISTINCT ON(diaobjectid) diaobjectid,ra,dec INTO TEMP TABLE objsearch_radeccut\n"
+                  "FROM diaobject o\n" )
+            if objprocver is not None:
+                q += ( "INNER JOIN base_procver_of_procver pv ON pv.base_procver_id=o.base_procver_id\n"
+                       "  AND pv.procver_id=%(pv)s\n" )
+            q += ( f"WHERE q3c_radial_query( ra, dec, %(ra)s, %(dec)s, %(rad)s )\n"
+                   f"ORDER BY diaobjectid{',pv.priority DESC' if objprocver is not None else ''}\n" )
+            subdict = { 'pv': objprocver, 'ra': ra, 'dec': dec, 'rad': radius/3600. }
             con.execute_nofetch( q, subdict )
+            # ****
             debug_count_temp_table( con, 'objsearch_radeccut' )
+            # ****
             nexttable = 'objsearch_radeccut'
 
         # Count (and maybe filter) by number of detections within the time window
         # ROB TODO : use processing version index
         if window_t0 is not None:
+            FDBLogger.debug( "Object search finding detections within window" )
             if nexttable != 'diaobject':
                 # Make a primary key so we can group by
-                con.execute_nofetch( f"ALTER TABLE {nexttable} ADD PRIMARY KEY (diaobjectid)" )
+                con.execute_nofetch( f"ALTER TABLE {nexttable} ADD PRIMARY KEY (diaobjectid)",
+                                     explain=False, analyze=False )
             subdict = { 'pv': procver, 't0': window_t0, 't1': window_t1 }
-            q = ( f"/*+ IndexScan(s idx_diasource_diaobjectid) */\n"
-                  f"SELECT * INTO TEMP TABLE objsearch_windowdet FROM (\n"
-                  f"  SELECT o.diaobjectid, o.ra, o.dec, COUNT(s.midpointmjdtai) AS numdetinwindow\n"
-                  f"  FROM {nexttable} o\n"
-                  f"  INNER JOIN diasource s ON o.diaobjectid=s.diaobjectid\n"
-                  f"         AND s.processing_version=%(pv)s\n"
-                  f"  WHERE s.midpointmjdtai>=%(t0)s AND s.midpointmjdtai<=%(t1)s\n" )
+            q = ( f"/*+ IndexScan(s idx_diasource_diaobjectid idx_diasource_mjd) */\n"
+                  f"SELECT diaobjectid, ra, dec, numdetinwindow\n"
+                  f"INTO TEMP TABLE objsearch_windowdet\n"
+                  f"FROM (\n"
+                  f"  SELECT diaobjectid,ra,dec,COUNT(visit) AS numdetinwindow\n"
+                  f"  FROM (\n"
+                  f"    SELECT DISTINCT ON (o.diaobjectid,s.visit) o.diaobjectid, o.ra, o.dec, s.visit\n"
+                  f"    FROM {nexttable} o\n"
+                  f"    INNER JOIN diasource s ON s.diaobjectid=o.diaobjectid \n"
+                  f"    INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id\n"
+                  f"           AND pv.procver_id=%(pv)s\n"
+                  f"    WHERE s.midpointmjdtai>=%(t0)s AND s.midpointmjdtai<=%(t1)s\n"
+                  f"    ORDER BY o.diaobjectid, s.visit, pv.priority DESC\n" )
             if statbands is not None:
                 q += "     AND s.band=ANY(%(bands)s)\n"
-            q += ( "  GROUP BY o.diaobjectid, o.ra, o.dec\n"
+            q += ( "  ) subsubq\n"
+                   "  GROUP BY diaobjectid, ra, dec\n"
                    ") subq\n" )
+            _and = "WHERE"
             if min_window_numdetections is not None:
-                q += "WHERE numdetinwindow>=%(n)s\n"
-                subdict['n'] = min_window_numdetections
+                q += f"{_and} numdetinwindow>=%(minn)s\n"
+                subdict['minn'] = min_window_numdetections
+                _and = "  AND"
+            if max_window_numdetections is not None:
+                q += f"{_and} numdetinwindow<=%(maxn)s\n"
+                subdict['maxn'] = max_window_numdetections
+                _and = "  AND"
             con.execute_nofetch( q, subdict )
+            # ****
             debug_count_temp_table( con, 'objsearch_windowdet' )
+            # ****
             nexttable = 'objsearch_windowdet'
+            addlfields.append( "numdetinwindow" )
 
 
-        # First pass cut that has any detection with (min(minfirst,minlast) < t < max(maxfirst,maxlast)
+        # First pass cut that has *any* detection with (min(minfirst,minlast) < t < max(maxfirst,maxlast)
         #   to try to cut down the total size of stuff to think about in our next big join
         # TODO : also thing about adding magnitude cuts here!  May not
-        #   be worth it since we don't have indexes on fluxes.  (Maybe we should?)
+        #   be worth it since we don't have indexes on fluxes.  (Maybe we should?)  (No way.)
         if any( i is not None for i in [ mint_firstdetection, maxt_firstdetection,
                                          mint_lastdetection, maxt_lastdetection ] ):
             if ( ( maxt_lastdetection is not None ) and ( mint_firstdetection is not None ) and
                  ( mint_firstdetection < maxt_lastdetection ) ):
                 raise RuntimeError( "maxt_lastdetection > mint_firstdetection, which makes no sense." )
+            FDBLogger.debug( "Object search doing first rough cut on detection times" )
             subdict = { 'pv': procver }
-            q = ( f"/*+ IndexScan(s idx_diasource_diaobjectid) */\n"
-                  f"SELECT * INTO TEMP TABLE objsearch_detcut FROM (\n"
-                  f"  SELECT DISTINCT ON (o.diaobjectid) o.diaobjectid,o.ra,o.dec FROM {nexttable} o\n"
-                  f"  INNER JOIN diasource s ON s.diaobjectid=o.diaobjectid\n"
-                  f"                        AND s.processing_version=%(pv)s\n" )
+            q = ( "/*+ IndexScan(s idx_diasource_diaobjectid idx_diasource_mjd) */\n"
+                  "SELECT * INTO TEMP TABLE objsearch_detcut FROM (\n"
+                  "  SELECT DISTINCT ON (o.diaobjectid) o.diaobjectid,o.ra,o.dec" )
+            if len(addlfields) > 0:
+                q += f",{','.join( [f'o.{x}' for x in addlfields] )}\n"
+            else:
+                q += "\n"
+            q += ( f"  FROM {nexttable} o\n"
+                   f"  INNER JOIN diasource s ON o.diaobjectid=s.diaobjectid\n"
+                   f"  INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id\n"
+                   f"    AND pv.procver_id=%(pv)s\n" )
+            _and = "WHERE"
             if ( mint_firstdetection is not None ) or ( mint_lastdetection is not None ):
-                q += "    AND midpointmjdtai>=%(mint)s\n"
+                q += f"  {_and} s.midpointmjdtai>=%(mint)s\n"
                 subdict['mint'] = ( mint_firstdetection if mint_lastdetection is None
                                     else mint_lastdetection if mint_firstdetection is None
                                     else min( mint_firstdetection, mint_lastdetection ) )
+                _and = "  AND"
             if ( maxt_firstdetection is not None ) or ( maxt_lastdetection is not None ):
-                q += "    AND midpointmjdtai<=%(maxt)s\n"
+                q += f"  {_and} s.midpointmjdtai<=%(maxt)s\n"
                 subdict['maxt'] = ( maxt_firstdetection if maxt_lastdetection is None
                                     else maxt_lastdetection if maxt_firstdetection is None
                                     else max( maxt_firstdetection, maxt_lastdetection ) )
+                _and = "  AND"
             if statbands is not None:
-                q += "    AND s.band=ANY(%(bands)s) "
+                q += f"  {_and} s.band=ANY(%(bands)s)\n"
                 subdict['bands'] = statbands
-            q += ") subq"
+            q += ( "  ORDER BY o.diaobjectid\n"           # , s.visit, pv.priority DESC\n"
+                   ") subq\n" )
             con.execute_nofetch( q, subdict )
+            # ****
             debug_count_temp_table( con, 'objsearch_detcut' )
+            # ****
             nexttable = "objsearch_detcut"
 
         # Make a temp table that has number of detections, and first, last, and max detections
@@ -532,73 +967,173 @@ def object_search( processing_version, return_format='json', just_objids=False, 
         #   there will ALWAYS be at least one diasource for any diaobject, otherwise
         #   the diaobject would never have been defined in the first place.
         # TODO THINK : what about when statbands is given?  ROB THINK A LOT.
+
+        # Another note: we're putting in hints to make sure postgres is
+        #   using indicies where it should, because sometimes the
+        #   postgres query planner does the wrong thing.  Additionally,
+        #   we specify the join order to force it first to join our
+        #   table of objects (which, presumably, has many fewer objects
+        #   than exist in the database) to the source or forced source
+        #   table, and only then join to processing versions.  We do
+        #   *not* want it scanning all the way through a source or
+        #   forced source index to filter out processing verions first,
+        #   because it will consider millions of rows that could be
+        #   ignored once we filtered by object.
+        # Also, analyze the latest table on column diaobjectid,
+        #   so where the postgres query optimizer is still doing
+        #   things it will work with reasonable data.  (It's possible
+        #   that this is enough, and we don't need the hints,
+        #   but this is a case where we are quite sure which join
+        #   order is going to be best.)  (Hurm; I still felt the
+        #   need to specify the join type sometimes....)
+
         subdict = { 'pv': procver }
-        q = ( f"/*+ IndexScan(s idx_diasource_diaobjectid) */\n"
-              f"SELECT * INTO TEMP TABLE objsearch_stattab FROM (\n"
-              f"  SELECT DISTINCT ON (diaobjectid)\n"
-              f"         o.*, NULL::integer as numdet,\n"
-              f"         s.midpointmjdtai AS firstdetmjd, s.band AS firstdetband,\n"
-              f"         s.psfflux AS firstdetflux, s.psffluxerr AS firstdetfluxerr,\n"
-              f"         NULL::double precision as lastdetmjd, NULL::text as lastdetband,\n"
-              f"         NULL::double precision as lastdetflux, NULL::double precision as lastdetfluxerr,\n"
-              f"         NULL::double precision as maxdetmjd, NULL::text as maxdetband,\n"
-              f"         NULL::double precision as maxdetflux, NULL::double precision as maxdetfluxerr\n"
-              f"  FROM {nexttable} o\n"
-              f"  INNER JOIN diasource s ON s.diaobjectid=o.diaobjectid\n"
-              f"                        AND s.processing_version=%(pv)s\n" )
+
+        con.execute( f"ANALYZE {nexttable}(diaobjectid)", explain=False )
+
+        # First: build the table, put in first detection
+        FDBLogger.debug( "Object search making stat tab with first detection" )
+        q = ( "/*+ IndexScan(s idx_diasource_diaobjectid)\n"
+              "    Leading( ( (o s) pv ) ) */\n"
+              "SELECT * INTO TEMP TABLE objsearch_stattab FROM (\n"
+              "  SELECT DISTINCT ON (diaobjectid)\n"
+              "         diaobjectid,ra,dec,\n" )
+        if len(addlfields) > 0:
+            q += f"         {','.join(addlfields)},\n"
+        q += ( "         NULL::integer as numdet,\n"
+               "         midpointmjdtai AS firstdetmjd, band AS firstdetband,\n"
+               "         psfflux AS firstdetflux, psffluxerr AS firstdetfluxerr,\n"
+               "         NULL::double precision as lastdetmjd, NULL::text as lastdetband,\n"
+               "         NULL::double precision as lastdetflux, NULL::double precision as lastdetfluxerr,\n"
+               "         NULL::double precision as maxdetmjd, NULL::text as maxdetband,\n"
+               "         NULL::double precision as maxdetflux, NULL::double precision as maxdetfluxerr\n"
+               "  FROM (\n"
+               "    SELECT diaobjectid, ra, dec, midpointmjdtai, band, psfflux, psffluxerr\n" )
+        if len(addlfields) > 0:
+            q += f"           ,{','.join(addlfields)}\n"
+        q += ( "    FROM (\n"
+               "      SELECT DISTINCT ON (o.diaobjectid,s.visit) o.diaobjectid, o.ra, o.dec,\n"
+               "                                                 s.midpointmjdtai, s.band, s.psfflux, s.psffluxerr\n"
+              )
+        if len(addlfields) > 0:
+            q += f"           ,{','.join( [ f'o.{x}' for x in addlfields ] )}\n"
+        q += ( f"      FROM {nexttable} o\n"
+               f"      INNER JOIN diasource s ON o.diaobjectid=s.diaobjectid\n"
+               f"      INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id\n"
+               f"        AND pv.procver_id=%(pv)s\n" )
+        _and = "WHERE"
         if statbands is not None:
             subdict['bands'] = statbands
-            q += "  WHERE s.band=ANY(%(bands)s)\n"
-        q += "  ORDER BY o.diaobjectid, s.midpointmjdtai\n ) subq"
+            q += f"      {_and} s.band=ANY(%(bands)s)\n"
+            _and = "  AND"
+        if mjd_now is not None:
+            subdict['mjdnow'] = mjd_now
+            q += f"      {_and} s.midpointmjdtai<=%(mjdnow)s\n"
+            _and = "  AND"
+        q += ( "      ORDER BY o.diaobjectid, s.visit, pv.priority DESC\n"
+               "    ) subsubq\n"
+               "    ORDER BY diaobjectid, midpointmjdtai\n"
+               "  ) subq\n"
+               ") outersubq" )
         con.execute_nofetch( q, subdict )
-        q = ( f"/*+ IndexScan(s idx_diasource_diaobjectid) */\n"
-              f"UPDATE objsearch_stattab o\n"
+
+        # Analyze the objsearch_stattab table to help postgres do the right thing.
+        FDBLogger.debug( f"Object search analyzing diaobjectid on {nexttable}" )
+        con.execute( f"ANALYZE {nexttable}(diaobjectid)", explain=False )
+
+        # Add in last detection
+        FDBLogger.debug( "Object search adding last detection to stat tab" )
+        q = ( f"/*+ IndexScan(s idx_diasource_diaobjectid)\n"
+              f"    Leading( ( (o s) pv ) ) */\n"
+              f"UPDATE objsearch_stattab ost\n"
               f"SET lastdetmjd=midpointmjdtai, lastdetband=band,\n"
               f"    lastdetflux=psfflux, lastdetfluxerr=psffluxerr\n"
-              f"FROM ( SELECT DISTINCT ON (o.diaobjectid) o.diaobjectid,\n"
-              f"                                          s.midpointmjdtai, s.band,\n"
-              f"                                          s.psfflux, s.psffluxerr\n"
-              f"       FROM {nexttable} o\n"
-              f"       INNER JOIN diasource s ON s.diaobjectid=o.diaobjectid\n"
-              f"                             AND s.processing_version=%(pv)s\n" )
+              f"FROM (\n"
+              f"  SELECT DISTINCT ON (diaobjectid) diaobjectid, midpointmjdtai, band, psfflux, psffluxerr\n"
+              f"  FROM (\n"
+              f"    SELECT DISTINCT ON (o.diaobjectid, s.visit) o.diaobjectid, s.midpointmjdtai,\n"
+              f"                                                s.band, s.psfflux, s.psffluxerr\n"
+              f"    FROM {nexttable} o\n"
+              f"    INNER JOIN diasource s ON o.diaobjectid=s.diaobjectid\n"
+              f"    INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id\n"
+              f"      AND pv.procver_id=%(pv)s\n" )
+        _and = "WHERE"
         if statbands is not None:
-            q += "               AND s.band=ANY(%(bands)s)\n"
-        q += ( "      ORDER BY o.diaobjectid, s.midpointmjdtai DESC\n"
-               "     ) subq\n"
-               "WHERE subq.diaobjectid=o.diaobjectid" )
+            q += f"    {_and} s.band=ANY(%(bands)s)\n"
+            _and = "  AND"
+        if mjd_now is not None:
+            q += f"    {_and} s.midpointmjdtai<=%(mjdnow)s\n"
+            _and = "  AND"
+        q += ( "    ORDER BY o.diaobjectid, s.visit, pv.priority DESC\n"
+               "  ) subsubq\n"
+               "  ORDER BY diaobjectid, midpointmjdtai DESC\n"
+               ") subq\n"
+               "WHERE subq.diaobjectid=ost.diaobjectid" )
         con.execute_nofetch( q, subdict )
-        q = ( f"/*+ IndexScan(s idx_diasource_diobjectid) */\n"
-              f"UPDATE objsearch_stattab o\n"
+
+        # Add in max detection
+        FDBLogger.debug( "Object search adding max detection to stat tab" )
+        q = ( f"/*+ IndexScan(s idx_diasource_diaobjectid)\n"
+              f"    Leading( ( ( o s ) pv ) ) */\n"
+              f"UPDATE objsearch_stattab ost\n"
               f"SET maxdetmjd=midpointmjdtai, maxdetband=band,\n"
               f"    maxdetflux=psfflux, maxdetfluxerr=psffluxerr\n"
-              f"FROM ( SELECT DISTINCT ON (o.diaobjectid) o.diaobjectid,\n"
-              f"                                          s.midpointmjdtai, s.band,\n"
-              f"                                          s.psfflux, s.psffluxerr\n"
-              f"       FROM {nexttable} o\n"
-              f"       INNER JOIN diasource s ON s.diaobjectid=o.diaobjectid\n"
-              f"                             AND s.processing_version=%(pv)s\n" )
+              f"FROM (\n"
+              f"  SELECT DISTINCT ON (diaobjectid) diaobjectid, midpointmjdtai, band, psfflux, psffluxerr\n"
+              f"  FROM (\n"
+              f"    SELECT DISTINCT ON (o.diaobjectid, s.visit) o.diaobjectid, s.midpointmjdtai,\n"
+              f"                                                s.band, s.psfflux, s.psffluxerr\n"
+              f"    FROM {nexttable} o\n"
+              f"    INNER JOIN diasource s ON o.diaobjectid=s.diaobjectid\n"
+              f"    INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id\n"
+              f"      AND pv.procver_id=%(pv)s\n" )
+        _and = "WHERE"
         if statbands is not None:
-            q += "               AND s.band=ANY(%(bands)s)\n"
-        q += ( "       ORDER BY o.diaobjectid, s.psfflux DESC\n"
-               "      ) subq\n"
-               "WHERE subq.diaobjectid=o.diaobjectid" )
+            q += f"    {_and} s.band=ANY(%(bands)s)\n"
+            _and = "  AND"
+        if mjd_now is not None:
+            q += f"    {_and} s.midpointmjdtai<=%(mjdnow)s\n"
+            _and = "  AND"
+        q += ( "    ORDER BY o.diaobjectid, s.visit, pv.priority DESC\n"
+               "  ) subsubq\n"
+               "  ORDER BY diaobjectid, psfflux DESC\n"
+               ") subq\n"
+               "WHERE subq.diaobjectid=ost.diaobjectid" )
         con.execute_nofetch( q, subdict )
-        q = ( f"/*+ IndexScan(s idx_diasource_diaobjectid) */\n"
+
+        # Add in number of detections
+        FDBLogger.debug( "Object search adding detection count to stat tab" )
+        q = ( f"/*+ IndexScan(s idx_diasource_diaobjectid)\n"
+              f"    Leading( ( (o s) pv ) ) */\n"
               f"UPDATE objsearch_stattab o\n"
               f"SET numdet=n "
-              f"FROM ( SELECT o.diaobjectid, COUNT(s.midpointmjdtai) AS n\n"
-              f"       FROM {nexttable} o\n"
-              f"       INNER JOIN diasource s ON s.diaobjectid=o.diaobjectid\n"
-              f"                             AND s.processing_version=%(pv)s\n" )
+              f"FROM (\n"
+              f"  SELECT diaobjectid, COUNT(visit) AS n\n"
+              f"  FROM (\n"
+              f"    SELECT DISTINCT ON (o.diaobjectid, s.visit) o.diaobjectid, s.visit\n"
+              f"    FROM {nexttable} o\n"
+              f"    INNER JOIN diasource s ON s.diaobjectid=o.diaobjectid\n"
+              f"    INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id\n"
+              f"      AND pv.procver_id=%(pv)s\n" )
+        _and = "WHERE"
         if statbands is not None:
-            q += "               AND s.band=ANY(%(bands)s)\n"
-        q += ( "       GROUP BY o.diaobjectid "
-               "     ) subq\n"
+            q += f"    {_and} s.band=ANY(%(bands)s)\n"
+            _and = "  AND"
+        if mjd_now is not None:
+            q += f"    {_and} s.midpointmjdtai<=%(mjdnow)s\n"
+            _and = "  AND"
+        q += ( "    ORDER BY o.diaobjectid, s.visit, pv.priority DESC\n"
+               "  ) subsubq\n"
+               "  GROUP BY diaobjectid\n"
+               ") subq\n"
                "WHERE subq.diaobjectid=o.diaobjectid" )
         con.execute_nofetch( q, subdict )
+        # ****
         debug_count_temp_table( con, 'objsearch_stattab' )
+        # ****
 
         # Delete from this table based on numdet and detection time as appropriate
+        FDBLogger.debug( "Object search applying cuts" )
         if min_numdetections is not None:
             con.execute_nofetch( "DELETE FROM objsearch_stattab WHERE numdet<%(n)s",
                                  { 'n': min_numdetections } )
@@ -662,54 +1197,90 @@ def object_search( processing_version, return_format='json', just_objids=False, 
                                  { 'f': 10**((maxmag_maxdetection-zp)/-2.5) } )
             debug_count_temp_table( con, 'objsearch_stattab' )
 
-        nexttable = 'objsearch_stattab'
+        if ( just_objids or noforced ) and ( min_lastmag is None ) and ( max_lastmag is None ):
+            FDBLogger.debug( "Object search pulling down results" )
+            # No need to search the forced source table, and that can be slow because the
+            #  forced photometry table is huge, so just skip it.
+            if just_objids:
+                rows, columns = con.execute( "SELECT diaobjectid FROM objsearch_stattab" )
+            else:
+                rows, columns = con.execute( "SELECT * FROM objsearch_stattab" )
 
-        # Get the last forced source
-        # For some reason, Postgres was deciding not to use the index on this next query, which
-        #   raised the runtime by two orders of magnitude.  Hint fixed it.
-        subdict = { 'pv': procver }
-        q = ( f"/*+ IndexScan(f idx_diaforcedsource_diaobjectid ) */\n"
-              f"SELECT * INTO TEMP TABLE objsearch_final FROM (\n"
-              f"  SELECT DISTINCT ON (t.diaobjectid) t.*,\n"
-              f"      f.psfflux AS lastforcedflux, f.psffluxerr AS lastforcedfluxerr,\n"
-              f"      f.midpointmjdtai AS lastforcedmjd, f.band AS lastforcedband\n"
-              f"  FROM {nexttable} t\n"
-              f"  INNER JOIN diaforcedsource f ON t.diaobjectid=f.diaobjectid AND f.processing_version=%(pv)s\n" )
-        if statbands is not None:
-            q += "  WHERE f.band=ANY(%(bands)s)\n"
-            subdict['bands'] = statbands
-        q += ( "  ORDER BY t.diaobjectid, f.midpointmjdtai DESC\n"
-               ") subq" )
-        con.execute_nofetch( q, subdict )
-        debug_count_temp_table( con, 'objsearch_final' )
+        else:
+            FDBLogger.debug( "Object search adding last forced photometry to stat tab" )
+            # In this else block, we need to get the latest forced photometry, so do that.
+            nexttable = 'objsearch_stattab'
 
-        # Filter baesd on last magnitude
-        if min_lastmag is not None:
-            con.execute_nofetch( "DELETE FROM objsearch_final WHERE lastforcedflux>%(f)s",
-                                 { 'f': 10**((min_lastmag-zp)/-2.5) } )
+            # Because the diaforcedsource table is going to be the hugest one,
+            #   create an index diabojectid of {nexttable} here to help
+            #   this next query along.  We hope.
+            con.execute( f"CREATE INDEX idx_t_diaobjectid ON {nexttable}(diaobjectid)", explain=False )
+
+            # Reanalyze this table to help postgres do the right thing
+            con.execute( f"ANALYZE {nexttable}(diaobjectid)", explain=False )
+
+            # Get the last forced source
+            q = ( f"/*+ IndexScan(f idx_diaforcedsource_diaobjectid )\n"
+                  # f"    HashJoin( f t )\n"
+                  f"    Leading( ( (f t) pv ) )\n"
+                  f"    Parallel( f 3 hard )\n"
+                  f"*/\n"
+                  f"SELECT * INTO TEMP TABLE objsearch_final FROM (\n"
+                  f"  SELECT DISTINCT ON (diaobjectid) *\n"
+                  f"  FROM (\n"
+                  f"    SELECT DISTINCT ON (t.diaobjectid, f.visit) t.*,\n"
+                  f"        f.psfflux AS lastforcedflux, f.psffluxerr AS lastforcedfluxerr,\n"
+                  f"        f.midpointmjdtai AS lastforcedmjd, f.band AS lastforcedband\n"
+                  f"    FROM {nexttable} t\n"
+                  f"    INNER JOIN diaforcedsource f ON f.diaobjectid=t.diaobjectid\n"
+                  f"    INNER JOIN base_procver_of_procver pv ON f.base_procver_id=pv.base_procver_id\n"
+                  f"      AND pv.procver_id=%(pv)s\n" )
+            _and = "WHERE"
+            if statbands is not None:
+                q += f"    {_and} f.band=ANY(%(bands)s)\n"
+                _and = "  AND"
+            if mjd_now is not None:
+                q += f"    {_and} f.midpointmjdtai<=%(mjdnow)s\n"
+                _and = "  AND"
+            q += ( "    ORDER BY t.diaobjectid, f.visit, pv.priority DESC\n"
+                   "  ) subsubq\n"
+                   "  ORDER BY diaobjectid, lastforcedmjd DESC\n"
+                   ") subq" )
+            con.execute_nofetch( q, subdict )
             debug_count_temp_table( con, 'objsearch_final' )
-        if max_lastmag is not None:
-            con.execute_nofetch( "DELETE FROM objsearch_final WHERE lastforcedflux<%(f)s",
-                                 { 'f': 10**((max_lastmag-zp)/-2.5) } )
-            debug_count_temp_table( con, 'objsearch_final' )
 
-        # Pull down the results
-        rows, columns = con.execute( "SELECT * FROM objsearch_final" )
-        colummap = { columns[i]: i for i in range(len(columns)) }
-        util.logger.debug( f"object_search returning {len(rows)} objects in format {return_format}" )
+            # Filter based on last magnitude
+            if min_lastmag is not None:
+                con.execute_nofetch( "DELETE FROM objsearch_final WHERE lastforcedflux>%(f)s",
+                                     { 'f': 10**((min_lastmag-zp)/-2.5) } )
+                debug_count_temp_table( con, 'objsearch_final' )
+            if max_lastmag is not None:
+                con.execute_nofetch( "DELETE FROM objsearch_final WHERE lastforcedflux<%(f)s",
+                                     { 'f': 10**((max_lastmag-zp)/-2.5) } )
+                debug_count_temp_table( con, 'objsearch_final' )
+
+            # Pull down the results
+            FDBLogger.debug( "Object search pulling down results" )
+            if just_objids:
+                rows, columns = con.execute( "SELECT diaobjectid FROM objsearch_final" )
+            else:
+                rows, columns = con.execute( "SELECT * FROM objsearch_final" )
+
+    columnmap = { columns[i]: i for i in range(len(columns)) }
+    FDBLogger.debug( f"object_search returning {len(rows)} objects in format {return_format}" )
 
     if return_format == 'json':
-        rval = { c: [ r[colummap[c]] for r in rows ] for c in columns }
-        if 'numdetinwindow' not in rval:
+        rval = { c: [ r[columnmap[c]] for r in rows ] for c in columns }
+        if ( not just_objids ) and ( 'numdetinwindow' not in rval ):
             rval['numdetinwindow'] = [ None for r in rows ]
-        # util.logger.debug( f"returning json\n{json.dumps(rval,indent=4)}" )
+        # FDBLogger.debug( f"returning json\n{json.dumps(rval,indent=4)}" )
         return rval
 
     elif return_format == 'pandas':
         df = pandas.DataFrame( rows, columns=columns )
-        if 'numdetinwindow' not in df.columns:
+        if ( not just_objids ) and ( 'numdetinwindow' not in df.columns ):
             df['numdetinwindow'] = None
-        # util.logger.debug( f"object_search pandas dataframe: {df}" )
+        # FDBLogger.debug( f"object_search pandas dataframe: {df}" )
         return df
 
     else:
@@ -717,14 +1288,15 @@ def object_search( processing_version, return_format='json', just_objids=False, 
 
 
 def get_hot_ltcvs( processing_version, detected_since_mjd=None, detected_in_last_days=None,
-                   mjd_now=None, source_patch=False, include_hostinfo=False ):
+                   mjd_now=None, source_patch=False, include_hostinfo=False, host_processing_version=None,
+                   object_processing_version=None, dbcon=None ):
     """Get lightcurves of objects with a recent detection.
 
     Parameters
     ----------
       processing_version: string
         The description of the processing version, or processing version
-        alias, to use for searching all tables.
+        alias, to use for searching diasource and diaforcedsource tables.
 
       detected_since_mjd: float, default None
         If given, will search for all objects detected (i.e. with an
@@ -742,7 +1314,7 @@ def get_hot_ltcvs( processing_version, detected_since_mjd=None, detected_in_last
         for simulations or reconstructions, you might want to pretend
         it's a different time.
 
-      source_path : bool, default Fals
+      source_patch : bool, default False
         Normally, returned light curves only return fluxes from the
         diaforcedsource table.  However, during the campaign, there will
         be sources detected for which there is no forced photometry.
@@ -760,66 +1332,66 @@ def get_hot_ltcvs( processing_version, detected_since_mjd=None, detected_in_last
       include_hostinfo : bool, default False
         If true, return a second data frame with information about the hosts.
 
+      host_processing_version : str, default None
+        WARNING : not currently supported.  Right now, it just assumes
+        the base processing version of the host is the same as that of
+        the diaobject.
+
+      dbcon: psycopg.Connection, db.DBCon, or None
+         Database connection to use.  If None, will make a new
+         connection and close it when done.
+
       Returns
       -------
-        ( pandas.DataFrame, pandas.DataFrame or None )
+        ltcvdf, objinfo, hostdf
 
-        A 2-element tuple.  The first will be a pandas DataFrame, the
-        second will either be another DataFrame or None.  No indexes
-        will have been set in the dataframes.
+        ltcvdf: pandas.DataFrame
+           A dataframe with lightcurves. It is sorted and indexed by
+           diaobjectid (bigint) and mjd (float), and has columns:
 
-        The first one has the lightcurves.  It has columns:
-           rootid -- the object root ID from the database.  (TODO: document.)
-           ra -- the ra of the *object* (interpretation complicated).
-                   Will be the same for all rows with the same rootid.
-                   Decimal degrees, J2000.
-           dec -- the dec of the *object* (goes with ra).  Decmial degrees, J2000.
-           visit -- the visit number
-           detector -- the detector number
-           midpointmjdtai -- the MJD of the obervation
-           band -- the filter (u, g, r, i, z, or Y)
-           psfflux -- the PSF flux in nJy
-           psffluxerr --- uncertaintly on psfflux in nJy
-           is_source -- bool.  If you specified source_aptch=False, this
-                          will be False for all rows.  Otherwise, it's
-                          True for rows pulled from the diasource table,
-                          and False for rows pulled from the
-                          diaforcedsource table.
+             visit -- the visit number
+             mjd -- the MJD of the obervation
+             band -- the filter (u, g, r, i, z, or Y)
+             flux -- the PSF flux in nJy
+             fluxerr -- uncertaintly on psfflux in nJy
+             istdet -- bool, True if this was detected (i.e. has an associated source)
+             ispatch -- bool, True if this data is from a source rather than a forced source
+                        (only included if source_patch is True)
 
-       The second member of the tuple will be None unless you specified
-       include_hostinfo.  If include_hostinfo is true, then it's a
-       dataframe with the following columns.  Note that the root id does
-       *not* uniquely specify the host properties!  The
-       processing_version you gave will affect which rows were actually
-       pulled from the diaobject table.  (And it's potentially more
-       complicated than that....)  These are mostly defined based on
-       looking at the Object table as defined in the 2023-07-10 version
-       of the DPDD in Table 4.3.1, with some columns coming from the
-       DiaObject table defined by https://sdm-schemas.lsst.io/apdb.html
-       (accessed on 2024-04-30).
+        objinfo: pandas.DataFrame
+           Information about the objects.  Sorted and indexed by diaobjectid,
+           with all the columns from diaobject.
 
-           rootid --- the object root ID from the database.  Use this to
-                        match to the lightcurve data frame.
-           stdcolor_u_g -- "standard" colors as (not really) defined by the DPDD, in AB mags
-           stdcolor_g_r --
-           stdcolor_r_i --
-           stdcolor_i_z --
-           stdcolor_z_y --
-           stdcolor_u_g_err -- uncertainty on standard colors
-           stdcolor_g_r_err --
-           stdcolor_r_i_err --
-           stdcolor_i_z_err --
-           stdcolor_z_y_err --
-           petroflux_r -- the flux in nJy within some standard multiple of the petrosian radius
-           petroflux_r_err -- uncertainty on petroflux_r
-           nearbyextobj1sep -- "Second moment-based separation of nearbyExtObj1 (unitless)" [????]
-                               For SNANA-based sims, this is ROB FIGURE THIS OUT
-           pzmean -- mean photoredshift (nominally from the "photoZ_pest" column of the DPD Object table)
-           pzstd -- standard deviation of photoredshift (also nominally from "photoZ_pest")
+        hostdf: pandas.DataFrame or None
+           If include_hostinfo is True, then this is a dataframe indexed by diaobjectid with the following columns:
+           the following columns
+
+             id -- UUID, the unique UUID primary key of the host galaxy
+             objectid -- the objectid of the host galaxy
+             base_procver_id -- the processing version of the host galaxy.
+             stdcolor_u_g -- "standard" colors as (not really) defined by the DPDD, in AB mags
+             stdcolor_g_r --
+             stdcolor_r_i --
+             stdcolor_i_z --
+             stdcolor_z_y --
+             stdcolor_u_g_err -- uncertainty on standard colors
+             stdcolor_g_r_err --
+             stdcolor_r_i_err --
+             stdcolor_i_z_err --
+             stdcolor_z_y_err --
+             petroflux_r -- the flux in nJy within some standard multiple of the petrosian radius
+             petroflux_r_err -- uncertainty on petroflux_r
+             nearbyextobj1sep -- "Second moment-based separation of nearbyExtObj1 (unitless)" [????]
+                                 For SNANA-based sims, this is ROB FIGURE THIS OUT
+             pzmean -- mean photoredshift (nominally from the "photoZ_pest" column of the DPD Object table)
+             pzstd -- standard deviation of photoredshift (also nominally from "photoZ_pest")
 
     """
 
     mjd0 = None
+
+    if host_processing_version is not None:
+        raise NotImplementedError( "Error, host processing version is not currently supported." )
 
     if detected_since_mjd is not None:
         if detected_in_last_days is not None:
@@ -840,107 +1412,51 @@ def get_hot_ltcvs( processing_version, detected_since_mjd=None, detected_in_last
 
     bands = [ 'u', 'g', 'r', 'i', 'z', 'y' ]
 
-    with db.DB() as con:
-        with con.cursor() as cursor:
-            # Figure out the processing version
-            cursor.execute( "SELECT id FROM processing_version WHERE description=%(procver)s",
-                            { 'procver': processing_version } )
-            rows = cursor.fetchall()
-            if len(rows) == 0:
-                cursor.execute( "SELECT id FROM processing_version_alias WHERE description=%(procver)s",
-                                { 'procver': processing_version } )
-                rows = cursor.fetchall()
-            if len(rows) == 0:
-                raise ValueError( f"Could not find processing version '{processing_version}'" )
-            procver = rows[0][0]
+    with db.DBCon( dbcon ) as con:
+        procver = util.procver_id( processing_version, dbcon=con.con )
 
-            # First : get a table of all the object ids (root object ids)
-            #   that have a detection (i.e. a diasource) in the
-            #   desired time period.
+        # First : get a table of all the object ids (root object ids)
+        #   that have a detection (i.e. a diasource) in the
+        #   desired time period.
 
-            q = ( "/*+ NoBitmapScan(elasticc2_diasource)\n"
-                  "*/\n"
-                  "SELECT DISTINCT ON(o.rootid) rootid "
-                  "INTO TEMP TABLE tmp_objids "
-                  "FROM diaobject o "
-                  "INNER JOIN diasource s ON s.diaobjectid=o.diaobjectid "
-                  "WHERE s.processing_version=%(procver)s AND s.midpointmjdtai>=%(t0)s" )
-            if mjd_now is not None:
-                q += "  AND midpointmjdtai<=%(t1)s"
-            cursor.execute( q, { 'procver': procver, 't0': mjd0, 't1': mjd_now } )
+        q = ( "/*+ IndexScan(s idx_diasource_mjd) */\n"
+              "SELECT DISTINCT ON(s.diaobjectid) s.diaobjectid\n"
+              "INTO TEMP TABLE tmp_objids\n"
+              "FROM diasource s\n"
+              "INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id\n"
+              "                                     AND pv.procver_id=%(procver)s\n"
+              "WHERE s.midpointmjdtai>=%(t0)s\n" )
+        if mjd_now is not None:
+            q += "  AND s.midpointmjdtai<=%(t1)s\n"
+        q += "ORDER BY s.diaobjectid\n"
+        con.execute_nofetch( q, { 'procver': procver, 't0': mjd0, 't1': mjd_now } )
 
-            # Second : pull out host info for those objects if requested
-            # TODO : right now it just pulls out nearby extended object 1.
-            # make it configurable to get up to all three.
-            hostdf = None
-            if include_hostinfo:
-                q = "SELECT DISTINCT ON (o.rootid) o.rootid,"
-                for bandi in range( len(bands)-1 ):
-                    q += ( f"h.stdcolor_{bands[bandi]}_{bands[bandi+1]},"
-                           f"h.stdcolor_{bands[bandi]}_{bands[bandi+1]}_err," )
-                q += ( "h.petroflux_r,h.petroflux_r_err,o.nearbyextobj1sep,h.pzmean,h.pzstd "
-                       "FROM diaobject o "
-                       "INNER JOIN host_galaxy h ON o.nearbyextobj1id=h.id "
-                       "WHERE o.rootid IN (SELECT rootid FROM tmp_objids) "
-                       "  AND o.processing_version=%(procver)s "
-                       "ORDER BY o.rootid" )
-                cursor.execute( q, { 'procver': procver} )
-                columns = [ cursor.description[i][0] for i in range( len(cursor.description) ) ]
-                hostdf = pandas.DataFrame( cursor.fetchall(), columns=columns )
+        # Second: pull out the object info for these objects
+        objdf = get_object_infos( objids_table='tmp_objids', dbcon=con, return_format='pandas' )
 
+        # Third : pull out host info for those objects if requested
+        # TODO : right now it just pulls out nearby extended object 1.
+        # make it configurable to get up to all three.
+        # TODO : is distinct on objectid the right thing to do?
+        # TODO : think about host processing versions!  Issue #64
+        hostdf = None
+        if include_hostinfo:
+            q = "SELECT o.diaobjectid,\n"
+            for bandi in range( len(bands)-1 ):
+                q += ( f"       h.stdcolor_{bands[bandi]}_{bands[bandi+1]},"
+                       f"h.stdcolor_{bands[bandi]}_{bands[bandi+1]}_err,\n" )
+            q += ( "       h.petroflux_r, h.petroflux_r_err, o.nearbyextobj1sep, h.pzmean, h.pzstd\n"
+                   "FROM tmp_objids t\n"
+                   "INNER JOIN diaobject o ON t.diaobjectid=o.diaobjectid\n"
+                   "LEFT JOIN host_galaxy h ON o.nearbyextobj1id=h.objectid\n"
+                   "                       AND o.base_procver_id=h.base_procver_id\n"
+                   "ORDER BY o.diaobjectid" )
+            rows, columns = con.execute( q )
+            hostdf = pandas.DataFrame( rows, columns=columns )
 
-            # Third : pull out all the forced photometry
-            # THOUGHT REQUIRED : do we want midmpointmjdtai to stop at mjd_now-1 rather
-            #   than mjd_now?  It depends what you mean.  If you want mjd_now to mean
-            #   "data through this date" then don't stop a day early.  If you mean
-            #   "simulate what we knew on this date"), then do stop a day early, because
-            #   forced photometry will be coming out with a delay of a ~day.
-            q = ( "/*+ IndexScan(f idx_diaforcedsource_diaobjectid)\n"
-                  "    IndexScan(o)\n"
-                  "*/\n"
-                  "SELECT o.rootid AS rootid, o.ra AS ra, o.dec AS dec,"
-                   "     f.visit,f.detector,f.midpointmjdtai,f.band,"
-                   "     f.psfflux,f.psffluxerr "
-                   "FROM diaforcedsource f "
-                   "INNER JOIN diaobject o ON f.diaobjectid=o.diaobjectid  "
-                   "WHERE o.rootid IN (SELECT rootid FROM tmp_objids) "
-                   "  AND f.processing_version=%(procver)s" )
-            if mjd_now is not None:
-                q += "  AND f.midpointmjdtai<=%(t1)s "
-            q += "ORDER BY o.rootid,f.midpointmjdtai"
-            cursor.execute( q, { "procver": procver, "t1": mjd_now } )
-            columns = [ cursor.description[i][0] for i in range( len(cursor.description) ) ]
-            forceddf = pandas.DataFrame( cursor.fetchall(), columns=columns )
-            forceddf['is_source'] = False
+        # Fourth: get the lightcurves
+        df = many_object_ltcvs( processing_version=processing_version, objids_table='tmp_objids',
+                                which='patch' if source_patch else 'forced',
+                                return_format='pandas', mjd_now=mjd_now, dbcon=con )
 
-            # Fourth: if we've been asked to patch in sources where forced sources are
-            #   missing, pull those down and concatenate them into the dataframe.
-            # TODO : figure out the right hints to give when these tables
-            #   are big!
-            sourcedf = None
-            if source_patch:
-                q = ( "/*+ IndexScan(s idx_diasource_diaobjectid)\n"
-                      "    IndexScan(f idx_diaforcedsource_diaobjectid)\n"
-                      "    IndexScan(o)\n"
-                      "*/\n"
-                      "SELECT o.rootid,o.ra,o.dec,s.visit,s.detector,"
-                      "       s.midpointmjdtai,s.band,s.psfflux,s.psffluxerr "
-                      "FROM diasource s "
-                      "INNER JOIN diaobject o ON s.diaobjectid=o.diaobjectid "
-                      "LEFT JOIN diaforcedsource f ON (f.diaobjectid=s.diaobjectid AND "
-                      "                                f.processing_version=s.processing_version AND "
-                      "                                f.visit=s.visit) "
-                      "WHERE o.rootid IN (SELECT rootid FROM tmp_objids) "
-                      "  AND s.processing_version=%(procver)s "
-                      "  AND f.diaobjectid IS NULL " )
-                if mjd_now is not None:
-                    q += "  AND s.midpointmjdtai<=%(t1)s "
-                q += "ORDER BY o.rootid,s.midpointmjdtai"
-                cursor.execute( q, { "procver": procver, "t1": mjd_now } )
-                columns = [ cursor.description[i][0] for i in range( len(cursor.description) ) ]
-                sourcedf = pandas.DataFrame( cursor.fetchall(), columns=columns )
-                sourcedf['is_source'] = True
-                forceddf = pandas.concat( [ forceddf, sourcedf ], axis='index' )
-                forceddf.sort_values( [ 'rootid', 'midpointmjdtai' ], inplace=True )
-
-    return forceddf, hostdf
+    return df, objdf, hostdf

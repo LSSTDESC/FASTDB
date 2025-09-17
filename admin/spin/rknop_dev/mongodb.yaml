@@ -126,7 +126,7 @@ spec:
       volumes:
       - name: mongodb-datadir
         persistentVolumeClaim:
-          claimName: fastdb-rknop-dev-mongodb-pvc-20250222
+          claimName: fastdb-rknop-dev-mongodb-pvc-20250909
 ---
 apiVersion: v1
 kind: Service

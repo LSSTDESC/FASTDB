@@ -105,7 +105,7 @@ class FITSFileHandler( SNANAColumnMapper ):
         # Copy settings from parent
         for attr in [ 'max_sources_per_object', 'photflag_detect',
                       'snana_zeropoint',
-                      'processing_version',
+                      'base_processing_version', 'processing_version',
                       'really_do', 'verbose', 'ppdb' ]:
             setattr( self, attr, getattr( parent, attr ) )
 
@@ -191,7 +191,7 @@ class FITSFileHandler( SNANAColumnMapper ):
                 hostgal.remove_column( f'mag_{bandi}_err' )
 
             if not self.ppdb:
-                hostgal.add_column( self.processing_version, name='processing_version' )
+                hostgal.add_column( self.base_processing_version, name='base_procver_id' )
 
             # At this point, hostgal should be ready for feeding to bulk_insert_or_upsert
             #   (onced processed through dict()).
@@ -199,7 +199,7 @@ class FITSFileHandler( SNANAColumnMapper ):
             # Build the diaobject table in head
             self.diaobject_map_columns( head )
             if not self.ppdb:
-                head.add_column( self.processing_version, name='processing_version' )
+                head.add_column( self.base_processing_version, name='base_procver_id' )
                 head.add_column( [ str(uuid.uuid4()) for i in range(len(head)) ], name='rootid' )
 
             head.add_column( str(NULLUUID), name='nearbyextobj1id' )
@@ -307,7 +307,7 @@ class FITSFileHandler( SNANAColumnMapper ):
             phot.add_column( np.int64(-1), name='diaobjectid' )
             phot['band'] = [ i.strip() for i in phot['band'] ]
             if not self.ppdb:
-                phot.add_column( self.processing_version, name='processing_version' )
+                phot.add_column( self.base_processing_version, name='base_procver_id' )
             phot.add_column( -1., name='ra' )
             phot.add_column( -100., name='dec' )
             phot.add_column( 0, name='visit' )

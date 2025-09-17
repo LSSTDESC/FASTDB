@@ -70,14 +70,12 @@ RUN mkdir -p /opt/rust \
 RUN chown postgres -R /usr/share/postgresql/ \
   && chown postgres -R /usr/lib/postgresql
 
-ENV PG_PARQUET_VERSION=0.4.0
-ENV PGRX_VERSION=0.14.1
+ENV PG_PARQUET_VERSION=0.4.3
+ENV PGRX_VERSION=0.16.0
 RUN curl https://sh.rustup.rs -sSf | sh -s -- --no-modify-path --profile minimal --default-toolchain stable -y
 RUN cargo install --locked cargo-pgrx --version ${PGRX_VERSION}
 RUN cargo pgrx init --pg15 $(which pg_config)
 
-RUN mkdir -p ~/.pgrx/data-15 \
-  && echo "shared_preload_libraries = 'pg_parquet'" >> ~/.pgrx/data-15/postgresql.conf
 RUN cd /opt/rust \
   && curl -LOJ https://github.com/CrunchyData/pg_parquet/archive/refs/tags/v${PG_PARQUET_VERSION}.tar.gz \
   && tar -xvzf pg_parquet-${PG_PARQUET_VERSION}.tar.gz \
@@ -99,13 +97,17 @@ COPY --from=build /usr/share/postgresql/15/extension/pg_hint_plan* /usr/share/po
 COPY --from=build /usr/lib/postgresql/15/lib/pg_parquet.so /usr/lib/postgresql/15/lib/
 COPY --from=build /usr/share/postgresql/15/extension/pg_parquet* /usr/share/postgresql/15/extension/
 
-# Make sure this matches what is in the config file (created just above)
+# Make sure the contents of run_postgres.sh what is in postgresql.conf.
 # (There is some futzing about here to make sure the right permissions are
 # on the file regardless of the permissions as it exists on the machine
 # where the docker image is built.  I don't know why a simple ADD
 # followed by CHMOD didn't work.)
 COPY run_postgres.sh /tmp/run_postgres.sh
 RUN cp /tmp/run_postgres.sh /run_postgres.sh && chmod 755 /run_postgres.sh
+
+# Make a temporary working directory that will
+#   be made the defaulte temporary tablespace.
+RUN mkdir -p /tmp/postgres_temp && chown -R postgres:postgres /tmp/postgres_temp
 
 USER postgres
 CMD ["bash", "/run_postgres.sh"]

@@ -1,10 +1,12 @@
 import logging
 
+from psycopg import sql
 import flask
 import flask_session
 
 import db
 import ltcv
+from util import FDBLogger
 import webserver.rkauth_flask as rkauth_flask
 import webserver.dbapp as dbapp
 import webserver.ltcvapp as ltcvapp
@@ -23,10 +25,6 @@ with open( config.secretkeyfile ) as ifp:
 
 class MainPage( BaseView ):
     def dispatch_request( self ):
-        app.logger.error( "Hello error." )
-        app.logger.warning( "Hello warning." )
-        app.logger.info( "Hello info." )
-        app.logger.debug( "Hello debug." )
         return flask.render_template( "fastdb_webap.html" )
 
 
@@ -36,12 +34,9 @@ class GetProcVers( BaseView ):
     def do_the_things( self ):
         # global app
 
-        with db.DB() as con:
-            cursor = con.cursor()
-            cursor.execute( "SELECT description FROM processing_version" )
-            pvrows = cursor.fetchall()
-            cursor.execute( "SELECT description FROM processing_version_alias" )
-            alrows = cursor.fetchall()
+        with db.DBCon() as con:
+            pvrows, _ = con.execute( "SELECT description FROM processing_version" )
+            alrows, _ = con.execute( "SELECT description FROM processing_version_alias" )
 
         rows = [ r[0] for r in ( pvrows + alrows ) ]
         rows.sort()
@@ -60,98 +55,142 @@ class ProcVer( BaseView ):
         # global app
         # app.logger.debug( f"In ProcVer with procver={procver}" )
 
-        pvid = None
-        with db.DB() as con:
-            cursor = con.cursor()
-            try:
-                intpv = int(procver)
-                cursor.execute( "SELECT id FROM processing_version WHERE id=%(pv)s", { 'pv': intpv } )
-                rows = cursor.fetchall()
-                if len(rows) > 0:
-                    pvid = rows[0][0]
-            except Exception:
-                pass
+        with db.DBCon() as con:
+            pvid = db.ProcessingVersion.procver_id( procver, dbcon=con )
             if pvid is None:
-                cursor.execute( "SELECT id FROM processing_version WHERE description=%(pv)s", { 'pv': procver } )
-                row = cursor.fetchone()
-                if row is not None:
-                    pvid = row[0]
-            if pvid is None:
-                cursor.execute( "SELECT id FROM processing_version_alias "
-                                "WHERE description=%(pv)s ORDER BY description ",
-                                { 'pv': procver } )
-                row = cursor.fetchone()
-                if row is not None:
-                    pvid = row[0]
+                return f"Unknown processing version {procver}", 500
 
-            if pvid is None:
-                return f"Unknonw processing version {procver}", 500
+            retval = { 'status': 'ok', 'id': None, 'description': None, 'aliases': [], 'base_procvers': [] }
+            row, _ = con.execute( "SELECT id,description FROM processing_version WHERE id=%(pv)s", { 'pv': pvid } )
+            retval['id'] = row[0][0]
+            retval['description'] = row[0][1]
 
-            retval = { 'status': 'ok', 'id': None, 'description': None, 'aliases': [] }
-            cursor.execute( "SELECT id,description FROM processing_version WHERE id=%(pv)s", { 'pv': pvid } )
-            row = cursor.fetchone()
-            retval['id'] = row[0]
-            retval['description'] = row[1]
-            cursor.execute( "SELECT description FROM processing_version_alias WHERE id=%(pv)s", { 'pv': pvid } )
-            rows = cursor.fetchall()
+            rows, _ = con.execute( "SELECT description FROM processing_version_alias WHERE procver_id=%(pv)s",
+                                   { 'pv': pvid } )
             retval['aliases'] = [ r[0] for r in rows ]
+
+            rows, _ = con.execute( "SELECT description FROM base_processing_version b "
+                                   "INNER JOIN base_procver_of_procver j ON b.id=j.base_procver_id "
+                                   "WHERE j.procver_id=%(pv)s "
+                                   "ORDER BY j.priority DESC",
+                                   { 'pv': pvid } )
+            retval['base_procvers'] = [ r[0] for r in rows ]
+
             return retval
 
 
+# ======================================================================
+
+class BaseProcVer( BaseView ):
+    def do_the_things( self, procver ):
+        with db.DBCon() as con:
+            pvid = db.BaseProcessingVersion.base_procver_id( procver )
+            if pvid is None:
+                return f"Unknown base processing version {procver}", 500
+
+            retval = { 'status': 'ok', 'id': None, 'description': None, 'procvers': [] }
+            row, _ = con.execute( "SELECT id,description FROM base_processing_version WHERE id=%(pv)s",
+                                  { 'pv': pvid } )
+            retval['id'] = row[0][0]
+            retval['description'] = row[0][1]
+
+            rows, _ = con.execute( "SELECT description FROM processing_version p "
+                                   "INNER JOIN base_procver_of_procver j ON p.id=j.procver_id "
+                                   "WHERE j.base_procver_id=%(pv)s "
+                                   "ORDER BY p.description",
+                                   { 'pv': pvid } )
+            retval['procvers'] = [ r[0] for r in rows ]
+
+            return retval
 
 
 # ======================================================================
 
 class CountThings( BaseView ):
-    def do_the_things( self, which, procver ):
+    def do_the_things( self, which, procver='default' ):
         global app
 
-        tablemap = { 'object': 'diaobject',
-                     'source': 'diasource',
-                     'forced': 'diaforcedsource' }
+        tablemap = { 'object': ( 'diaobject', ( 'rootid', ) ),
+                     'source': ( 'diasource', ( 'diaobjectid', 'visit' ) ),
+                     'forced': ( 'diaforcedsource', ( 'diaobjectid', 'visit' ) ) }
+        tablemap['diaobject'] = tablemap['object']
+        tablemap['diasource'] = tablemap['source']
+        tablemap['diaforcedsource'] = tablemap['forced']
+
         if which not in tablemap:
             return f"Unknown thing to count: {which}", 500
-        table = tablemap[ which ]
+        table = tablemap[ which ][0]
+        objfields = tablemap[ which ][1]
 
-        with db.DB() as dbcon:
-            cursor = dbcon.cursor()
-            cursor.execute( "SELECT id FROM processing_version WHERE description=%(pv)s",
-                            { 'pv': procver } )
-            rows = cursor.fetchall()
-            if len(rows) == 0:
-                cursor.execute( "SELECT id FROM processing_version_alias WHERE description=%(pv)s",
-                                { 'pv': procver } )
-                rows = cursor.fetchall()
-                if len(rows) == 0:
-                    return f"Unknown processing version {procver}", 500
-            pvid = rows[0][0]
+        estimate = False
+        if flask.request.is_json:
+            data = flask.request.json
+            estimate = ( 'estimate' in data ) and ( data['estimate'] )
+            # IN PROGRESS
 
-            cursor.execute( f"SELECT COUNT(*) FROM {table} WHERE processing_version=%(pv)s",
-                            { 'pv': pvid } )
-            rows = cursor.fetchall()
+        with db.DBCon() as dbcon:
+            pvid = db.ProcessingVersion.procver_id( procver )
 
-        return { 'status': 'ok',
-                 'which': which,
-                 'count': rows[0][0]
-                }
+            baseq = sql.SQL(
+                """
+                  SELECT DISTINCT ON({pk}) t.base_procver_id FROM {table} t
+                  INNER JOIN base_procver_of_procver pv ON t.base_procver_id=pv.base_procver_id
+                                                       AND pv.procver_id={pvid}
+                  ORDER BY {pk},pv.priority DESC
+                """
+            ).format( pk=sql.SQL(',').join( sql.Identifier(i) for i in objfields ),
+                      table=sql.Identifier(table), pvid=pvid )
+
+            if estimate:
+                # THIS DOES A REALLY TERRIBLE JOB.
+                # cf: https://wiki.postgresql.org/wiki/Count_estimate
+                # TODO : figure out how accurate this count estimate really is.  I have
+                #    a suspicion that it's not very good when there are multiple
+                #    different processing versions.
+                FDBLogger.debug( f"Getting estimate of count of {which} for {pvid}" )
+                q = sql.SQL( "EXPLAIN (FORMAT JSON) {baseq}" ).format( baseq=baseq )
+                rows, _  = dbcon.execute( q, explain=False )
+                FDBLogger.debug( f"rows is {rows}" )
+                count = rows[0][0][0]['Plan']['Plan Rows']
+
+            else:
+                # Gah.  I'm thrashing about a lot with these query
+                #   optimization thingies that I'm doing.  After bumping
+                #   the memory postgres had for buffers, the queries got
+                #   *slower*, for reasons I don't understand.  One thing
+                #   it did was assign fewer workers; the postgres query
+                #   optimizer is so strange.  So, I'm forcing parallel
+                #   workers, to make it faster.  For this count query,
+                #   this is probably not going to be a problem, but it
+                #   is of course scary.
+                q = sql.SQL( f"/*+ IndexScan(t idx_{table}_procver) Parallel(t 4) */\n"
+                             f"SELECT COUNT(*) FROM (\n{{baseq}}\n) subq" ).format( baseq=baseq )
+                rows, _ = dbcon.execute( q )
+                count = rows[0][0]
+
+            return { 'status': 'ok',
+                     'table': table,
+                     'isestimate': estimate,
+                     'count': count }
 
 
 # ======================================================================
 
 class ObjectSearch( BaseView ):
-    def do_the_things( self, processing_version ):
+    def do_the_things( self, processing_version='default' ):
         global app
         if not flask.request.is_json:
             raise TypeError( "POST data was not JSON; send search criteria as a JSON dict" )
         searchdata = flask.request.json
 
+        FDBLogger.debug( f"ObjectSearch on processing version {processing_version} with search data {searchdata}" )
         rval = ltcv.object_search( processing_version, return_format='json', **searchdata )
 
         # JSON dysfunctionality... convert to strings and back,
         # javascript may decide to interpret bigints as doubles, thereby
         # losing necessary precision.  Convert all bigints to strings.
         # Right now, that means listing the possible columns here.  There
-        # must be a better way... but if I want to interpret it in javascriptlk
+        # must be a better way... but if I want to interpret it in javascript
         # there probably isn't.
         bigints = [ 'diaobjectid' ]
         for k in bigints:
@@ -165,6 +204,7 @@ class ObjectSearch( BaseView ):
 # **********************************************************************
 # Configure and create the web app in global variable "app"
 
+FDBLogger.multiprocessing_replace( pid=True )
 
 app = flask.Flask(  __name__ )
 # app.logger.setLevel( logging.INFO )
@@ -208,7 +248,10 @@ urls = {
     "/": MainPage,
     "/getprocvers": GetProcVers,
     "/procver/<procver>": ProcVer,
+    "/baseprocver/<procver>": BaseProcVer,
+    "/count/<which>": CountThings,
     "/count/<which>/<procver>": CountThings,
+    "/objectsearch": ObjectSearch,
     "/objectsearch/<processing_version>": ObjectSearch
 }
 

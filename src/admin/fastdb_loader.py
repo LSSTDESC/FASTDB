@@ -1,5 +1,5 @@
-import datetime
 import re
+import uuid
 
 import psycopg
 import psycopg.rows
@@ -25,7 +25,9 @@ class FastDBLoader:
 
     with side-effects on
 
+        base_processing_version
         processing_version
+        base_procver_of_procver
 
     """
 
@@ -35,6 +37,7 @@ class FastDBLoader:
         self._all_tables.remove( "passwordlink" )
         self._all_tables.remove( "migrations_applied" )
 
+        self.base_processing_version = None
         self.processing_version = None
         self.processing_version_name = processing_version
 
@@ -43,26 +46,40 @@ class FastDBLoader:
         if self.processing_version_name is None:
             return
 
-        with db.DB() as conn:
-            try:
-                cursor = conn.cursor( row_factory=psycopg.rows.dict_row )
-                cursor.execute( "LOCK TABLE processing_version" )
-                cursor.execute( "SELECT * FROM processing_version WHERE description=%(pv)s",
-                                { 'pv': self.processing_version_name } )
-                rows = cursor.fetchall()
-                if len(rows) >= 1:
-                    self.processing_version = rows[0]['id']
-                else:
-                    cursor.execute( "SELECT MAX(id) AS maxid FROM processing_version" )
-                    row = cursor.fetchone()
-                    self.processing_version = row['maxid'] + 1 if row['maxid'] is not None else 0
-                    cursor.execute( "INSERT INTO processing_version(id,description,validity_start) "
-                                    "VALUES (%(id)s, %(pv)s, %(now)s)",
-                                    { 'id': self.processing_version, 'pv': self.processing_version_name,
-                                      'now': datetime.datetime.now(tz=datetime.UTC) } )
-                    conn.commit()
-            finally:
-                conn.rollback()
+        with db.DBCon( dictcursor=True ) as dbcon:
+            dbcon.execute_nofetch( "LOCK TABLE processing_version", explain=False, analyze=False )
+            rows = dbcon.execute( "SELECT * FROM processing_version WHERE description=%(pv)s",
+                                  { 'pv': self.processing_version_name } )
+            if len(rows) >= 1:
+                self.processing_version = rows[0]['id']
+            else:
+                self.processing_version = uuid.uuid4()
+                dbcon.execute_nofetch( "INSERT INTO processing_version(id,description) "
+                                       "VALUES (%(id)s,%(desc)s)",
+                                       { 'id': self.processing_version, 'desc': self.processing_version_name } )
+
+            rows = dbcon.execute( "SELECT b.id FROM base_processing_version b\n"
+                                  "INNER JOIN base_procver_of_procver j ON j.base_procver_id=b.id\n"
+                                  "WHERE j.procver_id=%(pvid)s\n"
+                                  "ORDER BY j.priority DESC\n"
+                                  "LIMIT 1\n",
+                                  { 'pvid': self.processing_version } )
+            if len(rows) >=1:
+                self.base_processing_version = rows[0]['id']
+            else:
+                # We're assuming that if a base processing version wasn't found, then
+                #   the base processing version with description self.processing_version_name
+                #   doesn't exist.  As long as we choose names carefully, this should be OK.
+                self.base_processing_version = uuid.uuid4()
+                dbcon.execute_nofetch( "INSERT INTO base_processing_version(id,description) "
+                                       "VALUES (%(id)s,%(desc)s)",
+                                       { 'id': self.base_processing_version,
+                                         'desc': self.processing_version_name } )
+                dbcon.execute_nofetch( "INSERT INTO base_procver_of_procver(base_procver_id,procver_id,priority) "
+                                       "VALUES (%(bpv)s,%(pv)s,0)",
+                                       { 'bpv': self.base_processing_version, 'pv': self.processing_version } )
+
+            dbcon.commit()
 
 
     def disable_indexes_and_fks( self ):

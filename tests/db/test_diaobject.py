@@ -8,11 +8,12 @@ from basetest import BaseTestDB
 class TestDiaObject( BaseTestDB ):
 
     @pytest.fixture
-    def basetest_setup( self, procver1, rootobj1, rootobj2, rootobj3 ):
+    def basetest_setup( self, procver_collection, rootobj1, rootobj2, rootobj3 ):
+        bpv, _pv = procver_collection
         self.cls = DiaObject
         self.columns = {
             'diaobjectid',
-            'processing_version',
+            'base_procver_id',
             'rootid',
             'radecmjdtai',
             'validitystart',
@@ -72,21 +73,21 @@ class TestDiaObject( BaseTestDB ):
         self.uniques = []
 
         self.obj1 = DiaObject( diaobjectid=1,
-                               processing_version=procver1.id,
+                               base_procver_id=bpv['bpv1'].id,
                                rootid=rootobj1.id,
                                radecmjdtai=60000.,
                                ra=42.,
                                dec=128. )
         self.dict1 = { k: getattr( self.obj1, k ) for k in self.columns }
         self.obj2 = DiaObject( diaobjectid=2,
-                               processing_version=procver1.id,
+                               base_procver_id=bpv['bpv1'].id,
                                rootid=rootobj2.id,
                                radecmjdtai=61000.,
                                ra=23.,
                                dec=-42. )
         self.dict2 = { k: getattr( self.obj2, k ) for k in self.columns }
         self.dict3 = { 'diaobjectid': 3,
-                       'processing_version': procver1.id,
+                       'base_procver_id': bpv['bpv1'].id,
                        'rootid': rootobj3.id,
                        'radecmjdtai': 62000.,
                        'ra': 64.,

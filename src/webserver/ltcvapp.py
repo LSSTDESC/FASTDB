@@ -1,20 +1,74 @@
+from psycopg import sql
 import flask
 
 import db
 import ltcv
+import util
+from util import FDBLogger
 from webserver.baseview import BaseView
 
 
 # ======================================================================
-# /ltcv/getltcv
+# /getmanyltcvs
+# /getmanyltcvs/<procver>
+#
+# POST body must be json, must include objids.  May include bands, which, mjd_now
 
-class GetLtcv( BaseView ):
-    def get_ltcv( self, procver, procverint, objid, dbcon=None ):
+class GetManyLtcvs( BaseView ):
+    def get_ltcvs( self, procver, objids, dbcon=None ):
+        """Return lightcurves of objects as json.
+
+        Reads parameters 'bands', 'which', and 'mjd_now' from
+        flask.request.json.  'bands' is a list of bands to include in
+        the lightcurve.  'which' is one of 'detections', 'forced', or
+        'patch'.  See ltcv.object_ltcv
+
+        Parameters
+        ----------
+          procver : uuid or str
+            The processing version to pull lightcurves from.
+
+          objids : int, uuid, list of int, or list of uuid
+            The object IDs to pull lightcurves for.
+
+          dbcon : db.DBCon or psycopg.Connection, default None
+            Database connection.  If None, opens a new one and closes it
+            when done.
+
+        Returns
+        -------
+          result: dict
+            keys are diaobjectids (warning: stringified ints, because JSON), values are dicts
+              The inner dict keys are are everything from diaobject
+              plus 'ltcv', which is itself a dict
+                The inner-inner dicts have keys:
+                { 'mjd': list of float,
+                  'band': list of str,
+                  'flux': list of float,
+                  'fluxerr': list of float,
+                  'isdet': list of int,   (1 for true, 0 for false)
+                  'ispatch': list of int,  (1 for true, 0 for false; only present if 'which' is 'patch')
+                }
+        """
+
+        if not util.isSequence( objids ):
+            objids = [ objids ]
+        try:
+            objids = [ int( o ) for o in objids ]
+        except ValueError:
+            try:
+                objids = [ util.asUUID( o ) for o in objids ]
+            except ValueError:
+                raise ValueError( f"objids must be a list of integers or a list of uuids, got {objids}" )
+        if len( objids ) == 0:
+            raise ValueError( "no objids requested" )
+
         bands = None
         which = 'patch'
+        mjd_now = None
         if flask.request.is_json:
             data = flask.request.json
-            unknown = set( data.keys() ) - { 'bands', 'which' }
+            unknown = set( data.keys() ) - { 'bands', 'which', 'mjd_now' }
             if len(unknown) > 0:
                 raise ValueError( f"Unknown data parameters: {unknown}" )
             if 'bands' in data:
@@ -23,50 +77,95 @@ class GetLtcv( BaseView ):
                 if data['which'] not in ( 'detections', 'forced', 'patch' ):
                     raise ValueError( f"Unknown value of which: {which}" )
                 which = data['which']
+            if 'mjd_now' in data:
+                mjd_now = float( data['mjd_now'] )
 
-        with db.DB( dbcon ) as dbcon:
-            cursor = dbcon.cursor()
-            # Converting bigints to strings because Javscript will read from JSON as if they're doubles
-            # TODO : return nearby object info?
-            q = ( "SELECT diaobjectid::text,processing_version,radecmjdtai,"
-                  "ra,dec,raerr,decerr,ra_dec_cov FROM diaobject "
-                  "WHERE diaobjectid=%(id)s AND processing_version=%(pv)s " )
-            cursor.execute( q, { 'id': objid, 'pv': procverint } )
-            columns = [ d[0] for d in cursor.description ]
-            row = cursor.fetchone()
-            if row is None:
-                raise ValueError( f"Unknown object {objid} in processing version {procver}" )
-            objinfo = { columns[i]: row[i] for i in range(len(columns)) }
-            # Convert procesing version to something usable for user display
-            objinfo['processing_version'] = f"{procver} ({objinfo['processing_version']})"
+        with db.DBCon() as dbcon:
+            FDBLogger.debug( f"Asking for lightcurves for {objids}, processing version {procver}, "
+                             f"which {which}, bands {bands}" )
+            ltcvs = ltcv.many_object_ltcvs( procver, objids, bands=bands, which=which,
+                                            return_format='json', string_keys=True,
+                                            mjd_now=mjd_now, dbcon=dbcon )
+            if len(ltcvs) != len(objids):
+                FDBLogger.warning( f"Asked for {len(objids)} lightcurves, got {len(ltcvs)}" )
+            if len(ltcvs) == 0:
+                return {}
+            objids = list( int(i) for i in ltcvs.keys() )
+            objinfo = ltcv.get_object_infos( objids, dbcon=dbcon )
 
-            ltcvdata = ltcv.object_ltcv( procverint, objid, return_format='json',
-                                         bands=bands, which=which, dbcon=dbcon )
-            retval= { 'status': 'ok', 'objinfo': objinfo, 'ltcv': ltcvdata }
-            return retval
+        if len(ltcvs) != len(objinfo['diaobjectid']):
+            raise RuntimeError( f"len(ltcvs)={len(ltcvs)}, len(objinfo['diaobjectid'])={len(objinfo['diaobjectid'])}, "
+                                "I am perplexed." )
 
-    def do_the_things( self, procver, objid ):
-        with db.DB() as dbcon:
-            objid = int( objid )
-            pv = ltcv.procver_int( procver )
-            return self.get_ltcv( procver, pv, objid, dbcon=dbcon )
+        rval = {}
+        for i in range( len(objinfo['diaobjectid']) ):
+            diaobjectid = str( objinfo['diaobjectid'][i] )
+            rval[ diaobjectid ] = { 'ltcv': ltcvs[ diaobjectid ] }
+            for k, v in objinfo.items():
+                rval[ diaobjectid ][k] = v[i]
+
+        return rval
+
+
+    def do_the_things( self, procver='default' ):
+        if ( not flask.request.is_json ) or ( 'objids' not in flask.request.json ):
+            raise ValueError( "Must pass POST data as a json dict with at least objids as a key" )
+        objids = flask.request.json['objids']
+        del flask.request.json['objids']
+        return self.get_ltcvs( procver, objids )
+
+
+
+# ======================================================================
+# /ltcv/getltcv
+#
+# Returns a dict with keys everything from diaobject, plus ltcv
+# ltcv is itself a dict with keys mjd, band, flux, fluxerr, isdet, and maybe ispatch,
+# each of which is a list.
+
+class GetLtcv( GetManyLtcvs ):
+    def do_the_things( self, procver, objid=None ):
+        if objid is None:
+            objid = procver
+            procver = 'default'
+
+        mess = self.get_ltcvs( procver, [ objid ] )
+        if len(mess) == 0:
+            raise ValueError( f"Could not find lightcurve for {objid} in processing version {procver}" )
+        key0 = list( mess.keys() )[0]
+        return mess[ key0 ]
 
 
 # ======================================================================
 # /ltcv/getrandomltcv
+#
+# NOTE : I'm not happy with this one, as it requires an object processing
+#   version, but those are more opaque than photometry processing versions.
 
 class GetRandomLtcv( GetLtcv ):
-    def do_the_things( self, procver ):
-        with db.DB() as dbcon:
-            pv = ltcv.procver_int( procver )
-            cursor = dbcon.cursor()
-            # THINK ; this may be slow, as it may sort the entire object table!  Or at least the index.
-            # TABLESAMPLE may be a solution, but it doesn't interact with WHERE
-            #   the way I'd want it to.  (Empirically, doesn't seem too bad with a 4M object table.)
-            cursor.execute( "SELECT diaobjectid FROM diaobject WHERE processing_version=%(pv)s "
-                            "ORDER BY random() LIMIT 1", { 'pv': pv } )
-            objid = cursor.fetchone()[0]
-            return self.get_ltcv( procver, pv, objid, dbcon=dbcon )
+    def do_the_things( self, procver="default" ):
+        with db.DBCon() as dbcon:
+            pv = db.ProcessingVersion.procver_id( procver, dbcon=dbcon  )
+
+            q = sql.SQL(
+                """
+                SELECT diaobjectid
+                FROM (
+                  SELECT DISTINCT ON (o.diaobjectid) o.diaobjectid
+                  FROM diaobject o
+                  INNER JOIN base_procver_of_procver pv ON o.base_procver_id=pv.base_procver_id
+                                                       AND pv.procver_id={procver}
+                  ORDER BY o.diaobjectid, pv.priority DESC
+                ) subq
+                ORDER BY random() LIMIT 1
+                """
+            ).format( procver=pv )
+            rows, _cols = dbcon.execute( q )
+
+            mess = self.get_ltcvs( pv, [ rows[0][0] ], dbcon=dbcon )
+
+        key0 = list( mess.keys() )[0]
+        return mess[ key0 ]
 
 
 # ======================================================================
@@ -83,9 +182,9 @@ class GetHotTransients( BaseView ):
     optional):
 
        processing_version : str
-         The processing version or alias.  If not given, assumes "default"
+         The processing version or alias.  If not given, uses "realtime".
 
-       return fromat : int
+       return format : int
          Specifies the format of the data returned; see below.  If not given,
          assumes 0.
 
@@ -116,12 +215,13 @@ class GetHotTransients( BaseView ):
     -------
       application/json   (utf-8 encoded, which I believe is required for json)
 
-         The format of the returned JSOn depends on the return_format paremeter.
+         The format of the returned JSON depends on the return_format paremeter.
 
          return_format = 0:
             Returns a list of dictionaries.  Each row corresponds to a single
             detected transients, and will have keys:
-               objectid : string UUID
+               diaobjectid : bigint
+               rootid : string UUID
                ra : float, ra of the object
                dec : float, dec of the object
                zp : float, always 31.4
@@ -132,7 +232,9 @@ class GetHotTransients( BaseView ):
                     band : str, one if u, g, r, i, z, or Y
                     flux : float, psf flux in nJy
                     fluxerr : uncertainty on flux
-                    is_source : bool; if False, this is forced photometry, if true it's a detection
+                    isdet : bool; if True, this point was detected (i.e. a source exists)
+                    ispatch : bool; if False, the flux is forced photometry, if True, the flux is
+                              from the detection.  Will only be present if source_patch is True.
 
                If include_hostinfo was True, then each row also includes the following fields:
 
@@ -163,12 +265,16 @@ class GetHotTransients( BaseView ):
             would have been in the elements of the 'photometry' dictionary in
             return_format 1.
 
+            WARNING NOT TESTED.
+
          return_format = 2:
             Returns a dict.  Each value of the dict is a list, and all lists
             have the same number of values.  Each element of each list corresponds
             to a single transient, and they're all ordered the same.  The keys of
             the top-level dictionary are the same as the keys of each row in
             return_format 1.
+
+            WARNING NOT TESTED.
 
          Both return formats 1 and 2 can be loaded directly into a pandas data
          frame, though polars might work better because it has better direct
@@ -194,7 +300,6 @@ class GetHotTransients( BaseView ):
     """
 
     def do_the_things( self ):
-        logger = flask.current_app.logger
         bands = [ 'u', 'g', 'r', 'i', 'z', 'y' ]
 
         if not flask.request.is_json:
@@ -202,8 +307,8 @@ class GetHotTransients( BaseView ):
         data = flask.request.json
 
         kwargs = {}
-        if 'procesing_version' not in data:
-            kwargs['processing_version'] = 'default'
+        if 'processing_version' not in data:
+            kwargs['processing_version'] = 'realtime'
         kwargs.update( data )
         if 'return_format' in kwargs:
             return_format = kwargs['return_format']
@@ -211,22 +316,28 @@ class GetHotTransients( BaseView ):
         else:
             return_format = 0
 
-        df, hostdf = ltcv.get_hot_ltcvs( **kwargs )
+        source_patch = ( 'source_patch' in data ) and ( data['source_patch'] )
+
+        ltcvdf, objdf, hostdf = ltcv.get_hot_ltcvs( **kwargs )
 
         if ( return_format == 0 ) or ( return_format == 1 ):
             sne = []
         elif ( return_format == 2 ):
-            sne = { 'objectid': [],
+            sne = { 'diaobjectid': [],
+                    'rootid': [],
                     'ra': [],
                     'dec': [],
                     'mjd': [],
+                    'visit': [],
                     'band': [],
                     'flux': [],
                     'fluxerr': [],
-                    'is_source': [],
+                    'isdet': [],
                     'zp': [],
                     'redshift': [],
                     'sncode': [] }
+            if source_patch:
+                sne[ 'ispatch' ] = []
             if hostdf is not None:
                 sne[ 'hostgal_petroflux_r' ] = []
                 sne[ 'hostgal_petroflux_r_err' ] = []
@@ -251,21 +362,19 @@ class GetHotTransients( BaseView ):
         #        = -2.5 ( log_10( f_ν / nJy ) - 9 ) + 8.90
         #        = -2.5 log_10( f_ν / nJy ) + 31.4
 
-        if len(df) > 0:
-            objids = df['rootid'].unique()
-            logger.debug( f"GetHotSNEView: got {len(objids)} objects in a df of length {len(df)}" )
-            df.set_index( [ 'rootid', 'visit' ], inplace=True )
-            if hostdf is not None:
-                hostdf.set_index( 'rootid', inplace=True )
+        if len(ltcvdf) > 0:
+            objids = objdf.index.get_level_values( 'diaobjectid' ).unique()
+            FDBLogger.debug( f"GetHotSNEView: got {len(objids)} objects in a df of length {len(ltcvdf)}" )
 
             for objid in objids:
-                subdf = df.xs( objid, level='rootid' )
+                subdf = ltcvdf.xs( objid, level='diaobjectid' )
                 if hostdf is not None:
                     subhostdf = hostdf.xs( objid )
                 if ( return_format == 0 ) or ( return_format == 1 ):
-                    toadd = { 'objectid': str(objid),
-                              'ra': subdf.ra.values[0],
-                              'dec': subdf.dec.values[0],
+                    toadd = { 'diaobjectid': int( objid ),
+                              'rootid': str( objdf.loc[objid].rootid ),
+                              'ra': float( objdf.loc[objid].ra ),
+                              'dec': float( objdf.loc[objid].dec ),
                               'zp': 31.4,
                               'redshift': -99.,
                               'sncode': -99 }
@@ -282,27 +391,36 @@ class GetHotTransients( BaseView ):
                                 subhostdf[ f'stdcolor_{bands[bandi]}_{bands[bandi+1]}_err' ] )
 
                     if return_format == 0:
-                        toadd['photometry'] = { 'mjd': list( subdf['midpointmjdtai'] ),
+                        toadd['photometry'] = { 'mjd': list( subdf.index.values ),
+                                                'visit': list( subdf['visit'] ),
                                                 'band': list( subdf['band'] ),
-                                                'flux': list( subdf['psfflux'] ),
-                                                'fluxerr': list( subdf['psffluxerr'] ),
-                                                'is_source': list( subdf['is_source'] ) }
+                                                'flux': list( subdf['flux'] ),
+                                                'fluxerr': list( subdf['fluxerr'] ),
+                                                'isdet': list( subdf['isdet'] ) }
+                        if source_patch:
+                            toadd['photometry']['ispatch'] = list( subdf['ispatch'] )
                     else:
-                        toadd['mjd'] = list( subdf['midpointmjdtai'] )
+                        toadd['mjd'] = list( subdf.index.values )
+                        toadd['visit'] = list( subdf['visit'] )
                         toadd['band'] = list( subdf['band'] )
                         toadd['flux'] = list( subdf['psfflux'] )
                         toadd['fluxerr'] = list( subdf['psffluxerr'] )
-                        toadd['is_source'] = list( subdf['is_source'] )
+                        toadd['isdet'] = list( subdf['isdet'] )
+                        if source_patch:
+                            toadd['ispatch'] = list( subdf['ispatch'] )
                     sne.append( toadd )
                 elif return_format == 2:
                     sne['objectid'].append( str(objid) )
                     sne['ra'].append( subdf.ra.values[0] )
                     sne['dec'].append( subdf.dec.values[0] )
-                    sne['mjd'].append( list( subdf['midpointmjdtai'] ) )
+                    sne['mjd'].append( subdf.index.values )
+                    sne['visit'].append( list( subdf['visit'] ) )
                     sne['band'].append( list( subdf['band'] ) )
-                    sne['flux'].append( list( subdf['psfflux'] ) )
-                    sne['fluxerr'].append( list( subdf['psffluxerr'] ) )
-                    sne['is_source'].append( list( subdf['is_source'] ) )
+                    sne['flux'].append( list( subdf['flux'] ) )
+                    sne['fluxerr'].append( list( subdf['fluxerr'] ) )
+                    sne['isdet'].append( list( subdf['isdet'] ) )
+                    if source_patch:
+                        sne['ispatch'].append( list( subdf['ispatch'] ) )
                     sne['zp'].append( 31.4 )
                     sne['redshift'].append( -99 )
                     sne['sncode'].append( -99 )
@@ -321,7 +439,7 @@ class GetHotTransients( BaseView ):
                     raise RuntimeError( "This should never happen." )
 
 
-        # logger.info( "GetHotTransients; returning" )
+        # FDBLogger.info( "GetHotTransients; returning" )
         return sne
 
 
@@ -334,7 +452,11 @@ class GetHotTransients( BaseView ):
 bp = flask.Blueprint( 'ltcvapp', __name__, url_prefix='/ltcv' )
 
 urls = {
+    "/getmanyltcvs": GetManyLtcvs,
+    "/getmanyltcvs/<procver>": GetManyLtcvs,
+    "/getltcv/<procver>": GetLtcv,             # <procver> is really <objid> in this case
     "/getltcv/<procver>/<objid>": GetLtcv,
+    "/getrandomltcv": GetRandomLtcv,
     "/getrandomltcv/<procver>": GetRandomLtcv,
     "/gethottransients": GetHotTransients
 }

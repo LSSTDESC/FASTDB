@@ -1,10 +1,10 @@
 .. _developers-docs:
 
-.. contents::
-
 ==========================
 Information for Developers
 ==========================
+
+.. contents::
 
 This documentation is for people who want to install a test version of FASTDB on their local machine, edit the FASTDB code, or try to install FASTDB somewhere else.  (It is currently woefully incomplete for the last purpose.)
 
@@ -32,7 +32,7 @@ to get the current version of all submodules.
 Installing the Code
 ===================
 
-(If you're reading this documentation for the first time, don't try to do what's in this section directly.  Rather, read on.  You will want to refer back to this section later.  First, though, you will probably want to do everything below about setting up a test environment.  That sections includes everything you need to install the test code.  This section is more general, and what you'd think about if you're trying to install a FASTDB instance somewhere else.)
+(If you're reading this documentation for the first time, don't try to do what's in this section directly.  Rather, read on.  You will want to refer back to this section later.  First, though, you will probably want to do everything below about :ref:`setting up a test environment <local-test-env>`.  That sections includes everything you need to install the test code.  This current section is more general, and what you'd think about if you're trying to install a FASTDB instance somewhere else.)
 
 The code (for the most part) is not designed to be run out of the ``src`` directory where it exists, though you may be able to get that to work.  Ideally, you should install the code first.  Exactly where you're installing it depends on what you're trying to do.  If you're just trying to get a local test environment going on your own machine, see :ref:`local-test-env`.
 
@@ -41,13 +41,13 @@ If you've edited a ``Makefile.am`` file in any directory, or the ``configure.ac`
   ./configure --with-installdir=[DIR] --with-smtp-server=[SERVER] --with-smpt-port=[PORT]
   make install
 
-The first ``[DIR]`` is the directory where you want to install the code.  The SMTP server setup requires you to know what you're doing.  You can run::
+The ``[DIR]`` parameter is the directory where you want to install the code.  The SMTP server setup requires you to know what you're doing.  (FASTDB uses smtp to send password reset messages.) You can run::
 
   ./configure --help
 
 as usual with GNU autotools to see what other options are available.  If you're making a production install of FASTDB somewhere, you will definitely want to do things like configure the database connection.
 
-It's possible that after running the first command, you'll get errors about ``aclocal-1.16 is missing on your system`` or something similar.  There are two possibilites; one is that you do legimiately need to rebuild the autotools file, in which case see :ref:`autoreconf-install` below.  However, if you haven't touchedd the files ``aclocal.m4``, ``configure``, or, in any subdirectory, ``Makefile.in`` or ``Makefile.am``, then this error may be result of an unfortunate interaction between autotools and git; autotools (at least some versions) looks at timestamps, but git checkouts do not restore timestamps of files committed to the archive.  In this case, you can run::
+It's possible that after running either the ``./configure`` or ``make`` commands, you'll get errors about ``aclocal-1.16 is missing on your system`` or something similar.  There are two possibilites; one is that you do legimiately need to rebuild the autotools file, in which case see :ref:`autoreconf-install` below.  However, if you haven't touched the files ``aclocal.m4``, ``configure``, or, in any subdirectory, ``Makefile.in`` or ``Makefile.am``, then this error may be result of an unfortunate interaction between autotools and git; autotools (at least some versions) looks at timestamps, but git checkouts do not restore timestamps of files committed to the archive.  In this case, you can run::
 
   touch aclocal.m4 configure
   find . -name Makefile.am -exec touch \{\} \;
@@ -130,14 +130,13 @@ Running the Docker Services
   
 Once you've successfully built the docker environments, and installed the code, run::
 
-  docker compose up -d webap
-  docker compose up -d shell
+  docker compose up -d webap shell
 
 (For those of you who know docker compose and are wondering why ``webap`` is not just a prerequisite for ``shell``, the reason is so one can get a debug environment up even when code errors prevent the web application from successfully starting.)
 
-**NOTE**: sometimes some of the services seem to be failing to come up properly.  It's possible that this is happening because the checks in the docker compose file time out too fast.  You may be able to get it to work by just repeating the ``...docker compose up -d ...`` line; the second time around, it's possible everything will work.  If something doesn't work, look at the service that didn't come up, and try ``docker compose logs <service>`` to see if it sheds any light.
+**NOTE**: sometimes some of the services seem to be failing to come up properly.  It's possible that this is happening because the checks in the docker compose file time out too fast.  You may be able to get it to work by just repeating the ``...docker compose up -d ...`` line; the second time around, it's possible everything will work.  If something doesn't work, look at the service that didn't come up, and try ``docker compose logs <service>`` to see if it sheds any light.  See `Issue #24 <https://github.com/LSSTDESC/FASTDB/issues/24>`_.
 
-When you run these two commands, it will start a number of local servers (containers) on your machine, and will set up all the basic database tables.  You can run ``docker compose ps`` to see what containers are running.  Assuming you're running these commands on the same machine you're sitting at (i.e. you're running them on your laptop or desktop, not on a remote server you've connected to), and that everything worked, then after this you should be able to connect to the FASTDB web application with your browser by going to:
+When you run this ``docker compose`` command, it will start a number of local servers (containers) on your machine, and will set up all the basic database tables.  You can run ``docker compose ps`` to see what containers are running.  Assuming you're running these commands on the same machine you're sitting at (i.e. you're running them on your laptop or desktop, not on a remote server you've connected to), and that everything worked, then after this you should be able to connect to the FASTDB web application with your browser by going to:
 
    http://localhost:8080
 
@@ -187,6 +186,7 @@ That will connect you to the shell container.  (You can tell you're inside the c
 
 If you want to run the tests in the ``tests`` subdirectory, you will first need to install the code to where it's expected; see :ref:`installing-for-tests`.  Once you're ready, inside the container go to the ``/code/tests`` directory and run various tests with ``pytest``.  If you just run ``pytest -v``, it will try to run all of them, but you can, as usual with pytest, give it just the file (or just the file and test) you want to run.
 
+.. _reinstalling-code:
 
 If you edit any python files
 ----------------------------
@@ -195,20 +195,22 @@ The tests do not run the code out of the source directory; rather, they run it o
 
   make install
 
-If you did the ``./confiugure`` and ``make`` steps inside the container, then cd to ``/code`` before running ``make install``.
+If you did the ``./configure`` and ``make`` steps inside the container, then cd to ``/code`` before running ``make install``.
 
 After that, the tests should see your updated code.
 
 If you've added any python files, then you may need to put them in one of the ``Makefile.am`` files, and do the steps in :ref:`autoreconf-install` below.
 
 
+.. _restart-webserver:
+
 Restarting the webserver
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
-However, there may be one more step.  If you modified code that the webserver uses, you have to tell the webserver to reread the code.  After doing the ``make install`` described above, ``cd`` into the top level of your git checkout and run::
+However, there may be one more step.  If you modified code that the webserver uses, you have to tell the webserver to reread the code.  After doing the ``make install`` :ref:`described above <reinstalling-code>`, ``cd`` into the top level of your git checkout and run::
 
   docker compose down webap
-  docker compose up webap
+  docker compose up -d webap
   docker compose logs webap
 
 The last step show not show any errors or tracebacks; if it did, then you broke the code an the webserver can't start.  Fix the code, install again, and then do the three steps above again until it works.
@@ -284,27 +286,26 @@ TODO : instructions for accessing the mongo database.
 Setting yourself up to futz around with the web app
 ---------------------------------------------------
 
-There will eventually be a better way to do this, as the current method is needlessly slow.  Right now, if you want to have a database with some stuff loaded into it for purposes of developing the web UI, what you can do is get yourself fully set up for tests, and then, inside the shell container, run::container, either run::
+There will eventually be a better way to do this, as the current method is needlessly slow.  Right now, if you want to have a database with some stuff loaded into it for purposes of developing the web UI, what you can do is get yourself fully set up for tests, and then, inside the shell container, run::
 
   cd /code/tests
-  pytest -v --trace test_ltcv_object_search.py::test_object_search
+  pytest -v --trace services/test_sourceimporter.py::test_full90days_fast
 
 or run::
 
   cd /code/tests
-  pytest -v --trace services/test_sourceimporter.py::test_import_30days_60days
+  RUN_FULL90DAYS=1 pytest -v --trace services/test_sourceimporter.py::test_full90days
 
 Both of these start tests with test fixtures that create a database user and load data into the database.  The ``--trace`` command tells pytest to stop at the begining of a test, after the fixture has run.  The shell where you run this will dump you into a ``(Pdb)`` prompt.  Just leave that shell sitting there.  At this point, you have a loaded database.  You can look at ``localhost:8080`` in your web browser to see the web ap, and log in with user ``test`` and password ``test_password``.
 
-The ``test_object_search`` command takes about 10 seconds to run, and loads up the main postgres tables with the test data.  It does *not* load anyting into the mongo database.  The ``test_import_30days_60days`` command takes up to a minute to run, because what it's really doing is testing a whole bunch of different servers, an there are built in sleeps so that each step of the test can be sure that other servers have had time to do their stuff.  This one loads the full test data set into the "ppdb" tables, and runs a 90 simulated days of alerts through some test brokers.  When it's done, the sources from those 90 simulated days will be in the main postgrest ables, and the mongo database will be populated with  the test broker messages.  (The test brokers aren't doing anything real, but are just assigning random classifications for purposes of testing the plubming.)
+The ``test_full90days_fast`` test runs a lot faster, loading up the main postgres tables with the test data.  It does *not* load anyting into the mongo database.  The ``test_full90days`` test takes up to a minute or so to run, because what it's really doing is testing a whole bunch of different servers, an there are built in sleeps so that each step of the test can be sure that other servers have had time to do their stuff.  This one loads the full test data set into the "ppdb" tables, and runs a 90 simulated days of alerts through some test brokers.  When it's done, the sources from those 90 simulated days will be in the main postgrest ables, and the mongo database will be populated with  the test broker messages.  (The test brokers aren't doing anything real, but are just assigning random classifications for purposes of testing the plubming.)
 
 When you're done futzing around with the web ap, go to the shell where you ran ``pytest ...`` and just press ``c`` and hit Enter at the ``(Pdb)`` prompt.  The test will compete, exit, and (ideally) clean up after itself.
 
-If you edit the web ap software and what to see the changes, you need to do a couple of things to see the changes.  First, you need to re-install the code.  On a shell inside the container (a different one from the one where your ``(Pdb)`` prompt is sitting), do ``cd /code`` and ``make install``.  (If you've added files, not just edited them, there is more to do; ROB TODO document this.)   Second, you need to get a shell on the webap.  Outside any container, in the ``tests`` directory, run ``docker compose exec -it webap /bin/bash``.  On the shell inside the webap container, run::
+If you've edited code that affects the web ap
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-  kill -HUP 1
-
-If all is well, then your webserver is now running the new code; shift-reload it in your browser to see it.  If the webap shell immediately exits after this ``kill`` command, it means you broker the server-side software enough that it no longer runs.  Do ``docker compose logs webap`` to see the logs, and try to fix the errors.  Once you've fixed them, you will need to do ``docker compose down webap`` and ``docker compose up -d webap`` to get the webap running again.
+You need to :ref:`restart the webserver <restart-webserver>`.
 
 
 Creating a persistent test user
@@ -354,6 +355,40 @@ when the build finishes, run all of the following, where ``<version>`` is what y
 Before running those, you may need to do::
 
   docker login ghcr.io
+
+
+Database Migrations
+===================
+
+Database migrations are all in the ``db`` subdirectory.  They are a series of ``.sql`` files which contain PostgreSQL commands.  If you look, you will notice that the files are named by date.  This is important, because the migrations in general do not commute; they must always be applied in the same order.
+
+Normally, when you bring up a :ref:`local-test-env`, the database migrations are automatically applied.  As such, once the test environment is going, the database already has all the necessarry tables created.
+
+On a production system, when updating the code, you may need to apply databse migrations to update your database.  This will happen when you update to a new version, and the database schema have changed.  In general, it's a good idea to run this every time you update the code for an installed FASTDB instance.  **Backup your current database before doing this**, just in case something horrible happens.  You apply the migrations by going into an environment where the code is running (e.g. a shell on the productionwebserver) and running::
+
+  cd /code/db
+  python apply_migrations.py
+
+If all is well, your database will be up to date when this is done.
+
+Each migration file is run within one transaction, so if there is an error partway through, the database will be left in the state it was in after the previous migration.
+
+The database keeps track of which migrations have been applied in the ``migrations_applied`` table.
+
+Additional database utilities
+-----------------------------
+
+There are two other utilities in this directory which may be useful in test environments.  ``wipe_all_data.py`` will, assuming it's been kept up to date, erase all data in all tables *except* the ``migrations_applied`` and ``authuser`` tables.  ``scorched_earth.py`` will, again assuming it's been up to date, completely destroy all tables in the database.  If it worked, if you use ``psql`` to look at your database, there will be no tables or views.  (In a :ref:`local-test-env`, it's usually easier just to destroy and restart the environment than to mess with this script.)
+
+Adding new migrations
+---------------------
+
+If you need to make changes to the database, you must write a migration for the database.  Do this by creating a file in the ``db`` subdirectory whose name is ``yyyy-mm-dd_nnn_text.sql``. In this name, ``nnn`` is just a number; usually this can just be 000 or 001.  It's there to preserve the order in case you need to create more than one migration file on the same there.  ``text`` can be anything.  It should be a very short description of the changes made.  Look at the existing files for guidance.  Do not put any spaces in ``text``; just use things you'd normally want to use in a Unix filename.  (That's a subset of what's legal in a Unix filename....)
+
+When creating the migration, be aware that this needs to be applied to production database.  You can't just think about changing the table structure; you also have to think about preserving the data.  That means you don't drop a column and add a new column, you have to rename a column.  If the table structure is changing alot, the SQL code needed to do the migration while preserving the data could potentially be complicated.  (You may need, for instance, to use temporary tables.)
+
+**WARNING**: Pay attention when merging branches.  If two branches have made database migrations, you may need to rename the migration to a later date to keep things in the right order.  (Of course, if the migrations are inconsistent, you have to resolve that, but that can happen with any code in any migration.)
+
 
 
 Note for Rob: Installing on Perlmutter

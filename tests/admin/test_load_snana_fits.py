@@ -27,8 +27,6 @@ def test_load_snana_fits():
 
         with db.DB() as conn:
             cursor = conn.cursor()
-            cursor.execute( "SELECT COUNT(*) FROM processing_version" )
-            assert cursor.fetchone()[0] == 1
             cursor.execute( "SELECT COUNT(*) FROM host_galaxy" )
             assert cursor.fetchone()[0] == 356
             cursor.execute( "SELECT COUNT(*) FROM diaobject" )
@@ -45,9 +43,15 @@ def test_load_snana_fits():
     finally:
         with db.DB() as conn:
             cursor = conn.cursor()
-            for tab in [ 'processing_version', 'host_galaxy',
-                         'diaobject', 'diasource', 'diaforcedsource', 'root_diaobject' ]:
+            for tab in [ 'host_galaxy', 'diaobject', 'diasource', 'diaforcedsource', 'root_diaobject' ]:
                 cursor.execute( f"TRUNCATE TABLE {tab} CASCADE" )
+            cursor.execute( "SELECT id FROM processing_version WHERE description='test_procver'" )
+            pid = cursor.fetchone()
+            if pid is not None:
+                pid = pid[0]
+                cursor.execute( "DELETE FROM base_procver_of_procver WHERE procver_id=%(pv)s", { 'pv': pid } )
+                cursor.execute( "DELETE FROM processing_version WHERE description='test_procver'" )
+                cursor.execute( "DELETE FROM base_processing_version WHERE description='test_procver'" )
             conn.commit()
 
 
@@ -63,7 +67,6 @@ def test_load_snana_fits_ppdb( snana_fits_ppdb_loaded ):
         cursor.execute( "SELECT COUNT(*) FROM ppdb_diaforcedsource" )
         assert cursor.fetchone()[0] == 52172
 
-        for tab in [ 'processing_version', 'host_galaxy',
-                     'diaobject', 'diasource', 'diaforcedsource' ]:
+        for tab in [ 'host_galaxy', 'diaobject', 'diasource', 'diaforcedsource' ]:
             cursor.execute( f"SELECT COUNT(*) FROM {tab}" )
             assert cursor.fetchone()[0] == 0

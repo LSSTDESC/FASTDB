@@ -171,7 +171,7 @@ def alerts_60moredays_sent_and_brokermessage_consumed( barf, alerts_60moredays_s
 
 # This next fixture assumes that the root_diaobject, diaobject,
 #   host_galaxy, diasource, and diaforcedsource tables all start empty,
-#   and completely wipes them out at the end.  Don't use it if that
+#   and completely wipes them out.  Don't use it if that
 #   assumption doesn't hold.
 #
 # (In particular, don't use this with any other fixture that
@@ -182,8 +182,18 @@ def alerts_60moredays_sent_and_brokermessage_consumed( barf, alerts_60moredays_s
 #   want a loaded database, whereas all of the others are for
 #   actually testing the load process.)
 @pytest.fixture( scope='module' )
-def alerts_90days_sent_received_and_imported( procver ):
+def alerts_90days_sent_received_and_imported( procver_collection ):
     try:
+        # We have to wipe out the database because we're about to restore it!
+        with db.DB() as conn:
+            cursor = conn.cursor()
+            cursor.execute( "DELETE FROM diaforcedsource" )
+            cursor.execute( "DELETE FROM diasource" )
+            cursor.execute( "DELETE FROM diaobject" )
+            cursor.execute( "DELETE FROM root_diaobject" )
+            cursor.execute( "DELETE FROM host_galaxy" )
+            conn.commit()
+
         args = [ 'pg_restore', '-h', 'postgres', '-U', 'postgres', '-d', 'fastdb', '-a',
                  'elasticc2_test_data/alerts_90days_sent_received_and_imported.pgdump' ]
         res = subprocess.run( args, env={ 'PGPASSWORD': 'fragile'}, capture_output=True )
@@ -209,43 +219,67 @@ def alerts_90days_sent_received_and_imported( procver ):
             cursor.execute( "DELETE FROM host_galaxy" )
             conn.commit()
 
-# The commented-out fixture below replicates the fixture above, but is
-# the code used to generate the data file used in the fixture above.
-# Because of all the various sleeps and such built into the fixtures
-# this fixture uses, it takes about a minute to run, so, for efficiency,
-# we ran it and pg_dumped the results, which the fixture above loads.
+
+# The fixture below should have (approximately!) the same result as the
+# fixture above.  Never use both fixtures in the same module!
 #
-# To regenerate the data file, comment out the fixture above, uncomment
-# the fixture below, run a test that uses this fixture with --trace,
-# and once the fixture finishes and you're dumped into pdb at the beginning
-# of the test, run:
+# The fixture below should (approximately) load the database the same
+# way as the previous fixture.  However, wheras the previous one just
+# quickly restores a previously-generated result to the database, the
+# fixture below goes through all of the steps of generating alerts,
+# classifying alerts, loading the database, etc.
+#
+# You can use the fixture below to generate the data file needed for the
+# fixture above.  To do this, run (in the tests directory):
+#
+#   RUN_FULL90DAYS=1 pytest -v --trace services/test_sourceimporter.py::test_full90days
+#
+# When you get to the pdb prompt at the beginning of that test, in
+# another shell in the container run:
 #
 #    PGPASSWORD=fragile pg_dump -h postgres -U postgres fastdb -F c -a  \
 #       -f elasticc2_test_data/alerts_90days_sent_received_and_imported.pgdump \
 #       -t root_diaobject -t diaobject -t host_galaxy -t diasource -t diaforcedsource
 #
-# You will then also need to rebuild the elasticc2_test_data.tar.bz2 file!
-# @pytest.fixture( scope='module' )
-# def alerts_90days_sent_received_and_imported( barf, procver, alerts_60moredays_sent_and_brokermessage_consumed ):
-#     from services.source_importer import SourceImporter
-#     from services.dr_importer import DRImporter
-#     collection_name = f'fastdb_{barf}'
-#     try:
-#         si = SourceImporter( procver.id )
-#         with db.MG() as mongoclient:
-#             collection = db.get_mongo_collection( mongoclient, collection_name )
-#             nobj, nroot, nsrc, nfrc = si.import_from_mongo( collection )
-#         dri = DRImporter( procver.id )
-#         dri.import_host_info()
-#         yield nobj, nroot, nsrc, nfrc
-#     finally:
-#         with db.DB() as conn:
-#             cursor = conn.cursor()
-#             cursor.execute( "DELETE FROM diaforcedsource" )
-#             cursor.execute( "DELETE FROM diasource" )
-#             cursor.execute( "DELETE FROM diaobject" )
-#             cursor.execute( "DELETE FROM root_diaobject" )
-#             cursor.execute( "DELETE FROM host_galaxy" )
-#             cursor.execute( "DELETE FROM diasource_import_time WHERE collection=%(col)s",
-#                             { 'col': collection_name } )
-#             conn.commit()
+# That will creae the file
+#   elasticc2_test_data/alerts_90days_sent_receved_and_imported.pgdump
+# underneath the tests directory.  If you do this, and the changes need
+# to be committed to git, you will also need to run:
+#
+#    tar jcvf elasticc2_test_data.tar.bz2 elasticc2_test_data
+#
+# (Make sure that you've unpacked the previous version of
+# elasticc2_test_data.tar.bz2 before doing this, or you will lose all
+# kinds of necessary test data!)
+#
+# The difference between the results of this fixture and the previous
+# fixture is that this one will also load up the mongo database with the
+# broker messages.  The previous fixture only loads up the postgres
+# tables with the results of the full alert cycle.
+
+@pytest.fixture( scope='module' )
+def fully_do_alerts_90days_sent_received_and_imported( barf, procver_collection,
+                                                       alerts_60moredays_sent_and_brokermessage_consumed ):
+    bpv, _pv = procver_collection
+    from services.source_importer import SourceImporter
+    from services.dr_importer import DRImporter
+    collection_name = f'fastdb_{barf}'
+    try:
+        si = SourceImporter( bpv['realtime'].id, bpv['realtime'].id )
+        with db.MG() as mongoclient:
+            collection = db.get_mongo_collection( mongoclient, collection_name )
+            nobj, nroot, nsrc, nfrc = si.import_from_mongo( collection )
+        dri = DRImporter( bpv['realtime'].id )
+        dri.import_host_info()
+        yield nobj, nroot, nsrc, nfrc
+    finally:
+        with db.DB() as conn:
+            cursor = conn.cursor()
+            cursor.execute( "DELETE FROM diaforcedsource" )
+            cursor.execute( "DELETE FROM diasource" )
+            cursor.execute( "DELETE FROM diaobject" )
+            cursor.execute( "DELETE FROM root_diaobject" )
+            cursor.execute( "DELETE FROM host_galaxy" )
+            cursor.execute( "DELETE FROM diasource_import_time WHERE collection=%(col)s",
+                            { 'col': collection_name } )
+            conn.commit()

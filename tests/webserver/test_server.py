@@ -1,38 +1,5 @@
+import re
 import pytest
-import db
-
-
-# Include the procver fixture since it's a session scoped fixture,
-#  so somebody else might already have included it.  The tests
-#  need to take that into account, so put the fixture here tox make
-#  sure it's run even if this test is run by itself.
-@pytest.fixture( scope='module' )
-def server_test_processing_versions( procver ):
-    try:
-        with db.DB() as con:
-            cursor = con.cursor()
-            cursor.execute( "INSERT INTO processing_version(id,description,validity_start,validity_end) "
-                            "VALUES (64738, 'test_server_1', NOW(), NULL)" )
-            cursor.execute( "INSERT INTO processing_version(id,description,validity_start,validity_end) "
-                            "VALUES (64739, 'test_server_2', NOW(), NULL)" )
-            cursor.execute( "INSERT INTO processing_version(id,description,validity_start,validity_end) "
-                            "VALUES (64740, 'test_server_3', NOW(), NULL)" )
-            cursor.execute( "INSERT INTO processing_version_alias(id,description) "
-                            "VALUES (64738, 'test_server_1_alias_1')" )
-            cursor.execute( "INSERT INTO processing_version_alias(id,description) "
-                            "VALUES (64738, 'test_server_1_alias_2')" )
-            cursor.execute( "INSERT INTO processing_version_alias(id,description) "
-                            "VALUES (64739, 'test_server_2_alias_1')" )
-            con.commit()
-
-        yield True
-
-    finally:
-        with db.DB() as con:
-            cursor = con.cursor()
-            cursor.execute( "DELETE FROM processing_version_alias WHERE id IN (64738,64739,64740)" )
-            cursor.execute( "DELETE FROM processing_version WHERE id IN (64738,64739,64740)" )
-            con.commit()
 
 
 # If you've manually loaded your test database, but haven't
@@ -43,41 +10,45 @@ def test_just_make_a_user( test_user ):
     pass
 
 
-def test_getprocvers( server_test_processing_versions, test_user, fastdb_client ):
+def test_getprocvers( procver_collection, test_user, fastdb_client ):
     res = fastdb_client.post( '/getprocvers' )
     assert isinstance( res, dict )
     assert res['status'] == 'ok'
-    assert res['procvers'] == [ 'test_procesing_version',
-                                'test_server_1', 'test_server_1_alias_1', 'test_server_1_alias_2',
-                                'test_server_2', 'test_server_2_alias_1', 'test_server_3' ]
+    assert res['procvers'] == [ 'default', 'pvc_pv1', 'pvc_pv2', 'pvc_pv3', 'realtime' ]
 
 
-def test_procver( server_test_processing_versions, test_user, fastdb_client ):
-    for suffix in [ '64738', 'test_server_1', 'test_server_1_alias_1', 'test_server_1_alias_2' ]:
+def test_procver( procver_collection, test_user, fastdb_client ):
+    bpvs, pvs = procver_collection
+
+    for suffix in [ 'default', pvs['pv3'].description, pvs['pv3'].id ]:
         res = fastdb_client.post( f'/procver/{suffix}' )
-        assert isinstance( res, dict )
-        assert res['status'] == 'ok'
-        assert res['id'] == 64738
-        assert res['description'] == 'test_server_1'
-        assert res['aliases'] == [ 'test_server_1_alias_1', 'test_server_1_alias_2' ]
+        assert res['id'] == str( pvs['pv3'].id )
+        assert res['description'] == pvs['pv3'].description
+        assert res['aliases'] == [ 'default' ]
+        assert res['base_procvers'] == [ bpvs[i].description for i in [ 'bpv3' ] ]
 
-    for suffix in [ '64739', 'test_server_2', 'test_server_2_alias_1' ]:
+    for suffix in [ pvs['pv2'].description, pvs['pv2'].id ]:
         res = fastdb_client.post( f'/procver/{suffix}' )
-        assert isinstance( res, dict )
-        assert res['status'] == 'ok'
-        assert res['id'] == 64739
-        assert res['description'] == 'test_server_2'
-        assert res['aliases'] == [ 'test_server_2_alias_1' ]
-
-    for suffix in [ '64740', 'test_server_3' ]:
-        res = fastdb_client.post( f'/procver/{suffix}' )
-        assert isinstance( res, dict )
-        assert res['status'] == 'ok'
-        assert res['id'] == 64740
-        assert res['description'] == 'test_server_3'
+        assert res['id'] == str( pvs['pv2'].id )
+        assert res['description'] == pvs['pv2'].description
         assert res['aliases'] == []
+        assert res['base_procvers'] == [ bpvs[i].description for i in [ 'bpv2a', 'bpv2' ] ]
 
-    # Reduce retries so that these calls will fail fast
+    for suffix in [ pvs['pv1'].description, pvs['pv1'].id ]:
+        res = fastdb_client.post( f'/procver/{suffix}' )
+        assert res['id'] == str( pvs['pv1'].id )
+        assert res['description'] == pvs['pv1'].description
+        assert res['aliases'] == []
+        assert res['base_procvers'] == [ bpvs[i].description for i in [ 'bpv1b', 'bpv1a', 'bpv1' ] ]
+
+    for suffix in [ pvs['realtime'].description, pvs['realtime'].id ]:
+        res = fastdb_client.post( f'/procver/{suffix}' )
+        assert res['id'] == str( pvs['realtime'].id )
+        assert res['description'] == pvs['realtime'].description
+        assert res['aliases'] == []
+        assert res['base_procvers'] == [ bpvs[i].description for i in [ 'realtime' ] ]
+
+    # Temporarily reduce retries to 0 so these will fail fast
     orig_retries = fastdb_client.retries
     try:
         fastdb_client.retries = 0
@@ -85,5 +56,76 @@ def test_procver( server_test_processing_versions, test_user, fastdb_client ):
             res = fastdb_client.post( '/procver/64741' )
         with pytest.raises( RuntimeError, match='Got status 500 trying to connect' ):
             res = fastdb_client.post( '/procver/does_not_exist' )
+    finally:
+        fastdb_client.retries = orig_retries
+
+
+def test_base_procver( procver_collection, test_user, fastdb_client ):
+    bpvs, _pvs = procver_collection
+
+    for k, bpv in bpvs.items():
+        for suffix in [ k, bpv.id ]:
+            suffix = f'pvc_{k}' if k != 'realtime' else suffix
+            res = fastdb_client.post( f'/baseprocver/{suffix}' )
+            assert res['id'] == str( bpv.id )
+            assert res['description'] == bpv.description
+            if k == 'realtime':
+                assert res['procvers'] == [ 'realtime' ]
+            else:
+                match = re.search( r'pv(\d)', k )
+                pv = f'pvc_pv{match.group(1)}'
+                assert res['procvers'] == [ pv ]
+
+
+def test_countthings( set_of_lightcurves, test_user, fastdb_client ):
+    for pv in ( '', 'pvc_pv2', 'pvc_pv3', 'default' ):
+        for table in ( 'diaobject', 'object' ):
+            suffix = table if pv == '' else f'{table}/{pv}'
+            res = fastdb_client.post( f'/count/{suffix}' )
+            assert res['status'] == 'ok'
+            assert res['table'] == 'diaobject'
+            assert res['count'] == ( 4 if pv == 'pvc_pv2' else 0 )
+
+        for table in ( 'diasource', 'source' ):
+            suffix = table if pv == '' else f'{table}/{pv}'
+            res = fastdb_client.post( f'/count/{suffix}' )
+            assert res['status'] == 'ok'
+            assert res['table'] == 'diasource'
+            assert res['count'] == 52
+
+        for table in ( 'diaforcedsource', 'forced' ):
+            suffix = table if pv == '' else f'{table}/{pv}'
+            res = fastdb_client.post( f'/count/{suffix}' )
+            assert res['status'] == 'ok'
+            assert res['table'] == 'diaforcedsource'
+            assert res['count'] == 100
+
+
+    for table in ( 'diaobject', 'object' ):
+        res = fastdb_client.post( f'/count/{table}/realtime' )
+        assert res['status'] == 'ok'
+        assert res['table'] == 'diaobject'
+        assert res['count'] == 3
+
+    for table in ( 'diasource', 'source' ):
+        res = fastdb_client.post( f'/count/{table}/realtime' )
+        assert res['status'] == 'ok'
+        assert res['table'] == 'diasource'
+        assert res['count'] == 39
+
+    for table in ( 'diaforcedsource', 'forced' ):
+        res = fastdb_client.post( f'/count/{table}/realtime' )
+        assert res['status'] == 'ok'
+        assert res['table'] == 'diaforcedsource'
+        assert res['count'] == 55
+
+    # Temporarily reduce retries to 0 so these will fail fast
+    orig_retries = fastdb_client.retries
+    try:
+        fastdb_client.retries = 0
+        with pytest.raises( RuntimeError, match='Got status 500 trying to connect' ):
+            res = fastdb_client.post( '/count/diaobject/this_processing_version_does_not_exist' )
+        with pytest.raises( RuntimeError, match='Got status 500 trying to connect' ):
+            res = fastdb_client.post( '/count/this_table_does_not_exist' )
     finally:
         fastdb_client.retries = orig_retries

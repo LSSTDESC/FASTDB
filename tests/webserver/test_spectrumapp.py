@@ -12,7 +12,9 @@ import db
 
 
 @pytest.fixture
-def setup_wanted_spectra_etc( procver, alerts_90days_sent_received_and_imported, test_user ):
+def setup_wanted_spectra_etc( procver_collection, alerts_90days_sent_received_and_imported, test_user ):
+    bpvs, _pvs = procver_collection
+    rtbpv = bpvs['realtime']
     # Prime the database with some wanted spectra
     # Some objects of interest:
     #    1696949 — 5 detections, 5 forced
@@ -41,9 +43,9 @@ def setup_wanted_spectra_etc( procver, alerts_90days_sent_received_and_imported,
         with db.DB() as con:
             cursor = con.cursor()
             cursor.execute( "SELECT rootid,diaobjectid FROM diaobject "
-                            "WHERE diaobjectid=ANY(%(obj)s) AND processing_version=%(procver)s",
+                            "WHERE diaobjectid=ANY(%(obj)s) AND base_procver_id=%(procver)s",
                             { 'obj': [ 1696949, 1981540, 191776, 1747042, 1173200 ],
-                              'procver': procver.id } )
+                              'procver': rtbpv.id } )
             idmap = { r[1]: r[0] for r in cursor.fetchall() }
             assert len(idmap) == 5
 
@@ -204,17 +206,19 @@ def setup_spectrum_info( setup_wanted_spectra_etc ):
 
 
 
-def test_ask_for_spectra( procver, alerts_90days_sent_received_and_imported, fastdb_client ):
+def test_ask_for_spectra( procver_collection, alerts_90days_sent_received_and_imported, fastdb_client ):
+    _bpvs, pvs = procver_collection
+    rtpv = pvs['realtime']
     try:
         # Get some hot lightcurves
-        df, _hostdf = ltcv.get_hot_ltcvs( procver.description, mjd_now=60328., source_patch=True )
-        assert df.midpointmjdtai.max() < 60328.
-        assert len(df.rootid.unique()) == 14
+        df, objdf, _hostdf = ltcv.get_hot_ltcvs( rtpv.description, mjd_now=60328., source_patch=True )
+        assert df.index.get_level_values('mjd').max() < 60328.
+        assert len(objdf.rootid.unique()) == 14
         assert len(df) == 310
 
         # Pick out five objects to ask for spectra
 
-        chosenobjs = [ str(i) for i in df.rootid.unique()[ numpy.array([1, 5, 7]) ] ]
+        chosenobjs = [ str(i) for i in objdf.rootid.unique()[ numpy.array([1, 5, 7]) ] ]
 
         # Ask
 
@@ -265,7 +269,7 @@ def test_get_wanted_spectra( setup_wanted_spectra_etc, fastdb_client ):
     assert isinstance( res, dict )
     assert res['status'] == 'ok'
     assert len( res['wantedspectra'] ) == 1
-    assert str( res['wantedspectra'][0]['oid'] ) == str( idmap[1981540] )
+    assert str( res['wantedspectra'][0]['root_diaobject_id'] ) == str( idmap[1981540] )
 
     # Test 2 : set a bunch of filters to None to see if we get everything
     # We should get back *6* responses.  Five objects, but one is requested
@@ -275,8 +279,8 @@ def test_get_wanted_spectra( setup_wanted_spectra_etc, fastdb_client ):
                                                                 'detected_since_mjd': None,
                                                                 'no_spectra_in_last_days': None } )
     assert len( res['wantedspectra'] ) == 6
-    assert set( r['req'] for r in res['wantedspectra'] ) == { 'requester1', 'requester2' }
-    assert len( set( r['oid'] for r in res['wantedspectra'] ) ) == 5
+    assert set( r['requester'] for r in res['wantedspectra'] ) == { 'requester1', 'requester2' }
+    assert len( set( r['root_diaobject_id'] for r in res['wantedspectra'] ) ) == 5
 
     # Test 3: Like last time, but set no_spectra_in_last_days to 1; shouldn't change the result
     res = fastdb_client.post( '/spectrum/spectrawanted', json={ 'mjd_now': mjdnow,
@@ -284,8 +288,8 @@ def test_get_wanted_spectra( setup_wanted_spectra_etc, fastdb_client ):
                                                                 'detected_since_mjd': None,
                                                                 'no_spectra_in_last_days': 1 } )
     assert len( res['wantedspectra'] ) == 6
-    assert set( r['req'] for r in res['wantedspectra'] ) == { 'requester1', 'requester2' }
-    assert len( set( r['oid'] for r in res['wantedspectra'] ) ) == 5
+    assert set( r['requester'] for r in res['wantedspectra'] ) == { 'requester1', 'requester2' }
+    assert len( set( r['root_diaobject_id'] for r in res['wantedspectra'] ) ) == 5
 
     # Test 4: Now no_spectra_in_last_days is 3, should filter out 191776
     res = fastdb_client.post( '/spectrum/spectrawanted', json={ 'mjd_now': mjdnow,
@@ -293,18 +297,18 @@ def test_get_wanted_spectra( setup_wanted_spectra_etc, fastdb_client ):
                                                                 'detected_since_mjd': None,
                                                                 'no_spectra_in_last_days': 3 } )
     assert len( res['wantedspectra'] ) == 5
-    assert set( r['req'] for r in res['wantedspectra'] ) == { 'requester1', 'requester2' }
-    assert len( set( r['oid'] for r in res['wantedspectra'] ) ) == 4
-    assert str( idmap[191776] ) not in [ r['oid'] for r in res['wantedspectra'] ]
+    assert set( r['requester'] for r in res['wantedspectra'] ) == { 'requester1', 'requester2' }
+    assert len( set( r['root_diaobject_id'] for r in res['wantedspectra'] ) ) == 4
+    assert str( idmap[191776] ) not in [ r['root_diaobject_id'] for r in res['wantedspectra'] ]
 
     # Test 5: no_spectra_in_last_days defaults to 7, filters out 191776 again
     res = fastdb_client.post( '/spectrum/spectrawanted', json={ 'mjd_now': mjdnow,
                                                                 'not_claimed_in_last_days': None,
                                                                 'detected_since_mjd': None } )
     assert len( res['wantedspectra'] ) == 5
-    assert set( r['req'] for r in res['wantedspectra'] ) == { 'requester1', 'requester2' }
-    assert len( set( r['oid'] for r in res['wantedspectra'] ) ) == 4
-    assert str( idmap[191776] ) not in [ r['oid'] for r in res['wantedspectra'] ]
+    assert set( r['requester'] for r in res['wantedspectra'] ) == { 'requester1', 'requester2' }
+    assert len( set( r['root_diaobject_id'] for r in res['wantedspectra'] ) ) == 4
+    assert str( idmap[191776] ) not in [ r['root_diaobject_id'] for r in res['wantedspectra'] ]
 
     # Test 6: using only the detected_since_mjd test, put in 60330, should filter out
     #   1173200 -- which is the one requested by requester2
@@ -313,9 +317,9 @@ def test_get_wanted_spectra( setup_wanted_spectra_etc, fastdb_client ):
                                                                 'detected_since_mjd': 60330.,
                                                                 'no_spectra_in_last_days': None } )
     assert len( res['wantedspectra'] ) == 4
-    assert all( r['req'] == 'requester1' for r in res['wantedspectra'] )
-    assert set( r['oid'] for r in res['wantedspectra'] ) == { str(idmap[i]) for i in
-                                                              [ 1696949, 1981540, 191776, 1747042 ] }
+    assert all( r['requester'] == 'requester1' for r in res['wantedspectra'] )
+    assert set( r['root_diaobject_id'] for r in res['wantedspectra'] ) == { str(idmap[i]) for i in
+                                                                            [ 1696949, 1981540, 191776, 1747042 ] }
 
 
     # Test 7: detected_in_last_days = 15 should throw out 1747042 and 1173200
@@ -324,9 +328,9 @@ def test_get_wanted_spectra( setup_wanted_spectra_etc, fastdb_client ):
                                                                 'detected_in_last_days': 15,
                                                                 'no_spectra_in_last_days': None } )
     assert len( res['wantedspectra'] ) == 3
-    assert all( r['req'] == 'requester1' for r in res['wantedspectra'] )
-    assert set( r['oid'] for r in res['wantedspectra'] ) == { str(idmap[i]) for i in
-                                                              [ 1696949, 1981540, 191776 ] }
+    assert all( r['requester'] == 'requester1' for r in res['wantedspectra'] )
+    assert set( r['root_diaobject_id'] for r in res['wantedspectra'] ) == { str(idmap[i]) for i in
+                                                                            [ 1696949, 1981540, 191776 ] }
 
     # Test 8: passing both detected_in_last_days and detected_since_mjd should ignore ..._last_days
     res = fastdb_client.post( '/spectrum/spectrawanted', json={ 'mjd_now': mjdnow,
@@ -335,9 +339,9 @@ def test_get_wanted_spectra( setup_wanted_spectra_etc, fastdb_client ):
                                                                 'detected_in_last_days': 15,
                                                                 'no_spectra_in_last_days': None } )
     assert len( res['wantedspectra'] ) == 4
-    assert all( r['req'] == 'requester1' for r in res['wantedspectra'] )
-    assert set( r['oid'] for r in res['wantedspectra'] ) == { str(idmap[i]) for i in
-                                                              [ 1696949, 1981540, 191776, 1747042 ] }
+    assert all( r['requester'] == 'requester1' for r in res['wantedspectra'] )
+    assert set( r['root_diaobject_id'] for r in res['wantedspectra'] ) == { str(idmap[i]) for i in
+                                                                            [ 1696949, 1981540, 191776, 1747042 ] }
 
     # Test 10 and 11: check requester
     res = fastdb_client.post( '/spectrum/spectrawanted', json={ 'mjd_now': mjdnow,
@@ -346,8 +350,8 @@ def test_get_wanted_spectra( setup_wanted_spectra_etc, fastdb_client ):
                                                                 'detected_since_mjd': None,
                                                                 'no_spectra_in_last_days': None } )
     assert len( res['wantedspectra'] ) == 5
-    assert all( r['req'] == 'requester1' for r in res['wantedspectra'] )
-    assert len( set( r['oid'] for r in res['wantedspectra'] ) ) == 5
+    assert all( r['requester'] == 'requester1' for r in res['wantedspectra'] )
+    assert len( set( r['root_diaobject_id'] for r in res['wantedspectra'] ) ) == 5
 
     res = fastdb_client.post( '/spectrum/spectrawanted', json={ 'mjd_now': mjdnow,
                                                                 'requester': 'requester2',
@@ -355,8 +359,8 @@ def test_get_wanted_spectra( setup_wanted_spectra_etc, fastdb_client ):
                                                                 'detected_since_mjd': None,
                                                                 'no_spectra_in_last_days': None } )
     assert len( res['wantedspectra'] ) == 1
-    assert res['wantedspectra'][0]['req'] == 'requester2'
-    assert res['wantedspectra'][0]['oid'] == str( idmap[1173200] )
+    assert res['wantedspectra'][0]['requester'] == 'requester2'
+    assert res['wantedspectra'][0]['root_diaobject_id'] == str( idmap[1173200] )
 
     # Test 12: lim_mag = 23.0 should throw out 1173200 and 1747042
     res = fastdb_client.post( '/spectrum/spectrawanted', json={ 'mjd_now': mjdnow,
@@ -365,10 +369,10 @@ def test_get_wanted_spectra( setup_wanted_spectra_etc, fastdb_client ):
                                                                 'no_spectra_in_last_days': None,
                                                                 'lim_mag': 23. } )
     assert len( res['wantedspectra'] ) == 3
-    assert len( set( r['oid'] for r in res['wantedspectra'] ) ) == 3
-    assert str(idmap[1696949]) in [ r['oid'] for r in res['wantedspectra'] ]
-    assert str(idmap[1173200]) not in [ r['oid'] for r in res['wantedspectra'] ]
-    assert str(idmap[1747042]) not in [ r['oid'] for r in res['wantedspectra'] ]
+    assert len( set( r['root_diaobject_id'] for r in res['wantedspectra'] ) ) == 3
+    assert str(idmap[1696949]) in [ r['root_diaobject_id'] for r in res['wantedspectra'] ]
+    assert str(idmap[1173200]) not in [ r['root_diaobject_id'] for r in res['wantedspectra'] ]
+    assert str(idmap[1747042]) not in [ r['root_diaobject_id'] for r in res['wantedspectra'] ]
 
     # Test 13: lim_mag = 23.0 and lim_mag_band='r' should throw out 1981540 and 1173200
     res = fastdb_client.post( '/spectrum/spectrawanted', json={ 'mjd_now': mjdnow,
@@ -378,10 +382,10 @@ def test_get_wanted_spectra( setup_wanted_spectra_etc, fastdb_client ):
                                                                 'lim_mag': 23.3,
                                                                 'lim_mag_band': 'r'} )
     assert len( res['wantedspectra'] ) == 3
-    assert len( set( r['oid'] for r in res['wantedspectra'] ) ) == 3
-    assert str(idmap[1696949]) in [ r['oid'] for r in res['wantedspectra'] ]
-    assert str(idmap[1173200]) not in [ r['oid'] for r in res['wantedspectra'] ]
-    assert str(idmap[1981540]) not in [ r['oid'] for r in res['wantedspectra'] ]
+    assert len( set( r['root_diaobject_id'] for r in res['wantedspectra'] ) ) == 3
+    assert str(idmap[1696949]) in [ r['root_diaobject_id'] for r in res['wantedspectra'] ]
+    assert str(idmap[1173200]) not in [ r['root_diaobject_id'] for r in res['wantedspectra'] ]
+    assert str(idmap[1981540]) not in [ r['root_diaobject_id'] for r in res['wantedspectra'] ]
 
 
 def test_plan_spectrum( setup_wanted_spectra_etc, fastdb_client ):
@@ -391,7 +395,7 @@ def test_plan_spectrum( setup_wanted_spectra_etc, fastdb_client ):
     # Add another, see if it goes.
 
     res = fastdb_client.post( '/spectrum/planspectrum',
-                              json={ 'oid': str(idmap[1747042]),
+                              json={ 'root_diaobject_id': str(idmap[1747042]),
                                      'facility': 'Second test facility',
                                      'plantime': '2031-12-13 02:00:00'
                                     } )
@@ -413,12 +417,12 @@ def test_remove_spectrum_plan( setup_wanted_spectra_etc, fastdb_client ):
     _mjdnow, _now, idmap = setup_wanted_spectra_etc
 
     res = fastdb_client.post( '/spectrum/planspectrum',
-                              json={ 'oid': str(idmap[1747042]),
+                              json={ 'root_diaobject_id': str(idmap[1747042]),
                                      'facility': 'Second test facility',
                                      'plantime': '2031-12-13 02:00:00'
                                     } )
 
-    res = fastdb_client.post( 'spectrum/removespectrumplan', json={ 'oid': str(idmap[1747042]),
+    res = fastdb_client.post( 'spectrum/removespectrumplan', json={ 'root_diaobject_id': str(idmap[1747042]),
                                                                     'facility': 'test facility' } )
     assert res['status'] == 'ok'
     assert res['ndel'] == 1
@@ -438,7 +442,7 @@ def test_report_spectrum_info( setup_wanted_spectra_etc, fastdb_client ):
     _mjdnow, _now, idmap = setup_wanted_spectra_etc
 
     res = fastdb_client.post( '/spectrum/reportspectruminfo',
-                              json={ 'oid': str( idmap[1747042] ),
+                              json={ 'root_diaobject_id': str( idmap[1747042] ),
                                      'facility': "Rob's C8 in his back yard",
                                      'mjd': 60364.128,
                                      'z': 1.36,
@@ -467,9 +471,9 @@ def test_get_known_spectrum_info( setup_spectrum_info, fastdb_client):
     res = fastdb_client.post( "/spectrum/getknownspectruminfo", json={} )
     assert isinstance( res, list )
     assert len(res) == 4
-    assert set( r['oid'] for r in res ) == set( str(idmap[i]) for i in ( 191776, 1173200 ) )
+    assert set( r['root_diaobject_id'] for r in res ) == set( str(idmap[i]) for i in ( 191776, 1173200 ) )
     for r in res:
-        if r['oid'] == str( idmap[191776] ):
+        if r['root_diaobject_id'] == str( idmap[191776] ):
             assert r['classid'] == 2342 if r['facility'] == "Rob's C8 in his back yard" else 2222
         else:
             assert r['classid'] == 2322 if r['facility'] == "Galileo's Telescope" else 2235
@@ -477,25 +481,26 @@ def test_get_known_spectrum_info( setup_spectrum_info, fastdb_client):
     # Get only the ones from test facility
     res = fastdb_client.post( "/spectrum/getknownspectruminfo", json={ 'facility': 'test facility' } )
     assert len(res) == 2
-    assert set( r['oid'] for r in res ) == set( str(idmap[i]) for i in ( 191776, 1173200 ) )
+    assert set( r['root_diaobject_id'] for r in res ) == set( str(idmap[i]) for i in ( 191776, 1173200 ) )
     assert set( r['classid'] for r in res ) == { 2222, 2235 }
 
-    # Test filtering by oid
-    res = fastdb_client.post( "/spectrum/getknownspectruminfo", json={ 'oid': str(idmap[191776]) } )
-    assert all( r['oid'] == str(idmap[191776]) for r in res )
+    # Test filtering by root_diaobject_id
+    res = fastdb_client.post( "/spectrum/getknownspectruminfo", json={ 'root_diaobject_ids': str(idmap[191776]) } )
+    assert all( r['root_diaobject_id'] == str(idmap[191776]) for r in res )
     assert set( r['facility'] for r in res ) == { "test facility", "Rob's C8 in his back yard" }
 
     res = fastdb_client.post( "/spectrum/getknownspectruminfo",
-                              json={ 'oid': [ str(idmap[191776]), 'e7cb3c55-6679-4e4f-8e36-d2c6eab8faa1' ] } )
-    assert all( r['oid'] == str(idmap[191776]) for r in res )
+                              json={ 'root_diaobject_ids': [ str(idmap[191776]),
+                                                             'e7cb3c55-6679-4e4f-8e36-d2c6eab8faa1' ] } )
+    assert all( r['root_diaobject_id'] == str(idmap[191776]) for r in res )
     assert set( r['facility'] for r in res ) == { "test facility", "Rob's C8 in his back yard" }
 
-    res = fastdb_client.post( "/spectrum/getknownspectruminfo", json={ 'oid': [ str(idmap[191776]),
-                                                                                str(idmap[1173200]) ] } )
+    res = fastdb_client.post( "/spectrum/getknownspectruminfo", json={ 'root_diaobject_ids': [ str(idmap[191776]),
+                                                                                               str(idmap[1173200]) ] } )
     assert len(res) == 4
-    assert set( r['oid'] for r in res ) == set( str(idmap[i]) for i in ( 191776, 1173200 ) )
+    assert set( r['root_diaobject_id'] for r in res ) == set( str(idmap[i]) for i in ( 191776, 1173200 ) )
     for r in res:
-        if r['oid'] == str( idmap[191776] ):
+        if r['root_diaobject_id'] == str( idmap[191776] ):
             assert r['classid'] == 2342 if r['facility'] == "Rob's C8 in his back yard" else 2222
         else:
             assert r['classid'] == 2322 if r['facility'] == "Galileo's Telescope" else 2235
@@ -503,13 +508,13 @@ def test_get_known_spectrum_info( setup_spectrum_info, fastdb_client):
     # Test filtering by mjd
     res = fastdb_client.post( "/spectrum/getknownspectruminfo", json={ 'mjd_min': mjdnow-5 } )
     assert len(res) ==2
-    assert set( r['oid'] for r in res ) == set( str(idmap[i]) for i in ( 191776, 1173200 ) )
+    assert set( r['root_diaobject_id'] for r in res ) == set( str(idmap[i]) for i in ( 191776, 1173200 ) )
     assert set( r['facility'] for r in res ) == {  "test facility", "Galileo's Telescope" }
     assert set( r['z'] for r in res ) == { 0.005, 0.25 }
 
     res = fastdb_client.post( "/spectrum/getknownspectruminfo", json={ 'mjd_max': mjdnow-5 } )
     assert len(res) ==2
-    assert set( r['oid'] for r in res ) == set( str(idmap[i]) for i in ( 191776, 1173200 ) )
+    assert set( r['root_diaobject_id'] for r in res ) == set( str(idmap[i]) for i in ( 191776, 1173200 ) )
     assert set( r['facility'] for r in res ) == {  "test facility", "Rob's C8 in his back yard" }
     assert set( r['z'] for r in res ) == { 0.12, 1.25 }
 
@@ -517,7 +522,7 @@ def test_get_known_spectrum_info( setup_spectrum_info, fastdb_client):
     res = fastdb_client.post( "/spectrum/getknownspectruminfo", json={ 'mjd_min': mjdnow-15,
                                                                        'mjd_max': mjdnow-5 } )
     assert len(res) == 1
-    assert res[0]['oid'] == str( idmap[191776] )
+    assert res[0]['root_diaobject_id'] == str( idmap[191776] )
     assert res[0]['facility'] == "Rob's C8 in his back yard"
     assert res[0]['classid'] == 2342
     assert res[0]['z'] == 1.25
@@ -526,7 +531,7 @@ def test_get_known_spectrum_info( setup_spectrum_info, fastdb_client):
 
     res = fastdb_client.post( "/spectrum/getknownspectruminfo", json={ 'classid': 2342 } )
     assert len(res) == 1
-    assert res[0]['oid'] == str( idmap[191776] )
+    assert res[0]['root_diaobject_id'] == str( idmap[191776] )
     assert res[0]['facility'] == "Rob's C8 in his back yard"
     assert res[0]['classid'] == 2342
     assert res[0]['z'] == 1.25
@@ -537,19 +542,19 @@ def test_get_known_spectrum_info( setup_spectrum_info, fastdb_client):
     # Test filtering by z
     res = fastdb_client.post( "/spectrum/getknownspectruminfo", json={ 'z_min': 0.2 } )
     assert len(res) == 2
-    assert all( r['oid'] == str(idmap[191776]) for r in res )
+    assert all( r['root_diaobject_id'] == str(idmap[191776]) for r in res )
     assert set( r['facility'] for r in res ) == { 'test facility', "Rob's C8 in his back yard" }
 
     res = fastdb_client.post( "/spectrum/getknownspectruminfo", json={ 'z_max': 0.01 } )
     assert len(res) == 1
-    assert res[0]['oid'] == str( idmap[1173200] )
+    assert res[0]['root_diaobject_id'] == str( idmap[1173200] )
     assert res[0]['facility'] == "Galileo's Telescope"
     assert res[0]['z'] == 0.005
     assert res[0]['classid'] == 2322
 
     res = fastdb_client.post( "/spectrum/getknownspectruminfo", json={ 'z_min': 0.1, 'z_max': 0.2 } )
     assert len(res) == 1
-    assert res[0]['oid'] == str( idmap[1173200] )
+    assert res[0]['root_diaobject_id'] == str( idmap[1173200] )
     assert res[0]['facility'] == "test facility"
     assert res[0]['z'] == 0.12
     assert res[0]['classid'] == 2235
@@ -558,6 +563,6 @@ def test_get_known_spectrum_info( setup_spectrum_info, fastdb_client):
     res = fastdb_client.post( "/spectrum/getknownspectruminfo",
                               json={ 'since': ( now - datetime.timedelta(days=5) ).isoformat() } )
     assert len(res) == 2
-    assert set( r['oid'] for r in res ) == set( str(idmap[i]) for i in ( 191776, 1173200 ) )
+    assert set( r['root_diaobject_id'] for r in res ) == set( str(idmap[i]) for i in ( 191776, 1173200 ) )
     assert set( r['facility'] for r in res ) == { "test facility", "Galileo's Telescope" }
     assert set( r['classid'] for r in res ) == { 2222, 2322 }

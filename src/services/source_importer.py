@@ -3,7 +3,8 @@ import datetime
 import argparse
 
 import db
-import psycopg.rows
+
+import util
 
 
 class SourceImporter:
@@ -40,26 +41,28 @@ class SourceImporter:
                               'scienceFlux', 'scienceFluxErr', 'time_processed', 'time_withdrawn' ]
 
 
-    def __init__( self, processing_version, object_match_radius=1. ):
+    def __init__( self, base_processing_version, object_base_processing_version, object_match_radius=1. ):
         """Create a SourceImporter.
 
         Parameters
         ----------
-          processing_version : int
-            The processing version.  This must be the key of a valid
-            entry in the processing_version table.
+          base_processing_version : UUID or str
+            The processing version.  This must be a valid entry (id or
+            description) in the base_processing_version table.
 
           object_match_radius : float, default 1.
             Objects within this many arcsec of an existing object will be considered
             the same root_diaobject.
 
         """
-        self.processing_version = int( processing_version )
+        self.base_processing_version = util.base_procver_id( base_processing_version )
+        self.object_base_processing_version = util.base_procver_id( object_base_processing_version )
         self.object_match_radius = float( object_match_radius )
 
 
     def _read_mongo_fields( self, pqconn, collection, pipeline, fields, temptable, liketable,
-                            t0=None, t1=None, batchsize=10000, procver_fields=['processing_version'] ):
+                            t0=None, t1=None, batchsize=10000, procver_fields=['base_procver_id'],
+                            isobj=False ):
         if not re.search( "^[a-zA-Z0-9_]+$", temptable ):
             raise ValueError( f"Invalid temp table name {temptable}" )
         if not re.search( "^[a-zA-Z0-9_]+$", liketable ):
@@ -85,7 +88,8 @@ class SourceImporter:
         mongocursor = collection.aggregate( pipeline )
         writefields = list( fields )
         writefields.extend( procver_fields )
-        procverextend = [ self.processing_version for i in procver_fields ]
+        bpv = self.object_base_processing_version if isobj else self.base_processing_version
+        procverextend = [ bpv for i in procver_fields ]
         with pqcursor.copy( f"COPY {temptable}({','.join(writefields)}) FROM STDIN" ) as pgcopy:
             for row in mongocursor:
                 # This is probably inefficient.  Generator to list to tuple.  python makes
@@ -125,7 +129,7 @@ class SourceImporter:
         pipeline = [ { "$group": group } ]
 
         self._read_mongo_fields( pqconn, collection, pipeline, fields, "temp_diaobject_import", "diaobject",
-                                 t0=t0, t1=t1, batchsize=batchsize )
+                                 t0=t0, t1=t1, batchsize=batchsize, isobj=True )
 
 
     def read_mongo_sources( self, pqconn, collection, t0=None, t1=None, batchsize=10000 ):
@@ -145,7 +149,7 @@ class SourceImporter:
 
         self._read_mongo_fields( pqconn, collection, pipeline, fields, "temp_diasource_import", "diasource",
                                  t0=t0, t1=t1, batchsize=batchsize,
-                                 procver_fields=[ 'processing_version' ] )
+                                 procver_fields=[ 'base_procver_id' ] )
 
 
     def read_mongo_prvsources( self, pqconn, collection, t0=None, t1=None, batchsize=10000 ):
@@ -167,7 +171,7 @@ class SourceImporter:
 
         self._read_mongo_fields( pqconn, collection, pipeline, fields, "temp_prvdiasource_import", "diasource",
                                  t0=t0, t1=t1, batchsize=batchsize,
-                                 procver_fields=[ 'processing_version' ] )
+                                 procver_fields=[ 'base_procver_id' ] )
 
 
     def read_mongo_prvforcedsources( self, pqconn, collection, t0=None, t1=None, batchsize=10000 ):
@@ -190,7 +194,7 @@ class SourceImporter:
 
         self._read_mongo_fields( pqconn, collection, pipeline, fields, "temp_prvdiaforcedsource_import",
                                  "diaforcedsource", t0=t0, t1=t1, batchsize=batchsize,
-                                 procver_fields=[ 'processing_version' ] )
+                                 procver_fields=[ 'base_procver_id' ] )
 
 
     def import_objects_from_collection( self, collection, t0=None, t1=None, batchsize=10000,
@@ -209,7 +213,7 @@ class SourceImporter:
             cursor.execute( "CREATE TEMP TABLE temp_new_diaobject AS "
                             "( SELECT tdi.* FROM temp_diaobject_import tdi "
                             "  LEFT JOIN diaobject o ON "
-                            "    o.diaobjectid=tdi.diaobjectid AND o.processing_version=tdi.processing_version "
+                            "    o.diaobjectid=tdi.diaobjectid AND o.base_procver_id=tdi.base_procver_id "
                             "  WHERE o.diaobjectid IS NULL )" )
 
             # Link new objects to existing root objects
@@ -217,7 +221,7 @@ class SourceImporter:
             #   objects that match!!!
             cursor.execute( "UPDATE temp_new_diaobject tno SET rootid=o.rootid "
                             "FROM diaobject o "
-                            "WHERE o.processing_version=tno.processing_version "
+                            "WHERE o.base_procver_id=tno.base_procver_id "
                             " AND q3c_radial_query(o.ra, o.dec, tno.ra, tno.dec, %(rad)s)",
                             { 'rad': self.object_match_radius/3600. } )
 
@@ -392,36 +396,20 @@ class SourceImporter:
 def main():
     parser = argparse.ArgumentParser( 'source_importer.py', description='Import sources from mongo to postgres',
                                       formatter_class=argparse.ArgumentDefaultsHelpFormatter )
-    parser.add_argument( "-p", "--processing-version", required=True,
-                         help="Processing version (number or text) to tag imported sources with" )
+    parser.add_argument( "-p", "--base-processing-version", required=True,
+                         help="Base processing version (uuid or text) to tag imported sources with." )
+    parser.add_argument( "-o", "--object-base-processing-version", default=None,
+                         help=( "Base processing version (uuid or text) to tag imported objects with.  "
+                                "Defaults to the same as --base-processing-version" ) )
     parser.add_argument( "-c", "--collection", required=True,
                          help="MongoDB collection to import from" )
     args = parser.parse_args()
 
-    with db.DB() as con:
-        cursor = con.cursor( row_factory=psycopg.rows.dict_row )
-        subdict = {}
-        q = "SELECT * FROM processing_version WHERE "
-        pv = args.processing_version
-        q += "description=%(pv)s"
-        subdict['pv'] = pv
-        try:
-            ipv = int( pv )
-            q += " OR id=%(ipv)s"
-            subdict['ipv'] = ipv
-        except ValueError:
-            pass
-        # TODO : validity dates?
-        cursor.execute( q, subdict )
-        rows = cursor.fetchall()
-        if len(rows) == 0:
-            raise ValueError( f"Could not find processing version {pv}" )
-        if len(rows) > 1:
-            raise ValueError( f"More than one processing version matches {pv}, you're probably screwed." )
+    objpv = ( args.base_processing_version
+              if args.object_base_processing_version is None
+              else args.object_base_processing_version )
 
-        ipv = rows[0]['id']
-
-    si = SourceImporter( ipv )
+    si = SourceImporter( args.base_processing_version, objpv )
     with db.MG() as mg:
         collection = db.get_mongo_collection( mg, args.collection )
         nobj, nsrc, nfrc = si.import_from_mongo( collection )
