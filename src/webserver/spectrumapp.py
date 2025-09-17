@@ -8,7 +8,7 @@ import astropy.time
 import db
 import spectrum
 from webserver.baseview import BaseView
-from util import FDBLogger
+from util import FDBLogger, asUUID
 
 # Want this to be False except when
 #  doing deep-in-the-weeds debugging
@@ -31,16 +31,21 @@ class AskForSpectrum( BaseView ):
              ( len( data['objectids'] ) != len( data['priorities'] ) ) ):
             return "Mal-formed data for askforspectrum", 500
 
+        try:
+            objectids = [ asUUID(i) for i in data['objectids'] ]
+        except Exception:
+            return "Error, all objectids must be UUIDs", 500
+
         now = datetime.datetime.now( tz=datetime.UTC )
         tocreate = [ { 'requester': data['requester'],
-                       'root_diaobject_id': data['objectids'][i],
-                       'wantspec_id': f"{data['objectids'][i]} ; {data['requester']}",
+                       'root_diaobject_id': objectids[i],
+                       'wantspec_id': f"{str(objectids[i])} ; {data['requester']}",
                        'user_id': userid,
                        'priority': ( 0 if int(data['priorities'][i]) < 0
                                      else 5 if int(data['priorities'][i]) > 5
                                      else int(data['priorities'][i] )),
                        'wanttime': now }
-                       for i in range(len(data['objectids'])) ]
+                       for i in range(len(objectids)) ]
 
         n = db.WantedSpectra.bulk_insert_or_upsert( tocreate, upsert=True )
 
@@ -106,11 +111,12 @@ class WhatSpectraAreWanted( BaseView ):
         # Build the return structure
         retarr = []
         for row in df.itertuples():
-            retarr.append( { 'oid': row.root_diaobject_id,
+            retarr.append( { 'root_diaobject_id': row.root_diaobject_id,
+                             'diaobjectid': row.diaobjectid,
+                             'requester': row.requester,
+                             'priority': row.priority,
                              'ra': float( row.ra ),
                              'dec': float( row.dec ),
-                             'req': row.requester,
-                             'prio': int( row.priority ),
                              'latest_source_band': row.src_band,
                              'latest_source_mjd': row.src_mjd,
                              'latest_source_mag': row.src_mag,
@@ -128,8 +134,8 @@ class PlanSpectrum( BaseView ):
     def do_the_things( self ):
         data = flask.request.json
 
-        if not all( i in data for i in ['oid', 'facility', 'plantime'] ):
-            return "JSON payload must include keys oid, facility, plantime", 500
+        if not all( i in data for i in ['root_diaobject_id', 'facility', 'plantime'] ):
+            return "JSON payload must include keys root_diaobject_id, facility, plantime", 500
 
         try:
             plantime = datetime.datetime.fromisoformat( data['plantime'] )
@@ -140,7 +146,7 @@ class PlanSpectrum( BaseView ):
         except (TypeError, ValueError):
             return f"Failed to parse YYYY-MM-DD HH:MM:SS from {data['plantime']}", 500
 
-        kwargs = { 'root_diaobject_id': uuid.UUID( data['oid'] ),
+        kwargs = { 'root_diaobject_id': uuid.UUID( data['root_diaobject_id'] ),
                    'facility': str( data['facility'] ),
                    'plantime': plantime,
                    'comment': data['comment'] if 'comment' in data else None
@@ -158,14 +164,14 @@ class RemoveSpectrumPlan( BaseView ):
     def do_the_things( self ):
         data = flask.request.json
 
-        if ( 'oid' not in data ) or ( 'facility' not in data ):
-            return "JSON payload must include keys oid and facility", 500
+        if ( 'root_diaobject_id' not in data ) or ( 'facility' not in data ):
+            return "JSON payload must include keys root_diaobject_id and facility", 500
 
         with db.DB() as con:
             cursor = con.cursor()
             cursor.execute( "DELETE FROM plannedspectra WHERE root_diaobject_id=%(id)s "
                             "  AND facility=%(fac)s",
-                            { 'id': data['oid'],
+                            { 'id': data['root_diaobject_id'],
                               'fac': data['facility'] } )
             nrows = cursor.rowcount
             con.commit()
@@ -180,10 +186,10 @@ class ReportSpectrumInfo( BaseView ):
     def do_the_things( self ):
         data = flask.request.json
 
-        if not all( i in data for i in [ 'oid', 'facility', 'mjd', 'z', 'classid' ] ):
-            return "JSON payload must include keys oid, facility, mjd, z, and classid", 500
+        if not all( i in data for i in [ 'root_diaobject_id', 'facility', 'mjd', 'z', 'classid' ] ):
+            return "JSON payload must include keys root_diaobject_id, facility, mjd, z, and classid", 500
 
-        specinfo = db.SpectrumInfo( root_diaobject_id=uuid.UUID( data['oid'] ),
+        specinfo = db.SpectrumInfo( root_diaobject_id=uuid.UUID( data['root_diaobject_id'] ),
                                     facility=str( data['facility'] ),
                                     inserted_at=datetime.datetime.now( tz=datetime.UTC ),
                                     mjd=float( data['mjd'] ),
@@ -203,12 +209,7 @@ class GetSpectrumInfo( BaseView ):
     def do_the_things( self ):
         data = flask.request.json.copy()
 
-        if 'oid' in data:
-            data['rootids'] = data['oid']
-            del data['oid']
-
         df = spectrum.get_spectrum_info( logger=FDBLogger, **data )
-        df.rename( columns={ 'root_diaobject_id': 'oid' }, inplace=True )
         df['inserted_at'] = df['inserted_at'].apply( lambda x: x.isoformat() )
         return df.to_dict( 'records' )
 

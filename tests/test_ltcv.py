@@ -391,6 +391,20 @@ def test_object_search( set_of_lightcurves ):
     assert list( j.keys() ) == [ 'diaobjectid' ]
     assert set( j['diaobjectid'] ) == { 200, 201 }
 
+    # Quick check that noforced works.  Well, sort of.  It tests that we don't
+    #   get the forced columns back, but doesn't test that the function actually
+    #   skipped searching that table.  But, whatevs.
+    df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
+                             ra=42., dec=13., radius=17., noforced=True )
+    assert set( df.diaobjectid ) == { 200, 201 }
+    assert all( i not in df.columns for i in [ 'lastforcedmjd', 'lastforcedband',
+                                               'lastforcedflux', 'lastforcedfluxerr' ] )
+    j = ltcv.object_search( processing_version='pvc_pv3', return_format='json',
+                            ra=42., dec=13., radius=17., noforced=True )
+    assert set( j['diaobjectid'] ) == { 200, 201 }
+    assert all( i not in j.keys() for i in [ 'lastforcedmjd', 'lastforcedband',
+                                             'lastforcedflux', 'lastforcedfluxerr' ] )
+
     # Quick bigger search; should get 3 of the 4 objects, ginormous search all of them
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
                              ra=42., dec=13., radius=1800. )

@@ -10,6 +10,7 @@ import astropy.time
 
 import db
 import util
+from util import FDBLogger
 
 
 def get_object_infos( objids=None, objids_table=None, processing_version=None,
@@ -517,11 +518,11 @@ def object_ltcv( processing_version='default', diaobjectid=None,
 
 def debug_count_temp_table( con, table ):
     res = con.execute( f"SELECT COUNT(*) FROM {table}" )
-    util.logger.debug( f"Table {table} has {res[0][0]} rows" )
+    FDBLogger.debug( f"Table {table} has {res[0][0]} rows" )
 
 
-def object_search( processing_version='default', object_processing_version=None,
-                   return_format='json', just_objids=False, dbcon=None, mjd_now=None,
+def object_search( processing_version='default', object_processing_version=None, return_format='json',
+                   just_objids=False, noforced=False, dbcon=None, mjd_now=None,
                    **kwargs ):
     """Search for objects.
 
@@ -550,6 +551,11 @@ def object_search( processing_version='default', object_processing_version=None,
 
       just_objids : bool, default False
          See "Returns" below.
+
+      noforced : bool, default False
+         Do not include forced photometry.  This can speed up the
+         queries.  Ignored if either min_lastmag or max_lastmag is
+         given.
 
       dbcon: psycopg.Connection, db.DBCon, or None
          Database connection to use.  If None, will make a new
@@ -594,7 +600,8 @@ def object_search( processing_version='default', object_processing_version=None,
          be given.
 
       # relwindow_t0, relwindow_t1 : float, default None
-      #    NOT IMPLEMENTED.  Intended to be a time window around maximum-flux detection.
+      #    NOT IMPLEMENTED.  May never be.  Intended to be a time window
+      #    around maximum-flux detection.
 
       mint_firstdetection : float, default None
          Only return objects whose first detection is on this MJD or later.
@@ -652,7 +659,7 @@ def object_search( processing_version='default', object_processing_version=None,
 
       # min_bandsdetected : int, default None
       #    Only return objects that have been detected in at least this many different  bands.
-      #    (Not yet implemented.)
+      #    (Not yet implemented.  May never be.)
 
       mindt_firstlastdetection : float, default None
          Only return objects that have at least this many days between the first and last detection.
@@ -662,13 +669,13 @@ def object_search( processing_version='default', object_processing_version=None,
 
 
       min_lastmag : float, default None
-         The most recent measurement (not detection! includes forced
-         sources) must have a magnitude that is at least this.  (Use
+         The most recent measurement (not detection! searches forced
+         photometry) must have a magnitude that is at least this.  (Use
          this to filter out things that are too bright.)
 
       max_lastmag : float, default None
-         The most recent measurement (not detection! includes forced
-         sources) must have a magnitude that is at most this.  (Use this
+         The most recent measurement (not detection! searches forced
+         photometry) must have a magnitude that is at most this.  (Use this
          to filter out things that are too dim.)
 
 
@@ -685,14 +692,14 @@ def object_search( processing_version='default', object_processing_version=None,
          included in this list.
 
     Returns
-     --------
+    -------
+      retval : pandas.DataFrame or dict
+
       A table of data.  If just_objids is true, this will have a single
       column, "diaobjectid" that has the object ids within the specified
       processing verison of objects that match the search.  Otherwise,
       there will be additional columns.  (For all of these columns,
       assume that there is a "within statbands" in the definition.)
-
-          ROB THIS IS WRONG FIX ALL OF THIS DOCUMENTATION BELOW
 
           diaobjectid — object id (within the specified processing version)
 
@@ -716,23 +723,29 @@ def object_search( processing_version='default', object_processing_version=None,
           maxdetflux — flux (nJy) of max-flux detection
           maxdetfluxerr — uncertainty on maxdetflux
 
-          lastforcedmjd — mjd of last measurement
-          lastforcedband — band of last measurement
-          lastforcedflux — flux (nJy) of last forced detection
+      If noforced is False, and min_lastmag and max_lastmag are both None, there will also be columns:
+
+          lastforcedmjd — mjd of last forced-photometry measurement
+          lastforcedband — band of last forced-photometry measurement
+          lastforcedflux — flux (nJy) of last forced-photometry detection
           lastforcedfluxerr — uncertainty on lastforcedflux
+
+      Note that it is possible that the latest detection will be *later*
+      than the latest forced photometry point!  This will happen when
+      detections have been reported, but forced photometry is not fully
+      up to date.
 
       If return_format is json, then the return is actually a
       dictionary; the keys of the dictionary are the names listed above,
       and the values are lists.  All lists have the same length.
 
-      If return_format is pandas, then the return is a pandas DataFrame
-      with those columns.  (Indexing of the DataFrame is... unclear.
-      Pandas sometimes does stuff automatically, and the author of this
-      code needs to pay more attention to know what's happening.)
+      The table *may* be sorted by diaobjectid, but don't depend on
+      this; this function makes no promises about the sorting of the
+      results.
 
     """
 
-    util.logger.debug( f"In object_search : kwargs = {kwargs}" )
+    FDBLogger.debug( f"In object_search : kwargs = {kwargs}" )
     knownargs = { 'ra', 'dec', 'radius',
                   'window_t0', 'window_t1', 'min_window_numdetections', 'max_window_numdetections',
                   'mint_firstdetection', 'maxt_firstdetection', 'minmag_firstdetection', 'maxmag_firstdetection',
@@ -1018,7 +1031,7 @@ def object_search( processing_version='default', object_processing_version=None,
                ") outersubq" )
         con.execute_nofetch( q, subdict )
 
-        # Analyze the objsearch_stattab table to help postgres do the right thing
+        # Analyze the objsearch_stattab table to help postgres do the right thing.
         con.execute( f"ANALYZE {nexttable}(diaobjectid)", explain=False )
 
         # Add in last detection
@@ -1173,76 +1186,87 @@ def object_search( processing_version='default', object_processing_version=None,
                                  { 'f': 10**((maxmag_maxdetection-zp)/-2.5) } )
             debug_count_temp_table( con, 'objsearch_stattab' )
 
-        nexttable = 'objsearch_stattab'
+        if ( just_objids or noforced ) and ( min_lastmag is None ) and ( max_lastmag is None ):
+            # No need to search the forced source table, and that can be slow because the
+            #  forced photometry table is huge, so just skip it.
+            if just_objids:
+                rows, columns = con.execute( "SELECT diaobjectid FROM objsearch_stattab" )
+            else:
+                rows, columns = con.execute( "SELECT * FROM objsearch_stattab" )
 
-        # Because the diaforcedsource table is going to be the hugest one,
-        #   create an index diabojectid of {nexttable} here to help
-        #   this next query along.  We hope.
-        con.execute( f"CREATE INDEX idx_t_diaobjectid ON {nexttable}(diaobjectid)", explain=False )
-
-        # Reanalyze this table to help postgres do the right thing
-        con.execute( f"ANALYZE {nexttable}(diaobjectid)", explain=False )
-
-        # Get the last forced source
-        q = ( f"/*+ IndexScan(f idx_diaforcedsource_diaobjectid )\n"
-              # f"    HashJoin( f t )\n"
-              f"    Leading( ( (f t) pv ) )\n"
-              f"    Parallel( f 3 hard )\n"
-              f"*/\n"
-              f"SELECT * INTO TEMP TABLE objsearch_final FROM (\n"
-              f"  SELECT DISTINCT ON (diaobjectid) *\n"
-              f"  FROM (\n"
-              f"    SELECT DISTINCT ON (t.diaobjectid, f.visit) t.*,\n"
-              f"        f.psfflux AS lastforcedflux, f.psffluxerr AS lastforcedfluxerr,\n"
-              f"        f.midpointmjdtai AS lastforcedmjd, f.band AS lastforcedband\n"
-              f"    FROM {nexttable} t\n"
-              f"    INNER JOIN diaforcedsource f ON f.diaobjectid=t.diaobjectid\n"
-              f"    INNER JOIN base_procver_of_procver pv ON f.base_procver_id=pv.base_procver_id\n"
-              f"      AND pv.procver_id=%(pv)s\n" )
-        _and = "WHERE"
-        if statbands is not None:
-            q += f"    {_and} f.band=ANY(%(bands)s)\n"
-            _and = "  AND"
-        if mjd_now is not None:
-            q += f"    {_and} f.midpointmjdtai<=%(mjdnow)s\n"
-            _and = "  AND"
-        q += ( "    ORDER BY t.diaobjectid, f.visit, pv.priority DESC\n"
-               "  ) subsubq\n"
-               "  ORDER BY diaobjectid, lastforcedmjd DESC\n"
-               ") subq" )
-        con.execute_nofetch( q, subdict )
-        debug_count_temp_table( con, 'objsearch_final' )
-
-        # Filter based on last magnitude
-        if min_lastmag is not None:
-            con.execute_nofetch( "DELETE FROM objsearch_final WHERE lastforcedflux>%(f)s",
-                                 { 'f': 10**((min_lastmag-zp)/-2.5) } )
-            debug_count_temp_table( con, 'objsearch_final' )
-        if max_lastmag is not None:
-            con.execute_nofetch( "DELETE FROM objsearch_final WHERE lastforcedflux<%(f)s",
-                                 { 'f': 10**((max_lastmag-zp)/-2.5) } )
-            debug_count_temp_table( con, 'objsearch_final' )
-
-        # Pull down the results
-        if just_objids:
-            rows, columns = con.execute( "SELECT diaobjectid FROM objsearch_final" )
         else:
-            rows, columns = con.execute( "SELECT * FROM objsearch_final" )
-        colummap = { columns[i]: i for i in range(len(columns)) }
-        util.logger.debug( f"object_search returning {len(rows)} objects in format {return_format}" )
+            # In this else block, we need to get the latest forced photometry, so do that.
+            nexttable = 'objsearch_stattab'
+
+            # Because the diaforcedsource table is going to be the hugest one,
+            #   create an index diabojectid of {nexttable} here to help
+            #   this next query along.  We hope.
+            con.execute( f"CREATE INDEX idx_t_diaobjectid ON {nexttable}(diaobjectid)", explain=False )
+
+            # Reanalyze this table to help postgres do the right thing
+            con.execute( f"ANALYZE {nexttable}(diaobjectid)", explain=False )
+
+            # Get the last forced source
+            q = ( f"/*+ IndexScan(f idx_diaforcedsource_diaobjectid )\n"
+                  # f"    HashJoin( f t )\n"
+                  f"    Leading( ( (f t) pv ) )\n"
+                  f"    Parallel( f 3 hard )\n"
+                  f"*/\n"
+                  f"SELECT * INTO TEMP TABLE objsearch_final FROM (\n"
+                  f"  SELECT DISTINCT ON (diaobjectid) *\n"
+                  f"  FROM (\n"
+                  f"    SELECT DISTINCT ON (t.diaobjectid, f.visit) t.*,\n"
+                  f"        f.psfflux AS lastforcedflux, f.psffluxerr AS lastforcedfluxerr,\n"
+                  f"        f.midpointmjdtai AS lastforcedmjd, f.band AS lastforcedband\n"
+                  f"    FROM {nexttable} t\n"
+                  f"    INNER JOIN diaforcedsource f ON f.diaobjectid=t.diaobjectid\n"
+                  f"    INNER JOIN base_procver_of_procver pv ON f.base_procver_id=pv.base_procver_id\n"
+                  f"      AND pv.procver_id=%(pv)s\n" )
+            _and = "WHERE"
+            if statbands is not None:
+                q += f"    {_and} f.band=ANY(%(bands)s)\n"
+                _and = "  AND"
+            if mjd_now is not None:
+                q += f"    {_and} f.midpointmjdtai<=%(mjdnow)s\n"
+                _and = "  AND"
+            q += ( "    ORDER BY t.diaobjectid, f.visit, pv.priority DESC\n"
+                   "  ) subsubq\n"
+                   "  ORDER BY diaobjectid, lastforcedmjd DESC\n"
+                   ") subq" )
+            con.execute_nofetch( q, subdict )
+            debug_count_temp_table( con, 'objsearch_final' )
+
+            # Filter based on last magnitude
+            if min_lastmag is not None:
+                con.execute_nofetch( "DELETE FROM objsearch_final WHERE lastforcedflux>%(f)s",
+                                     { 'f': 10**((min_lastmag-zp)/-2.5) } )
+                debug_count_temp_table( con, 'objsearch_final' )
+            if max_lastmag is not None:
+                con.execute_nofetch( "DELETE FROM objsearch_final WHERE lastforcedflux<%(f)s",
+                                     { 'f': 10**((max_lastmag-zp)/-2.5) } )
+                debug_count_temp_table( con, 'objsearch_final' )
+
+            # Pull down the results
+            if just_objids:
+                rows, columns = con.execute( "SELECT diaobjectid FROM objsearch_final" )
+            else:
+                rows, columns = con.execute( "SELECT * FROM objsearch_final" )
+
+    columnmap = { columns[i]: i for i in range(len(columns)) }
+    FDBLogger.debug( f"object_search returning {len(rows)} objects in format {return_format}" )
 
     if return_format == 'json':
-        rval = { c: [ r[colummap[c]] for r in rows ] for c in columns }
+        rval = { c: [ r[columnmap[c]] for r in rows ] for c in columns }
         if ( not just_objids ) and ( 'numdetinwindow' not in rval ):
             rval['numdetinwindow'] = [ None for r in rows ]
-        # util.logger.debug( f"returning json\n{json.dumps(rval,indent=4)}" )
+        # FDBLogger.debug( f"returning json\n{json.dumps(rval,indent=4)}" )
         return rval
 
     elif return_format == 'pandas':
         df = pandas.DataFrame( rows, columns=columns )
         if ( not just_objids ) and ( 'numdetinwindow' not in df.columns ):
             df['numdetinwindow'] = None
-        # util.logger.debug( f"object_search pandas dataframe: {df}" )
+        # FDBLogger.debug( f"object_search pandas dataframe: {df}" )
         return df
 
     else:

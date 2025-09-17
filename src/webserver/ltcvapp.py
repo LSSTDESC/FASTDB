@@ -215,7 +215,7 @@ class GetHotTransients( BaseView ):
     -------
       application/json   (utf-8 encoded, which I believe is required for json)
 
-         The format of the returned JSOn depends on the return_format paremeter.
+         The format of the returned JSON depends on the return_format paremeter.
 
          return_format = 0:
             Returns a list of dictionaries.  Each row corresponds to a single
@@ -328,6 +328,7 @@ class GetHotTransients( BaseView ):
                     'ra': [],
                     'dec': [],
                     'mjd': [],
+                    'visit': [],
                     'band': [],
                     'flux': [],
                     'fluxerr': [],
@@ -399,7 +400,8 @@ class GetHotTransients( BaseView ):
                         if source_patch:
                             toadd['photometry']['ispatch'] = list( subdf['ispatch'] )
                     else:
-                        toadd['mjd'] = list( subdf.index.values ),
+                        toadd['mjd'] = list( subdf.index.values )
+                        toadd['visit'] = list( subdf['visit'] )
                         toadd['band'] = list( subdf['band'] )
                         toadd['flux'] = list( subdf['psfflux'] )
                         toadd['fluxerr'] = list( subdf['psffluxerr'] )
@@ -411,7 +413,8 @@ class GetHotTransients( BaseView ):
                     sne['objectid'].append( str(objid) )
                     sne['ra'].append( subdf.ra.values[0] )
                     sne['dec'].append( subdf.dec.values[0] )
-                    sne['mjd'].append( subdf.index.values ),
+                    sne['mjd'].append( subdf.index.values )
+                    sne['visit'].append( list( subdf['visit'] ) )
                     sne['band'].append( list( subdf['band'] ) )
                     sne['flux'].append( list( subdf['flux'] ) )
                     sne['fluxerr'].append( list( subdf['fluxerr'] ) )

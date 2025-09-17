@@ -121,7 +121,7 @@ def test_what_spectra_are_wanted( wanted_spectra, planned_spectra, reported_spec
 def test_get_spectrum_info( set_of_lightcurves, reported_spectra, more_reported_spectra ):
     roots = set_of_lightcurves
 
-    df = get_spectrum_info( rootids=roots[0]['root'].id )
+    df = get_spectrum_info( root_diaobject_ids=roots[0]['root'].id )
     assert len(df) == 2
     assert set( df.root_diaobject_id ) == { roots[0]['root'].id }
     assert set( df.facility ) == { 'test facility', 'another test facility' }

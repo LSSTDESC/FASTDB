@@ -3,7 +3,6 @@ import io
 import datetime
 import pytz
 import logging
-import collections
 
 import pandas
 import astropy.time
@@ -91,7 +90,19 @@ def what_spectra_are_wanted( procver='realtime', wantsince=None, requester=None,
 
     Returns
     -------
-      pandas dataframe TODO DOCUMENT
+      pandas.DataFrame with columns:
+         root_diaobject_id
+         diabojectid
+         requester
+         priority
+         ra
+         dec
+         src_mjd -- mjd of latest detection
+         src_band -- band of latest detection
+         src_mag -- magnitude (AB) of latest detection
+         frced_mjd -- mjd of last forced-photometry point
+         frced_band -- band of last forced-photometry point
+         frced_mag -- magnitude (AB) of last forced-photometry point
 
     """
 
@@ -387,7 +398,7 @@ def what_spectra_are_wanted( procver='realtime', wantsince=None, requester=None,
     return df
 
 
-def get_spectrum_info( rootids=None, facility=None, mjd_min=None, mjd_max=None, classid=None,
+def get_spectrum_info( root_diaobject_ids=None, facility=None, mjd_min=None, mjd_max=None, classid=None,
                        z_min=None, z_max=None, since=None, logger=None ):
     if logger is None:
         logger = logging.getLogger( __name__ )
@@ -406,13 +417,13 @@ def get_spectrum_info( rootids=None, facility=None, mjd_min=None, mjd_max=None, 
         q = "SELECT * FROM spectruminfo "
         subdict = {}
 
-        if rootids is not None:
-            if ( isinstance( rootids, collections.abc.Sequence ) and not ( isinstance( rootids, str ) ) ):
+        if root_diaobject_ids is not None:
+            if util.isSequence( root_diaobject_ids ):
                 q += f"{where} root_diaobject_id=ANY(%(ids)s) "
-                subdict['ids'] = [ str(i) for i in rootids ]
+                subdict['ids'] = [ str(i) for i in root_diaobject_ids ]
             else:
                 q += f"{where} root_diaobject_id=%(id)s "
-                subdict['id'] = str(rootids)
+                subdict['id'] = str(root_diaobject_ids)
             where = "AND"
 
         if facility is not None:
