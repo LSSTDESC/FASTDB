@@ -245,6 +245,37 @@ def test_ask_for_spectra( procver_collection, alerts_90days_sent_received_and_im
         before = now - datetime.timedelta( minutes=10 )
         assert all( r['wanttime'] < now for r in rows )
         assert all( r['wanttime'] > before for r in rows )
+
+        # Make sure that if the same requester asks again, priorities are updated, not added to the list
+
+        later = datetime.datetime.now( tz=datetime.UTC )
+
+        res = fastdb_client.post( '/spectrum/askforspectrum',
+                                  json={ 'requester': 'testing',
+                                         'objectids': [ chosenobjs[0] ],
+                                         'priorities' : [ 1 ] } )
+        assert res['status'] == 'ok'
+
+        with db.DB() as con:
+            cursor = con.cursor( row_factory=psycopg.rows.dict_row )
+            cursor.execute( "SELECT * FROM wantedspectra" )
+            rows = cursor.fetchall()
+
+        assert set( str(r['root_diaobject_id']) for r in rows ) == set( chosenobjs )
+        prios = { str(r['root_diaobject_id']) : r['priority'] for r in rows }
+        wanttimes = { str(r['root_diaobject_id']) : r['wanttime'] for r in rows }
+        assert prios[ chosenobjs[0] ] == 1
+        assert prios[ chosenobjs[1] ] == 5
+        assert prios[ chosenobjs[2] ] == 2
+        assert all( r['requester'] == 'testing' for r in rows )
+
+        evenlater = datetime.datetime.now( tz=datetime.UTC )
+
+        assert wanttimes[ chosenobjs[0] ] > later
+        assert wanttimes[ chosenobjs[0] ] < evenlater
+        assert all( wanttimes[ chosenobjs[i] ] < now for i in ( 1, 2 ) )
+        assert all( wanttimes[ chosenobjs[i] ] > before for i in ( 1, 2 ) )
+
     finally:
         with db.DB() as con:
             cursor = con.cursor()
