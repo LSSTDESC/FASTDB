@@ -323,6 +323,20 @@ TODO
 Notes and Tips for Development and Testing
 ==========================================
 
+Running tests on github CI
+--------------------------
+
+The tests on github CI require up-to-date docker images.  They don't change very often, so usually you don't have to do anything.  However, if they have changed, then you need to do edit ``docker-compose.yaml`` and bump the default version of all the images.  You'll see that all the images end in ``${DOCKER_VERSION:-test20250815}`` (or some other yyyymmdd).  Bump the date to the current date on all the images.  Then do the following, in all places replacing 20250815 with your new ``yyyymmdd``::
+
+  DOCKER_ARCHIVE=ghcr.io/lsstdesc docker compose build
+  docker images | grep ghcr.*test20250815
+  for i in fastdb-postgres fastdb-webap fastdb-shell fastdb-kafka-test fastdb-query-runner fastdb-mongodb ; \
+     do docker push ghcr.io/lsstdesc/${i}:test20250815 ; \
+     done
+
+After you've done this, do a ``git push``, or create a pull request, or do whatever it is you normally do that triggers the running of the automated tests on github.
+
+
 Changing database structures
 ----------------------------
 
