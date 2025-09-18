@@ -61,7 +61,8 @@ jobs:
 
       - name: delete this block
         run: |
-          docker compose up -d webap shell
+          docker compose up -d postgres
+          sleep 30
           docker compose logs postgres
           docker compose down -v
         
