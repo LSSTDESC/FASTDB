@@ -54,10 +54,14 @@ jobs:
           cd tests
           tar xf elasticc2_test_data.tar.bz2
           
-      - name: run test
-        run: |
-          docker compose run --rm runtests
-          docker compose down -v
+      # - name: run test
+      #   run: |
+      #     docker compose run --rm runtests
+      #     docker compose down -v
 
-      - name: delete thist block
-        run: docker compose logs postgres
+      - name: delete this block
+        run: |
+          docker compose up -d webap shell
+          docker compose logs postgres
+          docker compose down -v
+        
