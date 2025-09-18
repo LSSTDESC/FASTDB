@@ -30,11 +30,6 @@ ENV LANG=en_US.UTF-8
 ENV LANGUAGE=en_US:en
 ENV LC_ALL=en_US.UTF-8
 
-
-RUN echo "host all all 0.0.0.0/0 md5" >> /etc/postgresql/15/main/pg_hba.conf
-COPY postgresql.conf /etc/postgresql/15/main/postgresql.conf
-ENV POSTGRES_DATA_DIR=/var/lib/postgresql/data
-
 ENV LESS=-XLRi
 
 # ======================================================================
@@ -82,9 +77,8 @@ RUN cd /opt/rust \
   && cd pg_parquet-${PG_PARQUET_VERSION} \
   && cargo pgrx install --release
 
-
 # ======================================================================
-FROM base AS postgres
+FROM base AS conf
 
 COPY --from=build /usr/lib/postgresql/15/lib/q3c.so /usr/lib/postgresql/15/lib/q3c.so
 COPY --from=build /usr/lib/postgresql/15/lib/bitcode/q3c /usr/share/postgresql/lib/bitcode/q3c
@@ -96,6 +90,26 @@ COPY --from=build /usr/lib/postgresql/15/lib/bitcode/pg_hint_plan.index.bc /usr/
 COPY --from=build /usr/share/postgresql/15/extension/pg_hint_plan* /usr/share/postgresql/15/extension/
 COPY --from=build /usr/lib/postgresql/15/lib/pg_parquet.so /usr/lib/postgresql/15/lib/
 COPY --from=build /usr/share/postgresql/15/extension/pg_parquet* /usr/share/postgresql/15/extension/
+
+RUN echo "host all all 0.0.0.0/0 md5" >> /etc/postgresql/15/main/pg_hba.conf
+
+# Have to configure postgres for different amounts of memory for NERSC Spin
+# and github CI
+ARG NERSCSPIN=0
+COPY postgresql.conf /etc/postgresql/15/main/postgresql.conf
+RUN cd /etc/postgresql/15/main \
+ && if [ "$NERSCSPIN" = "1" ] ; then \
+      cat postgresql.conf | sed 's/${config_shared_buffers}/32GB/; s/${config_temp_buffers}/4GB/; s/${config_work_mem}/4GB/; s/${config_maintenance_work_mem}/4GB/;' > postgresql.conf.new; \
+    else \
+      cat postgresql.conf | sed 's/${config_shared_buffers}/2GB/; s/${config_temp_buffers}/1GB/; s/${config_work_mem}/1GB/; s/${config_maintenance_work_mem}/1GB/;' > postgresql.conf.new ; \
+    fi \
+ && mv postgresql.conf.new postgresql.conf
+ 
+
+ENV POSTGRES_DATA_DIR=/var/lib/postgresql/data
+
+# ======================================================================
+FROM conf AS postgres
 
 # Make sure the contents of run_postgres.sh what is in postgresql.conf.
 # (There is some futzing about here to make sure the right permissions are
@@ -114,7 +128,7 @@ CMD ["bash", "/run_postgres.sh"]
 
 # ======================================================================
 
-FROM base AS pgdump
+FROM conf AS pgdump
 
 RUN mkdir=/home/pgdump
 ENV HOME=/home/pgdump

@@ -44,7 +44,7 @@ jobs:
         uses: astral-sh/ruff-action@v3
         with:
           src: /home/runner/work/FASTDB
-          
+
       - name: pull images
         run: |
           docker compose pull kafka-server postgres mongodb mailhog queryrunner shell webap
@@ -53,7 +53,7 @@ jobs:
         run: |
           cd tests
           tar xf elasticc2_test_data.tar.bz2
-          
+
       - name: run test
         run: |
           docker compose run --rm runtests
