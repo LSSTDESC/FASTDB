@@ -329,8 +329,8 @@ Running tests on github CI
 The tests on github CI require up-to-date docker images.  They don't change very often, so usually you don't have to do anything.  However, if they have changed, then you need to do edit ``docker-compose.yaml`` and bump the default version of all the images.  You'll see that all the images end in ``${DOCKER_VERSION:-test20250815}`` (or some other yyyymmdd).  Bump the date to the current date on all the images.  Then do::
 
   yyyymmdd=20250815    # replace this with the yyyymmdd you put in docker-compose.yaml
-  DOCKER_ARCHIVE=ghcr.io/lsstdesc docker compose build
-  docker images | grep ghcr.*test${yyyymmdd}
+  docker compose build
+  docker images | grep ghcr.*fastdb.*test${yyyymmdd}
   for i in fastdb-postgres fastdb-webap fastdb-shell fastdb-kafka-test \
            fastdb-query-runner fastdb-mongodb ; \
      do docker push ghcr.io/lsstdesc/${i}:test${yyyymmdd} ; \
@@ -409,6 +409,15 @@ When creating the migration, be aware that this needs to be applied to productio
 
 Note for Rob: Installing on Perlmutter
 ======================================
+
+building
+--------
+
+Do::
+
+  NERSCSPIN=1 DOCKER_ARCHIVE=registry.nersc.gov/m1727/raknop DOCKER_VERSION=<version> docker compose build
+
+where ``<version>`` is probably something like ``rknop-dev``.
 
 rknop_dev environment
 ---------------------
