@@ -234,6 +234,7 @@ def test_ask_for_spectra( procver_collection, alerts_90days_sent_received_and_im
             cursor.execute( "SELECT * FROM wantedspectra" )
             rows = cursor.fetchall()
 
+        assert len(rows) == 3
         assert set( str(r['root_diaobject_id']) for r in rows ) == set( chosenobjs )
         prios = { str(r['root_diaobject_id']) : r['priority'] for r in rows }
         assert prios[ chosenobjs[0] ] == 3
@@ -261,6 +262,7 @@ def test_ask_for_spectra( procver_collection, alerts_90days_sent_received_and_im
             cursor.execute( "SELECT * FROM wantedspectra" )
             rows = cursor.fetchall()
 
+        assert len(rows) == 3
         assert set( str(r['root_diaobject_id']) for r in rows ) == set( chosenobjs )
         prios = { str(r['root_diaobject_id']) : r['priority'] for r in rows }
         wanttimes = { str(r['root_diaobject_id']) : r['wanttime'] for r in rows }
