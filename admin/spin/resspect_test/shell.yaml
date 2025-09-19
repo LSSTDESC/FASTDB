@@ -123,19 +123,19 @@ spec:
           optional: false
           secretName: secrets
       - hostPath:
-          path: /global/cfs/cdirs/lsst/groups/TD/SOFTWARE/fastdb_deployment/resspect_test/install
+          path: /global/cfs/cdirs/desc-td/SOFTWARE/fastdb_deployment/resspect_test/install
           type: Directory
         name: fastdb-install
       - hostPath:
-          path: /global/cfs/cdirs/lsst/groups/TD/SOFTWARE/fastdb_deployment/resspect_test/FASTDB
+          path: /global/cfs/cdirs/desc-td/SOFTWARE/fastdb_deployment/resspect_test/FASTDB
           type: Directory
         name: fastdb-checkout
       - hostPath:
-          path: /global/cfs/cdirs/lsst/groups/TD/SOFTWARE/fastdb_deployment/resspect_test/query_results
+          path: /global/cfs/cdirs/desc-td/SOFTWARE/fastdb_deployment/resspect_test/query_results
           type: Directory
         name: fastdb-query-results
       - hostPath:
-          path: /global/cfs/cdirs/lsst/groups/TD/SOFTWARE/fastdb_deployment/resspect_test/sessions
+          path: /global/cfs/cdirs/desc-td/SOFTWARE/fastdb_deployment/resspect_test/sessions
           type: Directory
         name: fastdb-sessions
       - hostPath:

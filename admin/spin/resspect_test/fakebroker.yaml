@@ -36,8 +36,8 @@ spec:
         image: registry.nersc.gov/m1727/raknop/fastdb-shell:resspect-test
         imagePullPolicy: Always
         command: [ "python" ]
-        args: [ "/code/tests/fakebroker.py", "--source", "kafka", "-t", "test_20250502",
-                "--dest", "kafka", "-u", "test_20250502_brokermsg" ]
+        args: [ "/code/tests/fakebroker.py", "--source", "kafka", "-t", "run-forward-1",
+                "--dest", "kafka", "-u", "run-forward-1_brokermsg" ]
         resources: {}
         securityContext:
           allowPrivilegeEscalation: false
@@ -77,11 +77,11 @@ spec:
       #     optional: false
       #     secretName: secrets
       - hostPath:
-          path: /global/cfs/cdirs/lsst/groups/TD/SOFTWARE/fastdb_deployment/resspect_test/install
+          path: /global/cfs/cdirs/desc-td/SOFTWARE/fastdb_deployment/resspect_test/install
           type: Directory
         name: fastdb-install
       - hostPath:
-          path: /global/cfs/cdirs/lsst/groups/TD/SOFTWARE/fastdb_deployment/resspect_test/FASTDB
+          path: /global/cfs/cdirs/desc-td/SOFTWARE/fastdb_deployment/resspect_test/FASTDB
           type: Directory
         name: fastdb-checkout
 ---
