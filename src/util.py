@@ -2,7 +2,7 @@ __all__ = [ "FDBLogger", "parse_bool", "env_as_bool", "asUUID", "isSequence",
             "float_or_none_from_dict", "int_or_none_from_dict",
             "datetime_or_none_from_dict_mjd_or_timestring", "mjd_or_none_from_dict_mjd_or_timestring",
             "parse_sexigesimal", "float_or_none_from_dict_float_or_dms", "float_or_none_from_dict_float_or_hms",
-            "get_alert_schema", "procver_id" ]
+             "mjd_from_mjd_or_datetime_or_timestring", "get_alert_schema", "procver_id" ]
 
 import sys
 import os
@@ -21,7 +21,8 @@ import rkwebutil
 
 import db
 
-_schema_namespace = 'fastdb_test_0.2'
+_fastdb_schema_namespace = 'fastdb_9_0_1'
+_lsst_schema_namespace = 'lsst.v9_0'
 
 _default_datefmt = '%Y-%m-%d %H:%M:%S'
 _default_log_level = logging.DEBUG
@@ -336,31 +337,47 @@ def float_or_none_from_dict_float_or_hms( d, kw ):
         return float( d[kw] )
 
 
-def get_alert_schema( schemadir=None ):
+def mjd_from_mjd_or_datetime_or_timestring( d ):
+    if d is None:
+        return None
+    elif isinstance( d, numbers.Integral ):
+        return d
+    else:
+        return astropy.time.Time( rkwebutil.asDateTime( d ), format='datetime' ).mjd
 
+
+def get_alert_schema( schemadir=None ):
     """Return a dictionary of { name: schema }, plus 'alert_schema_file': Path }"""
 
     schemadir = pathlib.Path( "/fastdb/share/avsc" if schemadir is None else schemadir )
     if not schemadir.is_dir():
         raise RuntimeError( f"{schemadir} is not an existing directory" )
-    diaobject_schema = fastavro.schema.load_schema( schemadir / f"{_schema_namespace}.DiaObject.avsc" )
-    diasource_schema = fastavro.schema.load_schema( schemadir / f"{_schema_namespace}.DiaSource.avsc" )
-    diaforcedsource_schema = fastavro.schema.load_schema( schemadir / f"{_schema_namespace}.DiaForcedSource.avsc" )
-    named_schemas = { f'{_schema_namespace}.DiaObject': diaobject_schema,
-                      f'{_schema_namespace}.DiaSource': diasource_schema,
-                      f'{_schema_namespace}.DiaForcedSource': diaforcedsource_schema }
-    alert_schema = fastavro.schema.load_schema( schemadir / f"{_schema_namespace}.Alert.avsc",
+    diaobject_schema = fastavro.schema.load_schema( schemadir / f"{_lsst_schema_namespace}.diaObject.avsc" )
+    diasource_schema = fastavro.schema.load_schema( schemadir / f"{_lsst_schema_namespace}.diaSource.avsc" )
+    diaforcedsource_schema = fastavro.schema.load_schema( schemadir /
+                                                          f"{_lsst_schema_namespace}.diaForcedSource.avsc" )
+    MPCORB_schema = fastavro.schema.load_schema( schemadir / f"{_lsst_schema_namespace}.MPCORB.avsc" )
+    sssource_schema = fastavro.schema.load_schema( schemadir / f"{_lsst_schema_namespace}.ssSoource.avsc" )
+    named_schemas = { f'{_lsst_schema_namespace}.diaObject': diaobject_schema,
+                      f'{_lsst_schema_namespace}.diaSource': diasource_schema,
+                      f'{_lsst_schema_namespace}.diaForcedSource': diaforcedsource_schema,
+                      f'{_lsst_schema_namespace}.MPCORB': MPCORB_schema,
+                      f'{_lsst_schema_namespace}.ssSource': sssource_schema
+                     }
+    alert_schema = fastavro.schema.load_schema( schemadir / f"{_lsst_schema_namespace}.alert.avsc",
                                                 named_schemas=named_schemas )
-    brokermessage_schema = fastavro.schema.load_schema( schemadir / f"{_schema_namespace}.BrokerMessage.avsc",
+    brokermessage_schema = fastavro.schema.load_schema( schemadir / f"{_fastdb_schema_namespace}.BrokerMessage.avsc",
                                                         named_schemas=named_schemas )
 
     return { 'alert': fastavro.schema.parse_schema( alert_schema ),
              'diaobject': fastavro.schema.parse_schema( diaobject_schema ),
              'diasource': fastavro.schema.parse_schema( diasource_schema ),
              'diaforcedsource': fastavro.schema.parse_schema( diaforcedsource_schema ),
+             'MPCORB': fastavro.schema.parse_schema( MPCORB_schema ),
+             'sssource': fastavro.schema.parse_schema( sssource_schema ),
              'brokermessage': fastavro.schema.parse_schema( brokermessage_schema ),
-             'alert_schema_file': schemadir / f"{_schema_namespace}.Alert.avsc",
-             'brokermessage_schema_file': schemadir / f"{_schema_namespace}.BrokerMessage.avsc"
+             'alert_schema_file': schemadir / f"{_lsst_schema_namespace}.alert.avsc",
+             'brokermessage_schema_file': schemadir / f"{_fastdb_schema_namespace}.BrokerMessage.avsc"
             }
 
 
