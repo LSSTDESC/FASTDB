@@ -357,7 +357,7 @@ def get_alert_schema( schemadir=None ):
     diaforcedsource_schema = fastavro.schema.load_schema( schemadir /
                                                           f"{_lsst_schema_namespace}.diaForcedSource.avsc" )
     MPCORB_schema = fastavro.schema.load_schema( schemadir / f"{_lsst_schema_namespace}.MPCORB.avsc" )
-    sssource_schema = fastavro.schema.load_schema( schemadir / f"{_lsst_schema_namespace}.ssSoource.avsc" )
+    sssource_schema = fastavro.schema.load_schema( schemadir / f"{_lsst_schema_namespace}.ssSource.avsc" )
     named_schemas = { f'{_lsst_schema_namespace}.diaObject': diaobject_schema,
                       f'{_lsst_schema_namespace}.diaSource': diasource_schema,
                       f'{_lsst_schema_namespace}.diaForcedSource': diaforcedsource_schema,

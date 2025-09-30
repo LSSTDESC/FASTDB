@@ -71,6 +71,7 @@ def fakebroker( barf ):
 
 @pytest.fixture( scope='module' )
 def alerts_30days_sent( snana_fits_ppdb_loaded, barf ):
+    import pdb; pdb.set_trace()
     sender = AlertSender( 'kafka-server', f"alerts-{barf}" )
     nsent = sender( addeddays=30, reallysend=True )
     assert nsent == 77

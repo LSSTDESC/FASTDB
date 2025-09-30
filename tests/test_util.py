@@ -1,6 +1,18 @@
+import pathlib
 import util
 
 # OMG LOTS OF TESTS STILL NEED TO BE WRITTEN
+
+
+def test_get_alert_schema():
+    schema = util.get_alert_schema()
+    assert set( schema.keys() ) == { 'alert', 'diaobject', 'diasource', 'diaforcedsource', 'MPCORB',
+                                     'sssource', 'brokermessage', 'alert_schema_file', 'brokermessage_schema_file' }
+    for key in [ 'alert', 'diaobject', 'diasource', 'diaforcedsource', 'MPCORB', 'sssource', 'brokermessage' ]:
+        assert isinstance( schema[key], dict )
+    assert isinstance( schema['alert_schema_file'], pathlib.Path )
+    assert isinstance( schema['brokermessage_schema_file'], pathlib.Path )
+
 
 
 def test_parse_sexigesimal():

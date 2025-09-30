@@ -45,7 +45,6 @@ class SNANAColumnMapper( ColumnMapper ):
     def diaobject_map_columns( cls, tab ):
         """Map from the HEAD.FITS.gz files to the diaobject table"""
         mapper = { 'SNID': 'diaobjectid',
-                   'MJD_TRIGGER': 'radecmjdtai',
                    'HOSTGAL_OBJID': 'nearbyextobj1',
                    'HOSTGAL2_OBJID': 'nearbyextobj2',
                    'HOSTGAL3_OBJID': 'nearbyextobj3',
@@ -306,6 +305,7 @@ class FITSFileHandler( SNANAColumnMapper ):
             self.diasource_map_columns( phot )
             phot.add_column( np.int64(-1), name='diaobjectid' )
             phot['band'] = [ i.strip() for i in phot['band'] ]
+            phot.add_column( np.int64(-1), name='diaforcedsourceid' )
             if not self.ppdb:
                 phot.add_column( self.base_processing_version, name='base_procver_id' )
             phot.add_column( -1., name='ra' )
@@ -328,6 +328,8 @@ class FITSFileHandler( SNANAColumnMapper ):
                 phot['diaobjectid'][pmin:pmax+1] = headrow['diaobjectid']
                 phot['visit'][pmin:pmax+1] = np.array( np.floor( phot['midpointmjdtai'][pmin:pmax+1] * 20000 ),
                                                        dtype=np.int32 )
+                phot['diaforcedsourceid'][pmin:pmax+1] = ( obj['SNID'] + self.max_sources_per_object
+                                                           + np.arange( pmax - pmin + 1 ) )
                 phot['ra'][pmin:pmax+1] = obj['RA']
                 phot['dec'][pmin:pmax+1] = obj['DEC']
 
@@ -346,6 +348,7 @@ class FITSFileHandler( SNANAColumnMapper ):
                 self.logger.info( f"PID {os.getpid()} would try to load {nfrc} forced photometry points" )
 
             # Load the DiaSource table
+            phot.rename_column( 'diaforcedsourceid', 'diasourceid' )
             phot['snr'] = phot['psfflux'] / phot['psffluxerr']
             phot = phot[ ( phot['photflag'] & self.photflag_detect ) !=0 ]
             phot.remove_column( 'photflag' )

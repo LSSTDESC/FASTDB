@@ -1359,6 +1359,48 @@ class DiaSource( DBBase ):
     _tablemeta = None
     _pk = [ 'base_procver_id', 'diaobjectid', 'visit' ]
 
+    _flags_bits = { 0x00000001: 'centroid_flag',
+                    0x00000002: 'apFlux_flag',
+                    0x00000004: 'apFlux_flag_apertureTruncated',
+                    0x00000008: 'isNegative',
+                    0x00000010: 'psfFlux_flag',
+                    0x00000020: 'psfFlux_flag_edge',
+                    0x00000040: 'psfFlux_flag_noGoodPixels',
+                    0x00000080: 'trail_flag_edge',
+                    0x00000100: 'forced_PsfFlux_flag',
+                    0x00000200: 'forced_PsfFlux_flag_edge',
+                    0x00000400: 'forced_PsfFlux_flag_noGoodPixels',
+                    0x00000800: 'shape_flag',
+                    0x00001000: 'shape_flag_no_pixels',
+                    0x00002000: 'shape_flag_not_contained',
+                    0x00004000: 'shape_flag_parent_source',
+                    0x00008000: 'isDipole',
+                    0x00010000: 'dipleFitAttempted',
+                    0x00020000: 'glint_trail',
+                   }
+
+    _pixelflags_bits = { 0x00000001: 'pixelFlags',
+                         0x00000002: 'pixelFlags_bad',
+                         0x00000004: 'pixelFlags_cr',
+                         0x00000008: 'pixelFlags_crCenter',
+                         0x00000010: 'pixelFlags_edge',
+                         0x00000020: 'pixelFlags_nodata',
+                         0x00000040: 'pixelFlags_nodataCenter',
+                         0x00000080: 'pixelFlags_interpolated',
+                         0x00000100: 'pixelFlags_interpolatedCenter',
+                         0x00000200: 'pixelFlags_offimage',
+                         0x00000400: 'pixelFlags_saturated',
+                         0x00000800: 'pixelFlags_saturatedCenter',
+                         0x00001000: 'pixelFlags_suspect',
+                         0x00002000: 'pixelFlags_suspectCenter',
+                         0x00004000: 'pixelFlags_streak',
+                         0x00008000: 'pixelFlags_streakCenter',
+                         0x00010000: 'pixelFlags_injected',
+                         0x00020000: 'pixelFlags_injectedCenter',
+                         0x00040000: 'pixelFlags_injected_template',
+                         0x00080000: 'pixelFlags_injectedd_templateCenter',
+                        }
+
 
 # ======================================================================
 

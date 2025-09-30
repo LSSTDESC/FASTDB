@@ -399,7 +399,6 @@ def obj1( procver_collection, rootobj1 ):
     bpvs, _pvs = procver_collection
     obj = DiaObject( diaobjectid=42,
                      base_procver_id=bpvs['bpv1'].id,
-                     radecmjdtai=60000.,
                      ra=42.,
                      dec=13,
                      rootid=rootobj1.id
