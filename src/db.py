@@ -1143,7 +1143,7 @@ class DBBase:
 
         with DBCon( dbcon ) as con:
             con.execute_nofetch( "DROP TABLE IF EXISTS temp_bulk_upsert", explain=False, analyze=False )
-            con.execute_nofetch( f"CREATE TEMP TABLE temp_bulk_upsert (LIKE {cls.__tablename__})",
+            con.execute_nofetch( f"CREATE TEMP TABLE temp_bulk_upsert (LIKE {cls.__tablename__} INCLUDING DEFAULTS)",
                                  explain=False, analyze=False )
             with con.cursor.copy( f"COPY temp_bulk_upsert({','.join(columns)}) FROM STDIN" ) as copier:
                 for v in values:

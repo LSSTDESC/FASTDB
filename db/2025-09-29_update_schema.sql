@@ -63,13 +63,21 @@ ALTER TABLE diasource DROP COLUMN ixx_iyy_cov;
 ALTER TABLE diasource DROP COLUMN iyy_ixy_cov;
 ALTER TABLE diasource RENAME COLUMN fpbkgd TO templateflux;
 ALTER TABLE diasource RENAME COLUMN fpbkgderr TO templatefluxerr;
-ALTER TABLE diasource ADD COLUMN diasourceid bigint;
+ALTER TABLE diasource ALTER COLUMN x SET NOT NULL;
+ALTER TABLE diasource ALTER COLUMN y SET NOT NULL;
+ALTER TABLE diasource ALTER COLUMN psfflux DROP NOT NULL;
+ALTER TABLE diasource ALTER COLUMN psffluxerr DROP NOT NULL;
+ALTER TABLE diasource ADD COLUMN diasourceid bigint NOT NULL;
 ALTER TABLE diasource ADD COLUMN parentdiasourceid bigint;
 ALTER TABLE diasource ADD COLUMN apflux real;
 ALTER TABLE diasource ADD COLUMN apfluxerr real;
 ALTER TABLE diasource ADD COLUMN bboxsize int;
 ALTER TABLE diasource ADD COLUMN timeprocessedmjdtai double precision;
 ALTER TABLE diasource ADD COLUMN timewithdrawnmjdtai double precision;
+ALTER TABLE diasource ALTER COLUMN flags SET DEFAULT 0;
+ALTER TABLE diasource ALTER COLUMN pixelflags SET DEFAULT 0;
+UPDATE diasource SET flags=0 WHERE flags IS NULL;
+UPDATE diasource SET pixelflags=0 WHERE pixelflags IS NULL;
 -- Not going to keep the trail and dipole stuff for now
 -- Ideally broker filters will have gotten rid of things that are dipoles or trails
 -- ALTER TABLE diasource ADD COLUMN trailflux real;
@@ -110,6 +118,10 @@ ALTER TABLE ppdb_diasource DROP COLUMN ixx_iyy_cov;
 ALTER TABLE ppdb_diasource DROP COLUMN iyy_ixy_cov;
 ALTER TABLE ppdb_diasource RENAME COLUMN fpbkgd TO templateflux;
 ALTER TABLE ppdb_diasource RENAME COLUMN fpbkgderr TO templatefluxerr;
+ALTER TABLE diasource ALTER COLUMN x SET NOT NULL;
+ALTER TABLE diasource ALTER COLUMN y SET NOT NULL;
+ALTER TABLE diasource ALTER COLUMN psfflux DROP NOT NULL;
+ALTER TABLE diasource ALTER COLUMN psffluxerr DROP NOT NULL;
 ALTER TABLE ppdb_diasource ADD COLUMN diasourceid bigint;
 ALTER TABLE ppdb_diasource ADD COLUMN parentdiasourceid bigint;
 ALTER TABLE ppdb_diasource ADD COLUMN apflux real;
@@ -117,6 +129,12 @@ ALTER TABLE ppdb_diasource ADD COLUMN apfluxerr real;
 ALTER TABLE ppdb_diasource ADD COLUMN bboxsize int;
 ALTER TABLE ppdb_diasource ADD COLUMN timeprocessedmjdtai double precision;
 ALTER TABLE ppdb_diasource ADD COLUMN timewithdrawnmjdtai double precision;
+ALTER TABLE ppdb_diasource ALTER COLUMN flags SET DEFAULT 0;
+ALTER TABLE ppdb_diasource ALTER COLUMN pixelflags SET DEFAULT 0;
+ALTER TABLE ppdb_diasource ALTER COLUMN psfflux DROP NOT NULL;
+ALTER TABLE ppdb_diasource ALTER COLUMN psffluxerr DROP NOT NULL;
+UPDATE ppdb_diasource SET flags=0 WHERE flags IS NULL;
+UPDATE ppdb_diasource SET pixelflags=0 WHERE pixelflags IS NULL;
 -- Not going to keep the trail and dipole stuff for now
 -- Ideally broker filters will have gotten rid of things that are dipoles or trails
 -- ALTER TABLE ppdb_diasource ADD COLUMN trailflux real;
@@ -143,17 +161,23 @@ ALTER TABLE ppdb_diasource ADD COLUMN timewithdrawnmjdtai double precision;
 CREATE INDEX idx_ppdb_diasource_diasourceid ON ppdb_diasource(diasourceid);
 
 
+ALTER TABLE diaforcedsource ALTER COLUMN band DROP NOT NULL;
+ALTER TABLE diaforcedsource ALTER COLUMN psfflux DROP NOT NULL;
+ALTER TABLE diaforcedsource ALTER COLUMN psffluxerr DROP NOT NULL;
 ALTER TABLE diaforcedsource DROP COLUMN time_processed;
 ALTER TABLE diaforcedsource DROP COLUMN time_withdrawn;
-ALTER TABLE diaforcedsource ADD COLUMN timeprocessedmjdtai double precision;
+ALTER TABLE diaforcedsource ADD COLUMN timeprocessedmjdtai double precision NOT NULL;
 ALTER TABLE diaforcedsource ADD COLUMN timewithdrawnmjdtai double precision;
 ALTER TABLE diaforcedsource ADD COLUMN diaforcedsourceid bigint;
 CREATE INDEX idx_diaforcedsource_diaforcedsourceid ON diaforcedsource(diaforcedsourceid);
 
 
+ALTER TABLE ppdb_diaforcedsource ALTER COLUMN band DROP NOT NULL;
+ALTER TABLE ppdb_diaforcedsource ALTER COLUMN psfflux DROP NOT NULL;
+ALTER TABLE ppdb_diaforcedsource ALTER COLUMN psffluxerr DROP NOT NULL;
 ALTER TABLE ppdb_diaforcedsource DROP COLUMN time_processed;
 ALTER TABLE ppdb_diaforcedsource DROP COLUMN time_withdrawn;
-ALTER TABLE ppdb_diaforcedsource ADD COLUMN timeprocessedmjdtai double precision;
+ALTER TABLE ppdb_diaforcedsource ADD COLUMN timeprocessedmjdtai double precision NOT NULL;
 ALTER TABLE ppdb_diaforcedsource ADD COLUMN timewithdrawnmjdtai double precision;
 ALTER TABLE ppdb_diaforcedsource ADD COLUMN diaforcedsourceid bigint;
 CREATE INDEX idx_ppdb_diaforcedsource_diaforcedsourceid ON ppdb_diaforcedsource(diaforcedsourceid);

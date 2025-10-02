@@ -136,11 +136,11 @@ class AlertReconstructor:
                     curdict[col] = None
 
             # diasource has some pixel flags that are converted to a bitmask in the database
-            for mask, field in db.DiaSource_flags_bits:
-                curdict[field] = bool( rows['flags'] & mask )
+            for mask, field in db.DiaSource._flags_bits.items():
+                curdict[field] = bool( row[columns['flags']] & mask )
 
-            for mask, field in db.DiaSource_pixelflags_bits:
-                curdict[field] = bool( rows['pixelflags'] & mask )
+            for mask, field in db.DiaSource._pixelflags_bits.items():
+                curdict[field] = bool( row[columns['pixelflags']] & mask )
 
             dicts.append( curdict )
 
@@ -331,6 +331,7 @@ class AlertReconstructor:
                     else:
                         raise ValueError( f"Unknown command {msg['command']}" )
                 except Exception as ex:
+                    ROB PUT IN A TRACEBACK PRINT THING HERE
                     # Should I be sending an error message back to the parent process instead of just raising?
                     raise ex
 
