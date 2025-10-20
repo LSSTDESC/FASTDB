@@ -15,12 +15,10 @@ class TestDiaObject( BaseTestDB ):
             'diaobjectid',
             'base_procver_id',
             'rootid',
-            'radecmjdtai',
-            'validitystart',
-            'validityend',
+            'validitystartmjdtai',
             'ra',
-            'raerr',
             'dec',
+            'raerr',
             'decerr',
             'ra_dec_cov',
             'nearbyextobj1id',
@@ -33,25 +31,15 @@ class TestDiaObject( BaseTestDB ):
             'nearbyextobj3',
             'nearbyextobj3sep',
             'nearbylowzgal',
-            'nearbylowzgalsep',
-            'parallax',
-            'parallaxerr',
-            'pmra',
-            'pmraerr',
-            'pmra_parallax_cov',
-            'pmdec',
-            'pmdecerr',
-            'pmdec_parallax_cov',
-            'pmra_pmdec_cov' }
+            'nearbylowzgalsep'
+        }
         self.safe_to_modify = [
-            'radecmjdtai',
-            'validitystart',
-            'validityend',
             'ra',
-            'raerr',
             'dec',
+            'raerr',
             'decerr',
             'ra_dec_cov',
+            'validitystartmjdtai',
             'nearbyextobj1',
             'nearbyextobj1sep',
             'nearbyextobj2',
@@ -60,35 +48,32 @@ class TestDiaObject( BaseTestDB ):
             'nearbyextobj3sep',
             'nearbylowzgal',
             'nearbylowzgalsep',
-            'parallax',
-            'parallaxerr',
-            'pmra',
-            'pmraerr',
-            'pmra_parallax_cov',
-            'pmdec',
-            'pmdecerr',
-            'pmdec_parallax_cov',
-            'pmra_pmdec_cov'
         ]
         self.uniques = []
 
         self.obj1 = DiaObject( diaobjectid=1,
                                base_procver_id=bpv['bpv1'].id,
                                rootid=rootobj1.id,
-                               radecmjdtai=60000.,
                                ra=42.,
-                               dec=128. )
+                               dec=128.,
+                               raerr=0.1,
+                               decerr=0.1,
+                               validitystartmjdtai=60000. )
         self.dict1 = { k: getattr( self.obj1, k ) for k in self.columns }
         self.obj2 = DiaObject( diaobjectid=2,
                                base_procver_id=bpv['bpv1'].id,
                                rootid=rootobj2.id,
-                               radecmjdtai=61000.,
                                ra=23.,
-                               dec=-42. )
+                               dec=-42.,
+                               raerr=0.2,
+                               decerr=0.2,
+                               validitystartmjdtai=60001. )
         self.dict2 = { k: getattr( self.obj2, k ) for k in self.columns }
         self.dict3 = { 'diaobjectid': 3,
                        'base_procver_id': bpv['bpv1'].id,
                        'rootid': rootobj3.id,
-                       'radecmjdtai': 62000.,
                        'ra': 64.,
-                       'dec': -23. }
+                       'dec': -23.,
+                       'raerr': 0.3,
+                       'decerr': 0.3,
+                       'validitystartmjdtai': 60002. }

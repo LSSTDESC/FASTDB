@@ -6,12 +6,16 @@ import time
 import multiprocessing
 import signal
 import argparse
+import traceback
 
 import confluent_kafka
 import fastavro
 
 import db
 import util
+
+import numpy as np
+from astropy.io import fits
 
 _logger = logging.getLogger( __file__ )
 _logout = logging.StreamHandler( sys.stderr )
@@ -27,7 +31,8 @@ _logger.setLevel( logging.DEBUG )
 class AlertReconstructor:
     """A class that constructs alerts (in dict format) from the fastdb ppdb tables."""
 
-    def __init__( self, prevsrc=365, prevfrced=365, prevfrced_gap=1, schemadir=None ):
+    def __init__( self, prevsrc=365, prevfrced=365, prevfrced_gap=1, schemadir=None,
+                  make_cutouts=False, cutout_size=41 ):
         """Constructor.
 
         Parameters
@@ -44,6 +49,12 @@ class AlertReconstructor:
           schemadir : str or Path
             Directory with Alert.avsc, DiaObject.avsc, DiaSource.avsc, and DiaForcedSource.avsc
 
+          make_cutouts : bool, default False
+            If True, create FITS files of random values 100±10 (1σ) to stick in the cutouts fields.
+
+          cutout_size : int, default 41
+            If True, the size of the array in FITS files.
+
         """
 
         self.prevsrc = prevsrc
@@ -56,7 +67,13 @@ class AlertReconstructor:
         self.diasource_schema = schema[ 'diasource' ]
         self.diaforcedsource_schema = schema[ 'diaforcedsource' ]
 
-        self._reset_timings()
+        if make_cutouts:
+            bio = io.BytesIO()
+            rng = np.random.get_default_generator()
+            fits.writeto( bio, rng.normal(loc=100., scale=10., size=(cutout_size, cutout_size)).astype( np.float32 ) )
+            self.fitsdata = bio.getvalue()
+        else:
+            self.fitsdata = None
 
 
     def _reset_timings( self ):
@@ -76,14 +93,8 @@ class AlertReconstructor:
 
     def object_data_to_dicts( self, rows, columns ):
         allfields = [ f['name'] for f in self.diaobject_schema['fields'] ]
-        lcfields = { 'diaObjectId', 'raDecMjdTai', 'ra', 'raErr', 'dec', 'decErr', 'ra_dec_Cov',
-                     'nearbyExtObj1', 'nearbyExtObj1Sep', 'nearbyExtObj2', 'nearbyExtObj2Sep',
-                     'nearbyExtObj3', 'nearbyExtObj3Sep', 'nearbyLowzGal', 'nearbyLowzGalSep',
-                     'parallax', 'parallaxErr', 'pmRa', 'pmRaErr', 'pmRa_parallax_Cov',
-                     'pmDec', 'pmDecErr', 'pmDec_parallax_Cov', 'pmRa_pmDec_Cov'
-                    }
-        timefields = { 'validityStart': 'validitystart',
-                       'validityEnd': 'validityend' }
+        lcfields = { 'diaObjectId', 'ra', 'raErr', 'dec', 'decErr', 'ra_dec_Cov', 'validityStartMjdTai' }
+        timefields = {}
 
         dicts = []
         for row in rows:
@@ -103,17 +114,15 @@ class AlertReconstructor:
 
     def source_data_to_dicts( self, rows, columns ):
         allfields = [ f['name'] for f in self.diasource_schema['fields'] ]
-        lcfields = { 'diaObjectId', 'ssObjectId', 'visit', 'detector',
-                     'x', 'y', 'xErr', 'yErr', 'x_y_Cov',
-                     'band', 'midpointMjdTai', 'ra', 'raErr', 'dec', 'decErr', 'ra_dec_Cov',
-                     'psfFlux', 'psfFluxErr', 'psfRa', 'psfRaErr', 'psfDec', 'psfDecErr', 'psfRa_psfDec_Cov',
-                     'psfFlux_psfRa_cov', 'psfFlux_psfDec_cov', 'psfLnL', 'psfChi2', 'psfNdata', 'snr',
-                     'scienceFlux', 'scienceFluxErr', 'fpBkgd', 'fpBkdgErr',
-                     'extendedness', 'reliability',
-                     'ixx', 'ixxErr', 'iyy', 'iyyErr', 'ixy', 'ixx_ixy_Cov', 'ixx_iyy_Cov', 'iyy_ixy_Cov',
-                     'ixxPSF', 'iyyPSF', 'ixyPSF' }
-
-        # TODO : flags, pixelflags
+        lcfields = { 'diaSourceId', 'visit', 'detector', 'diaObjectId', 'ssObjectId',
+                     'parentDiaSourceId', 'midpointMjdTai', 'ra', 'raErr', 'dec', 'decErr', 'ra_dec_Cov',
+                     'x', 'xErr', 'y', 'yErr', 'apFlux', 'apFluxErr', 'snr',
+                     'psfFlux', 'psfFluxErr', 'psfFluxLnL', 'psfChi2', 'psfNdata',
+                     'scienceflux', 'scienceFluxErr', 'templateFlux', 'templateFluxErr',
+                     'ixx', 'iyy', 'ixy', 'ixxPSF', 'iyyPSF', 'ixyPSF',
+                     'extendedness', 'realibility', 'band',
+                     'timeProcessedMjdTai', 'timeWithddrawnMjdTai', 'bboxSize' }
+        timefields = {}
 
         dicts = []
         for row in rows:
@@ -121,8 +130,19 @@ class AlertReconstructor:
             for col in allfields:
                 if col in lcfields:
                     curdict[col] = row[ columns[col.lower()] ]
+                elif col in timefields:
+                    val = row[ columns[ timefields[col] ] ]
+                    curdict[col] = None if val is None else int( val.timestamp() * 1000 + 0.5 )
                 else:
                     curdict[col] = None
+
+            # diasource has some pixel flags that are converted to a bitmask in the database
+            for mask, field in db.DiaSource._flags_bits.items():
+                curdict[field] = bool( row[columns['flags']] & mask )
+
+            for mask, field in db.DiaSource._pixelflags_bits.items():
+                curdict[field] = bool( row[columns['pixelflags']] & mask )
+
             dicts.append( curdict )
 
         return dicts
@@ -130,10 +150,10 @@ class AlertReconstructor:
 
     def forced_source_data_to_dicts( self, rows, columns ):
         allfields = [ f['name'] for f in self.diaforcedsource_schema['fields'] ]
-        lcfields = [ 'diaObjectId', 'visit', 'detector', 'midpointMjdTai',
-                     'band', 'ra', 'dec', 'psfFlux', 'psfFluxErr', 'scienceFlux', 'sciencefluxErr', ]
-        timefields = { 'time_processed': 'time_processed',
-                       'time_withdrawn': 'time_withdrawn' }
+        lcfields = [ 'diaForcedSourceId', 'diaObjectId', 'ra', 'dec', 'visit', 'detector',
+                     'psfFlux', 'psfFluxErr', 'midpointMjdTai', 'scienceFlux', 'scienceFluxErr',
+                     'band', 'timeProcessedMjdTai', 'timeWithdrawnMjdTai' ]
+        timefields = {}
 
         dicts = []
         for row in rows:
@@ -220,6 +240,7 @@ class AlertReconstructor:
             if len(rows) > 1:
                 raise RuntimeError( f"diaobject {diasource['diaObjectId']} is multiply defined, I can't cope." )
             diaobject = self.object_data_to_dicts( rows, columns )[0]
+            diaobject['nDiaSources'] = 1 + len(previous_sources)
             t6 = time.perf_counter()
 
             self.connecttime += t1 - t0
@@ -231,11 +252,18 @@ class AlertReconstructor:
 
             # TODO : figure out a good unique alertid, right now this is bad!
             # (See Issue #49)
-            alert = { "alertId": visit,
+            alert = { "diaSourceId": diasource['diaSourceId'],
+                      "observation_reason": "simulation",
+                      "target_name": str( diaobject['diaObjectId'] ),
                       "diaSource": diasource,
                       "prvDiaSources": previous_sources if len(previous_sources) > 0 else None,
                       "prvDiaForcedSources": previous_forced_sources if len(previous_forced_sources) > 0 else None,
-                      "diaObject": diaobject }
+                      "diaObject": diaobject,
+                      "ssSource": None,
+                      "MPCORB": None,
+                      "cutoutDifference": self.fitsdata,
+                      "cutoutScience": self.fitsdata,
+                      "cutoutTemplate": self.fitsdata }
 
             return alert
 
@@ -305,7 +333,9 @@ class AlertReconstructor:
                     else:
                         raise ValueError( f"Unknown command {msg['command']}" )
                 except Exception as ex:
-                    # Should I be sending an error message back to the parent process instead of just raising?
+                    sio = io.StringIO()
+                    traceback.print_exception( ex, file=sio )
+                    _logger.exception( sio.getvalue() )
                     raise ex
 
         logger.info( "Subprocess sending finished message" )
@@ -329,7 +359,7 @@ class AlertReconstructor:
 class AlertSender:
     """A class to send simulated LSST AP alerts based on data in the fastdb ppdb tables."""
 
-    def __init__( self, kafka_server, kafka_topic, reconstruct_procs=5 ):
+    def __init__( self, kafka_server, kafka_topic, reconstruct_procs=5, make_cutouts=False, cutout_size=41 ):
         """Constructor
 
         Parmaeters
@@ -454,12 +484,16 @@ class AlertSender:
 
 
     def __call__( self, addeddays=1, throughday=None, reallysend=False, flush_every=1000, log_every=10000,
-                  catch_int_and_term=False ):
+                  catch_int_and_term=False, make_cutouts=False, cutout_size=21 ):
         """Send alerts.
 
         Launches AlertReconstructor subprocesses to build the alert
         dictionaries, and sends those alerts to the kafka server and
         topic configured at object instantiation.
+
+        This function is not re-entrant.  Once you've called it once,
+        don't call it again.  (Exit the whole program and start over.)
+        It mucks about with signal handlers, but doesn't restore state.
 
         Properties
         ----------
@@ -484,6 +518,15 @@ class AlertSender:
              handlers to catch INT and TERM signals, and shut down
              cleanly.  This is not True by default because our tests
              need it to be False.
+
+          make_cutouts : bool, default False
+             If True, then FITS images with gratuitous data will be
+             included in the cutout* fields.  (It's just noise, don't
+             try to actually interpret it.)
+
+          cutout_size : int, default 41
+             If make_cutouts is True, then this is the square size of
+             the coutout data included.
 
         """
 
@@ -515,8 +558,8 @@ class AlertSender:
             _producetime = 0
             overall_t0 = time.perf_counter()
 
-            def launch_reconstructor( pipe ):
-                reconstructor = AlertReconstructor()
+            def launch_reconstructor( pipe, make_cutouts, cutout_size ):
+                reconstructor = AlertReconstructor( make_cutouts=make_cutouts, cutout_size=cutout_size )
                 reconstructor( pipe )
 
             freeprocs = set()
@@ -527,7 +570,10 @@ class AlertSender:
             _logger.info( f'Launching {self.reconstruct_procs} alert reconstruction processes.' )
             for i in range( self.reconstruct_procs ):
                 parentconn, childconn = multiprocessing.Pipe()
-                proc = multiprocessing.Process( target=lambda: launch_reconstructor( childconn ), daemon=True )
+                proc = multiprocessing.Process( target=lambda: launch_reconstructor( childconn,
+                                                                                     make_cutouts,
+                                                                                     cutout_size ),
+                                                daemon=True )
                 proc.start()
                 self.procinfo[ proc.pid ] = { 'proc': proc,
                                               'parentconn': parentconn,

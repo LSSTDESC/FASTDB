@@ -42,7 +42,6 @@ def import_first30days_objects( barf, alerts_30days_sent_and_brokermessage_consu
             conn.commit()
 
 
-@pytest.fixture
 def import_first30days_hosts( import_first30days_objects, procver_collection ):
     bpv, _pv = procver_collection
     try:
@@ -376,6 +375,7 @@ def test_import_objects( import_first30days_objects ):
     # TODO : look at more?  Compare ppdb_diaobject to diaobject?
 
 
+@pytest.mark.skip( reason="Hosts aren't currently in the LSST schema" )
 def test_import_hosts( import_first30days_hosts ):
     assert import_first30days_hosts == 18
     with db.DB() as conn:
@@ -624,6 +624,7 @@ def test_import_next60days( import_next60days_noprv ):
     assert max( r[sourcecoldex['midpointmjdtai']] for r in sources ) == pytest.approx( 60362.3266, abs=0.01 )
 
 
+@pytest.mark.skip( reason="Hosts aren't currently in the LSST schema" )
 def test_import_next60days_hosts( import_next60days_hosts ):
     assert import_next60days_hosts == 30
     with db.DB() as conn:
@@ -669,7 +670,9 @@ def test_import_30days_60days( import_30days_60days, test_user ):
     assert nsrc == 104
     assert nprvsrc == 0   # at this point, anything that could be imported has been
     assert nprvfrc == 707
-    assert nhosts == 42
+    # Hosts aren't currently in the LSST schema
+    # assert nhosts == 42
+    assert nhosts == 0
     with db.DB() as conn:
         cursor = conn.cursor( row_factory=psycopg.rows.dict_row )
         cursor.execute( "SELECT * FROM diasource" )
@@ -689,7 +692,9 @@ def test_import_30days_60days( import_30days_60days, test_user ):
     assert len(objects) == 37
     assert len(sources) == 181
     assert len(forced) == 855
-    assert len(hosts) == 42
+    # Hosts aren't currently in the LSST schema
+    # assert len(hosts) == 42
+    assert len(hosts) == 0
     assert min( r['midpointmjdtai'] for r in sources ) == pytest.approx( 60278.029, abs=0.01 )
     assert max( r['midpointmjdtai'] for r in sources ) == pytest.approx( 60362.3266, abs=0.01 )
     assert set( r['id'] for r in roots ) == set( o['rootid'] for o in objects )

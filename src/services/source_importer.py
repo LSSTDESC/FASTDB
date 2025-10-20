@@ -13,32 +13,54 @@ class SourceImporter:
     Instantiate the object with the processing version (the key into the
     processing_version table).  Then call .import(), passing it the
     MongoDB collection (see db.py::get_mongo_collection) to import from.
-
     """
 
-    object_lcfields = [ 'diaObjectId', 'radecMjdTai', 'validityStart', 'validityEnd',
-                        'ra', 'raErr', 'dec', 'decErr', 'ra_dec_Cov',
-                        'nearbyExtObj1', 'nearbyExtObj1Sep', 'nearbyExtObj2', 'nearbyExtObj2Sep',
-                        'nearbyExtObj3', 'nearbyExtObj3Sep', 'nearbyLowzGal', 'nearbyLowzGalSep',
-                        'parallax', 'parallaxErr', 'pmRa', 'pmRaErr', 'pmRa_parallax_Cov',
-                        'pmDec', 'pmDecErr', 'pmDec_parallax_Cov', 'pmRa_pmDec_Cov' ]
 
-    # TODO : flags!
-    source_lcfields = [ 'diaObjectId', 'ssObjectId', 'visit', 'detector',
-                        'x', 'y', 'xErr', 'yErr', 'x_y_Cov',
-                        'band', 'midpointMjdTai', 'ra', 'raErr', 'dec', 'decErr', 'ra_dec_Cov',
-                        'psfFlux', 'psfFluxErr', 'psfRa', 'psfDec', 'psfRaErr', 'psfDecErr',
-                        'psfra_psfdec_Cov', 'psfFlux_psfRa_Cov', 'psfFlux_psfDec_Cov',
-                        'psfLnL', 'psfChi2', 'psfNdata', 'snr',
-                        'sciencEFlux', 'scienceFluxErr', 'fpBkgd', 'fpBkgdErr',
-                        'extendedness', 'reliability',
-                        'ixx', 'ixxErr', 'iyy', 'iyyErr', 'ixy', 'ixyErr',
-                        'ixx_ixy_Cov', 'ixx_iyy_Cov', 'iyy_ixy_Cov',
-                        'ixxPsf', 'iyyPsf', 'ixyPsf' ]
+    object_lcfields = [ 'diaObjectId', 'validityStartMjdTai',
+                        'ra', 'raErr', 'dec', 'decErr', 'ra_dec_Cov' ]
 
-    forcedsource_lcfields = [ 'diaObjectId', 'visit', 'detector',
-                              'midpointMjdTai', 'band', 'ra', 'dec', 'psfFlux', 'psfFluxErr',
-                              'scienceFlux', 'scienceFluxErr', 'time_processed', 'time_withdrawn' ]
+    object_funcmongofields = None
+
+    object_funcfields = None
+
+    # The following fields may eventually be there, but aren't in the lsst 9.0 alerts
+    #                    'nearbyExtObj1', 'nearbyExtObj1Sep', 'nearbyExtObj2', 'nearbyExtObj2Sep',
+    #                      'nearbyExtObj3', 'nearbyExtObj3Sep', 'nearbyLowzGal', 'nearbyLowzGalSep',
+
+
+    source_lcfields = [ 'diaSourceId', 'visit', 'detector', 'diaObjectId', 'ssObjectId',
+                        'parentDiaSourceId', 'midpointMjdTai', 'ra', 'raErr', 'dec', 'decErr', 'ra_dec_Cov',
+                        'x', 'xErr', 'y', 'yErr', 'apFlux', 'apFluxErr', 'snr',
+                        'psfFlux', 'psfFluxErr', 'psfLnL', 'psfChi2', 'psfNdata',
+                        'scienceFlux', 'scienceFluxErr', 'templateFlux', 'templateFluxErr',
+                        'ixx', 'iyy', 'ixy', 'ixxPSF', 'iyyPSF', 'ixyPSF',
+                        'extendedness', 'reliability', 'band',
+                        'timeProcessedMjdTai','timeWithdrawnMjdTai', 'bboxSize' ]
+
+    source_funcmongofields = ( [ v for v in db.DiaSource._flags_bits.values() ] +
+                               [ v for v in db.DiaSource._pixelflags_bits.values() ] )
+
+    source_funcfields = { 'flags': lambda row: SourceImporter.build_flags( db.DiaSource._flags_bits, row ),
+                          'pixelflags': lambda row: SourceImporter.build_flags( db.DiaSource._pixelflags_bits, row )
+                         }
+
+    forcedsource_lcfields = [ 'diaForcedSourceId', 'diaObjectId', 'ra', 'dec', 'visit', 'detector',
+                              'psfFlux', 'psfFluxErr', 'midpointMjdTai',
+                              'scienceFlux', 'scienceFluxErr', 'band',
+                              'timeProcessedMjdTai', 'timeWithdrawnMjdTai' ]
+
+    forcedsource_funcmongofields = None
+
+    forcedsource_funcfields = None
+
+
+    @classmethod
+    def build_flags( cls, flagmap, row ):
+        val = 0
+        for mask, field in flagmap.items():
+            if row[field]:
+                val |= mask
+        return mask
 
 
     def __init__( self, base_processing_version, object_base_processing_version, object_match_radius=1. ):
@@ -60,8 +82,9 @@ class SourceImporter:
         self.object_match_radius = float( object_match_radius )
 
 
-    def _read_mongo_fields( self, pqconn, collection, pipeline, fields, temptable, liketable,
-                            t0=None, t1=None, batchsize=10000, procver_fields=['base_procver_id'],
+    def _read_mongo_fields( self, pqconn, collection, pipeline, lcfields, funcfields, funcmongofields,
+                            temptable, liketable, t0=None, t1=None, batchsize=10000,
+                            procver_fields=['base_procver_id'],
                             isobj=False ):
         if not re.search( "^[a-zA-Z0-9_]+$", temptable ):
             raise ValueError( f"Invalid temp table name {temptable}" )
@@ -86,7 +109,9 @@ class SourceImporter:
                 pipeline.insert( 0, { "$match": { "savetime": { "$lte": t1 } } } )
 
         mongocursor = collection.aggregate( pipeline )
-        writefields = list( fields )
+        writefields = [ str(f).lower() for f in lcfields ]
+        if funcfields is not None:
+            writefields.extend( [ str(f).lower() for f in funcfields ] )
         writefields.extend( procver_fields )
         bpv = self.object_base_processing_version if isobj else self.base_processing_version
         procverextend = [ bpv for i in procver_fields ]
@@ -94,7 +119,10 @@ class SourceImporter:
             for row in mongocursor:
                 # This is probably inefficient.  Generator to list to tuple.  python makes
                 #   writing this easy, but it's probably doing multiple gratuitous memory copies
-                data = [ None if row[f] is None else str(row[f]) for f in fields ]
+                data = [ None if row[f] is None else str(row[f]) for f in lcfields ]
+                if funcfields is not None:
+                    for field, func  in funcfields.items():
+                        data.append( func(row) )
                 data.extend( procverextend )
                 pgcopy.write_row( tuple( data ) )
 
@@ -123,12 +151,16 @@ class SourceImporter:
 
         """
 
-        fields = self.object_lcfields
+        lcfields = self.object_lcfields
+        funcfields = self.object_funcfields
+        funcmongofields = self.object_funcmongofields
+        allfields = lcfields if funcmongofields is None else lcfields + funcmongofields
         group = { "_id": "$msg.diaObject.diaObjectId" }
-        group.update( { k: { "$first": f"$msg.diaObject.{k}" } for k in fields } )
+        group.update( { k: { "$first": f"$msg.diaObject.{k}" } for k in allfields } )
         pipeline = [ { "$group": group } ]
 
-        self._read_mongo_fields( pqconn, collection, pipeline, fields, "temp_diaobject_import", "diaobject",
+        self._read_mongo_fields( pqconn, collection, pipeline, lcfields, funcfields, funcmongofields,
+                                 "temp_diaobject_import", "diaobject",
                                  t0=t0, t1=t1, batchsize=batchsize, isobj=True )
 
 
@@ -142,12 +174,16 @@ class SourceImporter:
 
         """
 
-        fields = self.source_lcfields
+        lcfields = self.source_lcfields
+        funcfields = self.source_funcfields
+        funcmongofields = self.source_funcmongofields
+        allfields = lcfields if funcmongofields is None else lcfields + funcmongofields
         group = { "_id": { "diaObjectId": "$msg.diaSource.diaObjectId", "visit": "$msg.diaSource.visit" } }
-        group.update( { k: { "$first": f"$msg.diaSource.{k}" } for k in fields } )
+        group.update( { k: { "$first": f"$msg.diaSource.{k}" } for k in allfields } )
         pipeline = [ { "$group": group } ]
 
-        self._read_mongo_fields( pqconn, collection, pipeline, fields, "temp_diasource_import", "diasource",
+        self._read_mongo_fields( pqconn, collection, pipeline, lcfields, funcfields, funcmongofields,
+                                 "temp_diasource_import", "diasource",
                                  t0=t0, t1=t1, batchsize=batchsize,
                                  procver_fields=[ 'base_procver_id' ] )
 
@@ -163,13 +199,17 @@ class SourceImporter:
 
         """
 
-        fields = self.source_lcfields
+        lcfields = self.source_lcfields
+        funcfields = self.source_funcfields
+        funcmongofields = self.source_funcmongofields
+        allfields = lcfields if funcmongofields is None else lcfields + funcmongofields
         group = { "_id": { "diaObjectId": "$msg.prvDiaSources.diaObjectId", "visit": "$msg.prvDiaSources.visit" } }
-        group.update( { k: { "$first": f"$msg.prvDiaSources.{k}" } for k in fields } )
+        group.update( { k: { "$first": f"$msg.prvDiaSources.{k}" } for k in allfields } )
         pipeline = [ { "$unwind": "$msg.prvDiaSources" },
                      { "$group": group } ]
 
-        self._read_mongo_fields( pqconn, collection, pipeline, fields, "temp_prvdiasource_import", "diasource",
+        self._read_mongo_fields( pqconn, collection, pipeline, lcfields, funcfields, funcmongofields,
+                                 "temp_prvdiasource_import", "diasource",
                                  t0=t0, t1=t1, batchsize=batchsize,
                                  procver_fields=[ 'base_procver_id' ] )
 
@@ -185,15 +225,19 @@ class SourceImporter:
 
         """
 
-        fields = self.forcedsource_lcfields
+        lcfields = self.forcedsource_lcfields
+        funcfields = self.forcedsource_funcfields
+        funcmongofields = self.forcedsource_funcmongofields
+        allfields = lcfields if funcmongofields is None else lcfields + funcmongofields
         group = { "_id": { "diaObjectId": "$msg.prvDiaForcedSources.diaObjectId",
                            "visit": "$msg.prvDiaForcedSources.visit" } }
-        group.update( { k: { "$first": f"$msg.prvDiaForcedSources.{k}" } for k in fields } )
+        group.update( { k: { "$first": f"$msg.prvDiaForcedSources.{k}" } for k in allfields } )
         pipeline = [ { "$unwind": "$msg.prvDiaForcedSources" },
                      { "$group": group } ]
 
-        self._read_mongo_fields( pqconn, collection, pipeline, fields, "temp_prvdiaforcedsource_import",
-                                 "diaforcedsource", t0=t0, t1=t1, batchsize=batchsize,
+        self._read_mongo_fields( pqconn, collection, pipeline, lcfields, funcfields, funcmongofields,
+                                 "temp_prvdiaforcedsource_import", "diaforcedsource",
+                                 t0=t0, t1=t1, batchsize=batchsize,
                                  procver_fields=[ 'base_procver_id' ] )
 
 

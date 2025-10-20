@@ -1,7 +1,7 @@
 import pathlib
-import subprocess
 
 import db
+from admin.load_snana_fits import FITSLoader
 
 
 def test_load_snana_fits():
@@ -12,18 +12,9 @@ def test_load_snana_fits():
     assert len(dirs) > 0
 
     try:
-        com = [ "python", "/code/src/admin/load_snana_fits.py",
-                "-n", "5",
-                "--pv", "test_procver",
-                "-v",
-                "-d"
-               ]
-        com.extend( dirs )
-        com.append( "--do" )
-
-        res = subprocess.run( com, capture_output=True )
-
-        assert res.returncode == 0
+        loader=FITSLoader( nprocs=5, directories=dirs, processing_version='test_procver',
+                           verbose=True, really_do=True )
+        loader()
 
         with db.DB() as conn:
             cursor = conn.cursor()

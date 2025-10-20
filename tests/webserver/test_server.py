@@ -161,14 +161,12 @@ def test_getdiaobjectinfo( fastdb_client, procver_collection, set_of_lightcurves
         res = fastdb_client.post( "/getdiaobjectinfo", json={ 'objectids': [ 200, 201, 202 ] } )
         assert res['diaobjectid'] == [ 200, 201, 202 ]
         assert res['rootid'] == [ str(roots[0]['root'].id), str(roots[1]['root'].id), str(roots[2]['root'].id) ]
-        assert set( res.keys() ) == { 'diaobjectid', 'rootid', 'base_procver_id', 'radecmjdtai', 'validitystart',
-                                      'validityend', 'ra', 'raerr', 'dec', 'decerr', 'ra_dec_cov',
+        assert set( res.keys() ) == { 'diaobjectid', 'rootid', 'base_procver_id', 'validitystartmjdtai',
+                                      'ra', 'raerr', 'dec', 'decerr', 'ra_dec_cov',
                                       'nearbyextobj1', 'nearbyextobj1id', 'nearbyextobj1sep',
                                       'nearbyextobj2', 'nearbyextobj2id', 'nearbyextobj2sep',
                                       'nearbyextobj3', 'nearbyextobj3id', 'nearbyextobj3sep',
-                                      'nearbylowzgal', 'nearbylowzgalsep', 'parallax', 'parallaxerr',
-                                      'pmra', 'pmraerr', 'pmra_parallax_cov',
-                                      'pmdec', 'pmdecerr', 'pmdec_parallax_cov', 'pmra_pmdec_cov' }
+                                      'nearbylowzgal', 'nearbylowzgalsep' }
 
         res = fastdb_client.post( "/getdiaobjectinfo", json={ 'objectids': [ 200, 201, 202 ],
                                                               'columns': [ 'diaobjectid', 'ra', 'dec' ] } )
