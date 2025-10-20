@@ -57,7 +57,8 @@ class TestDiaObject( BaseTestDB ):
                                ra=42.,
                                dec=128.,
                                raerr=0.1,
-                               decerr=0.1 )
+                               decerr=0.1,
+                               validitystartmjdtai=60000. )
         self.dict1 = { k: getattr( self.obj1, k ) for k in self.columns }
         self.obj2 = DiaObject( diaobjectid=2,
                                base_procver_id=bpv['bpv1'].id,
@@ -65,7 +66,8 @@ class TestDiaObject( BaseTestDB ):
                                ra=23.,
                                dec=-42.,
                                raerr=0.2,
-                               decerr=0.2 )
+                               decerr=0.2,
+                               validitystartmjdtai=60001. )
         self.dict2 = { k: getattr( self.obj2, k ) for k in self.columns }
         self.dict3 = { 'diaobjectid': 3,
                        'base_procver_id': bpv['bpv1'].id,
@@ -73,4 +75,5 @@ class TestDiaObject( BaseTestDB ):
                        'ra': 64.,
                        'dec': -23.,
                        'raerr': 0.3,
-                       'decerr': 0.3 }
+                       'decerr': 0.3,
+                       'validitystartmjdtai': 60002. }

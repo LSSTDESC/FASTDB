@@ -24,7 +24,8 @@ from basetest import BaseTestDB
 def ppdbobj1():
     obj = PPDBDiaObject( diaobjectid=42,
                          ra=42.,
-                         dec=13
+                         dec=13,
+                         validitystartmjdtai=60000.
                         )
     obj.insert()
 
@@ -40,7 +41,8 @@ def ppdbobj1():
 def ppdbobj2():
     obj = PPDBDiaObject( diaobjectid=23,
                          ra=42.,
-                         dec=14
+                         dec=14,
+                         validitystartmjdtai=60001.
                         )
     obj.insert()
 
@@ -56,7 +58,8 @@ def ppdbobj2():
 def ppdbobj3():
     obj = PPDBDiaObject( diaobjectid=64738,
                          ra=42.,
-                         dec=15
+                         dec=15,
+                         validitystartmjdtai=60002.
                         )
     obj.insert()
 

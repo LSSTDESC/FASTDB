@@ -187,20 +187,23 @@ def set_of_lightcurves( procver_collection ):
             # diaobjects
             if i < 3:
                 objr = DiaObject( diaobjectid=i, ra=rootobj['ra'], dec=rootobj['dec'],
-                                  rootid=robj.id, base_procver_id=bpvs['realtime'].id )
+                                  rootid=robj.id, base_procver_id=bpvs['realtime'].id,
+                                  validitystartmjdtai=50000. )
                 objobjs.append( objr )
                 rootdict['objs'].append( { 'obj': objr, 'src': {}, 'frc': {} } )
             else:
                 rootdict['objs'].append( None )
 
             obj = DiaObject( diaobjectid=200+i, ra=rootobj['ra'], dec=rootobj['dec'],
-                             rootid=robj.id, base_procver_id=bpvs['bpv2'].id )
+                             rootid=robj.id, base_procver_id=bpvs['bpv2'].id,
+                             validitystartmjdtai=50000. )
             objobjs.append( obj )
             rootdict['objs'].append( { 'obj': obj, 'src': {}, 'frc': {} } )
 
             if i == 0:
                 obj1 = DiaObject( diaobjectid=100, ra=rootobj['ra'], dec=rootobj['dec'],
-                                  rootid=robj.id, base_procver_id=bpvs['bpv1'].id )
+                                  rootid=robj.id, base_procver_id=bpvs['bpv1'].id,
+                                  validitystartmjdtai=50000. )
                 objobjs.append( obj1 )
                 rootdict['objs'].append( { 'obj': obj1, 'src': {}, 'frc': {} } )
 
@@ -422,7 +425,8 @@ def obj1( procver_collection, rootobj1 ):
                      base_procver_id=bpvs['bpv1'].id,
                      ra=42.,
                      dec=13,
-                     rootid=rootobj1.id
+                     rootid=rootobj1.id,
+                     validitystartmjdtai=50000.,
                     )
     obj.insert()
 
