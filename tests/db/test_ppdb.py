@@ -1,4 +1,3 @@
-import datetime
 import uuid
 import pytest
 
@@ -24,7 +23,6 @@ from basetest import BaseTestDB
 @pytest.fixture
 def ppdbobj1():
     obj = PPDBDiaObject( diaobjectid=42,
-                         radecmjdtai=60000.,
                          ra=42.,
                          dec=13
                         )
@@ -41,7 +39,6 @@ def ppdbobj1():
 @pytest.fixture
 def ppdbobj2():
     obj = PPDBDiaObject( diaobjectid=23,
-                         radecmjdtai=60000.,
                          ra=42.,
                          dec=14
                         )
@@ -58,7 +55,6 @@ def ppdbobj2():
 @pytest.fixture
 def ppdbobj3():
     obj = PPDBDiaObject( diaobjectid=64738,
-                         radecmjdtai=60000.,
                          ra=42.,
                          dec=15
                         )
@@ -177,9 +173,7 @@ class TestPPDBDiaObject( BaseTestDB ):
         self.cls = PPDBDiaObject
         self.columns = {
             'diaobjectid',
-            'radecmjdtai',
-            'validitystart',
-            'validityend',
+            'validitystartmjdtai',
             'ra',
             'raerr',
             'dec',
@@ -196,19 +190,9 @@ class TestPPDBDiaObject( BaseTestDB ):
             'nearbyextobj3sep',
             'nearbylowzgal',
             'nearbylowzgalsep',
-            'parallax',
-            'parallaxerr',
-            'pmra',
-            'pmraerr',
-            'pmra_parallax_cov',
-            'pmdec',
-            'pmdecerr',
-            'pmdec_parallax_cov',
-            'pmra_pmdec_cov' }
+        }
         self.safe_to_modify = [
-            'radecmjdtai',
-            'validitystart',
-            'validityend',
+            'validitystartmjdtai',
             'ra',
             'raerr',
             'dec',
@@ -222,30 +206,21 @@ class TestPPDBDiaObject( BaseTestDB ):
             'nearbyextobj3sep',
             'nearbylowzgal',
             'nearbylowzgalsep',
-            'parallax',
-            'parallaxerr',
-            'pmra',
-            'pmraerr',
-            'pmra_parallax_cov',
-            'pmdec',
-            'pmdecerr',
-            'pmdec_parallax_cov',
-            'pmra_pmdec_cov'
         ]
         self.uniques = []
 
         self.obj1 = PPDBDiaObject( diaobjectid=1,
-                                   radecmjdtai=60000.,
+                                   validitystartmjdtai=60001.,
                                    ra=42.,
-                                  dec=128. )
+                                   dec=128. )
         self.dict1 = { k: getattr( self.obj1, k ) for k in self.columns }
         self.obj2 = PPDBDiaObject( diaobjectid=2,
-                                   radecmjdtai=61000.,
+                                   validitystartmjdtai=60002.,
                                    ra=23.,
-                                  dec=-42. )
+                                   dec=-42. )
         self.dict2 = { k: getattr( self.obj2, k ) for k in self.columns }
-        self.dict3 = { 'diaobjectid': 3,
-                       'radecmjdtai': 62000.,
+        self.dict3 = { 'validitystartmjdtai': 60003.,
+                       'diaobjectid': 3,
                        'ra': 64.,
                        'dec': -23. }
 
@@ -274,37 +249,31 @@ class TestPPDBDiaSource( BaseTestDB ):
             'ra_dec_cov',
             'psfflux',
             'psffluxerr',
-            'psfra',
-            'psfraerr',
-            'psfdec',
-            'psfdecerr',
-            'psfra_psfdec_cov',
-            'psfflux_psfra_cov',
-            'psfflux_psfdec_cov',
             'psflnl',
             'psfchi2',
             'psfndata',
             'snr',
             'scienceflux',
             'sciencefluxerr',
-            'fpbkgd',
-            'fpbkgderr',
+            'templateflux',
+            'templatefluxerr',
             'extendedness',
             'reliability',
             'ixx',
-            'ixxerr',
             'iyy',
-            'iyyerr',
             'ixy',
-            'ixyerr',
-            'ixx_ixy_cov',
-            'ixx_iyy_cov',
-            'iyy_ixy_cov',
             'ixxpsf',
             'iyypsf',
             'ixypsf',
             'flags',
             'pixelflags',
+            'diasourceid',
+            'parentdiasourceid',
+            'apflux',
+            'apfluxerr',
+            'bboxsize',
+            'timeprocessedmjdtai',
+            'timewithdrawnmjdtai',
         }
         self.safe_to_modify = [
             'detector',
@@ -322,37 +291,31 @@ class TestPPDBDiaSource( BaseTestDB ):
             'ra_dec_cov',
             'psfflux',
             'psffluxerr',
-            'psfra',
-            'psfraerr',
-            'psfdec',
-            'psfdecerr',
-            'psfra_psfdec_cov',
-            'psfflux_psfra_cov',
-            'psfflux_psfdec_cov',
             'psflnl',
             'psfchi2',
             'psfndata',
             'snr',
             'scienceflux',
             'sciencefluxerr',
-            'fpbkgd',
-            'fpbkgderr',
+            'templateflux',
+            'templatefluxerr',
             'extendedness',
             'reliability',
             'ixx',
-            'ixxerr',
             'iyy',
-            'iyyerr',
             'ixy',
-            'ixyerr',
-            'ixx_ixy_cov',
-            'ixx_iyy_cov',
-            'iyy_ixy_cov',
             'ixxpsf',
             'iyypsf',
             'ixypsf',
             'flags',
             'pixelflags',
+            'diasourceid',
+            'parentdiasourceid',
+            'apflux',
+            'apfluxerr',
+            'bboxsize',
+            'timeprocessedmjdtai',
+            'timewithdrawnmjdtai',
             'band',
         ]
         self.uniques = []
@@ -366,6 +329,8 @@ class TestPPDBDiaSource( BaseTestDB ):
                                    dec=12.9998,
                                    psfflux=123.4,
                                    psffluxerr=5.6,
+                                   pixelflags=0,
+                                   flags=0
                                   )
         self.dict1 = { k: getattr( self.obj1, k ) for k in self.columns }
         self.obj2 = PPDBDiaSource( diaobjectid=ppdbobj1.diaobjectid,
@@ -376,7 +341,9 @@ class TestPPDBDiaSource( BaseTestDB ):
                                    ra=42.0002,
                                    dec=13.0001,
                                    psfflux=124.6,
-                                   psffluxerr=8.0
+                                   psffluxerr=8.0,
+                                   pixelflags=0,
+                                   flags=0
                                   )
         self.dict2 = { k: getattr( self.obj2, k ) for k in self.columns }
         self.dict3 = { 'diaobjectid': ppdbobj1.diaobjectid,
@@ -407,8 +374,9 @@ class TestPPDBDiaForcedSource( BaseTestDB ):
             'psffluxerr',
             'scienceflux',
             'sciencefluxerr',
-            'time_processed',
-            'time_withdrawn',
+            'timeprocessedmjdtai',
+            'timewithdrawnmjdtai',
+            'diaforcedsourceid'
         }
         self.safe_to_modify = [
             'detector',
@@ -420,12 +388,12 @@ class TestPPDBDiaForcedSource( BaseTestDB ):
             'psffluxerr',
             'scienceflux',
             'sciencefluxerr',
-            'time_processed',
-            'time_withdrawn',
+            'timeprocessedmjdtai',
+            'timewithdrawnmjdtai',
+            'diaforcedsourceid'
         ]
         self.uniques = []
 
-        t0 = datetime.datetime.now( tz=datetime.UTC )
         self.obj1 = PPDBDiaForcedSource( diaobjectid=ppdbobj1.diaobjectid,
                                          visit=1,
                                          detector=1,
@@ -437,8 +405,9 @@ class TestPPDBDiaForcedSource( BaseTestDB ):
                                          psffluxerr=5.6,
                                          scienceflux=234.5,
                                          sciencefluxerr=7.8,
-                                         time_processed=t0,
-                                         time_withdrawn=None
+                                         timeprocessedmjdtai=60000.,
+                                         timewithdrawnmjdtai=None,
+                                         diaforcedsourceid=1
                                         )
         self.dict1 = { k: getattr( self.obj1, k ) for k in self.columns }
         self.obj2 = PPDBDiaForcedSource( diaobjectid=ppdbobj1.diaobjectid,
@@ -452,8 +421,9 @@ class TestPPDBDiaForcedSource( BaseTestDB ):
                                          psffluxerr=5.7,
                                          scienceflux=235.5,
                                          sciencefluxerr=7.9,
-                                         time_processed=t0 + datetime.timedelta( days=1 ),
-                                         time_withdrawn=t0 + datetime.timedelta( days=365 )
+                                         timeprocessedmjdtai=60001.,
+                                         timewithdrawnmjdtai=60361.,
+                                         diaforcedsourceid=2
                                         )
         self.dict2 = { k: getattr( self.obj2, k ) for k in self.columns }
         self.dict3 = { 'diaobjectid': ppdbobj1.diaobjectid,
@@ -467,6 +437,7 @@ class TestPPDBDiaForcedSource( BaseTestDB ):
                        'psffluxerr': 4.5,
                        'scienceflux': 233.4,
                        'sciencefluxerr': 5.6,
-                       'time_processed': t0 + datetime.timedelta( days=2 ),
-                       'time_withdrawn': t0 + datetime.timedelta( weeks=3 )
+                       'timeprocessedmjdtai': 60010.,
+                       'timewithdrawnmjdtai': 60370.,
+                       'diaforcedsourceid': 3
                       }
