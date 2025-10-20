@@ -2,9 +2,11 @@ import os
 import pytest
 import pathlib
 import uuid
+import datetime
 
 import numpy as np
 from pymongo import MongoClient
+import astropy.time
 
 from db import ( BaseProcessingVersion,
                  ProcessingVersion,
@@ -148,6 +150,8 @@ def set_of_lightcurves( procver_collection ):
     # Objects 0-2 have photometry through 60060 and forced through 60055 in realtime
     # All lightcurves are at a 2.5 day cadence, alternating bands r and i.
 
+    now_mjd = astropy.time.Time( datetime.datetime.now( tz=datetime.UTC ) ).mjd
+
     roots = []
     rootobjs = []
     objobjs = []
@@ -246,7 +250,8 @@ def set_of_lightcurves( procver_collection ):
                                            band=('r' if visit%2==0 else 'i'), midpointmjdtai=sourcemjd,
                                            ra=rootobj['ra'], dec=rootobj['dec'],
                                            psfflux=psfflux, psffluxerr=psffluxerr,
-                                           base_procver_id=bpvs['realtime'].id )
+                                           base_procver_id=bpvs['realtime'].id,
+                                           timeprocessedmjdtai=now_mjd )
                     frcobjs.append( frc )
                     rootdict['objs'][0]['frc']['realtime'].append( frc )
 
@@ -267,7 +272,8 @@ def set_of_lightcurves( procver_collection ):
                                            band=('r' if visit%2==0 else 'i'), midpointmjdtai=sourcemjd,
                                            ra=rootobj['ra'], dec=rootobj['dec'],
                                            psfflux=psfflux, psffluxerr=psffluxerr,
-                                           base_procver_id=bpvs[bpv].id )
+                                           base_procver_id=bpvs[bpv].id,
+                                           timeprocessedmjdtai=now_mjd )
                     frcobjs.append( frc )
                     rootdict['objs'][1]['frc'][bpv].append( frc )
 
@@ -295,7 +301,8 @@ def set_of_lightcurves( procver_collection ):
                                                band=('r' if visit%2==0 else 'i'), midpointmjdtai=sourcemjd,
                                                ra=rootobj['dec'], dec=rootobj['dec'],
                                                psfflux=psfflux, psffluxerr=psffluxerr,
-                                               base_procver_id=bpvs[bpv].id )
+                                               base_procver_id=bpvs[bpv].id,
+                                               timeprocessedmjdtai=now_mjd )
                         frcobjs.append( frc )
                         rootdict['objs'][2]['frc'][bpv].append( frc )
 
@@ -320,7 +327,8 @@ def set_of_lightcurves( procver_collection ):
                                            band=('r' if visit%2==0 else 'i'), midpointmjdtai=sourcemjd,
                                            ra=rootobj['ra'], dec=rootobj['dec'],
                                            psfflux=psfflux, psffluxerr=psffluxerr,
-                                           base_procver_id=bpvs['realtime'].id )
+                                           base_procver_id=bpvs['realtime'].id,
+                                           timeprocessedmjdtai=now_mjd )
                     frcobjs.append( frc )
                     rootdict['objs'][0]['frc']['realtime'].append( frc )
 
@@ -331,7 +339,8 @@ def set_of_lightcurves( procver_collection ):
                                            band=('r' if visit%2==0 else 'i'), midpointmjdtai=sourcemjd,
                                            ra=rootobj['ra'], dec=rootobj['dec'],
                                            psfflux=psfflux, psffluxerr=psffluxerr,
-                                           base_procver_id=bpvs[bpv].id )
+                                           base_procver_id=bpvs[bpv].id,
+                                           timeprocessedmjdtai=now_mjd )
                     frcobjs.append( frc )
                     rootdict['objs'][1]['frc'][bpv].append( frc )
 
@@ -346,7 +355,8 @@ def set_of_lightcurves( procver_collection ):
                                                band=('r' if visit%2==0 else 'i'), midpointmjdtai=sourcemjd,
                                                ra=rootobj['ra'], dec=rootobj['dec'],
                                                psfflux=psfflux, psffluxerr=psffluxerr,
-                                               base_procver_id=bpvs[bpv].id )
+                                               base_procver_id=bpvs[bpv].id,
+                                               timeprocessedmjdtai=now_mjd )
                         frcobjs.append( frc )
                         rootdict['objs'][2]['frc'][bpv].append( frc )
 
@@ -491,64 +501,6 @@ def src1_pv2( obj1, procver_collection ):
         cursor.execute( "DELETE FROM diasource WHERE base_procver_id=%(pv)s "
                         "                        AND diaobjectid=%(objid)s AND visit=%(visit)s",
                         { 'pv': src.base_procver_id, 'objid': src.diaobjectid, 'visit': src.visit } )
-        con.commit()
-
-
-@pytest.fixture
-def forced1( obj1, procver_collection ):
-    bpvs, _pvs = procver_collection
-    src = DiaForcedSource( base_procver_id=bpvs['bpv1'].id,
-                           diaobjectid=obj1.diaobjectid,
-                           visit=128.,
-                           detector=10.,
-                           midpointmjdtai=59100.,
-                           band='i',
-                           ra=obj1.ra - 0.0001,
-                           dec=obj1.dec - 0.0001,
-                           psfflux=4.,
-                           psffluxerr=0.2,
-                           scienceflux=7.,
-                           sciencefluxerr=0.5,
-                           time_processed=None,
-                           time_withdrawn=None
-                          )
-    src.insert()
-
-    yield src
-    with DB() as con:
-        cursor = con.cursor()
-        cursor.execute( "DELETE FROM diaforcedsource WHERE base_procver_id=%(pv)s "
-                        "                              AND objectid=%(id)s AND visit=%(visit)s",
-                        { 'pv': src.processing_version, 'objid': src.diaobjectid, 'visit': src.visit } )
-        con.commit()
-
-
-@pytest.fixture
-def forced1_pv2( obj1, procver_collection ):
-    bpvs, _pvs = procver_collection
-    src = DiaForcedSource( base_processing_version=bpvs['bpv2'].id,
-                           diaobjectid=obj1.diaobjectid,
-                           visit=128.,
-                           detector=10.,
-                           midpointmjdtai=59100.,
-                           band='i',
-                           ra=obj1.ra - 0.0001,
-                           dec=obj1.dec - 0.0001,
-                           psfflux=4.,
-                           psffluxerr=0.2,
-                           scienceflux=7.,
-                           sciencefluxerr=0.5,
-                           time_processed=None,
-                           time_withdrawn=None
-                          )
-    src.insert()
-
-    yield src
-    with DB() as con:
-        cursor = con.cursor()
-        cursor.execute( "DELETE FROM diaforcedsource WHERE base_procver_id=%(pv)s "
-                        "                              AND objectid=%(objid)s AND visit=%(visit)s",
-                        { 'pv': src.processing_version, 'objid': src.diaobjectid, 'visit': src.visit } )
         con.commit()
 
 

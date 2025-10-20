@@ -14,14 +14,12 @@ def test_dump_to_parquet( set_of_lightcurves ):
     dump_to_parquet( bio, 'realtime' )
     bio.seek(0)
     nf = npd.read_parquet( bio )
-    assert set( nf.columns ) == { 'diaobjectid', 'rootid', 'base_procver_id', 'validitystart', 'validityend',
-                                  'radecmjdtai', 'ra', 'raerr', 'dec', 'decerr', 'ra_dec_cov',
+    assert set( nf.columns ) == { 'diaobjectid', 'rootid', 'base_procver_id', 'validitystartmjdtai',
+                                  'ra', 'raerr', 'dec', 'decerr', 'ra_dec_cov',
                                   'nearbyextobj1', 'nearbyextobj1id', 'nearbyextobj1sep',
                                   'nearbyextobj2', 'nearbyextobj2id', 'nearbyextobj2sep',
                                   'nearbyextobj3', 'nearbyextobj3id', 'nearbyextobj3sep',
-                                  'nearbylowzgal', 'nearbylowzgalsep', 'parallax', 'parallaxerr',
-                                  'pmra', 'pmraerr', 'pmra_parallax_cov',
-                                  'pmdec', 'pmdecerr', 'pmdec_parallax_cov', 'pmra_pmdec_cov',
+                                  'nearbylowzgal', 'nearbylowzgalsep',
                                   'diasource', 'diaforcedsource' }
     assert len(nf) == 3
     # Results should be sorted by diaobjectid

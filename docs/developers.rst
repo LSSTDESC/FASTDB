@@ -344,8 +344,8 @@ Changing database structures
 
 If you change database sturctures (adding fields, etc.), it's possible that some of the tests will start failing because cached test data no longer matches what's expected.  This will happen (at least) to tests that use the ``alerts_90days_sent_received_and_imported`` fixture in ``tests/fixtures/alertcycle.py``.  If you're seeing something you think is this error, look at all the comments above and below that test in that file for information on rebuilding the cached test data.
 
-If the ``alerts_90days_sent_received_and_imported`` test fails
---------------------------------------------------------------
+If the ``services/test_sourceimporter.py::test_full90days_fast`` test fails
+---------------------------------------------------------------------------
 
 (Note that a bunch of other tests will also fail for the same reason that this test fails.)
 
