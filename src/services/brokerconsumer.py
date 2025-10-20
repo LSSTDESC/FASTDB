@@ -19,6 +19,9 @@ from pymongo import MongoClient
 
 from kafka_consumer import KafkaConsumer
 
+# Default location of BrokerMessage schema
+_default_brokermessage_schemafile = "/fastdb/share/avsc/fastdb_9_0_1.BrokerMessage.avsc"
+
 # TODO : uncomment this next line
 #   and the whole PittGoogleBroker class
 #   when pittgoogle works again
@@ -160,7 +163,7 @@ class BrokerConsumer:
         if schemafile is None:
             # This is where the schema lives inside our docker images...
             #   though the version of the namespace will evolve.
-            schemafile = "/fastdb/share/avsc/fastdb_test_0.2.BrokerMessage.avsc"
+            schemafile = _default_brokermessage_schemafile
 
         self.countlogger.info( f"************ Starting BrokerConsumer for {loggername} ****************" )
 
