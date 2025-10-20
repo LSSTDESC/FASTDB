@@ -176,6 +176,8 @@ class FITSFileHandler( SNANAColumnMapper ):
 
             # Build the diaobject table in head
             self.diaobject_map_columns( head )
+            head.add_column( astropy.time.Time( datetime.datetime.now( tz=datetime.UTC ) ).mjd,
+                             name='validitystartmjdtai' )
             if not self.ppdb:
                 head.add_column( self.base_processing_version, name='base_procver_id' )
                 head.add_column( [ str(uuid.uuid4()) for i in range(len(head)) ], name='rootid' )

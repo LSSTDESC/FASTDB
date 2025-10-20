@@ -17,8 +17,9 @@ from kafka_consumer import KafkaConsumer
 
 _rundir = pathlib.Path( __file__ ).parent
 
-# This next thing is used as a default
-_schema_namespace = "fastdb_test_0.2"
+# These next two are used as defaults
+_alert_schema_namespace = "lsst.v9_0"
+_brokermessage_schema_namespace = "fastdb_9_0_1"
 
 
 # ======================================================================
@@ -87,6 +88,11 @@ class Classifier:
         t1 = time.perf_counter()
         for msg in messages:
             t2 = time.perf_counter()
+            # ****
+            # import random
+            # import remote_pdb;
+            # remote_pdb.RemotePdb( '127.0.0.1', random.randint(4000,60000) ).set_trace()
+            ####
             alert = fastavro.schemaless_reader( io.BytesIO(msg), self.alertschema )
             alert['classifications'] = []
             t3 = time.perf_counter()
@@ -181,8 +187,8 @@ class FakeBroker:
                   dest,
                   dest_topic,
                   group_id="rknop-test",
-                  alert_schema=f"/fastdb/share/avsc/{_schema_namespace}.Alert.avsc",
-                  brokermessage_schema=f"/fastdb/share/avsc/{_schema_namespace}.BrokerMessage.avsc",
+                  alert_schema=f"/fastdb/share/avsc/{_alert_schema_namespace}.alert.avsc",
+                  brokermessage_schema=f"/fastdb/share/avsc/{_brokermessage_schema_namespace}.BrokerMessage.avsc",
                   runtime=datetime.timedelta(minutes=10),
                   consume_nmsgs=1000,
                   notopic_sleeptime=10,
@@ -352,10 +358,10 @@ def main():
     parser.add_argument( "--dest", default="brahms.lbl.gov:9092",
                          help="Server to push broker message alerts to" )
     parser.add_argument( "-u", "--dest-topic", required=True, help="Topic on dest server" )
-    parser.add_argument( "-s", "--alert-schema", default=f"/fastdb/share/avsc/{_schema_namespace}.Alert.avsc",
+    parser.add_argument( "-s", "--alert-schema", default=f"/fastdb/share/avsc/{_alert_schema_namespace}.alert.avsc",
                          help="File with AP alert schema" )
     parser.add_argument( "-b", "--brokermessage-schema",
-                         default=f"/fastdb/share/avsc/{_schema_namespace}.BrokerMessage.avsc",
+                         default=f"/fastdb/share/avsc/{_brokermessage_schema_namespace}.BrokerMessage.avsc",
                          help="File with broker message alert schema" )
     parser.add_argument( "-v", "--verbose", default=False, action="store_true",
                          help="Show a lot of debug log messages" )

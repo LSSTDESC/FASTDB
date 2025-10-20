@@ -240,6 +240,7 @@ class AlertReconstructor:
             if len(rows) > 1:
                 raise RuntimeError( f"diaobject {diasource['diaObjectId']} is multiply defined, I can't cope." )
             diaobject = self.object_data_to_dicts( rows, columns )[0]
+            diaobject['nDiaSources'] = 1 + len(previous_sources)
             t6 = time.perf_counter()
 
             self.connecttime += t1 - t0
