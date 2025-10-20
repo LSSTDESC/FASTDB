@@ -1,7 +1,6 @@
 import os
 import pytest
 import pathlib
-import subprocess
 import uuid
 
 import numpy as np
@@ -16,7 +15,8 @@ from db import ( BaseProcessingVersion,
                  DB,
                  DBCon,
                  AuthUser )
-from util import asUUID, logger
+from util import asUUID
+from admin.load_snana_fits import FITSLoader
 from fastdb.fastdb_client import FASTDBClient
 
 
@@ -569,18 +569,8 @@ def snana_fits_ppdb_loaded():
     assert len(dirs) > 0
 
     try:
-        com = [ "python", "/code/src/admin/load_snana_fits.py",
-                "-n", "5",
-                "-v",
-                "--ppdb",
-                "-d",
-               ]
-        com.extend( dirs )
-        com.append( "--do" )
-
-        logger.info( f"Running a subprocess with command: {com}" )
-        res = subprocess.run( com, capture_output=True )
-        assert res.returncode == 0
+        loader = FITSLoader( nprocs=5, directories=dirs, verbose=True, ppdb=True, really_do=True )
+        loader()
 
         yield True
 
@@ -603,18 +593,10 @@ def snana_fits_maintables_loaded_module( procver_collection ):
     assert len(dirs) > 0
 
     try:
-        com = [ "python", "/code/src/admin/load_snana_fits.py",
-                "-n", "5",
-                "-v",
-                "--pv", procver_collection[1]['pv1'].description,
-                "-d",
-               ]
-        com.extend( dirs )
-        com.append( "--do" )
+        loader = FITSLoader( nprocs=5, directories=dirs, verbose=True, really_do=True,
+                             processing_version=procver_collection[1]['pv1'].description )
+        loader()
 
-        logger.info( f"Running a subprocess with command: {com}" )
-        res = subprocess.run( com, capture_output=True )
-        assert res.returncode == 0
 
         with DB() as dbcon:
             cursor = dbcon.cursor()

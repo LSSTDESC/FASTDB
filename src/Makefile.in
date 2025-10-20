@@ -141,8 +141,9 @@ am__uninstall_files_from_dir = { \
     || { echo " ( cd '$$dir' && rm -f" $$files ")"; \
          $(am__cd) "$$dir" && rm -f $$files; }; \
   }
-am__installdirs = "$(DESTDIR)$(installdir)" "$(DESTDIR)$(servicesdir)"
-DATA = $(install_DATA) $(services_DATA)
+am__installdirs = "$(DESTDIR)$(admindir)" "$(DESTDIR)$(installdir)" \
+	"$(DESTDIR)$(servicesdir)"
+DATA = $(admin_DATA) $(install_DATA) $(services_DATA)
 am__tagged_files = $(HEADERS) $(SOURCES) $(TAGS_FILES) $(LISP)
 am__DIST_COMMON = $(srcdir)/Makefile.in $(srcdir)/config.py.in
 DISTFILES = $(DIST_COMMON) $(DIST_SOURCES) $(TEXINFOS) $(EXTRA_DIST)
@@ -238,6 +239,7 @@ top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
 AUTOMAKE_OPTION = subdir-objects
 servicesdir = @installdir@/services
+admindir = @installdir@/admin
 install_DATA = __init__.py config.py db.py kafka_consumer.py ltcv.py spectrum.py util.py rkwebutil.py \
 	parquet_export.py
 
@@ -247,6 +249,12 @@ services_DATA = services/__init__.py \
 	services/long_query_runner.py \
 	services/projectsim.py \
 	services/source_importer.py
+
+admin_DATA = admin/csv_to_avsc.py \
+	admin/dump_to_parquet.py \
+	admin/fastdb_loader.py \
+	admin/load_dp1_parquet.py \
+	admin/load_snana_fits.py
 
 all: all-am
 
@@ -282,6 +290,27 @@ $(ACLOCAL_M4):  $(am__aclocal_m4_deps)
 $(am__aclocal_m4_deps):
 config.py: $(top_builddir)/config.status $(srcdir)/config.py.in
 	cd $(top_builddir) && $(SHELL) ./config.status $(subdir)/$@
+install-adminDATA: $(admin_DATA)
+	@$(NORMAL_INSTALL)
+	@list='$(admin_DATA)'; test -n "$(admindir)" || list=; \
+	if test -n "$$list"; then \
+	  echo " $(MKDIR_P) '$(DESTDIR)$(admindir)'"; \
+	  $(MKDIR_P) "$(DESTDIR)$(admindir)" || exit 1; \
+	fi; \
+	for p in $$list; do \
+	  if test -f "$$p"; then d=; else d="$(srcdir)/"; fi; \
+	  echo "$$d$$p"; \
+	done | $(am__base_list) | \
+	while read files; do \
+	  echo " $(INSTALL_DATA) $$files '$(DESTDIR)$(admindir)'"; \
+	  $(INSTALL_DATA) $$files "$(DESTDIR)$(admindir)" || exit $$?; \
+	done
+
+uninstall-adminDATA:
+	@$(NORMAL_UNINSTALL)
+	@list='$(admin_DATA)'; test -n "$(admindir)" || list=; \
+	files=`for p in $$list; do echo $$p; done | sed -e 's|^.*/||'`; \
+	dir='$(DESTDIR)$(admindir)'; $(am__uninstall_files_from_dir)
 install-installDATA: $(install_DATA)
 	@$(NORMAL_INSTALL)
 	@list='$(install_DATA)'; test -n "$(installdir)" || list=; \
@@ -367,7 +396,7 @@ check-am: all-am
 check: check-am
 all-am: Makefile $(DATA)
 installdirs:
-	for dir in "$(DESTDIR)$(installdir)" "$(DESTDIR)$(servicesdir)"; do \
+	for dir in "$(DESTDIR)$(admindir)" "$(DESTDIR)$(installdir)" "$(DESTDIR)$(servicesdir)"; do \
 	  test -z "$$dir" || $(MKDIR_P) "$$dir"; \
 	done
 install: install-am
@@ -420,7 +449,8 @@ info: info-am
 
 info-am:
 
-install-data-am: install-installDATA install-servicesDATA
+install-data-am: install-adminDATA install-installDATA \
+	install-servicesDATA
 
 install-dvi: install-dvi-am
 
@@ -464,20 +494,22 @@ ps: ps-am
 
 ps-am:
 
-uninstall-am: uninstall-installDATA uninstall-servicesDATA
+uninstall-am: uninstall-adminDATA uninstall-installDATA \
+	uninstall-servicesDATA
 
 .MAKE: install-am install-strip
 
 .PHONY: all all-am check check-am clean clean-generic cscopelist-am \
 	ctags-am distclean distclean-generic distdir dvi dvi-am html \
-	html-am info info-am install install-am install-data \
-	install-data-am install-dvi install-dvi-am install-exec \
-	install-exec-am install-html install-html-am install-info \
-	install-info-am install-installDATA install-man install-pdf \
-	install-pdf-am install-ps install-ps-am install-servicesDATA \
-	install-strip installcheck installcheck-am installdirs \
-	maintainer-clean maintainer-clean-generic mostlyclean \
-	mostlyclean-generic pdf pdf-am ps ps-am tags-am uninstall \
+	html-am info info-am install install-adminDATA install-am \
+	install-data install-data-am install-dvi install-dvi-am \
+	install-exec install-exec-am install-html install-html-am \
+	install-info install-info-am install-installDATA install-man \
+	install-pdf install-pdf-am install-ps install-ps-am \
+	install-servicesDATA install-strip installcheck \
+	installcheck-am installdirs maintainer-clean \
+	maintainer-clean-generic mostlyclean mostlyclean-generic pdf \
+	pdf-am ps ps-am tags-am uninstall uninstall-adminDATA \
 	uninstall-am uninstall-installDATA uninstall-servicesDATA
 
 .PRECIOUS: Makefile

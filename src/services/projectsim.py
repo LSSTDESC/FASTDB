@@ -6,6 +6,7 @@ import time
 import multiprocessing
 import signal
 import argparse
+import traceback
 
 import confluent_kafka
 import fastavro
@@ -331,8 +332,9 @@ class AlertReconstructor:
                     else:
                         raise ValueError( f"Unknown command {msg['command']}" )
                 except Exception as ex:
-                    ROB PUT IN A TRACEBACK PRINT THING HERE
-                    # Should I be sending an error message back to the parent process instead of just raising?
+                    sio = io.StringIO()
+                    traceback.print_exception( ex, file=sio )
+                    _logger.exception( sio.getvalue() )
                     raise ex
 
         logger.info( "Subprocess sending finished message" )

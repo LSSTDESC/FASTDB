@@ -1,7 +1,6 @@
 import re
 import uuid
 
-import psycopg
 import psycopg.rows
 
 import db
