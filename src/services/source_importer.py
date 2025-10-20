@@ -46,7 +46,7 @@ class SourceImporter:
 
     forcedsource_lcfields = [ 'diaForcedSourceId', 'diaObjectId', 'ra', 'dec', 'visit', 'detector',
                               'psfFlux', 'psfFluxErr', 'midpointMjdTai',
-                              'scienceFlux', 'scienceFluxErr', 'band'
+                              'scienceFlux', 'scienceFluxErr', 'band',
                               'timeProcessedMjdTai', 'timeWithdrawnMjdTai' ]
 
     forcedsource_funcmongofields = None

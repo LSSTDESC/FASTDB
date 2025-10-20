@@ -235,13 +235,13 @@ def alerts_90days_sent_received_and_imported( procver_collection ):
 #   RUN_FULL90DAYS=1 pytest -v --trace services/test_sourceimporter.py::test_full90days
 #
 # When you get to the pdb prompt at the beginning of that test, in
-# another shell in the container run:
+# another shell in the container, cd into the tests directory and run:
 #
 #    PGPASSWORD=fragile pg_dump -h postgres -U postgres fastdb -F c -a  \
 #       -f elasticc2_test_data/alerts_90days_sent_received_and_imported.pgdump \
 #       -t root_diaobject -t diaobject -t host_galaxy -t diasource -t diaforcedsource
 #
-# That will creae the file
+# That will create the file
 #   elasticc2_test_data/alerts_90days_sent_receved_and_imported.pgdump
 # underneath the tests directory.  If you do this, and the changes need
 # to be committed to git, you will also need to run:
