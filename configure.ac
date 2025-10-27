@@ -9,6 +9,7 @@ AC_CONFIG_FILES([
   src/webserver/static/fastdb_start.js
   src/webserver/static/objectinfo.js
   src/webserver/static/objectlist.js
+  src/webserver/static/objectsearch.js
   src/webserver/static/rkauth.js
   src/webserver/static/resetpasswd_start.js
   src/webserver/templates/fastdb_webap.html
