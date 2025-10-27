@@ -6,7 +6,7 @@
  * rkwebutil is free software under the BSD 3-clause license (see LICENSE)
  */
 
-import { rkWebUtil } from "@external_url@rkwebutil.js"
+import { rkWebUtil } from "@external_url@static/rkwebutil.js"
 
 // ASSUMPTIONS
 // * There is a div (passed to the constructor) that rkAuth can do whatever it wants to
