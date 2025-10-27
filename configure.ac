@@ -5,6 +5,11 @@ AC_CONFIG_FILES([
   src/Makefile
   src/webserver/Makefile
   src/config.py
+  src/webserver/static/fastdb.js
+  src/webserver/static/fastdb_start.js
+  src/webserver/static/objectinfo.js
+  src/webserver/static/objectlist.js
+  src/webserver/templates/fastdb_webap.html
   share/Makefile
   client/Makefile
 ])
@@ -13,6 +18,11 @@ AC_ARG_WITH( installdir,
              [AS_HELP_STRING([--with-installdir=DIR], [Directory to install to [/usr/local/fastdb]])],
              [installdir=$withval],
              [installdir=/usr/local/fastdb] )
+
+AC_ARG_WITH( external-url,
+             [AS_HELP_STRING([--with-external-url=URL], [How the site is accessed externally; should end in / [""]])],
+             [external_url=$withval],
+             [external_url=""] )
 
 AC_ARG_WITH( dbhost,
              [AS_HELP_STRING([--with-dbhost=HOST], [Postgres host [postgres]])],

@@ -2,9 +2,9 @@
 
 {% block head %}
 <!-- <link rel="icon" type="image.png" href="static/favicon.png"> -->
-<link rel="stylesheet" href="static/fastdb.css">
-<script src="static/fastdb.js" type="module"></script>
-<script src="static/fastdb_start.js" type="module"></script>
+<link rel="stylesheet" href="@external_url@static/fastdb.css">
+<script src="@external_url@static/fastdb.js" type="module"></script>
+<script src="@external_url@static/fastdb_start.js" type="module"></script>
 {% endblock %}
 
 {% block title %}FASTDB Web UI{% endblock %}

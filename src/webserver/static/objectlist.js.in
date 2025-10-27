@@ -1,5 +1,5 @@
-import { fastdbap } from "./fastdb_ns.js"
-import { rkWebUtil } from "./rkwebutil.js"
+import { fastdbap } from "@external_url@static/fastdb_ns.js"
+import { rkWebUtil } from "@external_url@static/rkwebutil.js"
 
 // **********************************************************************
 // **********************************************************************

@@ -1,9 +1,9 @@
-import { fastdbap } from "./fastdb_ns.js"
-import { rkAuth } from "./rkauth.js";
-import { rkWebUtil } from "./rkwebutil.js";
-import "./objectsearch.js"
-import "./objectlist.js"
-import "./objectinfo.js"
+import { fastdbap } from "@external_url@static/fastdb_ns.js"
+import { rkAuth } from "@external_url@static/rkauth.js";
+import { rkWebUtil } from "@external_url@static/rkwebutil.js";
+import "@external_url@static/objectsearch.js"
+import "@external_url@static/objectlist.js"
+import "@external_url@static/objectinfo.js"
 
 // **********************************************************************
 // **********************************************************************
