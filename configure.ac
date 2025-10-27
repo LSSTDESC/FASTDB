@@ -37,7 +37,7 @@ AC_ARG_WITH( db-passwd-file,
 
 AC_ARG_WITH( secret-key-file,
              [AS_HELP_STRING([--with-secret-key-file=KEYFILE], [File with flask secret key [/secrets/secretkey]])],
-             [secretkeyfile=$withfal],
+             [secretkeyfile=$withval],
              [secretkeyfile=/secrets/secretkey] )
 
 AC_ARG_WITH( email-from,

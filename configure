@@ -2588,7 +2588,7 @@ fi
 # Check whether --with-secret-key-file was given.
 if test ${with_secret_key_file+y}
 then :
-  withval=$with_secret_key_file; secretkeyfile=$withfal
+  withval=$with_secret_key_file; secretkeyfile=$withval
 else $as_nop
   secretkeyfile=/secrets/secretkey
 fi
