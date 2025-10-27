@@ -617,6 +617,7 @@ PACKAGE_URL=''
 
 ac_subst_vars='LTLIBOBJS
 LIBOBJS
+external_url
 smtppassword
 smtpusername
 smtpusessl
@@ -2528,7 +2529,7 @@ END
   fi
 fi
 
-ac_config_files="$ac_config_files Makefile src/Makefile src/webserver/Makefile src/config.py src/webserver/static/fastdb.js src/webserver/static/fastdb_start.js src/webserver/static/objectinfo.js src/webserver/static/objectlist.js src/webserver/templates/fastdb_webap.html share/Makefile client/Makefile"
+ac_config_files="$ac_config_files Makefile src/Makefile src/webserver/Makefile src/config.py src/webserver/static/fastdb.js src/webserver/static/fastdb_start.js src/webserver/static/objectinfo.js src/webserver/static/objectlist.js src/webserver/static/rkauth.js src/webserver/static/resetpasswd_start.js src/webserver/templates/fastdb_webap.html share/Makefile client/Makefile"
 
 
 
@@ -2659,6 +2660,7 @@ then :
 else $as_nop
   smtppassword=None
 fi
+
 
 
 
@@ -3395,6 +3397,8 @@ do
     "src/webserver/static/fastdb_start.js") CONFIG_FILES="$CONFIG_FILES src/webserver/static/fastdb_start.js" ;;
     "src/webserver/static/objectinfo.js") CONFIG_FILES="$CONFIG_FILES src/webserver/static/objectinfo.js" ;;
     "src/webserver/static/objectlist.js") CONFIG_FILES="$CONFIG_FILES src/webserver/static/objectlist.js" ;;
+    "src/webserver/static/rkauth.js") CONFIG_FILES="$CONFIG_FILES src/webserver/static/rkauth.js" ;;
+    "src/webserver/static/resetpasswd_start.js") CONFIG_FILES="$CONFIG_FILES src/webserver/static/resetpasswd_start.js" ;;
     "src/webserver/templates/fastdb_webap.html") CONFIG_FILES="$CONFIG_FILES src/webserver/templates/fastdb_webap.html" ;;
     "share/Makefile") CONFIG_FILES="$CONFIG_FILES share/Makefile" ;;
     "client/Makefile") CONFIG_FILES="$CONFIG_FILES client/Makefile" ;;

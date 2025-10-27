@@ -9,6 +9,8 @@ AC_CONFIG_FILES([
   src/webserver/static/fastdb_start.js
   src/webserver/static/objectinfo.js
   src/webserver/static/objectlist.js
+  src/webserver/static/rkauth.js
+  src/webserver/static/resetpasswd_start.js
   src/webserver/templates/fastdb_webap.html
   share/Makefile
   client/Makefile
@@ -88,6 +90,7 @@ AC_SUBST(smtpport)
 AC_SUBST(smtpusessl)
 AC_SUBST(smtpusername)
 AC_SUBST(smtppassword)
+AC_SUBST(external_url)
 
 AC_OUTPUT
 

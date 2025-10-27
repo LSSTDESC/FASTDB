@@ -99,6 +99,8 @@ CONFIG_CLEAN_FILES = src/webserver/static/fastdb.js \
 	src/webserver/static/fastdb_start.js \
 	src/webserver/static/objectinfo.js \
 	src/webserver/static/objectlist.js \
+	src/webserver/static/rkauth.js \
+	src/webserver/static/resetpasswd_start.js \
 	src/webserver/templates/fastdb_webap.html
 CONFIG_CLEAN_VPATH_FILES =
 AM_V_P = $(am__v_P_@AM_V@)
@@ -159,6 +161,8 @@ am__DIST_COMMON = $(srcdir)/Makefile.in \
 	$(top_srcdir)/src/webserver/static/fastdb_start.js.in \
 	$(top_srcdir)/src/webserver/static/objectinfo.js.in \
 	$(top_srcdir)/src/webserver/static/objectlist.js.in \
+	$(top_srcdir)/src/webserver/static/resetpasswd_start.js.in \
+	$(top_srcdir)/src/webserver/static/rkauth.js.in \
 	$(top_srcdir)/src/webserver/templates/fastdb_webap.html.in \
 	README.md install-sh missing
 DISTFILES = $(DIST_COMMON) $(DIST_SOURCES) $(TEXINFOS) $(EXTRA_DIST)
@@ -263,6 +267,7 @@ docdir = @docdir@
 dvidir = @dvidir@
 emailfrom = @emailfrom@
 exec_prefix = @exec_prefix@
+external_url = @external_url@
 host_alias = @host_alias@
 htmldir = @htmldir@
 includedir = @includedir@
@@ -339,6 +344,10 @@ src/webserver/static/fastdb_start.js: $(top_builddir)/config.status $(top_srcdir
 src/webserver/static/objectinfo.js: $(top_builddir)/config.status $(top_srcdir)/src/webserver/static/objectinfo.js.in
 	cd $(top_builddir) && $(SHELL) ./config.status $@
 src/webserver/static/objectlist.js: $(top_builddir)/config.status $(top_srcdir)/src/webserver/static/objectlist.js.in
+	cd $(top_builddir) && $(SHELL) ./config.status $@
+src/webserver/static/rkauth.js: $(top_builddir)/config.status $(top_srcdir)/src/webserver/static/rkauth.js.in
+	cd $(top_builddir) && $(SHELL) ./config.status $@
+src/webserver/static/resetpasswd_start.js: $(top_builddir)/config.status $(top_srcdir)/src/webserver/static/resetpasswd_start.js.in
 	cd $(top_builddir) && $(SHELL) ./config.status $@
 src/webserver/templates/fastdb_webap.html: $(top_builddir)/config.status $(top_srcdir)/src/webserver/templates/fastdb_webap.html.in
 	cd $(top_builddir) && $(SHELL) ./config.status $@
