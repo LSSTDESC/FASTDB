@@ -1354,7 +1354,7 @@ Optional Packages:
   --without-PACKAGE       do not use PACKAGE (same as --with-PACKAGE=no)
   --with-installdir=DIR   Directory to install to [/usr/local/fastdb]
   --with-external-url=URL How the site is accessed externally; should end in /
-                          [""]
+                          ["/"]
   --with-dbhost=HOST      Postgres host [postgres]
   --with-dbport=PORT      Postgres port [5432]
   --with-dbdatabase=PORT  Database name [fastdb]

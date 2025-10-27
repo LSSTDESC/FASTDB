@@ -23,7 +23,7 @@ AC_ARG_WITH( installdir,
              [installdir=/usr/local/fastdb] )
 
 AC_ARG_WITH( external-url,
-             [AS_HELP_STRING([--with-external-url=URL], [How the site is accessed externally; should end in / [""]])],
+             [AS_HELP_STRING([--with-external-url=URL], [How the site is accessed externally; should end in / ["/"]])],
              [external_url=$withval],
              [external_url=""] )
 
