@@ -75,7 +75,7 @@ var rkAuth = function( authdiv, webapurl, isauthcallback,
 
 rkAuth.prototype.checkAuth = function( isauthcallback=null, isnotauthcallback=null ) {
     let self = this
-    this.conn.sendHttpRequest( "@external_url@static/auth/isauth", null,
+    this.conn.sendHttpRequest( "@external_url@auth/isauth", null,
                                function( statedata ) {
                                    self.processCheckAuth( statedata, isauthcallback, isnotauthcallback ) },
                                self.errorhandler );
@@ -118,7 +118,7 @@ rkAuth.prototype.logout = function( loggedoutcallback=null ) {
     var self=this;
     rkWebUtil.wipeDiv( this.authdiv );
     rkWebUtil.elemaker( "p", this.authdiv, { "text": "...logging out..." } )
-    this.conn.sendHttpRequest( "@external_url@static/auth/logout", null,
+    this.conn.sendHttpRequest( "@external_url@auth/logout", null,
                                function() { self.loggedout( loggedoutcallback ), self.errorhandler } );
 }
 
@@ -177,7 +177,7 @@ rkAuth.prototype.startLogin = function() {
     let username = document.getElementById( "login_username" ).value;
     let password = document.getElementById( "login_password" ).value;
     let requestdata = { 'username': username };
-    this.conn.sendHttpRequest( "@external_url@static/auth/getchallenge", requestdata,
+    this.conn.sendHttpRequest( "@external_url@auth/getchallenge", requestdata,
                                function( statedata ) {
                                    self.processChallenge( statedata, password ) },
                                self.errorhandler );
@@ -252,7 +252,7 @@ rkAuth.prototype.processChallenge = async function( retdata, password ) {
 
     requestdata = { 'username': retdata.username,
                     'response': response };
-    this.conn.sendHttpRequest( "@external_url@static/auth/respondchallenge", requestdata,
+    this.conn.sendHttpRequest( "@external_url@auth/respondchallenge", requestdata,
                                function( statedata ) { self.processChallengeResponse( statedata ) },
                                self.errorhandler );
 }
@@ -324,7 +324,7 @@ rkAuth.prototype.requestPasswordLink = function() {
                  "email": this.email_input.value.trim() };
     let conn = new rkWebUtil.Connector( this.webapurl );
     let p = rkWebUtil.elemaker( "p", this.authdiv, { "text": "Sending password reset link... please wait..." } );
-    conn.sendHttpRequest( "@external_url@static/auth/getpasswordresetlink", data,
+    conn.sendHttpRequest( "@external_url@auth/getpasswordresetlink", data,
                           function( res ) { self.passwordLinkSent( res ) },
                           function( res ) { window.alert( 'Error: ' + res.error ) } );
 }
@@ -378,7 +378,7 @@ rkAuth.prototype.setNewPassword = async function() {
     //                                "iv": rkWebUtil.b64encode( iv ) },
     //                              null, 4 ) );
 
-    this.conn.sendHttpRequest( "@external_url@static/auth/changepassword",
+    this.conn.sendHttpRequest( "@external_url@auth/changepassword",
                                { "passwordlinkid": document.getElementById( "resetpasswd_linkid" ).value,
                                  "publickey": pubkey,
                                  "privatekey": encprivkey,
