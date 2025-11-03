@@ -22,11 +22,8 @@ from kafka_consumer import KafkaConsumer
 # Default location of BrokerMessage schema
 _default_brokermessage_schemafile = "/fastdb/share/avsc/fastdb_9_0_1.BrokerMessage.avsc"
 
-# TODO : uncomment this next line
-#   and the whole PittGoogleBroker class
-#   when pittgoogle works again
-# from concurrent.futures import ThreadPoolExecutor  # for pittgoogle
-# import pittgoogle
+from concurrent.futures import ThreadPoolExecutor  # for pittgoogle
+import pittgoogle
 
 _rundir = pathlib.Path(__file__).parent
 _logdir = pathlib.Path( os.getenv( 'LOGDIR', '/logs' ) )
@@ -180,6 +177,9 @@ class BrokerConsumer:
             self.countlogger.error( "CRASHING.  I only know how to handle schemaless streams." )
             raise RuntimeError( "I only know how to handle schemaless streams" )
         self.schemafile = schemafile
+        # ****
+        self.logger.warning( f"self.schemafile = {self.schemafile}" )
+        # ****
         self.schema = fastavro.schema.load_schema( self.schemafile )
 
         self.nmessagesconsumed = 0
@@ -502,108 +502,133 @@ class AlerceConsumer(BrokerConsumer):
         self.consumer.subscribe( self.topics )
 
 # =====================================================================
-# MAKE SURE TO UPDATE WHAT'S BELOW TO MATCH CHANGES TO BrokerConsumer
-# AS WELL AS WHAT'S NEEDED FOR Pitt-Google
 
-# class PittGoogleBroker(BrokerConsumer):
-#     _brokername = 'pitt-google'
-#
-#     def __init__(
-#         self,
-#         pitt_topic: str,
-#         pitt_project: str,
-#         max_workers: int = 8,  # max number of ThreadPoolExecutor workers
-#         batch_maxn: int = 1000,  # max number of messages in a batch
-#         batch_maxwait: int = 5,  # max seconds to wait between messages before processing a batch
-#         loggername: str = "PITTGOOGLE",
-#         **kwargs
-#     ):
-#         super().__init__(server=None, groupid=None, loggername=loggername, **kwargs)
+class PittGoogleBroker(BrokerConsumer):
+    """Pitt-Google-Hernandez Broker
 
-#         topic = pittgoogle.pubsub.Topic(pitt_topic, pitt_project)
-#         subscription = pittgoogle.pubsub.Subscription(name=f"{pitt_topic}-desc", topic=topic)
-#         # if the subscription doesn't already exist, this will create one in the
-#         # project given by the env var GOOGLE_CLOUD_PROJECT
-#         subscription.touch()
+    cf: https://mwvgroup.github.io/pittgoogle-client/api-reference/pubsub.html
 
-#         self.consumer = pittgoogle.pubsub.Consumer(
-#             subscription=subscription,
-#             msg_callback=self.handle_message,
-#             batch_callback=self.handle_message_batch,
-#             batch_maxn=batch_maxn,
-#             batch_maxwait=batch_maxwait,
-#             executor=ThreadPoolExecutor(
-#                 max_workers=max_workers,
-#                 initializer=self.worker_init,
-#                 initargs=(
-#                     self.schema,
-#                     subscription.topic.name,
-#                     self.logger,
-#                     self.countlogger
-#                 ),
-#             ),
-#         )
+    """
 
-#     @staticmethod
-#     def worker_init(classification_schema: dict, pubsub_topic: str,
-#                     broker_logger: logging.Logger, broker_countlogger: logging.Logger ):
-#
+    
+    _brokername = 'pitt-google'
 
-#    """Initializer for the ThreadPoolExecutor."""
-#         global countlogger
-#         global logger
-#         global schema
-#         global topic
+    def __init__(
+        self,
+        server_not_used: str = "",
+        groupid: str = "default_pittgooglebroker_fastdb_groupid",
+        max_workers: int = 8,  # max number of ThreadPoolExecutor workers
+        batch_maxn: int = 1000,  # max number of messages in a batch
+        batch_maxwait: int = 5,  # max seconds to wait between messages before processing a batch
+        loggername: str = "PITTGOOGLE",
+        **kwargs
+    ):
+        super().__init__(server=None, groupid=None, loggername=loggername, **kwargs)
 
-#         countlogger = broker_countlogger
-#         logger = broker_logger
-#         schema = classification_schema
-#         topic = pubsub_topic
+        neededconfig = [ 'name', 'survey', 'google_cloud_project', 'google_cloud_key_file' ]
+        if any( i not in self.extraconfig for i in neededconfig ):
+            raise ValueError( f"need in extraconfig: {neededconfig}" )
 
-#         logger.info( "In worker_init" )
+        testid = self.extraconfig['testid'] if 'testid' in self.extraconfig else False
 
-#     @staticmethod
-#     def handle_message(alert: pittgoogle.pubsub.Alert) -> pittgoogle.pubsub.Response:
-#         """Callback that will process a single message. This will run in a background thread."""
-#         global logger
-#         global schema
-#         global topic
+        auth = pittgoogle.auth.Auth( GOOGLE_CLOUD_PROJECT=self.extraconfig['google_cloud_project'],
+                                     GOOGLE_APPLICATION_CREDENTIALS=self.extraconfig['google_cloud_key_file'] )
+        topic = pittgoogle.Topic.from_cloud( name=self.extraconfig['name'],
+                                             survey=self.extraconfig['survey'],
+                                             testid=testid,
+                                             projectid=pittgoogle.ProjectIds().pittgoogle )
+        subscription = pittgoogle.pubsub.Subscription(name=groupid,
+                                                      topic=topic,
+                                                      auth=auth,
+                                                      schema_name="lsst")
+        self.topic = subscription.topic.name
 
-#         logger.info( "In handle_message" )
+        # if the subscription doesn't already exist, this will create one
+        # TODO FIGURE OUT IF THIS IS NECESSARY
+        # subscription.touch()
 
-#         message = {
-#             "msg": fastavro.schemaless_reader(io.BytesIO(alert.bytes), schema),
-#             "topic": topic,
-#             # this is a DatetimeWithNanoseconds, a subclass of datetime.datetime
-#             # https://googleapis.dev/python/google-api-core/latest/helpers.html
-#             "timestamp": alert.metadata["publish_time"].astimezone(datetime.timezone.utc),
-#             # there is no offset in pubsub
-#             # if this cannot be null, perhaps the message id would work?
-#             "msgoffset": alert.metadata["message_id"],
-#         }
+        self.consumer = pittgoogle.pubsub.Consumer(
+            subscription=subscription,
+            msg_callback=self.handle_message,
+            batch_callback=self.handle_message_batch,
+            batch_maxn=batch_maxn,
+            batch_max_wait_between_messages=batch_maxwait,
+            executor=ThreadPoolExecutor(
+                max_workers=max_workers,
+                initializer=self.worker_init,
+                initargs=(),
+                # initargs=(
+                #     self,
+                #     self.schema,
+                #     subscription.topic.name,
+                #     self.logger,
+                #     self.countlogger
+                # ),
+            ),
+        )
 
-#         return pittgoogle.pubsub.Response(result=message, ack=True)
+    # @staticmethod
+    def worker_init(self): #, classification_schema: dict, pubsub_topic: str,
+                           #Broker_logger: logging.Logger, broker_countlogger: logging.Logger ):
+        """Initializer for the ThreadPoolExecutor."""
+        # global countlogger
+        # global logger
+        # global schema
+        # global topic
 
-#     @staticmethod
-#     def handle_message_batch(messagebatch: list) -> None:
-#         """Callback that will process a batch of messages. This will run in the main thread."""
-#         global logger
-#         global countlogger
+        # countlogger = broker_countlogger
+        # logger = broker_logger
+        # schema = classification_schema
+        # topic = pubsub_topic
 
-#         logger.info( "In handle_message_batch" )
-#         # import pdb; pdb.set_trace()
+        self.logger.info( "In worker_init" )
 
-#         added = BrokerMessage.load_batch(messagebatch, logger=logger)
-#         countlogger.info(
-#             f"...added {added['addedmsgs']} messages, "
-#             f"{added['addedclassifiers']} classifiers, "
-#             f"{added['addedclassifications']} classifications. "
-#         )
+    # @staticmethod
+    def handle_message(self, alert: pittgoogle.pubsub.Alert) -> pittgoogle.pubsub.Response:
+        """Callback that will process a single message. This will run in a background thread."""
+        # global logger
+        # global schema
+        # global topic
 
-#     def poll(self):
-#         # this blocks indefinitely or until a fatal error
-#         # use Control-C to exit
-#         self.consumer.stream( pipe=self.pipe, heartbeat=60 )
+        self.logger.info( "In handle_message" )
+
+        self.logger.warning( f"alert is a {type(alert)}, alert.msg is a {type(alert.msg)} and is {alert.msg}" )
+        # logger.warning( f"alert.dict is {alert.dict}" )
+        message = {
+            # NOTE -- start reading alert.msg.data at byte 5 because the first 4 bytes
+            #   are a schema ID of some sort.
+            "msg": fastavro.schemaless_reader(io.BytesIO(alert.msg.data[5:]), self.schema),
+            "topic": self.topic,
+            # this is a DatetimeWithNanoseconds, a subclass of datetime.datetime
+            # https://googleapis.dev/python/google-api-core/latest/helpers.html
+            "timestamp": alert.msg.publish_time.astimezone(datetime.timezone.utc),
+            # there is no offset in pubsub
+            # if this cannot be null, perhaps the message id would work?
+            "msgoffset": alert.msg.message_id,
+            "savetime": datetime.datetime.now(tz=datetime.UTC)
+        }
+
+        return pittgoogle.pubsub.Response(result=message, ack=True)
+
+    # @staticmethod
+    def handle_message_batch(self, messagebatch: list) -> None:
+        """Callback that will process a batch of messages. This will run in the main thread."""
+        # global logger
+        # global countlogger
+
+        self.logger.info( "In handle_message_batch" )
+        # import pdb; pdb.set_trace()
+
+        nadded = self.mongodb_store( messagebatch )
+        self.countlogger.info( f"...added {nadded} messages to mongodb {self.mongodb_dbaname} "
+                               f"collection {self.mongodb_collection}" )
+
+
+    # ROB TODO : think about **kwargs here, maybe we should do something with the standard values
+    def poll(self, **kwargs):
+        # this blocks indefinitely or until a fatal error
+        # use Control-C to exit
+        self.consumer.stream( pipe=self.pipe, heartbeat=60 )
 
 
 class BrokerConsumerLauncher:
@@ -687,6 +712,7 @@ class BrokerConsumerLauncher:
                                   topics=brokerinfo['topics'],
                                   updatetopics=brokerinfo['updatetopics'],
                                   extraconfig=brokerinfo['extraconfig'],
+                                  schemafile=brokerinfo['schemafile'],
                                   pipe=brokerinfo['childpipe'],
                                   mongodb_collection=brokerinfo['collection'],
                                   loggername=brokerinfo['loggername'],
@@ -727,7 +753,8 @@ class BrokerConsumerLauncher:
         schemafile = config[ 'schemafile' ]
 
         brokers = []
-        clsmap = { 'BrokerConsumer': BrokerConsumer }
+        clsmap = { 'BrokerConsumer': BrokerConsumer,
+                   'PittGoogleBroker': PittGoogleBroker }
 
         # Parse the config for all brokers before launching anything, so that if we get an exception
         #   we won't have started subprocesses.
@@ -860,7 +887,7 @@ def main():
                                       description="Listen to broker streams and save broker messages",
                                       formatter_class=argparse.ArgumentDefaultsHelpFormatter )
     parser.add_argument( 'config', help='YAML file with config of brokers to listen to' )
-    parser.add_argument( 'collection', default=None,
+    parser.add_argument( '-c', '--collection', default=None,
                          help="Collection in mongo database to store alerts; defaults to $MONGODB_DEFAULT_COLLECTION" )
     parser.add_argument( '-b', '--barf', default='abcdef',
                          help=( "String of random characters for group and topic names.  (Used in tests.)"
@@ -876,8 +903,8 @@ def main():
     mongodb_password = os.getenv( "MONGODB_ALERT_WRITER_PASSWD" )
     if any ( [ i is None for i in [ mongodb_host, mongodb_dbname, mongodb_collection,
                                     mongodb_user, mongodb_password ] ] ):
-        raise ValueError( "Must set all the following env vars: MONGODB_HOST, MONGODB_DBNAME, MONGODB_COLLECTION, "
-                          "MONGODB_ALERT_WRITER_USER, MONGODB_ALERT_WRITER_PASSWD" )
+        raise ValueError( "Must set all the following env vars: MONGODB_HOST, MONGODB_DBNAME, "
+                          "MONGODB_DEFAULT_COLLECTION, MONGODB_ALERT_WRITER_USER, MONGODB_ALERT_WRITER_PASSWD" )
 
     bcl = BrokerConsumerLauncher( args.config, barf=args.barf, verbose=args.verbose )
     bcl()
