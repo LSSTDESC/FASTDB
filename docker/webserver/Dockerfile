@@ -76,6 +76,7 @@ RUN source /venv/bin/activate && \
        nested-pandas==0.4.6 \
        numpy==2.2.4 \
        pandas==2.2.3 \
+       pittgoogle-client==0.3.19 \
        polars==1.29.0 \
        psycopg==3.2.6 \
        pycryptodome==3.22.0 \
@@ -87,6 +88,10 @@ RUN source /venv/bin/activate && \
        remote-pdb==2.1.0 \
        requests==2.32.3 \
        simplejson==3.20.1
+
+# Our own customization of pubsub
+COPY pubsub.patch /tmp/pubsub.patch
+RUN patch /venv/lib/python3.11/site-packages/pittgoogle/pubsub.py /tmp/pubsub.patch
 
 # ======================================================================
 # This is for the test webserver.  It installs crappy keys so you
