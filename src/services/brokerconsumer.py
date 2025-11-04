@@ -544,8 +544,7 @@ class PittGoogleBroker(BrokerConsumer):
         self.topic = subscription.topic.name
 
         # if the subscription doesn't already exist, this will create one
-        # TODO FIGURE OUT IF THIS IS NECESSARY
-        # subscription.touch()
+        subscription.touch()
 
         self.consumer = pittgoogle.pubsub.Consumer(
             subscription=subscription,
@@ -620,7 +619,7 @@ class PittGoogleBroker(BrokerConsumer):
         # import pdb; pdb.set_trace()
 
         nadded = self.mongodb_store( messagebatch )
-        self.countlogger.info( f"...added {nadded} messages to mongodb {self.mongodb_dbaname} "
+        self.countlogger.info( f"...added {nadded} messages to mongodb {self.mongodb_dbname} "
                                f"collection {self.mongodb_collection}" )
 
 
