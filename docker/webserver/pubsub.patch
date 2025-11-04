@@ -1,0 +1,135 @@
+--- /venv/lib/python3.11/site-packages/pittgoogle/pubsub_orig.py	2025-11-03 16:54:42.041278457 +0000
++++ /venv/lib/python3.11/site-packages/pittgoogle/pubsub.py	2025-11-03 18:45:13.915355699 +0000
+@@ -1,4 +1,4 @@
+-# -*- coding: UTF-8 -*-
++# -*- coding: utf-8 -*-
+ """Classes to facilitate connections to Google Cloud Pub/Sub streams.
+ 
+ .. autosummary::
+@@ -13,6 +13,7 @@
+ import concurrent.futures
+ import datetime
+ import logging
++import multiprocessing.connection
+ import queue
+ import time
+ from typing import Any, Callable, List, Literal, Optional, Union
+@@ -578,7 +579,10 @@
+             self._executor = concurrent.futures.ThreadPoolExecutor(self.max_workers)
+         return self._executor
+ 
+-    def stream(self, block: bool = True) -> None:
++    def stream(self, block: bool = True,
++               pipe: multiprocessing.connection.Connection = None,
++               heartbeat: int = 60
++               ) -> None:
+         """Open the stream in a background thread and process messages through the callbacks.
+ 
+         Recommended for long-running listeners.
+@@ -589,6 +593,13 @@
+                 indefinitely (use `Ctrl-C` to close the stream and unblock). If `False`, open the
+                 stream and then return (use :meth:`~Consumer.stop()` to close the stream).
+                 This must be `True` in order to use a `batch_callback`.
++        pipe : `multiprocessing.connection.Connection`
++            A pipe.  Will listen for a dictionary on this pipe; if { 'command': 'die' }
++            is received will exit.  Will also send a heartbeat message with
++            { 'message': 'ok', 'nconsumed': int, 'runtime': datetime.timedelta } every
++            heartbeat seconds.
++        heartbeat : Time out after this many seconds have elapsed; check the pipe for
++            a command, and send the heartbeat message
+         """
+         # open a streaming-pull and process messages through the callback, in the background
+         self._open_stream()
+@@ -600,7 +611,7 @@
+             return
+ 
+         try:
+-            self._process_batches()
++            self._process_batches( pipe, heartbeat )
+ 
+         # catch all exceptions and attempt to close the stream before raising
+         except (KeyboardInterrupt, Exception):
+@@ -634,26 +645,47 @@
+         else:
+             message.nack()
+ 
+-    def _process_batches(self):
++    def _process_batches(self,
++                         pipe: multiprocessing.connection.Connection = None,
++                         heartbeat: int = 60
++                         ):
+         """Run the batch callback if provided, otherwise just sleep.
+ 
+         This never returns -- it runs until it encounters an error.
+         """
++        t0 = datetime.datetime.now()
++        
+         # if there's no batch_callback there's nothing to do except wait until the process is killed
+         if self.batch_callback is None:
+             while True:
+-                time.sleep(60)
++                time.sleep( heartbeat )
++                if pipe is not None:
++                    if pipe.poll():
++                        msg = pipe.recv()
++                        if ( 'command' in msg ) and ( msg['command'] == 'die' ):
++                            self.stop()
++                            return
++                    pipe.send( { "message": "ok", "nconsumed": 0, "runtime": datetime.datetime.now() - t0 } )
+ 
+         batch, count = [], 0
++        totprocessed = 0
++        t0 = time.perf_counter()
++        firstheartbeat = datetime.datetime.now()
++        lastheartbeat = firstheartbeat
+         while True:
++            t1 = time.perf_counter()
++            waittime = max( min( self.batch_max_wait_between_messages, heartbeat ) - (t1-t0), 0 )
+             try:
+                 batch.append(
+-                    self._queue.get(block=True, timeout=self.batch_max_wait_between_messages)
++                    self._queue.get(block=True, timeout=waittime)
+                 )
+ 
+             except queue.Empty:
+                 # hit the max wait. process the batch
+-                self.batch_callback(batch)
++                t0 = t1
++                if len(batch) > 0:
++                    self.batch_callback(batch)
++                totprocessed += len(batch)
+                 batch, count = [], 0
+ 
+             # catch anything else and try to process the batch before raising
+@@ -665,11 +697,29 @@
+                 self._queue.task_done()
+                 count += 1
+ 
+-            if count == self.batch_maxn:
++            if ( (t1-t0) > self.batch_max_wait_between_messages ) or ( count >= self.batch_maxn ):
+                 # hit the max number of results. process the batch
+-                self.batch_callback(batch)
++                t0 = t1
++                if len(batch) > 0:
++                    self.batch_callback(batch)
++                totprocessed += len(batch)
+                 batch, count = [], 0
+ 
++            # Listen for a die command, and send the heartbeat
++            if pipe is not None:
++                if ( datetime.datetime.now() - lastheartbeat ).total_seconds() > heartbeat:
++                    lastheartbeat = datetime.datetime.now()
++                    if pipe.poll():
++                        msg = pipe.recv()
++                        if ( 'command' in msg ) and ( msg['command'] == 'die' ):
++                            if len(batch) > 0: self.batch_callback( batch )
++                            totprocessed += len(batch)
++                            batch, count = [], 0
++                            self.stop()
++                            return
++                    pipe.send( { "message": "ok", "nconsumed": totprocessed,
++                                 "runtime": lastheartbeat - firstheartbeat } )
++
+     def stop(self) -> None:
+         """Attempt to shutdown the streaming pull and exit the background threads gracefully."""
+         LOGGER.info("closing the stream")

@@ -1,0 +1,31 @@
+Several on spin
+
+
+fastdb_dev :
+
+   * database host decatdb.lbl.gov
+   * webserver URL https://c3-sn.lbl.gov/fastdb_dev
+
+   * mongo
+      - Overall admin user (MONGO_ADMIN_USER): admin
+
+      - MONGO_DBNAME = fastdb_dev
+        MONGO_ALERT_READER_USER = fastdb_dev_reader
+        MONGO_ALERT_WRITER_USER = fastdb_dev_writer
+
+   * postgres
+      - database fastdb_dev
+        user fastdb_dev
+        readonly user fastdb_dev_ro
+
+   ./configure \
+       --with-external-url=https://c3-sn.lbl.gov/fastdb_dev/ \
+       --with-dbhost=decatdb.lbl.gov \
+       --with-dbdatabase=fastdb_dev \
+       --with-dbuser=fastdb_dev \
+       --with-db-passwd-file=/secrets/decatdb_postgres_fastdb_dev \
+       --with-secret-key-file=/secrets/decatdb_fastdb_dev_flask_secret_key \
+       --with-email-from=raknop@lbl.gov \
+       --with-smtp-server=smtp.lbl.gov \
+       --with-smtp-port=25 \
+       --with-installdir=/web-data/fastdb_dev/install

@@ -204,6 +204,7 @@ docdir = @docdir@
 dvidir = @dvidir@
 emailfrom = @emailfrom@
 exec_prefix = @exec_prefix@
+external_url = @external_url@
 host_alias = @host_alias@
 htmldir = @htmldir@
 includedir = @includedir@
@@ -239,7 +240,7 @@ top_srcdir = @top_srcdir@
 AUTOMAKE_OPTION = subdir-objects
 sharedir = @installdir@/share
 avscdir = @installdir@/share/avsc
-avsc_DATA = avsc/fastdb_9_0_1.BrokerMessage.avsc \
+avsc_DATA = avsc/fastdb_9_0_2.BrokerMessage.avsc \
 	avsc/lsst.v9_0.alert.avsc \
 	avsc/lsst.v9_0.diaObject.avsc \
 	avsc/lsst.v9_0.diaSource.avsc \

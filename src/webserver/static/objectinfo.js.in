@@ -1,6 +1,6 @@
-import { fastdbap } from "./fastdb_ns.js"
-import { rkWebUtil } from "./rkwebutil.js"
-import { SVGPlot } from "./svgplot.js"
+import { fastdbap } from "@external_url@static/fastdb_ns.js"
+import { rkWebUtil } from "@external_url@static/rkwebutil.js"
+import { SVGPlot } from "@external_url@static/svgplot.js"
 
 // **********************************************************************
 // **********************************************************************

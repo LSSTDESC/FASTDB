@@ -1,4 +1,4 @@
-schemafile: /code/share/avsc/fastdb_test_0.1.BrokerMessage.avsc
+schemafile: /code/share/avsc/fastdb_9_0_2.BrokerMessage.avsc
 
 brokers:
   - name: "test broker"
