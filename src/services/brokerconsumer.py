@@ -501,6 +501,7 @@ class AlerceConsumer(BrokerConsumer):
         self.topics = tosub
         self.consumer.subscribe( self.topics )
 
+
 # =====================================================================
 
 class PittGoogleBroker(BrokerConsumer):
@@ -510,7 +511,7 @@ class PittGoogleBroker(BrokerConsumer):
 
     """
 
-    
+
     _brokername = 'pitt-google'
 
     def __init__(
@@ -566,33 +567,16 @@ class PittGoogleBroker(BrokerConsumer):
             ),
         )
 
-    # @staticmethod
-    def worker_init(self): #, classification_schema: dict, pubsub_topic: str,
-                           #Broker_logger: logging.Logger, broker_countlogger: logging.Logger ):
+    def worker_init(self):
         """Initializer for the ThreadPoolExecutor."""
-        # global countlogger
-        # global logger
-        # global schema
-        # global topic
-
-        # countlogger = broker_countlogger
-        # logger = broker_logger
-        # schema = classification_schema
-        # topic = pubsub_topic
-
         self.logger.info( "In worker_init" )
 
-    # @staticmethod
     def handle_message(self, alert: pittgoogle.pubsub.Alert) -> pittgoogle.pubsub.Response:
         """Callback that will process a single message. This will run in a background thread."""
-        # global logger
-        # global schema
-        # global topic
 
         self.logger.info( "In handle_message" )
 
         self.logger.warning( f"alert is a {type(alert)}, alert.msg is a {type(alert.msg)} and is {alert.msg}" )
-        # logger.warning( f"alert.dict is {alert.dict}" )
         message = {
             # NOTE -- start reading alert.msg.data at byte 5 because the first 4 bytes
             #   are a schema ID of some sort.
@@ -600,7 +584,7 @@ class PittGoogleBroker(BrokerConsumer):
             "topic": self.topic,
             # this is a DatetimeWithNanoseconds, a subclass of datetime.datetime
             # https://googleapis.dev/python/google-api-core/latest/helpers.html
-            "timestamp": alert.msg.publish_time.astimezone(datetime.timezone.utc),
+            "timestamp": alert.msg.publish_time.astimezone(datetime.UTC),
             # there is no offset in pubsub
             # if this cannot be null, perhaps the message id would work?
             "msgoffset": alert.msg.message_id,
@@ -609,11 +593,8 @@ class PittGoogleBroker(BrokerConsumer):
 
         return pittgoogle.pubsub.Response(result=message, ack=True)
 
-    # @staticmethod
     def handle_message_batch(self, messagebatch: list) -> None:
         """Callback that will process a batch of messages. This will run in the main thread."""
-        # global logger
-        # global countlogger
 
         self.logger.info( "In handle_message_batch" )
         # import pdb; pdb.set_trace()
