@@ -240,7 +240,7 @@ top_srcdir = @top_srcdir@
 AUTOMAKE_OPTION = subdir-objects
 sharedir = @installdir@/share
 avscdir = @installdir@/share/avsc
-avsc_DATA = avsc/fastdb_9_0_1.BrokerMessage.avsc \
+avsc_DATA = avsc/fastdb_9_0_2.BrokerMessage.avsc \
 	avsc/lsst.v9_0.alert.avsc \
 	avsc/lsst.v9_0.diaObject.avsc \
 	avsc/lsst.v9_0.diaSource.avsc \

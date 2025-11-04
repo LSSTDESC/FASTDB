@@ -10,7 +10,7 @@ fi
 echo
 echo "*** Starting mongod listening locally, no auth; logging to /var/log/mongodb/init_mongodb.log ***"
 echo
-mongod -f /etc/mongod.conf --bind_ip 127.0.0.1 --fork --logpath /var/log/mongodb/init_mongodb.log
+mongod -f /etc/mongod.conf --noauth --bind_ip 127.0.0.1 --fork --logpath /var/log/mongodb/init_mongodb.log
 
 # See if the admin user exists; create it if it doesn't
 # (We're assuming that if admin exists, then all the others do too....)

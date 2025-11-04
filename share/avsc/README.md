@@ -14,7 +14,7 @@ The **BrokerMessage** schema is just the LSST v9.0 alert schema plus four additi
 
 * `classifierName` identifies the classifier that the broker used.
 
-* `classifierVersion` identifies the version of the classifier that the broker used.  Ideally, if the training of a classifier changes, this version should bump.
+* `classifierVersion` identifies the version of the classifier that the broker used.  Ideally, if the training of a classifier changes, this version should bump.  This doesn't strictly have to be a semantic version; it can also include paramters used for the classifier.  (E.g., it could be something like "v1.0.0 with param_1=val_1, param_2=val_2".)
 
 * `classifications` is an array of classifications.  Each element of the array is a two-element record, an integer with a class ID, and a float with a probability between 0 and 1.  classId values will be taken from the [ELAsTiCC2 taxnomy]() (though this may evolve).  Probabilities, ideally, sum to 1.  Use the classID 200 ("Residual") if the probabilities don't sum to 1.  (So, for example, if all you have is a classifier that decides the probability of it being a SNIa, and a given candidate has a 25% probability of being a SNIa, then the `classificatations` field should hold `[{2222,0.25},{200,0.75}]`.)
 

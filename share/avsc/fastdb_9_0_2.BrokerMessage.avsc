@@ -1,5 +1,5 @@
 {
-	"namespace": "fastdb.v9_0_1",
+	"namespace": "fastdb.v9_0_2",
 	"type": "record",
 	"name": "BrokerMessage",
 	"doc": "LSST Alert message from broker for FASTDB",
@@ -25,20 +25,22 @@
 		{"name": "classifierName", "type": "string", "doc": "Name of the classifier providing classifications"},
 		{"name": "classifierVersion", "type": "string", "doc": "Version of the classifier providing classifications"},
 		{	"name": "classifications",
-			"type": "array",
-			"items": {
-				"type": "record",
-				"name": "classificationDict",
-				"fields": [
-					{	"name": "classId",
-						"type": "int",
-						"doc": "See https://github.com/LSSTDESC/elasticc/tree/main/taxonomy/taxonomy.ipynb for specification"
-					},
-					{	"name": "probability",
-						"type": "float",
-						"doc": "0-1"
-					}
-				]
+			"type": {
+				"type": "array",
+				"items": {
+					"type": "record",
+					"name": "classificationDict",
+					"fields": [
+						{	"name": "classId",
+							"type": "int",
+							"doc": "See https://github.com/LSSTDESC/elasticc/tree/main/taxonomy/taxonomy.ipynb for specification"
+						},
+						{	"name": "probability",
+							"type": "float",
+							"doc": "0-1"
+						}
+					]
+				}
 			}
 		}
 	]

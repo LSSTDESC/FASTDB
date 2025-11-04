@@ -94,6 +94,9 @@ class Classifier:
             # remote_pdb.RemotePdb( '127.0.0.1', random.randint(4000,60000) ).set_trace()
             ####
             alert = fastavro.schemaless_reader( io.BytesIO(msg), self.alertschema )
+            alert['brokerName'] = self.brokername
+            alert['classifierName'] = self.classifiername
+            alert['classifierVersion'] = self.classifierparams
             alert['classifications'] = []
             t3 = time.perf_counter()
             probs = self.determine_types_and_probabilities( alert )
