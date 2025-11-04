@@ -1,5 +1,5 @@
-import { fastdbap } from "./fastdb_ns.js"
-import { rkWebUtil } from "./rkwebutil.js"
+import { fastdbap } from "@external_url@static/fastdb_ns.js"
+import { rkWebUtil } from "@external_url@static/rkwebutil.js"
 
 // **********************************************************************
 // **********************************************************************
@@ -202,7 +202,7 @@ fastdbap.ObjectList = class
                               "classes": [ "warning", "bold", "italic" ] } );
         this.context.maintabs.selectTab( "objectinfo" );
 
-        this.context.connector.sendHttpRequest( "/ltcv/getltcv/" + pv + "/" + objid, {},
+        this.context.connector.sendHttpRequest( "@external_url@ltcv/getltcv/" + pv + "/" + objid, {},
                                                 (data) => { self.actually_show_object_info( data ) } );
     }
 

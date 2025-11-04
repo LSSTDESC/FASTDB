@@ -26,10 +26,8 @@ _logger.setLevel( logging.DEBUG )
 def test_reconstruct_alert( snana_fits_ppdb_loaded ):
     recon = AlertReconstructor()
 
+    recon._reset_timings()
     alert = recon.reconstruct( 1696949, 1207427456 )
-
-    # TODO: see issue #49
-    assert alert['alertId'] == 1207427456
 
     assert alert['diaObject']['diaObjectId'] == 1696949
     assert alert['diaObject']['ra'] == pytest.approx( 210.234375, abs=1e-5 )
@@ -55,6 +53,7 @@ def test_reconstruct_alert( snana_fits_ppdb_loaded ):
     # Try reconstructing with a different lookback time
 
     recon = AlertReconstructor( prevsrc=10, prevfrced=17, prevfrced_gap=10 )
+    recon._reset_timings()
     alert = recon.reconstruct( 1696949, 1207427456 )
 
     assert len( alert['prvDiaSources'] ) == 9

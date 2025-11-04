@@ -2,6 +2,7 @@ import datetime
 import pytest
 
 from db import DiaForcedSource
+import util
 
 from basetest import BaseTestDB
 
@@ -16,6 +17,7 @@ class TestDiaForcedSource( BaseTestDB ):
             'base_procver_id',
             'diaobjectid',
             'visit',
+            'diaforcedsourceid',
             'detector',
             'midpointmjdtai',
             'band',
@@ -25,8 +27,8 @@ class TestDiaForcedSource( BaseTestDB ):
             'psffluxerr',
             'scienceflux',
             'sciencefluxerr',
-            'time_processed',
-            'time_withdrawn',
+            'timeprocessedmjdtai',
+            'timewithdrawnmjdtai',
         }
         self.safe_to_modify = [
             'detector',
@@ -38,12 +40,21 @@ class TestDiaForcedSource( BaseTestDB ):
             'psffluxerr',
             'scienceflux',
             'sciencefluxerr',
-            'time_processed',
-            'time_withdrawn',
+            'timeprocessedmjdtai',
+            'timewithdrawnmjdtai',
         ]
         self.uniques = []
 
         t0 = datetime.datetime.now( tz=datetime.UTC )
+        t1 = t0 + datetime.timedelta( days=1 )
+        t2 = t0 + datetime.timedelta( days=365 )
+        t3 = t0 + datetime.timedelta( days=2 )
+        t4 = t0 + datetime.timedelta( weeks=3 )
+        t0 = util.mjd_from_mjd_or_datetime_or_timestring( t0 )
+        t1 = util.mjd_from_mjd_or_datetime_or_timestring( t1 )
+        t2 = util.mjd_from_mjd_or_datetime_or_timestring( t2 )
+        t3 = util.mjd_from_mjd_or_datetime_or_timestring( t3 )
+        t4 = util.mjd_from_mjd_or_datetime_or_timestring( t4 )
         self.obj1 = DiaForcedSource( base_procver_id=bpv['bpv1'].id,
                                      diaobjectid=obj1.diaobjectid,
                                      visit=1,
@@ -56,8 +67,8 @@ class TestDiaForcedSource( BaseTestDB ):
                                      psffluxerr=5.6,
                                      scienceflux=234.5,
                                      sciencefluxerr=7.8,
-                                     time_processed=t0,
-                                     time_withdrawn=None
+                                     timeprocessedmjdtai=t0,
+                                     timewithdrawnmjdtai=None
                                     )
         self.dict1 = { k: getattr( self.obj1, k ) for k in self.columns }
         self.obj2 = DiaForcedSource( base_procver_id=bpv['bpv1'].id,
@@ -72,8 +83,8 @@ class TestDiaForcedSource( BaseTestDB ):
                                      psffluxerr=5.7,
                                      scienceflux=235.5,
                                      sciencefluxerr=7.9,
-                                     time_processed=t0 + datetime.timedelta( days=1 ),
-                                     time_withdrawn=t0 + datetime.timedelta( days=365 )
+                                     timeprocessedmjdtai=t1,
+                                     timewithdrawnmjdtai=t2,
                                     )
         self.dict2 = { k: getattr( self.obj2, k ) for k in self.columns }
         self.dict3 = { 'base_procver_id': bpv['bpv1'].id,
@@ -88,6 +99,6 @@ class TestDiaForcedSource( BaseTestDB ):
                        'psffluxerr': 4.5,
                        'scienceflux': 233.4,
                        'sciencefluxerr': 5.6,
-                       'time_processed': t0 + datetime.timedelta( days=2 ),
-                       'time_withdrawn': t0 + datetime.timedelta( weeks=3 )
+                       'timeprocessedmjdtai': t3,
+                       'timewithdrawnmjdtai': t4,
                       }

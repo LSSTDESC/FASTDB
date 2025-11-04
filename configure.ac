@@ -5,6 +5,14 @@ AC_CONFIG_FILES([
   src/Makefile
   src/webserver/Makefile
   src/config.py
+  src/webserver/static/fastdb.js
+  src/webserver/static/fastdb_start.js
+  src/webserver/static/objectinfo.js
+  src/webserver/static/objectlist.js
+  src/webserver/static/objectsearch.js
+  src/webserver/static/rkauth.js
+  src/webserver/static/resetpasswd_start.js
+  src/webserver/templates/fastdb_webap.html
   share/Makefile
   client/Makefile
 ])
@@ -13,6 +21,11 @@ AC_ARG_WITH( installdir,
              [AS_HELP_STRING([--with-installdir=DIR], [Directory to install to [/usr/local/fastdb]])],
              [installdir=$withval],
              [installdir=/usr/local/fastdb] )
+
+AC_ARG_WITH( external-url,
+             [AS_HELP_STRING([--with-external-url=URL], [How the site is accessed externally; should end in / ["/"]])],
+             [external_url=$withval],
+             [external_url=""] )
 
 AC_ARG_WITH( dbhost,
              [AS_HELP_STRING([--with-dbhost=HOST], [Postgres host [postgres]])],
@@ -37,7 +50,7 @@ AC_ARG_WITH( db-passwd-file,
 
 AC_ARG_WITH( secret-key-file,
              [AS_HELP_STRING([--with-secret-key-file=KEYFILE], [File with flask secret key [/secrets/secretkey]])],
-             [secretkeyfile=$withfal],
+             [secretkeyfile=$withval],
              [secretkeyfile=/secrets/secretkey] )
 
 AC_ARG_WITH( email-from,
@@ -78,6 +91,7 @@ AC_SUBST(smtpport)
 AC_SUBST(smtpusessl)
 AC_SUBST(smtpusername)
 AC_SUBST(smtppassword)
+AC_SUBST(external_url)
 
 AC_OUTPUT
 

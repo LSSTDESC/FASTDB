@@ -1,5 +1,5 @@
-import { fastdbap } from "./fastdb_ns.js"
-import "./fastdb.js"
+import { fastdbap } from "@external_url@static/fastdb_ns.js"
+import "@external_url@static/fastdb.js"
 
 // **********************************************************************
 // **********************************************************************

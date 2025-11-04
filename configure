@@ -617,6 +617,7 @@ PACKAGE_URL=''
 
 ac_subst_vars='LTLIBOBJS
 LIBOBJS
+external_url
 smtppassword
 smtpusername
 smtpusessl
@@ -704,6 +705,7 @@ ac_user_opts='
 enable_option_checking
 enable_silent_rules
 with_installdir
+with_external_url
 with_dbhost
 with_dbport
 with_dbdatabase
@@ -1351,6 +1353,8 @@ Optional Packages:
   --with-PACKAGE[=ARG]    use PACKAGE [ARG=yes]
   --without-PACKAGE       do not use PACKAGE (same as --with-PACKAGE=no)
   --with-installdir=DIR   Directory to install to [/usr/local/fastdb]
+  --with-external-url=URL How the site is accessed externally; should end in /
+                          ["/"]
   --with-dbhost=HOST      Postgres host [postgres]
   --with-dbport=PORT      Postgres port [5432]
   --with-dbdatabase=PORT  Database name [fastdb]
@@ -2525,7 +2529,7 @@ END
   fi
 fi
 
-ac_config_files="$ac_config_files Makefile src/Makefile src/webserver/Makefile src/config.py share/Makefile client/Makefile"
+ac_config_files="$ac_config_files Makefile src/Makefile src/webserver/Makefile src/config.py src/webserver/static/fastdb.js src/webserver/static/fastdb_start.js src/webserver/static/objectinfo.js src/webserver/static/objectlist.js src/webserver/static/objectsearch.js src/webserver/static/rkauth.js src/webserver/static/resetpasswd_start.js src/webserver/templates/fastdb_webap.html share/Makefile client/Makefile"
 
 
 
@@ -2535,6 +2539,16 @@ then :
   withval=$with_installdir; installdir=$withval
 else $as_nop
   installdir=/usr/local/fastdb
+fi
+
+
+
+# Check whether --with-external-url was given.
+if test ${with_external_url+y}
+then :
+  withval=$with_external_url; external_url=$withval
+else $as_nop
+  external_url=""
 fi
 
 
@@ -2588,7 +2602,7 @@ fi
 # Check whether --with-secret-key-file was given.
 if test ${with_secret_key_file+y}
 then :
-  withval=$with_secret_key_file; secretkeyfile=$withfal
+  withval=$with_secret_key_file; secretkeyfile=$withval
 else $as_nop
   secretkeyfile=/secrets/secretkey
 fi
@@ -2646,6 +2660,7 @@ then :
 else $as_nop
   smtppassword=None
 fi
+
 
 
 
@@ -3378,6 +3393,14 @@ do
     "src/Makefile") CONFIG_FILES="$CONFIG_FILES src/Makefile" ;;
     "src/webserver/Makefile") CONFIG_FILES="$CONFIG_FILES src/webserver/Makefile" ;;
     "src/config.py") CONFIG_FILES="$CONFIG_FILES src/config.py" ;;
+    "src/webserver/static/fastdb.js") CONFIG_FILES="$CONFIG_FILES src/webserver/static/fastdb.js" ;;
+    "src/webserver/static/fastdb_start.js") CONFIG_FILES="$CONFIG_FILES src/webserver/static/fastdb_start.js" ;;
+    "src/webserver/static/objectinfo.js") CONFIG_FILES="$CONFIG_FILES src/webserver/static/objectinfo.js" ;;
+    "src/webserver/static/objectlist.js") CONFIG_FILES="$CONFIG_FILES src/webserver/static/objectlist.js" ;;
+    "src/webserver/static/objectsearch.js") CONFIG_FILES="$CONFIG_FILES src/webserver/static/objectsearch.js" ;;
+    "src/webserver/static/rkauth.js") CONFIG_FILES="$CONFIG_FILES src/webserver/static/rkauth.js" ;;
+    "src/webserver/static/resetpasswd_start.js") CONFIG_FILES="$CONFIG_FILES src/webserver/static/resetpasswd_start.js" ;;
+    "src/webserver/templates/fastdb_webap.html") CONFIG_FILES="$CONFIG_FILES src/webserver/templates/fastdb_webap.html" ;;
     "share/Makefile") CONFIG_FILES="$CONFIG_FILES share/Makefile" ;;
     "client/Makefile") CONFIG_FILES="$CONFIG_FILES client/Makefile" ;;
 

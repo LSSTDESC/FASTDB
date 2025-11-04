@@ -3,7 +3,7 @@
 
 services:
   kafka-zookeeper:
-    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-kafka-test:${DOCKER_VERSION:-test20250918}
+    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-kafka-test:${DOCKER_VERSION:-test20251104}
     build:
       context: ./docker/kafka
     healthcheck:
@@ -17,7 +17,7 @@ services:
     depends_on:
        kafka-zookeeper:
          condition: service_healthy
-    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-kafka-test:${DOCKER_VERSION:-test20250918}
+    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-kafka-test:${DOCKER_VERSION:-test20251104}
     build:
       context: ./docker/kafka
     healthcheck:
@@ -28,7 +28,7 @@ services:
     entrypoint: [ "bin/kafka-server-start.sh", "config/server.properties" ]
 
   postgres:
-    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-postgres:${DOCKER_VERSION:-test20250918}
+    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-postgres:${DOCKER_VERSION:-test20251104}
     build:
       context: ./docker/postgres
       target: postgres
@@ -49,7 +49,7 @@ services:
       retries: 10
 
   mongodb:
-    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-mongodb:${DOCKER_VERSION:-test20250918}
+    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-mongodb:${DOCKER_VERSION:-test20251104}
     build:
       context: ./docker/mongodb
     environment:
@@ -76,7 +76,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-shell:${DOCKER_VERSION:-test20250918}
+    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-shell:${DOCKER_VERSION:-test20251104}
     build:
       context: ./docker/webserver
       target: shell
@@ -97,7 +97,7 @@ services:
     depends_on:
       createdb:
         condition: service_completed_successfully
-    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-query-runner:${DOCKER_VERSION:-test20250918}
+    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-query-runner:${DOCKER_VERSION:-test20251104}
     build:
       context: ./docker/query_runner
       target: queryrunner
@@ -128,7 +128,7 @@ services:
         condition: service_started
       queryrunner:
         condition: service_started
-    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-webap:${DOCKER_VERSION:-test20250918}
+    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-webap:${DOCKER_VERSION:-test20251104}
     build:
       context: ./docker/webserver
       target: webserver
@@ -184,7 +184,7 @@ services:
         condition: service_healthy
       createdb:
         condition: service_completed_successfully
-    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-shell:${DOCKER_VERSION:-test20250918}
+    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-shell:${DOCKER_VERSION:-test20251104}
     build:
       context: ./docker/webserver
       target: shell
@@ -235,7 +235,7 @@ services:
         condition: service_healthy
       mongodb:
         condition: service_healthy
-    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-shell:${DOCKER_VERSION:-test20250918}
+    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-shell:${DOCKER_VERSION:-test20251104}
     build:
       context: ./docker/webserver
       target: shell
@@ -281,7 +281,7 @@ services:
     working_dir: /code
 
   makeinstall:
-    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-shell:${DOCKER_VERSION:-test20250918}
+    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-shell:${DOCKER_VERSION:-test20251104}
     build:
       context: ./docker/webserver
       target: shell
@@ -319,7 +319,7 @@ services:
         condition: service_started   # TODO : health test for webap
       makeinstall:
         condition: service_completed_successfully
-    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-shell:${DOCKER_VERSION:-test20250918}
+    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-shell:${DOCKER_VERSION:-test20251104}
     build:
       context: ./docker/webserver
       target: shell
