@@ -21,22 +21,25 @@
 		{"name": "cutoutScience", "type": ["null", "bytes"], "default": null},
 		{"name": "cutoutTemplate", "type": ["null", "bytes"], "default": null},
 
-                { "name": "classifications",
-                  "type": { 
-                    "type": "array",
-                    "items": {
-                      "type": "record",
-                      "name": "classificationDict",
-                      "fields": [
-                         { "name": "classId",
-                           "type": "int",
-                           "doc": "See https://github.com/LSSTDESC/elasticc/tree/main/taxonomy/taxonomy.ipynb for specification" },
-                         { "name": "probability",
-                           "type": "float",
-                           "doc": "0-1" }
-                       ]
-                    }
-                  }
-                }
-        ]
+		{"name": "brokerName", "type": "string", "doc": "Name of the broker providing classifications" },
+		{"name": "classifierName", "type": "string", "doc": "Name of the classifier providing classifications"},
+		{"name": "classifierVersion", "type": "string", "doc": "Version of the classifier providing classifications"},
+		{	"name": "classifications",
+			"type": "array",
+			"items": {
+				"type": "record",
+				"name": "classificationDict",
+				"fields": [
+					{	"name": "classId",
+						"type": "int",
+						"doc": "See https://github.com/LSSTDESC/elasticc/tree/main/taxonomy/taxonomy.ipynb for specification"
+					},
+					{	"name": "probability",
+						"type": "float",
+						"doc": "0-1"
+					}
+				]
+			}
+		}
+	]
 }

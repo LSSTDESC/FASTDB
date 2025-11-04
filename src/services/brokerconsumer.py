@@ -20,7 +20,7 @@ from pymongo import MongoClient
 from kafka_consumer import KafkaConsumer
 
 # Default location of BrokerMessage schema
-_default_brokermessage_schemafile = "/fastdb/share/avsc/fastdb_9_0_1.BrokerMessage.avsc"
+_default_brokermessage_schemafile = "/fastdb/share/avsc/fastdb_9_0_2.BrokerMessage.avsc"
 
 from concurrent.futures import ThreadPoolExecutor  # for pittgoogle
 import pittgoogle

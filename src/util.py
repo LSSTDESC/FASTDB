@@ -21,7 +21,7 @@ import rkwebutil
 
 import db
 
-_fastdb_schema_namespace = 'fastdb_9_0_1'
+_fastdb_schema_namespace = 'fastdb_9_0_2'
 _lsst_schema_namespace = 'lsst.v9_0'
 
 _default_datefmt = '%Y-%m-%d %H:%M:%S'
