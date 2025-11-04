@@ -10,7 +10,7 @@ Based on `lsst.v9_0`.  Has only `BrokerMessage` in it, which includes things fro
 
 The **BrokerMessage** schema is just the LSST v9.0 alert schema plus four additional fields:
 
-* `brokerName` identifies the broker that provided the classifications (should be one of ANTARES, ALcRCE, AMPEL, FINK, Lasair, Pitt-Google, or Babmul).
+* `brokerName` identifies the broker that provided the classifications (should be one of ANTARES, ALcRCE, AMPEL, FINK, Lasair, Pitt-Google, or Babmul, but is sometimes something else in tests).
 
 * `classifierName` identifies the classifier that the broker used.
 
