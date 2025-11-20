@@ -224,7 +224,11 @@ class FITSFileHandler( SNANAColumnMapper ):
                                                              assume_no_conflict=True, dbcon=conn )
 
                     cls = PPDBHostGalaxy if self.ppdb else HostGalaxy
-                    nhost = cls.bulk_insert_or_upsert( dict(hostgal), assume_no_conflict=True, dbcon=conn )
+                    # NOTE -- we have to leave assume_no_conflict=False
+                    #   on host_galaxy, as this process ends up with lots of duplicate
+                    #   records.  We left the host galaxy unique constraints in place
+                    # nhost = cls.bulk_insert_or_upsert( dict(hostgal), assume_no_conflict=True, dbcon=conn )
+                    nhost = cls.bulk_insert_or_upsert( dict(hostgal), assume_no_conflict=False, dbcon=conn )
                     FDBLogger.info( f"PID {os.getpid()} loaded {nhost} host galaxies from {headfile.name}" )
 
                     cls = PPDBDiaObject if self.ppdb else DiaObject

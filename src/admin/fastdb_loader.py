@@ -89,6 +89,8 @@ class FastDBLoader:
         file "load_snana_fits_reconstruct_indexes_constraints.sql" which
         can be feed through psql to undo the damage.
 
+        DOES NOT disable the hostgalaxy
+
         """
 
         tables = self._all_tables
@@ -102,6 +104,7 @@ class FastDBLoader:
 
         pkmatcher = re.compile( r'^ *PRIMARY KEY \((.*)\) *$' )
         pkindexmatcher = re.compile( r' USING .* \((.*)\) *$' )
+        hostgal_unique_matcher = re.compile('CREATE UNIQUE INDEX .*host_galaxy' )
 
         with db.DB() as conn:
             cursor = conn.cursor( row_factory=psycopg.rows.dict_row )
@@ -158,6 +161,12 @@ class FastDBLoader:
                         # It's possible the index is already present in table constraints,
                         #   as a UNIQUE constraint will also create an index.
                         continue
+                    hostgalmatch = hostgal_unique_matcher.search( row['indexdef'] )
+                    if hostgalmatch is not None:
+                        # We will get lots of duplicate indexes in the host galaxy
+                        #   table if we do disable this index, so we have to leave
+                        #   it in and accept the performance hit
+                        continue
                     tableindexes[table].append( row['indexname'] )
                     indexdef = row['indexdef']
                     # SCARY HACK ALERT.  The indexes were coming up with ON ONLY in their
@@ -199,7 +208,6 @@ class FastDBLoader:
 
             # OMG
             conn.commit()
-
 
     def recreate_indexes_and_fks( self, commandfile='load_snana_fits_reconstruct_indexes_constraints.sql' ):
         """Restore indexes and constraints destroyed by disable_indexes_and_fks()"""
