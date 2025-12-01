@@ -39,9 +39,9 @@ from util import FDBLogger
 # a query plan (I don't know why; is it a pg_hint_plan thing?)
 #
 # We should replace them with configurable options.
-_echoqueries = True
-_alwaysexplain = True
-_alwaysanalyze = True
+_echoqueries = False
+_alwaysexplain = False
+_alwaysanalyze = False
 
 # The tables here should be in the order they safe to drop.
 # (Insofar as it's safe to drop all your tables....)
@@ -1151,7 +1151,7 @@ class DBBase:
 
             if not assume_no_conflict:
                 if not upsert:
-                    conflict = f"ON CONFLICT ({','.join(cls._pk)}) DO NOTHING"
+                    conflict = "ON CONFLICT DO NOTHING"
                 else:
                     conflict = ( f"ON CONFLICT ({','.join(cls._pk)}) DO UPDATE SET "
                                  + ",".join( f"{c}=EXCLUDED.{c}" for c in columns ) )

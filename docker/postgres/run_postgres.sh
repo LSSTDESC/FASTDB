@@ -10,18 +10,19 @@ if [ ! -f $POSTGRES_DATA_DIR/PG_VERSION ]; then
     psql --command "CREATE EXTENSION pg_hint_plan" fastdb
     psql --command "CREATE EXTENSION pg_parquet" fastdb
     ropasswd=`cat /secrets/postgres_ro_password`
-    psql --command "CREATE USER postgres_ro PASSWORD '${ropasswd}'"
+    psql --command "CREATE USER postgres_ro PASSWORD '${ropasswd}' LOGIN"
     psql --command "GRANT CONNECT ON DATABASE fastdb TO postgres_ro"
     psql --command "GRANT USAGE ON SCHEMA public TO postgres_ro" fastdb
     psql --command "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO postgres_ro" fastdb
     /usr/lib/postgresql/15/bin/pg_ctl -D $POSTGRES_DATA_DIR stop
 fi
 
+# RKNOP 2025-11-05 : commented this out, confusion is reigning
 # Make sure the temporary tablespace directory is properly created
-/usr/lib/postgresql/15/bin/pg_ctl -D $POSTGRES_DATA_DIR -o "-c listen_addresses=''" start
-psql --command "DROP TABLESPACE IF EXISTS postgres_temp" fastdb
-psql --command "CREATE TABLESPACE postgres_temp LOCATION '/tmp/postgres_temp'" fastdb
-/usr/lib/postgresql/15/bin/pg_ctl -D $POSTGRES_DATA_DIR stop
+# /usr/lib/postgresql/15/bin/pg_ctl -D $POSTGRES_DATA_DIR -o "-c listen_addresses=''" start
+# psql --command "DROP TABLESPACE IF EXISTS postgres_temp" fastdb
+# psql --command "CREATE TABLESPACE postgres_temp LOCATION '/tmp/postgres_temp'" fastdb
+# /usr/lib/postgresql/15/bin/pg_ctl -D $POSTGRES_DATA_DIR stop
 
 # Now run the database server for real
 exec /usr/lib/postgresql/15/bin/postgres -c config_file=/etc/postgresql/15/main/postgresql.conf

@@ -186,36 +186,45 @@ class FITSFileHandler( SNANAColumnMapper ):
             head.add_column( str(NULLUUID), name='nearbyextobj2id' )
             if 'nearbyextobj3' in head.columns:
                 head.add_column( str(NULLUUID), name='nearbyextobj3id' )
-            # By construction, in each of the joins below, joint should
-            #   have w rows.  hostgal was selected from all the known
-            #   nearbyextobj* in the HEAD file, and was made unique.
-            # So, when we are done, everything with a nearbyextobj{n}
-            #   that is >=0 should have a non-NULL uuid in
-            #   nearbyextobj{n}id.
-            # The bigger worry is that different HEAD files will use the
-            #   same hostgal more than once.  In that case, the same
-            #   hostgal will show up with different uuids.  The database
-            #   structure sould be OK with that (since there's no unique
-            #   constraint on (objectid, processing_version) in
-            #   host_galaxy), but it would be better to identify the
-            #   same host gal as the same host gal!
-            # For handling actual alerts, we need to be able to do this
-            #   better, as we're already going to need to be able to
-            #   handle repeated reports of the same sources, never mind
-            #   host galaxies.
-            w = np.where( head['nearbyextobj1'] > 0 )[0]
-            if len(w) > 0:
-                joint = astropy.table.join( head[w], hostgal, keys_left='nearbyextobj1', keys_right=['objectid'] )
-                head['nearbyextobj1id'][w] = joint['id']
-            w = np.where( head['nearbyextobj2'] > 0 )[0]
-            if len(w) > 0:
-                joint = astropy.table.join( head[w], hostgal, keys_left='nearbyextobj2', keys_right=['objectid'] )
-                head['nearbyextobj2id'][w] = joint['id']
-            if 'nearbyextobj3' in head.columns:
-                w = np.where( head['nearbyextobj3'] > 0 )[0]
-                if len(w) > 0:
-                    joint = astropy.table.join( head[w], hostgal, keys_left='nearbyextobj3', keys_right=['objectid'] )
-                    head['nearbyextobj3id'][w] = joint['id']
+
+            # GAAAAAAAAAH.
+            #
+            # OK.  I put in a unique index that made everything break
+            #   when the same host galaxy was loaded in more than once.
+            #   So, we can't identify the host galaxy IDs right now, but
+            #   will have to do it at the end of the whole load process.
+            #   Leave them all as null right now.
+            #
+            # # By construction, in each of the joins below, joint should
+            # #   have w rows.  hostgal was selected from all the known
+            # #   nearbyextobj* in the HEAD file, and was made unique.
+            # # So, when we are done, everything with a nearbyextobj{n}
+            # #   that is >=0 should have a non-NULL uuid in
+            # #   nearbyextobj{n}id.
+            # # The bigger worry is that different HEAD files will use the
+            # #   same hostgal more than once.  In that case, the same
+            # #   hostgal will show up with different uuids.  The database
+            # #   structure sould be OK with that (since there's no unique
+            # #   constraint on (objectid, processing_version) in
+            # #   host_galaxy), but it would be better to identify the
+            # #   same host gal as the same host gal!
+            # # For handling actual alerts, we need to be able to do this
+            # #   better, as we're already going to need to be able to
+            # #   handle repeated reports of the same sources, never mind
+            # #   host galaxies.
+            # w = np.where( head['nearbyextobj1'] > 0 )[0]
+            # if len(w) > 0:
+            #     joint = astropy.table.join( head[w], hostgal, keys_left='nearbyextobj1', keys_right=['objectid'] )
+            #     head['nearbyextobj1id'][w] = joint['id']
+            # w = np.where( head['nearbyextobj2'] > 0 )[0]
+            # if len(w) > 0:
+            #     joint = astropy.table.join( head[w], hostgal, keys_left='nearbyextobj2', keys_right=['objectid'] )
+            #     head['nearbyextobj2id'][w] = joint['id']
+            # if 'nearbyextobj3' in head.columns:
+            #     w = np.where( head['nearbyextobj3'] > 0 )[0]
+            #     if len(w) > 0:
+            #         joint = astropy.table.join( head[w], hostgal, keys_left='nearbyextobj3', keys_right=['objectid'] )
+            #         head['nearbyextobj3id'][w] = joint['id']
 
             if self.really_do:
                 with DB() as conn:
@@ -224,7 +233,11 @@ class FITSFileHandler( SNANAColumnMapper ):
                                                              assume_no_conflict=True, dbcon=conn )
 
                     cls = PPDBHostGalaxy if self.ppdb else HostGalaxy
-                    nhost = cls.bulk_insert_or_upsert( dict(hostgal), assume_no_conflict=True, dbcon=conn )
+                    # NOTE -- we have to leave assume_no_conflict=False
+                    #   on host_galaxy, as this process ends up with lots of duplicate
+                    #   records.  We left the host galaxy unique constraints in place
+                    # nhost = cls.bulk_insert_or_upsert( dict(hostgal), assume_no_conflict=True, dbcon=conn )
+                    nhost = cls.bulk_insert_or_upsert( dict(hostgal), assume_no_conflict=False, dbcon=conn )
                     FDBLogger.info( f"PID {os.getpid()} loaded {nhost} host galaxies from {headfile.name}" )
 
                     cls = PPDBDiaObject if self.ppdb else DiaObject
@@ -241,6 +254,10 @@ class FITSFileHandler( SNANAColumnMapper ):
                         cursor.execute( "UPDATE temp_bulk_upsert SET nearbyextobj3=NULL, nearbyextobj3id=NULL, "
                                         "                            nearbyextobj3sep=NULL "
                                         "WHERE nearbyextobj3 <= 0" )
+                    # Null out ALL nearbyextids to get rid of the nulluuids we put there before
+                    #   because of astropy tables and types and oh my
+                    cursor.execute( "UPDATE temp_bulk_upsert SET nearbyextobj1id=NULL, nearbyextobj2id=NULL, "
+                                    "  nearbyextobj3id=NULL" )
                     cursor.execute( q )
                     nobj = cursor.rowcount
                     conn.commit()
@@ -519,6 +536,24 @@ class FITSLoader( FastDBLoader ):
         finally:
             if not self.dont_disable_indexes_fks:
                 self.recreate_indexes_and_fks()
+
+            FDBLogger.info( "Done recreating indices, now filling in host IDs." )
+            with DB() as conn:
+                cursor = conn.cursor()
+                FDBLogger.info( "...nearbyextobj1..." )
+                cursor.execute( "UPDATE diaobject o SET nearbyextobj1id=h.id "
+                                "  FROM host_galaxy h "
+                                "  WHERE o.nearbyextobj1=h.objectid" )
+                FDBLogger.info( "...nearbyextobj2..." )
+                cursor.execute( "UPDATE diaobject o SET nearbyextobj2id=h.id "
+                                "  FROM host_galaxy h "
+                                "  WHERE o.nearbyextobj2=h.objectid" )
+                FDBLogger.info( "...nearbyextobj2..." )
+                cursor.execute( "UPDATE diaobject o SET nearbyextobj3id=h.id "
+                                "  FROM host_galaxy h "
+                                "  WHERE o.nearbyextobj3=h.objectid" )
+                conn.commit()
+            FDBLogger.info( "Done." )
 
 
 # ======================================================================

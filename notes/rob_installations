@@ -29,3 +29,31 @@ fastdb_dev :
        --with-smtp-server=smtp.lbl.gov \
        --with-smtp-port=25 \
        --with-installdir=/web-data/fastdb_dev/install
+
+
+fastdb_resspect_test on c3-sn.lbl.gov:
+
+    * database host decatdb.lbl.gov
+    * web server URL https://c3-sn.lbl.gov/fastdb_resspect_test
+
+    * mongo
+       - MONGO_DBNAME = fastdb_resspect_test
+         MONGO_ALERT_READER_USER = fastdb_resspect_test_reader
+         MONTO_ALERT_WRITER_USER = fastdb_resspect_test_writer
+
+    * postgres
+       - database fastdb_resspect_test
+         user fastdb_resspect_test
+         readonly user fastdb_resspect_test_ro
+
+   ./configure \
+       --with-external-url=https://c3-sn.lbl.gov/fastdb_resspect_test/ \
+       --with-dbhost=decatdb.lbl.gov \
+       --with-dbdatabase=fastdb_resspect_test \
+       --with-dbuser=fastdb_resspect_test \
+       --with-db-passwd-file=/secrets/decatdb_postgres_fastdb_resspect_test \
+       --with-secret-key-file=/secrets/decatdb_fastdb_resspect_test_flask_secret_key \
+       --with-email-from=raknop@lbl.gov \
+       --with-smtp-server=smtp.lbl.gov \
+       --with-smtp-port=25 \
+       --with-installdir=/web-data/fastdb_resspect_test/install
