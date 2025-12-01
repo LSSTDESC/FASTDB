@@ -1151,10 +1151,8 @@ class DBBase:
 
             if not assume_no_conflict:
                 if not upsert:
-                    # conflict = f"ON CONFLICT ({','.join(cls._pk)}) DO NOTHING"
                     conflict = "ON CONFLICT DO NOTHING"
                 else:
-                    # conflict = ( "ON CONFLICT DO UPDATE SET "
                     conflict = ( f"ON CONFLICT ({','.join(cls._pk)}) DO UPDATE SET "
                                  + ",".join( f"{c}=EXCLUDED.{c}" for c in columns ) )
             else:
