@@ -256,8 +256,8 @@ class FITSFileHandler( SNANAColumnMapper ):
                                         "WHERE nearbyextobj3 <= 0" )
                     # Null out ALL nearbyextids to get rid of the nulluuids we put there before
                     #   because of astropy tables and types and oh my
-                    cursor.execute( "UPDATE temp_bulk_upsert SET nearbyextobj1id=NULL, nearbyextobjid2=NULL, "
-                                    "  nearbyextobjid3=NULL" )
+                    cursor.execute( "UPDATE temp_bulk_upsert SET nearbyextobj1id=NULL, nearbyextobj2id=NULL, "
+                                    "  nearbyextobj3id=NULL" )
                     cursor.execute( q )
                     nobj = cursor.rowcount
                     conn.commit()
@@ -539,7 +539,7 @@ class FITSLoader( FastDBLoader ):
 
             FDBLogger.info( f"Done recreating indices, now filling in host IDs." )
             with DB() as conn:
-                cursor = conn.curor()
+                cursor = conn.cursor()
                 FDBLogger.info( "...nearbyextobj1..." )
                 cursor.execute( "UPDATE diaobject o SET nearbyextobj1id=h.id "
                                 "  FROM host_galaxy h "
