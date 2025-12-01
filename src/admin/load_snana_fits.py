@@ -537,7 +537,7 @@ class FITSLoader( FastDBLoader ):
             if not self.dont_disable_indexes_fks:
                 self.recreate_indexes_and_fks()
 
-            FDBLogger.info( f"Done recreating indices, now filling in host IDs." )
+            FDBLogger.info( "Done recreating indices, now filling in host IDs." )
             with DB() as conn:
                 cursor = conn.cursor()
                 FDBLogger.info( "...nearbyextobj1..." )
@@ -554,6 +554,7 @@ class FITSLoader( FastDBLoader ):
                                 "  WHERE o.nearbyextobj3=h.objectid" )
                 conn.commit()
             FDBLogger.info( "Done." )
+
 
 # ======================================================================
 
