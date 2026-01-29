@@ -1,0 +1,93 @@
+{{- if .Values.postgresStandby.enabled }}
+{{- $namespace := include "fastdb.namespace" . }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-standby
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "fastdb.labels" . | nindent 4 }}
+    app: postgres-standby
+spec:
+  replicas: {{ .Values.postgresStandby.replicas }}
+  selector:
+    matchLabels:
+      app: postgres-standby
+  template:
+    metadata:
+      labels:
+        app: postgres-standby
+    spec:
+      {{- include "fastdb.imagePullSecrets" . | nindent 6 }}
+      initContainers:
+      - name: volume-mount-hack
+        image: busybox
+        command: ["sh", "-c", "chown 100:108 /pgdata"]
+        securityContext:
+          runAsUser: 0
+        volumeMounts:
+        - name: postgres-standby-data
+          mountPath: /pgdata
+      containers:
+      - name: postgres-standby
+        image: {{ include "fastdb.image" (dict "image" .Values.postgresStandby.image "global" .Values.global) }}
+        imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+        env:
+        - name: POSTGRES_DATA_DIR
+          value: /var/lib/postgresql/data
+        - name: PRIMARY_HOST
+          value: {{ .Values.postgresStandby.primaryHost }}
+        - name: PRIMARY_PORT
+          value: {{ .Values.postgresStandby.primaryPort | quote }}
+        - name: REPLICATION_SLOT
+          value: {{ .Values.postgresStandby.replicationSlot }}
+        ports:
+        - containerPort: 5432
+        volumeMounts:
+        - name: postgres-standby-data
+          mountPath: /var/lib/postgresql/data
+        - name: secrets
+          mountPath: /secrets
+          readOnly: true
+        - name: dshm
+          mountPath: /dev/shm
+        readinessProbe:
+          tcpSocket:
+            port: 5432
+          initialDelaySeconds: 30
+          periodSeconds: 5
+        livenessProbe:
+          tcpSocket:
+            port: 5432
+          initialDelaySeconds: 60
+          periodSeconds: 10
+      volumes:
+      - name: postgres-standby-data
+        persistentVolumeClaim:
+          claimName: {{ $namespace }}-postgres-standby-pvc
+      - name: secrets
+        secret:
+          secretName: secrets
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          sizeLimit: {{ .Values.postgresStandby.sharedMemory }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-ro
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "fastdb.labels" . | nindent 4 }}
+    app: postgres-standby
+spec:
+  selector:
+    app: postgres-standby
+  ports:
+  - name: postgres
+    port: 5432
+    targetPort: 5432
+  type: ClusterIP
+{{- end }}

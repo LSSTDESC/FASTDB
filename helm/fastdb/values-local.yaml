@@ -1,0 +1,88 @@
+# FASTDB Local (Kind) Environment Values
+# Usage: helm install fastdb ./helm/fastdb -f ./helm/fastdb/values-local.yaml
+
+global:
+  namespace: fastdb-local
+  environment: local
+
+  # Local images built and loaded into Kind
+  imageRegistry: "localhost"
+  imageTag: "local"
+  imagePullPolicy: Never
+  imagePullSecrets: []
+
+# Use PVC for database storage, hostPath for code (via Kind extraMounts)
+volumes:
+  type: pvc  # PVCs for database storage
+  storageClass: ""
+
+  # Code is mounted via Kind extraMounts
+  codeHostPath: true  # Enable hostPath for /fastdb-install and /fastdb-db
+
+# Local development secrets (not for production!)
+secrets:
+  postgres:
+    password: "fragile"
+    roPassword: "readonly1234"
+    replicatorPassword: "repl1c4t0r"
+  secretKey: "fragilesecretkey"
+
+  mongodb:
+    adminUser: "admin"
+    adminPassword: "fragile"
+    readerUser: "alertreader"
+    readerPassword: "reader"
+    writerUser: "alertwriter"
+    writerPassword: "writer"
+
+# PostgreSQL
+postgres:
+  enabled: true
+  persistence:
+    size: 10Gi
+
+  # NodePort for external access
+  externalAccess:
+    enabled: true
+    type: NodePort
+    nodePort: 30432
+
+# Standby enabled for local testing
+postgresStandby:
+  enabled: true
+  persistence:
+    size: 10Gi
+
+# MongoDB
+mongodb:
+  enabled: true
+  persistence:
+    size: 5Gi
+
+# Web application with NodePort
+webap:
+  enabled: true
+  externalAccess:
+    enabled: true
+    type: NodePort
+    nodePort: 30080
+
+# Shell pod for debugging
+shell:
+  enabled: true
+
+# Query runner
+queryrunner:
+  enabled: true
+
+# Mailhog with NodePort
+mailhog:
+  enabled: true
+  externalAccess:
+    enabled: true
+    type: NodePort
+    nodePort: 30025
+
+# Database migrations
+createdb:
+  enabled: true

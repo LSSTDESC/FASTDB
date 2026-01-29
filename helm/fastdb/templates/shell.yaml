@@ -1,0 +1,78 @@
+{{- if .Values.shell.enabled }}
+{{- $namespace := include "fastdb.namespace" . }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shell
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "fastdb.labels" . | nindent 4 }}
+    app: shell
+spec:
+  replicas: {{ .Values.shell.replicas }}
+  selector:
+    matchLabels:
+      app: shell
+  template:
+    metadata:
+      labels:
+        app: shell
+    spec:
+      {{- include "fastdb.imagePullSecrets" . | nindent 6 }}
+      containers:
+      - name: shell
+        image: {{ include "fastdb.image" (dict "image" .Values.shell.image "global" .Values.global) }}
+        imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+        # Keep container running for interactive shell access
+        command: ["sleep", "infinity"]
+        envFrom:
+        - configMapRef:
+            name: mongodb-config
+        volumeMounts:
+        - name: secrets
+          mountPath: /secrets
+          readOnly: true
+        - name: sessions
+          mountPath: /sessions
+        - name: query-results
+          mountPath: /query_results
+        - name: logs
+          mountPath: /logs
+        {{- if .Values.volumes.codeHostPath }}
+        - name: fastdb-install
+          mountPath: /fastdb
+        - name: fastdb-db
+          mountPath: /fastdb/db
+        {{- else if .Values.volumes.codePvc.enabled }}
+        - name: code
+          mountPath: /fastdb
+        {{- end }}
+      volumes:
+      - name: secrets
+        secret:
+          secretName: secrets
+      - name: sessions
+        persistentVolumeClaim:
+          claimName: {{ $namespace }}-sessions-pvc
+      - name: query-results
+        persistentVolumeClaim:
+          claimName: {{ $namespace }}-query-results-pvc
+      - name: logs
+        persistentVolumeClaim:
+          claimName: {{ $namespace }}-logs-pvc
+      {{- if .Values.volumes.codeHostPath }}
+      - name: fastdb-install
+        hostPath:
+          path: /fastdb-install
+          type: Directory
+      - name: fastdb-db
+        hostPath:
+          path: /fastdb-db
+          type: Directory
+      {{- else if .Values.volumes.codePvc.enabled }}
+      - name: code
+        persistentVolumeClaim:
+          claimName: {{ $namespace }}-code-pvc
+      {{- end }}
+{{- end }}

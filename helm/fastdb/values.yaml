@@ -1,0 +1,216 @@
+# FASTDB Helm Chart Values
+# Base configuration - override with environment-specific values files
+
+# Global settings
+global:
+  namespace: fastdb
+  environment: dev
+
+  # Image configuration
+  imageRegistry: ""  # e.g., "ghcr.io/fifteen3", "registry.nersc.gov/m1727/raknop"
+  imageTag: "latest"
+  imagePullPolicy: Always
+  imagePullSecrets: []
+  # - name: ghcr-secret
+
+  # Namespace labels
+  namespaceLabels: {}
+  # owner: username
+  # environment: dev
+
+# Volume configuration
+volumes:
+  # Type: "pvc" for persistent volume claims
+  type: pvc
+  storageClass: ""
+
+  # Enable hostPath for code directories (for local Kind deployment)
+  # When true, mounts /fastdb-install and /fastdb-db from Kind extraMounts
+  codeHostPath: false
+
+  # Code PVC - for loading code via git clone (for vcluster/cloud deployments)
+  codePvc:
+    enabled: false
+    size: 2Gi
+    accessMode: ReadWriteMany
+    gitRepo: "https://github.com/LSSTDESC/FASTDB.git"
+    gitBranch: "main"
+
+# Secrets
+secrets:
+  postgres:
+    password: "changeme"
+    roPassword: "changeme"
+    replicatorPassword: "changeme"
+  secretKey: "changeme"
+
+  # MongoDB credentials
+  mongodb:
+    adminUser: "admin"
+    adminPassword: "changeme"
+    readerUser: "alertreader"
+    readerPassword: "changeme"
+    writerUser: "alertwriter"
+    writerPassword: "changeme"
+
+# PostgreSQL primary
+postgres:
+  enabled: true
+  image:
+    repository: fastdb-postgres
+    tag: ""  # Falls back to global.imageTag
+  replicas: 1
+
+  persistence:
+    size: 10Gi
+    accessMode: ReadWriteOnce
+
+  sharedMemory: 1Gi
+
+  service:
+    type: ClusterIP
+    port: 5432
+
+  # External access (NodePort or LoadBalancer)
+  externalAccess:
+    enabled: false
+    type: NodePort  # or LoadBalancer
+    nodePort: 30432
+    # LoadBalancer annotations (for SLAC metallb)
+    annotations: {}
+
+  # Security context
+  securityContext:
+    runAsUser: null  # null for local, 100 for SLAC
+    runAsNonRoot: false
+    allowPrivilegeEscalation: false
+
+  # WAL archiving for replication
+  walArchive:
+    enabled: false
+    size: 20Gi
+    accessMode: ReadWriteMany
+
+# PostgreSQL standby (read replica)
+postgresStandby:
+  enabled: false
+  image:
+    repository: fastdb-postgres
+    tag: ""
+  replicas: 1
+
+  persistence:
+    size: 10Gi
+    accessMode: ReadWriteOnce
+
+  sharedMemory: 1Gi
+
+  primaryHost: postgres
+  primaryPort: 5432
+  replicationSlot: standby_slot
+
+# MongoDB
+mongodb:
+  enabled: true
+  image:
+    repository: fastdb-mongodb
+    tag: ""
+  replicas: 1
+
+  persistence:
+    size: 5Gi
+    accessMode: ReadWriteOnce
+
+  config:
+    host: mongodb
+    database: brokeralert
+    collection: alerts
+
+# Web application
+webap:
+  enabled: true
+  image:
+    repository: fastdb-webap
+    tag: ""
+  replicas: 1
+
+  service:
+    type: ClusterIP
+    port: 8080
+
+  externalAccess:
+    enabled: false
+    type: NodePort
+    nodePort: 30080
+
+  # Base path for subdirectory deployments (sets SCRIPT_NAME env var)
+  basePath: ""
+
+  # Ingress configuration
+  ingress:
+    enabled: false
+    host: ""
+    path: "/"
+    annotations: {}
+    ingressClassName: ""
+    tls: false
+    tlsSecretName: ""
+
+  # Volume mounts
+  volumes:
+    sessions:
+      size: 1Gi
+    queryResults:
+      size: 1Gi
+    logs:
+      size: 1Gi
+
+# Shell pod for debugging
+shell:
+  enabled: true
+  image:
+    repository: fastdb-shell
+    tag: ""
+  replicas: 1
+
+# Query runner
+queryrunner:
+  enabled: true
+  image:
+    repository: fastdb-query-runner
+    tag: ""
+  replicas: 1
+
+# Mailhog (email testing)
+mailhog:
+  enabled: true
+  image:
+    repository: mailhog/mailhog
+    tag: "latest"
+    registry: "docker.io"
+  replicas: 1
+
+  externalAccess:
+    enabled: false
+    type: NodePort
+    nodePort: 30025
+
+# Database migrations job
+createdb:
+  enabled: true
+  image:
+    repository: fastdb-shell
+    tag: ""
+  ttlSecondsAfterFinished: 300
+
+# WAL webserver (for replication - SLAC specific)
+walWebserver:
+  enabled: false
+  replicas: 1
+
+  ingress:
+    enabled: false
+    host: ""
+    path: /fastdb-wal
+    annotations: {}
+    tls: []

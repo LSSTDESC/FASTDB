@@ -1,0 +1,175 @@
+{{- if .Values.webap.enabled }}
+{{- $namespace := include "fastdb.namespace" . }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webap
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "fastdb.labels" . | nindent 4 }}
+    app: webap
+spec:
+  replicas: {{ .Values.webap.replicas }}
+  selector:
+    matchLabels:
+      app: webap
+  template:
+    metadata:
+      labels:
+        app: webap
+    spec:
+      {{- include "fastdb.imagePullSecrets" . | nindent 6 }}
+      containers:
+      - name: webap
+        image: {{ include "fastdb.image" (dict "image" .Values.webap.image "global" .Values.global) }}
+        imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+        envFrom:
+        - configMapRef:
+            name: mongodb-config
+        {{- if .Values.webap.basePath }}
+        env:
+        - name: SCRIPT_NAME
+          value: {{ .Values.webap.basePath | quote }}
+        {{- end }}
+        ports:
+        - containerPort: 8080
+        volumeMounts:
+        - name: secrets
+          mountPath: /secrets
+          readOnly: true
+        - name: sessions
+          mountPath: /sessions
+        - name: query-results
+          mountPath: /query_results
+        - name: logs
+          mountPath: /logs
+        {{- if .Values.volumes.codeHostPath }}
+        - name: fastdb-install
+          mountPath: /fastdb
+        - name: fastdb-db
+          mountPath: /fastdb/db
+        {{- else if .Values.volumes.codePvc.enabled }}
+        - name: code
+          mountPath: /fastdb
+        {{- end }}
+        readinessProbe:
+          httpGet:
+            path: {{ .Values.webap.basePath | default "" }}/
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: {{ .Values.webap.basePath | default "" }}/
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+      volumes:
+      - name: secrets
+        secret:
+          secretName: secrets
+      - name: sessions
+        persistentVolumeClaim:
+          claimName: {{ $namespace }}-sessions-pvc
+      - name: query-results
+        persistentVolumeClaim:
+          claimName: {{ $namespace }}-query-results-pvc
+      - name: logs
+        persistentVolumeClaim:
+          claimName: {{ $namespace }}-logs-pvc
+      {{- if .Values.volumes.codeHostPath }}
+      - name: fastdb-install
+        hostPath:
+          path: /fastdb-install
+          type: Directory
+      - name: fastdb-db
+        hostPath:
+          path: /fastdb-db
+          type: Directory
+      {{- else if .Values.volumes.codePvc.enabled }}
+      - name: code
+        persistentVolumeClaim:
+          claimName: {{ $namespace }}-code-pvc
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: webap
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "fastdb.labels" . | nindent 4 }}
+    app: webap
+spec:
+  selector:
+    app: webap
+  ports:
+  - name: http
+    port: {{ .Values.webap.service.port }}
+    targetPort: 8080
+  type: {{ .Values.webap.service.type }}
+{{- if .Values.webap.externalAccess.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: webap-external
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "fastdb.labels" . | nindent 4 }}
+    app: webap
+spec:
+  selector:
+    app: webap
+  ports:
+  - name: http
+    port: 8080
+    targetPort: 8080
+    {{- if eq .Values.webap.externalAccess.type "NodePort" }}
+    nodePort: {{ .Values.webap.externalAccess.nodePort }}
+    {{- end }}
+  type: {{ .Values.webap.externalAccess.type }}
+  {{- if eq .Values.webap.externalAccess.type "LoadBalancer" }}
+  allocateLoadBalancerNodePorts: false
+  {{- end }}
+{{- end }}
+{{- if .Values.webap.ingress.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: webap
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "fastdb.labels" . | nindent 4 }}
+    app: webap
+  {{- with .Values.webap.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .Values.webap.ingress.ingressClassName }}
+  ingressClassName: {{ .Values.webap.ingress.ingressClassName }}
+  {{- end }}
+  rules:
+  - host: {{ .Values.webap.ingress.host }}
+    http:
+      paths:
+      - path: {{ .Values.webap.ingress.path }}
+        pathType: Prefix
+        backend:
+          service:
+            name: webap
+            port:
+              number: {{ .Values.webap.service.port }}
+  {{- if .Values.webap.ingress.tls }}
+  tls:
+  - hosts:
+    - {{ .Values.webap.ingress.host }}
+    {{- if .Values.webap.ingress.tlsSecretName }}
+    secretName: {{ .Values.webap.ingress.tlsSecretName }}
+    {{- end }}
+  {{- end }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,167 @@
+{{- if eq .Values.volumes.type "pvc" }}
+{{- $namespace := include "fastdb.namespace" . }}
+
+{{/* PostgreSQL PVC */}}
+{{- if .Values.postgres.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $namespace }}-postgres-pvc
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "fastdb.labels" . | nindent 4 }}
+    app: postgres
+spec:
+  accessModes:
+    - {{ .Values.postgres.persistence.accessMode }}
+  {{- if .Values.volumes.storageClass }}
+  storageClassName: {{ .Values.volumes.storageClass }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.postgres.persistence.size }}
+  volumeMode: Filesystem
+{{- end }}
+
+{{/* PostgreSQL WAL Archive PVC */}}
+{{- if and .Values.postgres.enabled .Values.postgres.walArchive.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $namespace }}-wal-archive-pvc
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "fastdb.labels" . | nindent 4 }}
+    app: postgres
+spec:
+  accessModes:
+    - {{ .Values.postgres.walArchive.accessMode }}
+  {{- if .Values.volumes.storageClass }}
+  storageClassName: {{ .Values.volumes.storageClass }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.postgres.walArchive.size }}
+  volumeMode: Filesystem
+{{- end }}
+
+{{/* PostgreSQL Standby PVC */}}
+{{- if .Values.postgresStandby.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $namespace }}-postgres-standby-pvc
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "fastdb.labels" . | nindent 4 }}
+    app: postgres-standby
+spec:
+  accessModes:
+    - {{ .Values.postgresStandby.persistence.accessMode }}
+  {{- if .Values.volumes.storageClass }}
+  storageClassName: {{ .Values.volumes.storageClass }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.postgresStandby.persistence.size }}
+  volumeMode: Filesystem
+{{- end }}
+
+{{/* MongoDB PVC */}}
+{{- if .Values.mongodb.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $namespace }}-mongodb-pvc
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "fastdb.labels" . | nindent 4 }}
+    app: mongodb
+spec:
+  accessModes:
+    - {{ .Values.mongodb.persistence.accessMode }}
+  {{- if .Values.volumes.storageClass }}
+  storageClassName: {{ .Values.volumes.storageClass }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.mongodb.persistence.size }}
+  volumeMode: Filesystem
+{{- end }}
+
+{{/* Shared Volumes */}}
+{{- if .Values.webap.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $namespace }}-sessions-pvc
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "fastdb.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: {{ .Values.webap.volumes.sessions.size }}
+  volumeMode: Filesystem
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $namespace }}-query-results-pvc
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "fastdb.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: {{ .Values.webap.volumes.queryResults.size }}
+  volumeMode: Filesystem
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $namespace }}-logs-pvc
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "fastdb.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: {{ .Values.webap.volumes.logs.size }}
+  volumeMode: Filesystem
+{{- end }}
+
+{{/* Code PVC - shared volume for application code */}}
+{{- if .Values.volumes.codePvc.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $namespace }}-code-pvc
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "fastdb.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - {{ .Values.volumes.codePvc.accessMode }}
+  {{- if .Values.volumes.storageClass }}
+  storageClassName: {{ .Values.volumes.storageClass }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.volumes.codePvc.size }}
+  volumeMode: Filesystem
+{{- end }}
+
+{{- end }}

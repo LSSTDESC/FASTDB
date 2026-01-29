@@ -1,0 +1,144 @@
+{{- if .Values.postgres.enabled }}
+{{- $namespace := include "fastdb.namespace" . }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "fastdb.labels" . | nindent 4 }}
+    app: postgres
+spec:
+  replicas: {{ .Values.postgres.replicas }}
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      {{- include "fastdb.imagePullSecrets" . | nindent 6 }}
+      initContainers:
+      - name: volume-mount-hack
+        image: busybox
+        {{- if .Values.postgres.walArchive.enabled }}
+        command: ["sh", "-c", "chown 100:108 /pgdata && mkdir -p /wal-archive && chown 100:108 /wal-archive"]
+        {{- else }}
+        command: ["sh", "-c", "chown 100:108 /pgdata"]
+        {{- end }}
+        securityContext:
+          runAsUser: 0
+        volumeMounts:
+        - name: postgres-data
+          mountPath: /pgdata
+        {{- if .Values.postgres.walArchive.enabled }}
+        - name: wal-archive
+          mountPath: /wal-archive
+        {{- end }}
+      containers:
+      - name: postgres
+        image: {{ include "fastdb.image" (dict "image" .Values.postgres.image "global" .Values.global) }}
+        imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+        {{- if .Values.postgres.securityContext.runAsUser }}
+        securityContext:
+          runAsUser: {{ .Values.postgres.securityContext.runAsUser }}
+          runAsNonRoot: {{ .Values.postgres.securityContext.runAsNonRoot }}
+          allowPrivilegeEscalation: {{ .Values.postgres.securityContext.allowPrivilegeEscalation }}
+          capabilities:
+            drop:
+            - ALL
+          privileged: false
+          readOnlyRootFilesystem: false
+        {{- end }}
+        env:
+        - name: POSTGRES_DATA_DIR
+          value: /var/lib/postgresql/data
+        ports:
+        - containerPort: 5432
+        volumeMounts:
+        - name: postgres-data
+          mountPath: /var/lib/postgresql/data
+        - name: secrets
+          mountPath: /secrets
+          readOnly: true
+        - name: dshm
+          mountPath: /dev/shm
+        {{- if .Values.postgres.walArchive.enabled }}
+        - name: wal-archive
+          mountPath: /wal-archive
+        {{- end }}
+        readinessProbe:
+          tcpSocket:
+            port: 5432
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        livenessProbe:
+          tcpSocket:
+            port: 5432
+          initialDelaySeconds: 30
+          periodSeconds: 10
+      volumes:
+      - name: postgres-data
+        persistentVolumeClaim:
+          claimName: {{ $namespace }}-postgres-pvc
+      - name: secrets
+        secret:
+          secretName: secrets
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          sizeLimit: {{ .Values.postgres.sharedMemory }}
+      {{- if .Values.postgres.walArchive.enabled }}
+      - name: wal-archive
+        persistentVolumeClaim:
+          claimName: {{ $namespace }}-wal-archive-pvc
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "fastdb.labels" . | nindent 4 }}
+    app: postgres
+spec:
+  selector:
+    app: postgres
+  ports:
+  - name: postgres
+    port: {{ .Values.postgres.service.port }}
+    targetPort: 5432
+  type: {{ .Values.postgres.service.type }}
+{{- if .Values.postgres.externalAccess.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-external
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "fastdb.labels" . | nindent 4 }}
+    app: postgres
+  {{- with .Values.postgres.externalAccess.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  selector:
+    app: postgres
+  ports:
+  - name: postgres
+    port: 5432
+    targetPort: 5432
+    {{- if eq .Values.postgres.externalAccess.type "NodePort" }}
+    nodePort: {{ .Values.postgres.externalAccess.nodePort }}
+    {{- end }}
+  type: {{ .Values.postgres.externalAccess.type }}
+  {{- if eq .Values.postgres.externalAccess.type "LoadBalancer" }}
+  allocateLoadBalancerNodePorts: false
+  {{- end }}
+{{- end }}
+{{- end }}
