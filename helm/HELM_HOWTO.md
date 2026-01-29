@@ -52,6 +52,7 @@ helm/fastdb/
 - `helm` CLI installed
 - `kubectl` configured to access your cluster
 - Docker images built and accessible
+- For private registries (GHCR, NERSC, etc.): a GitHub PAT with `read:packages` scope (see [Registry Credentials](#registry-credentials))
 
 ### Deploy to Local Kind Cluster
 
@@ -79,18 +80,122 @@ kubectl get pods -n fastdb-local
 curl http://localhost:8080
 ```
 
+### Registry Credentials
+
+Deployments that pull from private registries (e.g., GHCR) need a `dockerconfigjson` secret. The Helm chart creates this automatically when `global.registryCredentials.enabled` is `true` in your values file. Pass the password at deploy time via `--registry-password` (or `--set`) so it never gets committed to git.
+
+> **Note:** You can generate a GitHub Personal Access Token (PAT) with `read:packages` scope at https://github.com/settings/tokens.
+
+Configure your values file with registry info (no password):
+
+```yaml
+global:
+  imagePullSecrets:
+    - name: ghcr-secret
+
+  registryCredentials:
+    enabled: true
+    secretName: ghcr-secret
+    server: ghcr.io
+    username: your-github-username
+    password: ""  # NEVER commit - pass via --registry-password or --set
+```
+
+Then pass the password at deploy time:
+
+```bash
+# Via the deploy script
+./scripts/helm-deploy.sh my-namespace ./helm/fastdb/values-my-env.yaml \
+  --registry-password <your-github-pat>
+
+# Or via helm directly
+helm upgrade --install fastdb ./helm/fastdb \
+  -f ./helm/fastdb/values-my-env.yaml -n my-namespace --create-namespace \
+  --set global.registryCredentials.password=<your-github-pat>
+```
+
+### Build the Install Directory
+
+The `install/` directory is a build artifact produced by Automake. It contains the Python code, config files, and static assets that get mounted into pods at `/fastdb`. This directory is **not** in git — it must be built before deploying.
+
+```bash
+# Build install/ using docker-compose (runs ./configure && make install inside a container)
+docker-compose run --rm makeinstall
+```
+
+This creates/updates the `install/` directory at the repo root. The `db/` directory (SQL migrations) is already in git and doesn't need building.
+
+### Deploy Script
+
+The `scripts/helm-deploy.sh` script automates the full deploy cycle: build code, helm install, copy code to the PVC, and restart pods.
+
+```bash
+./scripts/helm-deploy.sh [NAMESPACE] [VALUES_FILE] [OPTIONS]
+```
+
+**Arguments:**
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `NAMESPACE` | `ccosta-dev` | Kubernetes namespace |
+| `VALUES_FILE` | `./helm/fastdb/values-ccosta-dev.yaml` | Helm values file |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--registry-password PAT` | Registry password/token (passed to Helm as `registryCredentials.password`) |
+| `--skip-build` | Skip the `docker-compose makeinstall` step |
+| `--skip-helm` | Skip `helm upgrade --install` (just copy code + restart) |
+| `--release NAME` | Helm release name (default: `fastdb`) |
+| `-h, --help` | Show help |
+
+**Examples:**
+
+```bash
+# Full deploy from scratch (build + install + copy + restart)
+./scripts/helm-deploy.sh ccosta-dev ./helm/fastdb/values-ccosta-dev.yaml \
+  --registry-password ghp_xxxxx
+
+# Skip build (install/ already up to date)
+./scripts/helm-deploy.sh ccosta-dev ./helm/fastdb/values-ccosta-dev.yaml \
+  --skip-build --registry-password ghp_xxxxx
+
+# Code-only update (no build, no helm, just copy code and restart pods)
+./scripts/helm-deploy.sh ccosta-dev ./helm/fastdb/values-ccosta-dev.yaml \
+  --skip-build --skip-helm
+
+# Config-only update (no build, re-run helm upgrade, copy code, restart)
+./scripts/helm-deploy.sh ccosta-dev ./helm/fastdb/values-ccosta-dev.yaml \
+  --skip-build --registry-password ghp_xxxxx
+```
+
+**What the script does:**
+
+1. Builds `install/` via `docker-compose run makeinstall`
+2. Runs `helm upgrade --install` with `--create-namespace` (works for fresh installs and upgrades; creates the namespace if it doesn't exist)
+3. Waits for the shell pod to be ready
+4. Copies `install/` contents to `/fastdb/` on the code PVC via tar pipe through the shell pod
+5. Copies `db/` contents to `/fastdb/db/` on the code PVC
+6. Restarts webap and queryrunner deployments so they pick up the new code
+7. Prints pod status
+
+The Helm release is stored in the target namespace (not `default`). The createdb Job retries automatically (`restartPolicy: OnFailure`) until postgres and code are both ready.
+
+> **Note:** `--registry-password` is only needed when running the helm step. If you use `--skip-helm`, the secret already exists in the cluster and no password is required.
+
 ### Deploy to SLAC S3DF
 
 ```bash
 # Ensure kubectl context points to SLAC cluster
 kubectl config use-context your-slac-context
 
-# Deploy with namespace override
-helm install fastdb ./helm/fastdb \
-  -f ./helm/fastdb/values-slac.yaml \
-  --set global.namespace=your-namespace \
-  --set global.namespaceLabels.owner=your-username
+# Deploy (creates namespace, registry secret, and all resources)
+./scripts/helm-deploy.sh your-namespace ./helm/fastdb/values-slac.yaml \
+  --registry-password <your-github-pat>
 ```
+
+That's it. The script handles namespace creation, registry credentials, code copying, and pod restarts.
 
 ## Common Operations
 
@@ -131,14 +236,10 @@ helm upgrade <release-name> ./helm/fastdb -f ./helm/fastdb/values-<env>.yaml --d
 ### Uninstall a Release
 
 ```bash
-helm uninstall <release-name>
+helm uninstall <release-name> -n <namespace>
 ```
 
-Note: This removes deployments but PVCs may persist. Delete manually if needed:
-
-```bash
-kubectl delete pvc -n <namespace> --all
-```
+> **Warning:** This deletes the namespace and everything in it (including the registry secret). A fresh `helm-deploy.sh` with `--registry-password` will recreate everything.
 
 ### List Releases
 
@@ -168,6 +269,14 @@ global:
   imagePullPolicy: Never           # Never, Always, IfNotPresent
   imagePullSecrets: []             # Registry credentials
   # - name: ghcr-secret
+
+  # Helm-managed registry credentials (creates imagePullSecret automatically)
+  registryCredentials:
+    enabled: false                 # Set true to create the secret via Helm
+    secretName: ghcr-secret        # Must match imagePullSecrets[].name
+    server: ""                     # e.g., ghcr.io
+    username: ""                   # Registry username
+    password: ""                   # NEVER commit - pass via --registry-password
 
   namespaceLabels: {}              # Additional namespace labels
   # owner: username

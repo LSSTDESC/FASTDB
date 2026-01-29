@@ -12,6 +12,15 @@ global:
   imagePullSecrets:
     - name: ghcr-secret
 
+  # Registry credentials - pass password via --set:
+  #   --set global.registryCredentials.password=ghp_xxxxx
+  registryCredentials:
+    enabled: true
+    secretName: ghcr-secret
+    server: ghcr.io
+    username: fifteen3
+    password: ""  # NEVER commit - pass via --set flag
+
 # Use PVC for database storage
 volumes:
   type: pvc  # PVCs for database storage
