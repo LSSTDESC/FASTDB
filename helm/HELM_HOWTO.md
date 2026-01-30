@@ -125,6 +125,40 @@ docker-compose run --rm makeinstall
 
 This creates/updates the `install/` directory at the repo root. The `db/` directory (SQL migrations) is already in git and doesn't need building.
 
+#### Subdirectory Deployments (external URL)
+
+When FASTDB is served from a subdirectory (e.g., `https://host/fastdb-ccosta-dev/` instead of `https://host/`), the frontend JavaScript and HTML templates must be built with the correct base path. The Automake build system uses `@external_url@` placeholders in `.js.in` and `.html.in` files that get substituted during `./configure`:
+
+```
+# Template (fastdb.js.in):
+import { rkWebUtil } from "@external_url@static/rkwebutil.js";
+
+# Built with --with-external-url=/fastdb-ccosta-dev/ → (fastdb.js):
+import { rkWebUtil } from "/fastdb-ccosta-dev/static/rkwebutil.js";
+
+# Built without (default) → (fastdb.js):
+import { rkWebUtil } from "static/rkwebutil.js";
+```
+
+The deploy script handles this via `--external-url`:
+
+```bash
+# Build with subdirectory path baked into frontend
+./scripts/helm-deploy.sh ccosta-dev ./helm/fastdb/values-ccosta-dev.yaml \
+  --external-url /fastdb-ccosta-dev/ --registry-password ghp_xxxxx
+```
+
+The `--external-url` value must:
+- Match the `webap.basePath` in your values file (plus a trailing `/`)
+- End with a trailing slash
+- Be an absolute path starting with `/`
+
+Two settings work together:
+- `--external-url /path/` → bakes the path into static JS/HTML at build time
+- `webap.basePath: /path` → sets `SCRIPT_NAME` env var for Flask routing at runtime
+
+If your deployment is at the root URL (`/`), you don't need `--external-url` or `basePath`.
+
 ### Deploy Script
 
 The `scripts/helm-deploy.sh` script automates the full deploy cycle: build code, helm install, copy code to the PVC, and restart pods.
@@ -145,6 +179,7 @@ The `scripts/helm-deploy.sh` script automates the full deploy cycle: build code,
 | Option | Description |
 |--------|-------------|
 | `--registry-password PAT` | Registry password/token (passed to Helm as `registryCredentials.password`) |
+| `--external-url PATH` | Base path for subdirectory deployments (e.g., `/fastdb-ccosta-dev/`). Must match `webap.basePath` with a trailing `/`. See [Subdirectory Deployments](#subdirectory-deployments-external-url). |
 | `--skip-build` | Skip the `docker-compose makeinstall` step |
 | `--skip-helm` | Skip `helm upgrade --install` (just copy code + restart) |
 | `--release NAME` | Helm release name (default: `fastdb`) |
@@ -155,7 +190,7 @@ The `scripts/helm-deploy.sh` script automates the full deploy cycle: build code,
 ```bash
 # Full deploy from scratch (build + install + copy + restart)
 ./scripts/helm-deploy.sh ccosta-dev ./helm/fastdb/values-ccosta-dev.yaml \
-  --registry-password ghp_xxxxx
+  --external-url /fastdb-ccosta-dev/ --registry-password ghp_xxxxx
 
 # Skip build (install/ already up to date)
 ./scripts/helm-deploy.sh ccosta-dev ./helm/fastdb/values-ccosta-dev.yaml \
@@ -168,6 +203,10 @@ The `scripts/helm-deploy.sh` script automates the full deploy cycle: build code,
 # Config-only update (no build, re-run helm upgrade, copy code, restart)
 ./scripts/helm-deploy.sh ccosta-dev ./helm/fastdb/values-ccosta-dev.yaml \
   --skip-build --registry-password ghp_xxxxx
+
+# Root-path deploy (no subdirectory, no --external-url needed)
+./scripts/helm-deploy.sh my-namespace ./helm/fastdb/values-my-env.yaml \
+  --registry-password ghp_xxxxx
 ```
 
 **What the script does:**
@@ -190,12 +229,12 @@ The Helm release is stored in the target namespace (not `default`). The createdb
 # Ensure kubectl context points to SLAC cluster
 kubectl config use-context your-slac-context
 
-# Deploy (creates namespace, registry secret, and all resources)
+# Deploy with subdirectory path (if using basePath in values)
 ./scripts/helm-deploy.sh your-namespace ./helm/fastdb/values-slac.yaml \
-  --registry-password <your-github-pat>
+  --external-url /your-base-path/ --registry-password <your-github-pat>
 ```
 
-That's it. The script handles namespace creation, registry credentials, code copying, and pod restarts.
+The script handles namespace creation, registry credentials, frontend path configuration, code copying, and pod restarts.
 
 ## Common Operations
 

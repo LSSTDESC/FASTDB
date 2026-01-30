@@ -17,6 +17,9 @@
 #   --skip-helm              Skip helm upgrade --install (just copy code + restart)
 #   --release NAME           Helm release name (default: fastdb)
 #   --registry-password PAT  Registry password/token (passed to Helm as registryCredentials.password)
+#   --external-url PATH      Base path for subdirectory deployments (e.g., /fastdb-ccosta-dev/)
+#                            Must match webap.basePath in your values file, with a trailing slash.
+#                            Bakes the path into frontend JS/HTML during the build step.
 #   -h, --help               Show this help message
 #
 
@@ -29,6 +32,7 @@ RELEASE="fastdb"
 SKIP_BUILD=false
 SKIP_HELM=false
 REGISTRY_PASSWORD=""
+EXTERNAL_URL=""
 
 # ── Parse optional flags (after positional args) ─────────────────────
 shift 2 2>/dev/null || true
@@ -38,6 +42,7 @@ while [[ $# -gt 0 ]]; do
     --skip-helm)           SKIP_HELM=true;        shift ;;
     --release)             RELEASE="$2";          shift 2 ;;
     --registry-password)   REGISTRY_PASSWORD="$2"; shift 2 ;;
+    --external-url)        EXTERNAL_URL="$2";      shift 2 ;;
     -h|--help)
       sed -n '2,/^$/s/^# \?//p' "$0"
       exit 0
@@ -63,15 +68,33 @@ if [[ ! -f "$VALUES" ]]; then
 fi
 
 echo "=== FASTDB Helm Deploy ==="
-echo "  Namespace : $NS"
-echo "  Values    : $VALUES"
-echo "  Release   : $RELEASE"
+echo "  Namespace    : $NS"
+echo "  Values       : $VALUES"
+echo "  Release      : $RELEASE"
+if [[ -n "$EXTERNAL_URL" ]]; then
+  echo "  External URL : $EXTERNAL_URL"
+fi
 echo ""
 
 # ── Step 1: Build install/ ───────────────────────────────────────────
 if [[ "$SKIP_BUILD" == "false" ]]; then
-  echo "--- Building install/ via docker-compose makeinstall ---"
-  docker-compose run --rm makeinstall
+  if [[ -n "$EXTERNAL_URL" ]]; then
+    echo "--- Building install/ with --with-external-url=$EXTERNAL_URL ---"
+    docker-compose run --rm --entrypoint "" makeinstall /bin/bash -c "
+      touch aclocal.m4 configure \
+      && find . -name Makefile.am -exec touch {} \; \
+      && find . -name Makefile.in -exec touch {} \; \
+      && ./configure \
+           --with-installdir=/fastdb \
+           --with-smtp-server=mailhog \
+           --with-smtp-port=1025 \
+           --with-external-url=$EXTERNAL_URL \
+      && make install
+    "
+  else
+    echo "--- Building install/ via docker-compose makeinstall ---"
+    docker-compose run --rm makeinstall
+  fi
   echo ""
 fi
 
