@@ -240,22 +240,32 @@ The script handles namespace creation, registry credentials, frontend path confi
 
 ### Install a New Release
 
+The recommended way to deploy is via the [deploy script](#deploy-script), which handles the build, helm install, code copy, and pod restart in one command. If you need to run helm directly:
+
 ```bash
-helm install <release-name> ./helm/fastdb -f ./helm/fastdb/values-<env>.yaml
+helm upgrade --install <release-name> ./helm/fastdb \
+  -f ./helm/fastdb/values-<env>.yaml -n <namespace> --create-namespace
 ```
+
+> **Important:** Always pass `-n <namespace>` so the Helm release is stored in the correct namespace (not `default`). Use `--create-namespace` if the namespace may not exist yet.
+
+After a bare `helm install`, the code PVC will be empty — you still need to copy `install/` and `db/` to the PVC via the shell pod. See the [deploy script](#deploy-script) for how this works.
 
 ### Upgrade an Existing Release
 
 After modifying values or templates:
 
 ```bash
-helm upgrade <release-name> ./helm/fastdb -f ./helm/fastdb/values-<env>.yaml
+helm upgrade <release-name> ./helm/fastdb \
+  -f ./helm/fastdb/values-<env>.yaml -n <namespace>
 ```
+
+Or use the deploy script with `--skip-build` if only values/templates changed.
 
 ### View Current Values
 
 ```bash
-helm get values <release-name>
+helm get values <release-name> -n <namespace>
 ```
 
 ### Preview Changes (Dry Run)
@@ -269,7 +279,8 @@ helm template <release-name> ./helm/fastdb -f ./helm/fastdb/values-<env>.yaml
 Or with diff against current deployment:
 
 ```bash
-helm upgrade <release-name> ./helm/fastdb -f ./helm/fastdb/values-<env>.yaml --dry-run
+helm upgrade <release-name> ./helm/fastdb \
+  -f ./helm/fastdb/values-<env>.yaml -n <namespace> --dry-run
 ```
 
 ### Uninstall a Release
@@ -278,20 +289,20 @@ helm upgrade <release-name> ./helm/fastdb -f ./helm/fastdb/values-<env>.yaml --d
 helm uninstall <release-name> -n <namespace>
 ```
 
-> **Warning:** This deletes the namespace and everything in it (including the registry secret). A fresh `helm-deploy.sh` with `--registry-password` will recreate everything.
+> **Warning:** This deletes the namespace and everything in it (including the registry secret and PVCs). A fresh `helm-deploy.sh` with `--registry-password` will recreate everything, but data in PVCs will be lost.
 
 ### List Releases
 
 ```bash
-helm list
 helm list -n <namespace>
+helm list -A  # All namespaces
 ```
 
 ### Rollback to Previous Version
 
 ```bash
-helm rollback <release-name> <revision-number>
-helm history <release-name>  # View revision history
+helm rollback <release-name> <revision-number> -n <namespace>
+helm history <release-name> -n <namespace>  # View revision history
 ```
 
 ## Configuration Reference
@@ -432,7 +443,15 @@ shell:
 ### 3. Deploy
 
 ```bash
-helm install fastdb ./helm/fastdb -f ./helm/fastdb/values-myenv.yaml
+./scripts/helm-deploy.sh myenv ./helm/fastdb/values-myenv.yaml \
+  --registry-password <your-pat>
+```
+
+Or if using raw helm (you'll need to copy code to the PVC separately):
+
+```bash
+helm upgrade --install fastdb ./helm/fastdb \
+  -f ./helm/fastdb/values-myenv.yaml -n myenv --create-namespace
 ```
 
 ## Environment Examples
@@ -599,6 +618,7 @@ kubectl exec -it deploy/shell -n <namespace> -- \
 | `Chart.yaml` | Chart metadata |
 | `values.yaml` | Default values (don't modify for deployment) |
 | `values-local.yaml` | Local Kind deployment |
+| `values-ccosta-dev.yaml` | SLAC ccosta-dev deployment |
 | `values-slac.yaml` | SLAC S3DF deployment |
 | `templates/_helpers.tpl` | Reusable template functions |
 | `templates/namespace.yaml` | Namespace resource |
