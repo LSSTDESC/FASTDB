@@ -161,7 +161,7 @@ If your deployment is at the root URL (`/`), you don't need `--external-url` or 
 
 ### Deploy Script
 
-The `scripts/helm-deploy.sh` script automates the full deploy cycle: build code, helm install, copy code to the PVC, and restart pods.
+`scripts/helm-deploy.sh` is a convenience script that wraps the manual steps (build, helm install, code copy, pod restart) into a single command. It is not required — everything it does can be run by hand (see [Common Operations](#common-operations)) — but it saves repetitive typing during development when you're deploying over and over.
 
 ```bash
 ./scripts/helm-deploy.sh [NAMESPACE] [VALUES_FILE] [OPTIONS]
@@ -240,7 +240,7 @@ The script handles namespace creation, registry credentials, frontend path confi
 
 ### Install a New Release
 
-The recommended way to deploy is via the [deploy script](#deploy-script), which handles the build, helm install, code copy, and pod restart in one command. If you need to run helm directly:
+You can use the [deploy script](#deploy-script) to run all the steps in one command, or run helm directly:
 
 ```bash
 helm upgrade --install <release-name> ./helm/fastdb \
@@ -249,7 +249,7 @@ helm upgrade --install <release-name> ./helm/fastdb \
 
 > **Important:** Always pass `-n <namespace>` so the Helm release is stored in the correct namespace (not `default`). Use `--create-namespace` if the namespace may not exist yet.
 
-After a bare `helm install`, the code PVC will be empty — you still need to copy `install/` and `db/` to the PVC via the shell pod. See the [deploy script](#deploy-script) for how this works.
+After `helm install`, the code PVC will be empty. You still need to copy `install/` and `db/` to the PVC via the shell pod (the deploy script does this automatically, or see [What the script does](#deploy-script) for the manual commands).
 
 ### Upgrade an Existing Release
 
@@ -260,7 +260,7 @@ helm upgrade <release-name> ./helm/fastdb \
   -f ./helm/fastdb/values-<env>.yaml -n <namespace>
 ```
 
-Or use the deploy script with `--skip-build` if only values/templates changed.
+Or with the deploy script: `--skip-build` to skip the build step when only values/templates changed.
 
 ### View Current Values
 
