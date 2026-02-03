@@ -105,7 +105,7 @@ metadata:
     {{- include "fastdb.labels" . | nindent 4 }}
 spec:
   accessModes:
-    - ReadWriteMany
+    - {{ .Values.webap.volumes.sessions.accessMode }}
   resources:
     requests:
       storage: {{ .Values.webap.volumes.sessions.size }}
@@ -120,7 +120,7 @@ metadata:
     {{- include "fastdb.labels" . | nindent 4 }}
 spec:
   accessModes:
-    - ReadWriteMany
+    - {{ .Values.webap.volumes.queryResults.accessMode }}
   resources:
     requests:
       storage: {{ .Values.webap.volumes.queryResults.size }}
@@ -135,7 +135,7 @@ metadata:
     {{- include "fastdb.labels" . | nindent 4 }}
 spec:
   accessModes:
-    - ReadWriteMany
+    - {{ .Values.webap.volumes.logs.accessMode }}
   resources:
     requests:
       storage: {{ .Values.webap.volumes.logs.size }}

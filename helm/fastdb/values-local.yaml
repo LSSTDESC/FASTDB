@@ -5,9 +5,10 @@ global:
   namespace: fastdb-local
   environment: local
 
-  # Local images built and loaded into Kind
-  imageRegistry: "localhost"
-  imageTag: "local"
+  # Images built by docker-compose and loaded into Kind via kind load.
+  # imagePullPolicy: Never means K8s uses the local store only — no registry contact.
+  imageRegistry: "ghcr.io/lsstdesc"
+  imageTag: "test20251201"
   imagePullPolicy: Never
   imagePullSecrets: []
 
@@ -66,6 +67,14 @@ webap:
     enabled: true
     type: NodePort
     nodePort: 30080
+  # Kind's local-path provisioner only supports ReadWriteOnce
+  volumes:
+    sessions:
+      accessMode: ReadWriteOnce
+    queryResults:
+      accessMode: ReadWriteOnce
+    logs:
+      accessMode: ReadWriteOnce
 
 # Shell pod for debugging
 shell:

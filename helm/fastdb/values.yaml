@@ -172,10 +172,13 @@ webap:
   volumes:
     sessions:
       size: 1Gi
+      accessMode: ReadWriteMany
     queryResults:
       size: 1Gi
+      accessMode: ReadWriteMany
     logs:
       size: 1Gi
+      accessMode: ReadWriteMany
 
 # Shell pod for debugging
 shell:
