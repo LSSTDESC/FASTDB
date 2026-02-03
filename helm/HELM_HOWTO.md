@@ -56,28 +56,34 @@ helm/fastdb/
 
 ### Deploy to Local Kind Cluster
 
+The deploy script can create a Kind cluster for you via `--create-cluster`. The Kind config template (`admin/local/kind-config.yaml`) uses `${PWD}` in `hostPath` entries, which the script replaces with the current directory at runtime. The cluster is named after the namespace, and `--context` is set to `kind-<namespace>` automatically.
+
 ```bash
-# 1. Create Kind cluster with port mappings
-kind create cluster --name fastdb-local --config admin/local/kind-config.yaml
-
-# 2. Build and load images
+# 1. Build images and load into Kind
 docker-compose build postgres mongodb shell webap queryrunner
-docker tag ghcr.io/lsstdesc/fastdb-postgres:test20251201 fastdb-postgres:local
-docker tag ghcr.io/lsstdesc/fastdb-mongodb:test20251201 fastdb-mongodb:local
-docker tag ghcr.io/lsstdesc/fastdb-shell:test20251201 fastdb-shell:local
-docker tag ghcr.io/lsstdesc/fastdb-webap:test20251201 fastdb-webap:local
-docker tag ghcr.io/lsstdesc/fastdb-query-runner:test20251201 fastdb-query-runner:local
-
-kind load docker-image fastdb-postgres:local fastdb-mongodb:local \
-  fastdb-shell:local fastdb-webap:local fastdb-query-runner:local \
+kind load docker-image \
+  ghcr.io/lsstdesc/fastdb-postgres:test20251201 \
+  ghcr.io/lsstdesc/fastdb-mongodb:test20251201 \
+  ghcr.io/lsstdesc/fastdb-shell:test20251201 \
+  ghcr.io/lsstdesc/fastdb-webap:test20251201 \
+  ghcr.io/lsstdesc/fastdb-query-runner:test20251201 \
   --name fastdb-local
 
-# 3. Deploy with Helm
-helm install fastdb ./helm/fastdb -f ./helm/fastdb/values-local.yaml
+# 2. Create cluster + deploy (first time)
+./scripts/helm-deploy.sh fastdb-local ./helm/fastdb/values-local.yaml \
+  --create-cluster admin/local/kind-config.yaml
 
-# 4. Verify
-kubectl get pods -n fastdb-local
+# 3. Verify
+kubectl --context kind-fastdb-local get pods -n fastdb-local
 curl http://localhost:8080
+```
+
+On subsequent deploys, `--create-cluster` will skip creation if the cluster already exists. Or omit it and use `--context kind-fastdb-local` directly.
+
+To tear down the cluster:
+
+```bash
+kind delete cluster --name fastdb-local
 ```
 
 ### Registry Credentials
@@ -171,13 +177,15 @@ If your deployment is at the root URL (`/`), you don't need `--external-url` or 
 
 | Argument | Default | Description |
 |----------|---------|-------------|
-| `NAMESPACE` | `ccosta-dev` | Kubernetes namespace |
-| `VALUES_FILE` | `./helm/fastdb/values-ccosta-dev.yaml` | Helm values file |
+| `NAMESPACE` | `local` | Kubernetes namespace |
+| `VALUES_FILE` | `./helm/fastdb/values-local.yaml` | Helm values file |
 
 **Options:**
 
 | Option | Description |
 |--------|-------------|
+| `--create-cluster FILE` | Create a Kind cluster before deploying. `${PWD}` in the config is replaced with the current directory. Cluster name is set to `NAMESPACE`, context to `kind-NAMESPACE`. Skips creation if the cluster already exists. |
+| `--context NAME` | Kubernetes context to use (default: current kubeconfig context). Set automatically by `--create-cluster`. |
 | `--registry-password PAT` | Registry password/token (passed to Helm as `registryCredentials.password`) |
 | `--external-url PATH` | Base path for subdirectory deployments (e.g., `/fastdb-ccosta-dev/`). Must match `webap.basePath` with a trailing `/`. See [Subdirectory Deployments](#subdirectory-deployments-external-url). |
 | `--skip-build` | Skip the `docker-compose makeinstall` step |
