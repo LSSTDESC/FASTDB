@@ -25,6 +25,9 @@
 #   --external-url PATH      Base path for subdirectory deployments (e.g., /fastdb-ccosta-dev/)
 #                            Must match webap.basePath in your values file, with a trailing slash.
 #                            Bakes the path into frontend JS/HTML during the build step.
+#   --load-images            Build container images and load them into the Kind cluster.
+#                            Implied by --create-cluster. Uses DOCKER_ARCHIVE and DOCKER_VERSION
+#                            env vars (defaults: ghcr.io/lsstdesc, test20251201).
 #   -h, --help               Show this help message
 #
 
@@ -40,6 +43,7 @@ REGISTRY_PASSWORD=""
 EXTERNAL_URL="/"
 KUBE_CONTEXT=""
 CREATE_CLUSTER=""
+LOAD_IMAGES=false
 
 # ── Parse optional flags (after positional args) ─────────────────────
 shift 2 2>/dev/null || true
@@ -52,6 +56,7 @@ while [[ $# -gt 0 ]]; do
     --external-url)        EXTERNAL_URL="$2";      shift 2 ;;
     --context)             KUBE_CONTEXT="$2";      shift 2 ;;
     --create-cluster)      CREATE_CLUSTER="$2";    shift 2 ;;
+    --load-images)         LOAD_IMAGES=true;       shift ;;
     -h|--help)
       sed -n '2,/^$/s/^# \?//p' "$0"
       exit 0
@@ -80,16 +85,27 @@ if [[ -n "$CREATE_CLUSTER" ]]; then
     sed "s|\${PWD}|$PWD|g" "$CREATE_CLUSTER" | kind create cluster --name "$NS" --config -
   fi
   KUBE_CONTEXT="kind-$NS"
+  LOAD_IMAGES=true
   echo ""
 fi
 
 # ── Preflight checks ────────────────────────────────────────────────
-for cmd in kubectl helm docker; do
+for cmd in kubectl helm; do
   if ! command -v "$cmd" &>/dev/null; then
     echo "Error: $cmd is required but not found in PATH" >&2
     exit 1
   fi
 done
+
+# Detect container runtime: prefer podman, fall back to docker
+if command -v podman &>/dev/null; then
+  CONTAINER_RT=podman
+elif command -v docker &>/dev/null; then
+  CONTAINER_RT=docker
+else
+  echo "Error: podman or docker is required but neither was found in PATH" >&2
+  exit 1
+fi
 
 if [[ ! -f "$VALUES" ]]; then
   echo "Error: values file not found: $VALUES" >&2
@@ -108,6 +124,7 @@ echo "=== FASTDB Helm Deploy ==="
 echo "  Namespace    : $NS"
 echo "  Values       : $VALUES"
 echo "  Release      : $RELEASE"
+echo "  Runtime      : $CONTAINER_RT"
 echo "  Context      : ${KUBE_CONTEXT:-$(kubectl config current-context 2>/dev/null || echo '(unknown)')}"
 if [[ -n "$EXTERNAL_URL" ]]; then
   echo "  External URL : $EXTERNAL_URL"
@@ -118,7 +135,7 @@ echo ""
 if [[ "$SKIP_BUILD" == "false" ]]; then
   if [[ -n "$EXTERNAL_URL" ]]; then
     echo "--- Building install/ with --with-external-url=$EXTERNAL_URL ---"
-    docker-compose run --rm --entrypoint "" makeinstall /bin/bash -c "
+    $CONTAINER_RT compose run --rm --entrypoint "" makeinstall /bin/bash -c "
       touch aclocal.m4 configure \
       && find . -name Makefile.am -exec touch {} \; \
       && find . -name Makefile.in -exec touch {} \; \
@@ -131,7 +148,7 @@ if [[ "$SKIP_BUILD" == "false" ]]; then
     "
   else
     echo "--- Building install/ via docker-compose makeinstall ---"
-    docker-compose run --rm makeinstall
+    $CONTAINER_RT compose run --rm makeinstall
   fi
   echo ""
 fi
@@ -143,6 +160,30 @@ if [[ ! -d install ]] || [[ -z "$(ls -A install 2>/dev/null)" ]]; then
   exit 1
 fi
 
+# ── Step 1b: Build and load images into Kind ──────────────────────────
+if [[ "$LOAD_IMAGES" == "true" ]]; then
+  DOCKER_ARCHIVE="${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}"
+  DOCKER_VERSION="${DOCKER_VERSION:-test20251201}"
+
+  echo "--- Building container images ---"
+  $CONTAINER_RT compose build postgres mongodb shell webap queryrunner
+  echo ""
+
+  echo "--- Loading images into Kind cluster '$NS' ---"
+  # Save and load each image individually. podman save does not correctly
+  # preserve multiple images in a single archive (all tags collapse to one
+  # image), so we must handle them one at a time.
+  for img in postgres mongodb shell webap query-runner; do
+    local_tag="${DOCKER_ARCHIVE}/fastdb-${img}:${DOCKER_VERSION}"
+    echo "  Loading $local_tag"
+    IMAGE_TAR=$(mktemp /tmp/fastdb-kind-${img}.XXXXXX.tar)
+    $CONTAINER_RT save -o "$IMAGE_TAR" "$local_tag"
+    kind load image-archive "$IMAGE_TAR" --name "$NS"
+    rm -f "$IMAGE_TAR"
+  done
+  echo ""
+fi
+
 # ── Step 2: Helm upgrade --install ───────────────────────────────────
 if [[ "$SKIP_HELM" == "false" ]]; then
   echo "--- Running helm upgrade --install ---"
@@ -150,8 +191,9 @@ if [[ "$SKIP_HELM" == "false" ]]; then
   if [[ -n "$REGISTRY_PASSWORD" ]]; then
     HELM_SET_ARGS+=(--set "global.registryCredentials.password=$REGISTRY_PASSWORD")
   fi
-  helm upgrade --install "$RELEASE" ./helm/fastdb -f "$VALUES" -n "$NS" \
-    --create-namespace "${HELM_CTX[@]+"${HELM_CTX[@]}"}" \
+  helm upgrade --install "$RELEASE" ./helm/fastdb -f "$VALUES"\
+    --create-namespace -n "$NS" \
+    "${HELM_CTX[@]+"${HELM_CTX[@]}"}" \
     "${HELM_SET_ARGS[@]+"${HELM_SET_ARGS[@]}"}"
   echo ""
 fi
