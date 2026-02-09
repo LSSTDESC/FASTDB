@@ -1,7 +1,7 @@
 import uuid
 import pytest
 
-from db import HostGalaxy
+from db import HostGalaxy, DiaObjectHostMatch
 
 from basetest import BaseTestDB
 
@@ -15,92 +15,73 @@ class TestHostGalaxy( BaseTestDB ):
         self.columns = {
             'id',
             'base_procver_id',
-            'objectid',
+            'host_id',
+            'host_catalog',
             'ra',
             'dec',
-            'petroflux_r',
-            'petroflux_r_err',
-            'stdcolor_u_g',
-            'stdcolor_g_r',
-            'stdcolor_r_i',
-            'stdcolor_i_z',
-            'stdcolor_z_y',
-            'stdcolor_u_g_err',
-            'stdcolor_g_r_err',
-            'stdcolor_r_i_err',
-            'stdcolor_i_z_err',
-            'stdcolor_z_y_err',
-            'pzmode',
-            'pzmean',
-            'pzstd',
-            'pzskew',
-            'pzkurt',
-            'pzquant000',
-            'pzquant010',
-            'pzquant020',
-            'pzquant030',
-            'pzquant040',
-            'pzquant050',
-            'pzquant060',
-            'pzquant070',
-            'pzquant080',
-            'pzquant090',
-            'pzquant100',
-            'flags',
+            'info'
         }
         self.safe_to_modify = [
-            'objectid',
             'ra',
             'dec',
-            'petroflux_r',
-            'petroflux_r_err',
-            'stdcolor_u_g',
-            'stdcolor_g_r',
-            'stdcolor_r_i',
-            'stdcolor_i_z',
-            'stdcolor_z_y',
-            'stdcolor_u_g_err',
-            'stdcolor_g_r_err',
-            'stdcolor_r_i_err',
-            'stdcolor_i_z_err',
-            'stdcolor_z_y_err',
-            'pzmode',
-            'pzmean',
-            'pzstd',
-            'pzskew',
-            'pzkurt',
-            'pzquant000',
-            'pzquant010',
-            'pzquant020',
-            'pzquant030',
-            'pzquant040',
-            'pzquant050',
-            'pzquant060',
-            'pzquant070',
-            'pzquant080',
-            'pzquant090',
-            'pzquant100',
-            'flags',
+            'info'
         ]
         self.uniques = []
 
         self.obj1 = HostGalaxy( id=uuid.uuid4(),
                                 base_procver_id=bpv['bpv1'].id,
-                                objectid=42,
-                                ra=13.,
-                                dec=-66.
+                                host_id='fred',
+                                host_catalog='some survey',
+                                ra=128.,
+                                dec=-42.,
+                                info={}
                                )
         self.dict1 = { k: getattr( self.obj1, k ) for k in self.columns }
         self.obj2 = HostGalaxy( id=uuid.uuid4(),
                                 base_procver_id=bpv['bpv1'].id,
-                                objectid=23,
+                                host_id='george',
+                                host_catalog='some survey',
                                 ra=137.,
-                                dec=42.,
+                                dec=13.,
+                                info={}
                                )
         self.dict2 = { k: getattr( self.obj2, k ) for k in self.columns }
         self.dict3 = { 'id': uuid.uuid4(),
                        'base_procver_id': bpv['bpv1'].id,
-                       'objectid': 31337,
-                       'ra': 32.,
-                       'dec': 64.
+                       'host_id': 'ginny',
+                       'host_catalog': 'a much better survey',
+                       'ra': 0.,
+                       'dec': -0.001,
+                       'info': { 'cat': 'meow' }
                        }
+
+
+class TestDiaObjectHostMatch( BaseTestDB ):
+
+    @pytest.fixture
+    def basetest_setup( self, procver_collection, obj1, obj2, host1, host2 ):
+        bpv, _pv = procver_collection
+        self.cls = DiaObjectHostMatch
+        self.columns = {
+            'diaobjectid',
+            'host_galaxy_id',
+            'base_procver_id',
+            'prio'
+        }
+        self.safe_to_modify = [ 'prio' ]
+        self.uniques = []
+
+        self.obj1 = DiaObjectHostMatch( diaobjectid=obj1.diaobjectid,
+                                        host_galaxy_id=host1.id,
+                                        base_procver_id=bpv['bpv3'].id,
+                                        prio=1 )
+        self.dict1 = { k: getattr( self.obj1, k ) for k in self.columns }
+        self.obj2 = DiaObjectHostMatch( diaobjectid=obj1.diaobjectid,
+                                        host_galaxy_id=host2.id,
+                                        base_procver_id=bpv['bpv3'].id,
+                                        prio=2 )
+        self.dict2 = { k: getattr( self.obj2, k ) for k in self.columns }
+        self.dict3 = { 'diaobjectid': obj2.diaobjectid,
+                       'host_galaxy_id': host1.id,
+                       'base_procver_id': bpv['bpv3'].id,
+                       'prio': 3 }

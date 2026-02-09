@@ -14,6 +14,7 @@ from db import ( BaseProcessingVersion,
                  DiaObject,
                  DiaSource,
                  DiaForcedSource,
+                 HostGalaxy,
                  DB,
                  DBCon,
                  AuthUser )
@@ -71,19 +72,21 @@ def procver_collection():
             # Gotta hardcode the uuids so that they will match when we do a pg_restore
             #  in the fixtures/alertycle.py::alerts_90days_sent_received_and_imported fixture
             bpvs['bpv1'] = BaseProcessingVersion( id=asUUID('7379926d-9825-4b1b-9dc8-d00cb043ea3e'),
-                                                  description='pvc_bpv1' )
+                                                  _table="table1", description='pvc_bpv1' )
             bpvs['bpv1a'] = BaseProcessingVersion( id=asUUID('0b2c33ad-aa8e-4344-9da6-925c9f826269'),
-                                                   description='pvc_bpv1a' )
+                                                   _table="table1", description='pvc_bpv1a' )
             bpvs['bpv1b'] = BaseProcessingVersion( id=asUUID('1fbe60a1-4bab-454b-9598-dbac51d36adb'),
-                                                   description='pvc_bpv1b' )
+                                                   _table="table1", description='pvc_bpv1b' )
             bpvs['bpv2'] = BaseProcessingVersion( id=asUUID('eaad2a77-cab3-40d7-8f4b-c3f1b76af91c'),
-                                                  description='pvc_bpv2' )
+                                                  _table="table1", description='pvc_bpv2' )
             bpvs['bpv2a'] = BaseProcessingVersion( id=asUUID('dc87f7a2-c313-496a-89ae-d85329e23b1a'),
-                                                   description='pvc_bpv2a' )
+                                                   _table="table1", description='pvc_bpv2a' )
             bpvs['bpv3'] = BaseProcessingVersion( id=asUUID('e074266d-4a1c-4045-b04b-deac609f5eb6'),
-                                                  description='pvc_bpv3' )
+                                                  _table="table1", description='pvc_bpv3' )
             bpvs['realtime'] = BaseProcessingVersion( id=asUUID('46bffce7-7098-4261-ae32-0c9d78cd3c42'),
-                                                      description='realtime' )
+                                                      _table="diaobject", description='realtime' )
+            bpvs['realtime_source'] = BaseProcessingVersion( id=asUUID('66b191d6-9afb-4322-9e48-2eaf175a4355'),
+                                                             _table="diasource", description='realtime' )
             for bpv in bpvs.values():
                 bpv.insert( dbcon=con, nocommit=True, refresh=False )
 
@@ -98,11 +101,13 @@ def procver_collection():
                                   [ [ 'bpv1', 'bpv1a', 'bpv1b' ],
                                     [ 'bpv2', 'bpv2a' ],
                                     [ 'bpv3' ],
-                                    [ 'realtime' ] ] ):
+                                    [ 'realtime', 'realtime_source' ] ] ):
                 for prio, bpv in enumerate( bpvae ):
-                    con.execute_nofetch( "INSERT INTO base_procver_of_procver(procver_id,base_procver_id,priority) "
-                                         "VALUES (%(pv)s,%(bpv)s,%(prio)s)",
-                                         { 'pv': pvs[pv].id, 'bpv': bpvs[bpv].id, 'prio': prio } )
+                    con.execute_nofetch( "INSERT INTO base_procver_of_procver(procver_id,base_procver_id,"
+                                         "                                    _table,priority) "
+                                         "VALUES (%(pv)s,%(bpv)s,%(tab)s,%(prio)s)",
+                                         { 'pv': pvs[pv].id, 'bpv': bpvs[bpv].id,
+                                           'tab': bpvs[bpv]._table, 'prio': prio } )
 
 
             con.execute_nofetch( "INSERT INTO processing_version_alias(description,procver_id) "
@@ -431,39 +436,61 @@ def rootobj3():
 @pytest.fixture
 def obj1( procver_collection, rootobj1 ):
     bpvs, _pvs = procver_collection
-    obj = DiaObject( diaobjectid=42,
-                     base_procver_id=bpvs['bpv1'].id,
-                     ra=42.,
-                     dec=13,
-                     rootid=rootobj1.id,
-                     validitystartmjdtai=50000.,
-                    )
+    obj = DiaObject( diaobjectid=42, base_procver_id=bpvs['bpv1'].id, rootid=rootobj1.id )
     obj.insert()
 
     yield obj
     with DB() as con:
         cursor = con.cursor()
-        subdict = { 'rootid': rootobj1.id, 'id': obj.diaobjectid, 'pv': obj.base_procver_id }
+        subdict = { 'id': obj.diaobjectid, 'pv': obj.base_procver_id }
         cursor.execute( "DELETE FROM diaobject WHERE diaobjectid=%(id)s AND base_procver_id=%(pv)s", subdict )
         con.commit()
 
 
 @pytest.fixture
-def src1( obj1, procver_collection ):
+def obj2( procver_collection, rootobj2 ):
+    bpvs, _pvs = procver_collection
+    obj = DiaObject( diaobjectid=64, base_procver_id=bpvs['bpv1'].id, rootid=rootobj2.id )
+    obj.insert()
+
+    yield obj
+    with DB() as con:
+        cursor = con.cursor()
+        subdict = { 'id': obj.diaobjectid, 'pv': obj.base_procver_id }
+        cursor.execute( "DELETE FROM diaobject WHERE diaobjectid=%(id)s AND base_procver_id=%(pv)s", subdict )
+        con.commit()
+
+
+@pytest.fixture
+def obj3( procver_collection, rootobj3 ):
+    bpvs, _pvs = procver_collection
+    obj = DiaObject( diaobjectid=137, base_procver_id=bpvs['bpv1'].id, rootid=rootobj3.id )
+    obj.insert()
+
+    yield obj
+    with DB() as con:
+        cursor = con.cursor()
+        subdict = { 'id': obj.diaobjectid, 'pv': obj.base_procver_id }
+        cursor.execute( "DELETE FROM diaobject WHERE diaobjectid=%(id)s AND base_procver_id=%(pv)s", subdict )
+        con.commit()
+
+
+
+@pytest.fixture
+def obj1_src1( obj1, procver_collection ):
     bpvs, _pvs = procver_collection
     src = DiaSource( base_procver_id=bpvs['bpv1'].id,
                      diaobjectid=obj1.diaobjectid,
                      diasourceid=1,
                      visit=64,
-                     detector=9,
                      band='r',
                      midpointmjdtai=59000.,
-                     ra=obj1.ra + 0.0001,
-                     dec=obj1.dec + 0.0001,
-                     psfflux=3.,
-                     psffluxerr=0.1,
-                     x=0.,
-                     y=0.
+                     psfflux=137.,
+                     psffluxerr=1.,
+                     ra=128. + 0.0001,
+                     dec=42. + 0.0001,
+                     raerr=0.0002,
+                     decerr=0.0002
                     )
     src.insert()
 
@@ -477,21 +504,18 @@ def src1( obj1, procver_collection ):
 
 
 @pytest.fixture
-def src1_pv2( obj1, procver_collection ):
+def obj1_src1_pv2( obj1, procver_collection ):
     bpvs, _pvs = procver_collection
     src = DiaSource( base_procver_id=bpvs['bpv2'].id,
                      diaobjectid=obj1.diaobjectid,
                      diasourceid=2,
                      visit=64,
-                     detector=9,
                      band='r',
                      midpointmjdtai=59000.,
-                     ra=obj1.ra + 0.0001,
-                     dec=obj1.dec + 0.0001,
                      psfflux=3.,
                      psffluxerr=0.1,
-                     x=0.,
-                     y=0.
+                     ra=128. - 0.0001,
+                     dec=42. + 0.0001
                     )
     src.insert()
 
@@ -501,6 +525,173 @@ def src1_pv2( obj1, procver_collection ):
         cursor.execute( "DELETE FROM diasource WHERE base_procver_id=%(pv)s "
                         "                        AND diaobjectid=%(objid)s AND visit=%(visit)s",
                         { 'pv': src.base_procver_id, 'objid': src.diaobjectid, 'visit': src.visit } )
+        con.commit()
+
+
+@pytest.fixture
+def obj1_src2( obj1, procver_collection ):
+    bpvs, _pvs = procver_collection
+    src = DiaSource( base_procver_id=bpvs['bpv1'].id,
+                     diaobjectid=obj1.diaobjectid,
+                     diasourceid=2,
+                     visit=128,
+                     band='i',
+                     midpointmjdtai=59020.,
+                     psfflux=299792.,
+                     psffluxerr=2000.,
+                     ra=128. - 0.0001,
+                     dec=42. - 0.0001,
+                     raerr=0.0002,
+                     decerr=0.0002
+                    )
+    src.insert()
+
+    yield src
+    with DB() as con:
+        cursor = con.cursor()
+        cursor.execute( "DELETE FROM diasource WHERE base_procver_id=%(pv)s "
+                        "                        AND diaobjectid=%(objid)s AND visit=%(visit)s",
+                        { 'pv': src.base_procver_id, 'objid': src.diaobjectid, 'visit': src.visit } )
+        con.commit()
+
+
+@pytest.fixture
+def obj1_src3( obj1, procver_collection ):
+    bpvs, _pvs = procver_collection
+    src = DiaSource( base_procver_id=bpvs['bpv1'].id,
+                     diaobjectid=obj1.diaobjectid,
+                     diasourceid=3,
+                     visit=256,
+                     band='z',
+                     midpointmjdtai=59040.,
+                     psfflux=6626.,
+                     psffluxerr=60.,
+                     ra=128. + 0.0001,
+                     dec=42. - 0.0001,
+                     raerr=0.0002,
+                     decerr=0.0002
+                    )
+    src.insert()
+
+    yield src
+    with DB() as con:
+        cursor = con.cursor()
+        cursor.execute( "DELETE FROM diasource WHERE base_procver_id=%(pv)s "
+                        "                        AND diaobjectid=%(objid)s AND visit=%(visit)s",
+                        { 'pv': src.base_procver_id, 'objid': src.diaobjectid, 'visit': src.visit } )
+        con.commit()
+
+
+@pytest.fixture
+def obj1_frced1( obj1, procver_collection ):
+    bpvs, _pvs = procver_collection
+    frc = DiaForcedSource( base_procver_id=bpvs['bpv1'].id,
+                           diaobjectid=obj1.diaobjectid,
+                           visit=64,
+                           band='r',
+                           midpointmjdtai=59000.,
+                           psfflux=138.,
+                           psffluxerr=1.,
+                           ra=128.,
+                           dec=42.
+                          )
+    frc.insert()
+
+    yield frc
+    with DB() as con:
+        cursor = con.cursor()
+        cursor.execute( "DELETE FROM diaforcedsource WHERE base_procver_id=%(pv)s "
+                        "                              AND diaobjectid=%(objid)s "
+                        "                              AND visit=%(visit)s",
+                        { 'pv': frc.base_procver_id, 'objid': frc.diaobjectid, 'visit': frc.visit } )
+        con.commit()
+
+
+@pytest.fixture
+def obj1_frced2( obj1, procver_collection ):
+    bpvs, _pvs = procver_collection
+    frc = DiaForcedSource( base_procver_id=bpvs['bpv1'].id,
+                           diaobjectid=obj1.diaobjectid,
+                           visit=128,
+                           band='i',
+                           midpointmjdtai=59020.,
+                           psfflux=300000.,
+                           psffluxerr=2000.,
+                           ra=128.,
+                           dec=42.
+                          )
+    frc.insert()
+
+    yield frc
+    with DB() as con:
+        cursor = con.cursor()
+        cursor.execute( "DELETE FROM diaforcedsource WHERE base_procver_id=%(pv)s "
+                        "                              AND diaobjectid=%(objid)s "
+                        "                              AND visit=%(visit)s",
+                        { 'pv': frc.base_procver_id, 'objid': frc.diaobjectid, 'visit': frc.visit } )
+        con.commit()
+
+
+@pytest.fixture
+def obj1_frced3( obj1, procver_collection ):
+    bpvs, _pvs = procver_collection
+    frc = DiaForcedSource( base_procver_id=bpvs['bpv1'].id,
+                           diaobjectid=obj1.diaobjectid,
+                           visit=256,
+                           band='z',
+                           midpointmjdtai=59040.,
+                           psfflux=6680.,
+                           psffluxerr=60.,
+                           ra=128.,
+                           dec=42.
+                          )
+    frc.insert()
+
+    yield frc
+    with DB() as con:
+        cursor = con.cursor()
+        cursor.execute( "DELETE FROM diaforcedsource WHERE base_procver_id=%(pv)s "
+                        "                              AND diaobjectid=%(objid)s "
+                        "                              AND visit=%(visit)s",
+                        { 'pv': frc.base_procver_id, 'objid': frc.diaobjectid, 'visit': frc.visit } )
+        con.commit()
+
+
+@pytest.fixture
+def host1( procver_collection ):
+    bpvs, _pvs = procver_collection
+    host = HostGalaxy( id=uuid.uuid4(),
+                       host_catalog='foo',
+                       host_id='bar',
+                       base_procver_id=bpvs['bpv1'].id,
+                       ra=1.,
+                       dec=-2.,
+                       info={} )
+    host.insert()
+
+    yield host
+    with DB() as con:
+        cursor = con.cursor()
+        cursor.execute( "DELETE FROM host_galaxy WHERE id=%(id)s", { 'id': host.id } )
+        con.commit()
+
+
+@pytest.fixture
+def host2( procver_collection ):
+    bpvs, _pvs = procver_collection
+    host = HostGalaxy( id=uuid.uuid4(),
+                       host_catalog='foo',
+                       host_id='smol',
+                       base_procver_id=bpvs['bpv1'].id,
+                       ra=48.,
+                       dec=-89.,
+                       info={} )
+    host.insert()
+
+    yield host
+    with DB() as con:
+        cursor = con.cursor()
+        cursor.execute( "DELETE FROM host_galaxy WHERE id=%(id)s", { 'id': host.id } )
         con.commit()
 
 

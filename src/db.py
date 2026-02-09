@@ -560,14 +560,20 @@ class DBBase:
 
 
     @classmethod
-    def all_columns_sql( cls, prefix=None ):
+    def all_columns_sql( cls, prefix=None, omit=[], asmap={} ):
         """Returns a psycopg.sql.SQL thingy with all columns comma separated."""
         if cls._tablemeta is None:
             cls.load_table_meta()
-        if prefix is None:
-            return psycopg.sql.SQL(',').join( psycopg.sql.Identifier(i) for i in cls._tablemeta.keys() )
-        else:
-            return psycopg.sql.SQL(',').join( psycopg.sql.Identifier(prefix, i) for i in cls._tablemeta.keys() )
+        mess = []
+        for col in cls._tablemeta.keys():
+            if col in omit:
+                continue
+            thing = psycopg.sql.Identifier( col ) if prefix is None else psycopg.sql.Identifier( prefix, col )
+            if col in asmap:
+                thing += psycopg.sql.SQL( " AS " ) + psycopg.sql.Identifier( asmap[col] )
+            mess.append( thing )
+
+        return psycopg.sql.SQL(',').join( mess )
 
     @classmethod
     def load_table_meta( cls, dbcon=None ):
@@ -1283,7 +1289,7 @@ class ProcessingVersion( DBBase ):
             return rows[0][0]
 
 
-    def highest_prio_base_procver( self, dbcon=None ):
+    def highest_prio_base_procver( self, table, dbcon=None ):
         """Returns the highest priority base_processing_version associated with this processing version.
 
         Be careful with this.  If you don't fully understand the
@@ -1298,6 +1304,9 @@ class ProcessingVersion( DBBase ):
 
         Parameters
         ----------
+          table : str
+            The table whose base processing version we want.  Required
+
           dbcon : DBCon or psycopg.Connection, default None
             Database connection to use.  If not given, will open a new
             one and close it when done.
@@ -1311,9 +1320,10 @@ class ProcessingVersion( DBBase ):
             bpv = con.execute( "SELECT b.* FROM base_processing_version b\n"
                                "INNER JOIN base_procver_of_procver j ON j.base_procver_id=b.id\n"
                                "WHERE j.procver_id=%(pv)s\n"
+                               "  AND j._table=%(tab)s\n"
                                "ORDER BY j.priority DESC\n"
                                "LIMIT 1",
-                               { 'pv': self.id } )
+                               { 'pv': self.id, 'tab': table } )
             if len(bpv) == 0:
                 raise ValueError( f"Can't find base processing version for processing version {self.description}" )
             bpv = bpv[0]
@@ -1326,14 +1336,6 @@ class ProcessingVersionAlias( DBBase ):
     __tablename__ = "processing_version_alias"
     _tablemeta = None
     _pk = [ 'description' ]
-
-
-# ======================================================================
-
-class HostGalaxy( DBBase ):
-    __tablename__ = "host_galaxy"
-    _tablemeta = None
-    _pk = [ 'id' ]
 
 
 # ======================================================================
@@ -1354,10 +1356,42 @@ class DiaObject( DBBase ):
 
 # ======================================================================
 
+class DiaObjectPosition( DBBase ):
+    __tablename__ = "diaobject_position"
+    _tablemeta = None
+    _pk= [ 'diaobjectid', 'base_procver_id' ]
+
+
+# ======================================================================
+
+class HostGalaxy( DBBase ):
+    __tablename__ = "host_galaxy"
+    _tablemeta = None
+    _pk = [ 'id' ]
+
+
+# ======================================================================
+
+class DiaObjectHostMatch( DBBase ):
+    __tablename__ = "diaobject_host_match"
+    _tablemeta = None
+    _pk = [ 'diaobjectid', 'host_galaxy_id', 'base_procver_id' ]
+
+
+# ======================================================================
+
 class DiaSource( DBBase ):
     __tablename__ = "diasource"
     _tablemeta = None
-    _pk = [ 'base_procver_id', 'diaobjectid', 'visit' ]
+    _pk = [ 'diasourceid', 'base_procver_id' ]
+
+
+# ======================================================================
+
+class DiaSourceExtra( DBBase ):
+    __tablename__ = "diasource_extra"
+    _tablemeta = None
+    _pk = [ 'diasourceid', 'base_procver_id' ]
 
     _flags_bits = { 0x00000001: 'centroid_flag',
                     0x00000002: 'apFlux_flag',
@@ -1406,6 +1440,14 @@ class DiaSource( DBBase ):
 
 class DiaForcedSource( DBBase ):
     __tablename__ = "diaforcedsource"
+    _tablemeta = None
+    _pk = [ 'base_procver_id', 'diaobjectid', 'visit' ]
+
+
+# ======================================================================
+
+class DiaForcedSourceExtra( DBBase ):
+    __tablename__ = "diaforcedsource_extra"
     _tablemeta = None
     _pk = [ 'base_procver_id', 'diaobjectid', 'visit' ]
 

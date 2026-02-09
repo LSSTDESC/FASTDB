@@ -14,13 +14,13 @@ from util import FDBLogger
 
 
 def get_object_infos( objids=None, objids_table=None, processing_version=None,
-                      columns=None, return_format='json', dbcon=None ):
+                      position_processing_version=None, columns=None, return_format='json', dbcon=None ):
     """Get information from the diaobject table.
 
     Parameters
     ----------
       objids : list of int or uuid
-        Either the diaobejctid or rootid values for the objects to get.
+        Either the diaobjectid or rootid values for the objects to get.
         Either this or objids_table is required.
 
       objids_table : str, default None
@@ -30,15 +30,22 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None,
         that temporary tables are meaningful).
 
       processing_version : str, uuid, or None
-        If objids is a list of rootids, then defaults to 'default'.  If
-        objids is a list of int, then this is ignored.
+        The processing version for the objects.  Can be omitted if
+        objis is a list of int, not a list of uuid.
+
+      position_processing_version : str, uuid, or None
+        The processing version for the object positions.  If None, then
+        the position processing version will be assumed to be the same
+        as the diaobject processing version.  If both processing_version
+        and position_processing version is None, then you will not get
+        back positions, those columns will all be null.
 
       columns : list of str, default None
-        If given only include these columns from the diaobject table.
-        Otherwise, include all of them.  If 'diaobjectid' is not
-        included in this list, it will be prepended to it.  (You can't
-        not get diaobjectid back, because it's the index of the returned
-        dataframe or the keys of the returned dictionary.)
+        If given only include these columns in the returned data.  If
+        'diaobjectid' is not included in this list, it will be prepended
+        to it.  (You can't not get diaobjectid back, because it's the
+        index of the returned dataframe or the keys of the returned
+        dictionary.)
 
       return_format : str, default 'json'
         Either 'pandas' or 'json'
@@ -50,13 +57,25 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None,
     Returns
     -------
       rval: pandas.DataFrame or dict
-        If return_format is 'pandas', the dataframe is indexed by diaobjectid and has
-        all columns from the diaobject table.
+        If return_format is 'pandas', the dataframe is indexed by
+        diaobjectid.  If return_format is 'json', then the return is a
+        dictionary whose keys are the columns of diaobject, and whose
+        values are lists all of the same length.
 
-        If return_format is 'json', then the return is a dictionary whose keys are
-        the columns of diaobject, and whose values are lists all of the same length.
+        Columns included come from the diaobject and diaboject_position tables:
+
+           diaobjectid         | bigint           | Globally unique (across all proc vers) diaobject id
+           rootid              | uuid             | root_diaobject id for this object
+           obj_base_procver_id | uuid             | base processing version for the diaobject
+           pos_base_procver_id | uuid             | base processing version for the diaobject_position
+           ra                  | double precision | ra
+           dec                 | double precision | dec
+           raerr               | real             | uncertainty (NOT variance) on ra
+           decerr              | real             | uncertainty (NOT variance) on dec
+           ra_dec_cov          | real             | covariance between ra and dec
 
     """
+
     obj_is_root = False
     if objids_table is not None:
         if dbcon is None:

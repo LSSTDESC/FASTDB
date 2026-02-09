@@ -17,9 +17,21 @@ class TestSpectrumInfo( BaseTestDB ):
                          'facility',
                          'inserted_at',
                          'mjd',
+                         'ra',
+                         'dec',
+                         'is_host',
                          'z',
-                         'classid' }
-        self.safe_to_modify = [ 'facility', 'inserted_at', 'mjd', 'z', 'classid' ]
+                         'classid',
+                         'class_description' }
+        self.safe_to_modify = [ 'facility',
+                                'inserted_at',
+                                'mjd',
+                                'ra',
+                                'dec',
+                                'is_host',
+                                'z',
+                                'classid',
+                                'class_description' ]
         self.uniques = []
 
         t0 = datetime.datetime.now( tz=datetime.UTC )
@@ -30,36 +42,36 @@ class TestSpectrumInfo( BaseTestDB ):
                                   facility="Test Facility 1",
                                   inserted_at=t0,
                                   mjd=60000.,
+                                  ra=12.,
+                                  dec=34.,
+                                  is_host=False,
                                   z=0.42,
-                                  classid=2222 )
-        self.dict1 = { 'specinfo_id': self.obj1.specinfo_id,
-                       'root_diaobject_id': rootobj1.id,
-                       'facility': "Test Facility 1",
-                       'inserted_at': t0,
-                       'mjd': 60000.,
-                       'z': 0.42,
-                       'classid': 2222 }
+                                  classid=2222,
+                                  class_description="SNIa" )
+        self.dict1 = { k: getattr( self.obj1, k ) for k in self.columns }
         self.obj2 = SpectrumInfo( specinfo_id=uuid.UUID( '78429a22-5790-42ec-a825-13a4fada889d' ),
                                   root_diaobject_id=rootobj2.id,
                                   facility="Test Facility 2",
                                   inserted_at=t1,
                                   mjd=60001.,
+                                  ra=56.,
+                                  dec=78.,
+                                  is_host=False,
                                   z=0.13,
-                                  classid=2224 )
-        self.dict2 = { 'specinfo_id': self.obj2.specinfo_id,
-                       'root_diaobject_id': rootobj2.id,
-                       'facility': "Test Facility 2",
-                       'inserted_at': t1,
-                       'mjd': 60001.,
-                       'z': 0.13,
-                       'classid': 2224 }
+                                  classid=2224,
+                                  class_description="SNII" )
+        self.dict2 = { k: getattr( self.obj2, k ) for k in self.columns }
         self.dict3 = { 'specinfo_id': uuid.UUID( '73085b3b-1daf-43f8-a1a6-f83aa7315be4' ),
                        'root_diaobject_id': rootobj1.id,
                        'facility': "Test Facility 3",
                        'inserted_at': t2,
                        'mjd': 60001.04,
+                       'ra': 123.,
+                       'dec': -45.,
+                       'is_host': True,
                        'z': 0.137,
-                       'classid': 2223 }
+                       'classid': 8,
+                       'class_description': 'SBc Galaxy' }
 
 
 class TestWantedSpectra( BaseTestDB ):

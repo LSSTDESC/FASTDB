@@ -7,6 +7,48 @@ from db import ProcessingVersion, BaseProcessingVersion
 from basetest import BaseTestDB
 
 
+class TestBaseProcessingVersion( BaseTestDB ):
+
+    @pytest.fixture
+    def basetest_setup( self ):
+        self.cls = BaseProcessingVersion
+        self.columns = { 'id', 'description', '_table', 'notes', 'created_at' }
+        self.safe_to_modify = [ 'notes', 'created_at' ]
+        self.uniques = []
+        t0 = datetime.datetime.now( tz=datetime.UTC )
+        self.obj1 = BaseProcessingVersion( id=uuid.uuid4(),
+                                           description='testprocver_bpv1',
+                                           _table='table1',
+                                           notes='testprocver_bpv1 notes',
+                                           created_at=t0
+                                          )
+        self.dict1 = { k: getattr( self.obj1, k ) for k in self.columns }
+        self.obj2 = BaseProcessingVersion( id=uuid.uuid4(),
+                                           description='testprocver_bpv2',
+                                           _table='table2',
+                                           notes='testprocver_bpv2 notes',
+                                           created_at=t0 + datetime.timedelta( minutes=1 )
+                                          )
+        self.dict2 = { k: getattr( self.obj2, k ) for k in self.columns }
+        self.dict3 = { 'id': uuid.uuid4(),
+                       'description': 'testprocver_bpv3',
+                       '_table': '_table3',
+                       'notes': 'testprocver_bpv3 notes',
+                       'created_at': t0 + datetime.timedelta( hours=2 )
+                      }
+
+    def test_base_procver_id( self, obj1_inserted, obj2_inserted ):
+        gratuitous = uuid.uuid4()
+        assert BaseProcessingVersion.base_procver_id( gratuitous ) == gratuitous
+        assert BaseProcessingVersion.base_procver_id( str(gratuitous) ) == gratuitous
+
+        assert BaseProcessingVersion.base_procver_id( 'testprocver_bpv1' ) == self.obj1.id
+        assert BaseProcessingVersion.base_procver_id( 'testprocver_bpv2' ) == self.obj2.id
+
+        with pytest.raises( ValueError, match="Unknown base processing version foo" ):
+            BaseProcessingVersion.base_procver_id( 'foo' )
+
+
 class TestProcessingVersion( BaseTestDB ):
 
     @pytest.fixture
@@ -45,47 +87,12 @@ class TestProcessingVersion( BaseTestDB ):
         with pytest.raises( ValueError, match="Unknown processing version foo" ):
             ProcessingVersion.procver_id( 'foo' )
 
+    # This is basically a test of the base_procver_of_procver table.
+    # THIS TEST HAS TO GO LAST because it runs the procver_collection fixture that's module scope
     def test_highest_prio_base_procver( self, procver_collection ):
         bpv, pv = procver_collection
-        assert pv['pv1'].highest_prio_base_procver().id == bpv['bpv1b'].id
-        assert pv['pv2'].highest_prio_base_procver().id == bpv['bpv2a'].id
-        assert pv['pv3'].highest_prio_base_procver().id == bpv['bpv3'].id
-
-
-class TestBaseProcessingVersion( BaseTestDB ):
-
-    @pytest.fixture
-    def basetest_setup( self ):
-        self.cls = BaseProcessingVersion
-        self.columns = { 'id', 'description', 'notes', 'created_at' }
-        self.safe_to_modify = [ 'notes', 'created_at' ]
-        self.uniques = [ 'description' ]
-        t0 = datetime.datetime.now( tz=datetime.UTC )
-        self.obj1 = BaseProcessingVersion( id=uuid.uuid4(),
-                                           description='testprocver_bpv1',
-                                           notes='testprocver_bpv1 notes',
-                                           created_at=t0
-                                          )
-        self.dict1 = { k: getattr( self.obj1, k ) for k in self.columns }
-        self.obj2 = BaseProcessingVersion( id=uuid.uuid4(),
-                                           description='testprocver_bpv2',
-                                           notes='testprocver_bpv2 notes',
-                                           created_at=t0 + datetime.timedelta( minutes=1 )
-                                          )
-        self.dict2 = { k: getattr( self.obj2, k ) for k in self.columns }
-        self.dict3 = { 'id': uuid.uuid4(),
-                       'description': 'testprocver_bpv3',
-                       'notes': 'testprocver_bpv3 notes',
-                       'created_at': t0 + datetime.timedelta( hours=2 )
-                      }
-
-    def test_base_procver_id( self, obj1_inserted, obj2_inserted ):
-        gratuitous = uuid.uuid4()
-        assert BaseProcessingVersion.base_procver_id( gratuitous ) == gratuitous
-        assert BaseProcessingVersion.base_procver_id( str(gratuitous) ) == gratuitous
-
-        assert BaseProcessingVersion.base_procver_id( 'testprocver_bpv1' ) == self.obj1.id
-        assert BaseProcessingVersion.base_procver_id( 'testprocver_bpv2' ) == self.obj2.id
-
-        with pytest.raises( ValueError, match="Unknown base processing version foo" ):
-            BaseProcessingVersion.base_procver_id( 'foo' )
+        assert pv['pv1'].highest_prio_base_procver('table1').id == bpv['bpv1b'].id
+        assert pv['pv2'].highest_prio_base_procver('table1').id == bpv['bpv2a'].id
+        assert pv['pv3'].highest_prio_base_procver('table1').id == bpv['bpv3'].id
+        assert pv['realtime'].highest_prio_base_procver('diaobject').id == bpv['realtime'].id
+        assert pv['realtime'].highest_prio_base_procver('diasource').id == bpv['realtime_source'].id
