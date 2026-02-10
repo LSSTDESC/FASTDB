@@ -2,6 +2,7 @@ __all__ = [ "object_ltcv", "object_search", "get_hot_ltcvs" ]
 
 import datetime
 import numbers
+import uuid
 import json   # noqa: F401
 
 from psycopg import sql
@@ -30,8 +31,9 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None,
         that temporary tables are meaningful).
 
       processing_version : str, uuid, or None
-        The processing version for the objects.  Can be omitted if
-        objis is a list of int, not a list of uuid.
+        The processing version for the objects.  Ignored objis is a list
+        of int, not a list of uuid.  If not given and a list of uuids is
+        given, will default to 'default'.
 
       position_processing_version : str, uuid, or None
         The processing version for the object positions.  If None, then
@@ -105,57 +107,139 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None,
         if len(objids) == 0:
             raise ValueError( "no objids requested" )
 
+    pv = None
     if obj_is_root:
         pv = db.ProcessingVersion.procver_id( processing_version if processing_version is not None else 'default' )
+
+    if position_processing_version is None:
+        if pv is not None:
+            pospv = pv
+        elif processing_version is not None:
+            pospv = db.ProcessingVersion.procver_id( processing_version )
+        else:
+            # Pick a random UUID, this will effectively null out the join to the diaobject_position table
+            pospv = uuid.uuid4()
+    else:
+        pospv = db.ProcessingVersion.procver_id( position_processing_version )
 
     if return_format not in ( 'pandas', 'json' ):
         raise ValueError( f"return_format must be pandas or json, not {return_format}" )
 
+    objcols = [ 'diaobjectid', 'rootid', 'obj_base_procver_id' ]
+    poscols = [ 'pos_base_procver_id', 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ]
+    sqlcolumns = []
+    gotsomepos = False
     if columns is None:
-        columns = db.DiaObject.all_columns_sql( prefix='o' )
+        columns = objcols + poscols
     else:
         if not util.isSequence( columns ):
             columns = [ columns ]
         else:
             columns = list( columns )
+        if not all( ( c in objcols ) or ( c in poscols ) for c in columns ):
+            unknown = set(columns) - set( objcols ).union( poscols )
+            raise ValueError( f"Unknown Columns: {unknown}" )
         if 'diaobjectid' not in columns:
             columns = columns.copy()
             columns.insert( 0, 'diaobjectid' )
-        columns = sql.SQL(',').join( sql.Identifier('o', i) for i in columns )
 
+    for c in columns:
+        if c in objcols:
+            sqlcolumns.append( sql.Identifier( 'o', c ) if c != 'obj_base_procver_id'
+                               else sql.Identifier( 'o', 'base_procver_id' ) + sql.SQL( " AS " ) + sql.Identifier( c ) )
+        else:
+            gotsomepos = True
+            sqlcolumns.append( sql.Identifier( 'p', c ) if c != 'pos_base_procver_id'
+                               else sql.Identifier( 'p', 'base_procver_id' ) + sql.SQL( " AS " ) + sql.Identifier( c ) )
+
+    # sqlcolumns = sql.SQL(',').join( c for c in columns )
+    # SQL().join() doesn't do what we want it to; it's turning stuff into literals and removing prefixes
+    #   and so forth.  Gotta do this the hard way.
+    first = True
+    for c in sqlcolumns:
+        if first:
+            first = False
+            sqlcolobj = c
+        else:
+            sqlcolobj += sql.SQL( "," )
+            sqlcolobj += c
 
     with db.DBCon( dbcon ) as dbcon:
+        if gotsomepos:
+            positionclause = sql.SQL(
+                """
+                SELECT DISTINCT ON(p1.diaobjectid) p1.*
+                FROM diaobject_position p1
+                INNER JOIN base_procver_of_procver p1pv ON p1.base_procver_id=p1pv.base_procver_id
+                                                          AND p1pv.procver_id={pospv}
+                ORDER BY p1.diaobjectid, p1pv.priority DESC
+                """ ).format( pospv=pospv )
+
         if objids_table is not None:
             q = sql.SQL(
-                """/*+ IndexScan(o idx_diaobject_diaobjectid) */
-                SELECT {columns}
+                """
+                /*+ IndexScan(o idx_diaobject_diaobjectid)
+                    IndexScan(p1 idx_diaobject_position_diaobjectid)
+                */
+                SELECT {sqlcolumns}
                 FROM {objids_table} t
                 INNER JOIN diaobject o ON o.diaobjectid=t.diaobjectid
-                """ ).format( columns=columns, objids_table=sql.Identifier(objids_table) )
+                """ ).format( sqlcolumns=sqlcolobj, objids_table=sql.Identifier(objids_table) )
+            if gotsomepos:
+                q += sql.SQL( "LEFT JOIN (\n" )
+                q += positionclause
+                q += sql.SQL( ") p ON p.diaobjectid=o.diaobjectid" )
         else:
             if obj_is_root:
                 q = sql.SQL(
                     """
-                    SELECT DISTINCT ON(o.diaobjectid) {columns}
+                    /*+ IndexScan(o idx_diaobject_diaobjectid)
+                        IndexScan(p1 idx_diaobject_position_diaobjectid)
+                    */
+                    SELECT DISTINCT ON(o.diaobjectid) {sqlcolumns}
                     FROM diaobject o
                     INNER JOIN base_procver_of_procver pv ON o.base_procver_id=pv.base_procver_id
                                                          AND pv.procver_id={pv}
+                    """ ).format( sqlcolumns=sqlcolobj, pv=pv )
+                if gotsomepos:
+                    q += sql.SQL( "LEFT JOIN (\n" )
+                    q += positionclause
+                    q += sql.SQL(
+                        """
+                        ) p
+                        ON p.diaobjectid=o.diaobjectid
+                        """ )
+                q += sql.SQL(
+                    """
                     WHERE o.rootid=ANY(%(objids)s)
                     ORDER BY o.diaobjectid, pv.priority DESC
-                    """
-                ).format( columns=columns, pv=pv )
+                    """ )
             else:
-                q = sql.SQL( "SELECT {columns} FROM diaobject o WHERE diaobjectid=ANY(%(objids)s)"
-                            ).format( columns=columns )
+                q = sql.SQL(
+                    """
+                    /*+ IndexScan(o idx_diaobject_diaobjectid)
+                        IndexScan(p1 idx_diaobject_position_diaobjectid)
+                    */
+                    SELECT {sqlcolumns}
+                    FROM diaobject o
+                    """ ).format( sqlcolumns=sqlcolobj )
+                if gotsomepos:
+                    q += sql.SQL( "LEFT JOIN (\n" )
+                    q += positionclause
+                    q += sql.SQL(
+                        """
+                        ) p
+                        ON p.diaobjectid=o.diaobjectid
+                        """ )
+                q += sql.SQL( "WHERE o.diaobjectid=ANY(%(objids)s)" )
 
         rows, cols = dbcon.execute( q, { 'objids': objids } )
-
+        # Next line deals with what I think is a dysfunctional psycopg return
+        cols = columns if len(rows) == 0 else cols
         if return_format == 'pandas':
             return pandas.DataFrame( rows, columns=cols ).set_index( 'diaobjectid' )
-
         elif return_format == 'json':
             return { c: [ r[i] for r in rows ] for i, c in enumerate( cols ) }
-
         else:
             raise RuntimeError( "This should never happen" )
 

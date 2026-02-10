@@ -5,28 +5,53 @@ import db
 import ltcv
 
 
-def test_get_object_infos( set_of_lightcurves ):
+def test_get_object_infos( set_of_lightcurves, procver_collection ):
+    bpvs, _pvs = procver_collection
     roots = set_of_lightcurves
 
     info = ltcv.get_object_infos( [ 200, 201, 202 ], return_format='pandas' )
     assert info.index.name == 'diaobjectid'
-    assert set(info.columns.values) == set( [ i for i in db.DiaObject().tablemeta.keys() if i != 'diaobjectid' ] )
+    assert set(info.columns.values) == { 'rootid', 'obj_base_procver_id', 'pos_base_procver_id',
+                                         'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' }
     assert len(info) == 3
     assert list( info.index.values ) == [ 200, 201, 202 ]
     assert info.rootid.values.tolist() == [ roots[i]['root'].id for i in [0, 1, 2] ]
+    # Since we didn't get a position processing version, none of the position fields should be filled
+    assert all( all( i is None for i in info[col] ) for col in ['pos_base_procver_id', 'ra', 'dec',
+                                                                'raerr', 'decerr', 'ra_dec_cov'] )
 
+    # Make sure json return gives the same stuff
     jsinfo = ltcv.get_object_infos( [ 200, 201, 202 ], return_format='json' )
     assert jsinfo['diaobjectid'] == [ 200, 201, 202 ]
     info.reset_index( inplace=True )
     for col in info.columns:
         assert ( info.loc[ :, col ].values == np.array( jsinfo[col] ) ).all()
 
+    # Make sure we get position information if we give a position processing version
+    info = ltcv.get_object_infos( [ 200, 201, 202 ], return_format='pandas', processing_version='pvc_pv2' )
+    assert list( info.index.values ) == [ 200, 201, 202 ]
+    assert all( all( i is not None for i in info[col] )for col in ['pos_base_procver_id', 'ra', 'dec',
+                                                                   'raerr', 'decerr', 'ra_dec_cov'] )
+    assert info.loc[ 200, 'pos_base_procver_id'] == bpvs['bpv2a_diaobject_position_60030'].id
+    assert info.loc[ 201, 'pos_base_procver_id'] == bpvs['bpv2a_diaobject_position_60060'].id
+    assert info.loc[ 202, 'pos_base_procver_id'] == bpvs['bpv2a_diaobject_position_60080'].id
+
+    info2 = ltcv.get_object_infos( [ 200, 201, 202 ], return_format='pandas',
+                                   position_processing_version='pvc_pv2' )
+    assert info2.equals( info )
+
     info = ltcv.get_object_infos( [ roots[i]['root'].id for i in [0, 1, 2] ] )
     # TODO : right now there are no diaobjects in the default processing version!  Fix that in Issue #70.
     assert info['diaobjectid'] == []
 
     info = ltcv.get_object_infos( [ roots[i]['root'].id for i in [0, 1, 2] ], processing_version='pvc_pv2' )
-    assert info['diaobjectid'] == [ 200, 201, 202 ]
+    dex200 = info['diaobjectid'].index( 200 )
+    dex201 = info['diaobjectid'].index( 201 )
+    dex202 = info['diaobjectid'].index( 202 )
+    assert all( info['obj_base_procver_id'][i] == bpvs['bpv2'].id for i in range(3) )
+    assert info['pos_base_procver_id'][dex200] == bpvs['bpv2a_diaobject_position_60030'].id
+    assert info['pos_base_procver_id'][dex201] == bpvs['bpv2a_diaobject_position_60060'].id
+    assert info['pos_base_procver_id'][dex202] == bpvs['bpv2a_diaobject_position_60080'].id
 
     info = ltcv.get_object_infos( [ 200, 201, 202 ], columns=['ra', 'dec'] )
     assert info['diaobjectid'] == [ 200, 201, 202 ]
