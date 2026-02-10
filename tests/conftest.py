@@ -407,7 +407,7 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
                     dec[base] = rootdec + ddec
                     ratot[base] += ra[base]
                     dectot[base] += dec[base]
-                    npos += 1
+                npos += 1
 
                 dopos = False
                 if sourcemjd >= procver_postimes[nextposdex]:

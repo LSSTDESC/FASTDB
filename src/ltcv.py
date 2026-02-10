@@ -3,6 +3,7 @@ __all__ = [ "object_ltcv", "object_search", "get_hot_ltcvs" ]
 import datetime
 import numbers
 import uuid
+import textwrap
 import json   # noqa: F401
 
 from psycopg import sql
@@ -166,17 +167,17 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None,
 
     with db.DBCon( dbcon ) as dbcon:
         if gotsomepos:
-            positionclause = sql.SQL(
+            positionclause = sql.SQL( textwrap.dedent(
                 """
                 SELECT DISTINCT ON(p1.diaobjectid) p1.*
                 FROM diaobject_position p1
                 INNER JOIN base_procver_of_procver p1pv ON p1.base_procver_id=p1pv.base_procver_id
-                                                          AND p1pv.procver_id={pospv}
+                                                       AND p1pv.procver_id={pospv}
                 ORDER BY p1.diaobjectid, p1pv.priority DESC
-                """ ).format( pospv=pospv )
+                """ ) ).format( pospv=pospv )
 
         if objids_table is not None:
-            q = sql.SQL(
+            q = sql.SQL( textwrap.dedent(
                 """
                 /*+ IndexScan(o idx_diaobject_diaobjectid)
                     IndexScan(p1 idx_diaobject_position_diaobjectid)
@@ -184,14 +185,14 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None,
                 SELECT {sqlcolumns}
                 FROM {objids_table} t
                 INNER JOIN diaobject o ON o.diaobjectid=t.diaobjectid
-                """ ).format( sqlcolumns=sqlcolobj, objids_table=sql.Identifier(objids_table) )
+                """ ) ).format( sqlcolumns=sqlcolobj, objids_table=sql.Identifier(objids_table) )
             if gotsomepos:
                 q += sql.SQL( "LEFT JOIN (\n" )
                 q += positionclause
-                q += sql.SQL( ") p ON p.diaobjectid=o.diaobjectid" )
+                q += sql.SQL( ") p ON p.diaobjectid=o.diaobjectid\n" )
         else:
             if obj_is_root:
-                q = sql.SQL(
+                q = sql.SQL( textwrap.dedent(
                     """
                     /*+ IndexScan(o idx_diaobject_diaobjectid)
                         IndexScan(p1 idx_diaobject_position_diaobjectid)
@@ -200,37 +201,37 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None,
                     FROM diaobject o
                     INNER JOIN base_procver_of_procver pv ON o.base_procver_id=pv.base_procver_id
                                                          AND pv.procver_id={pv}
-                    """ ).format( sqlcolumns=sqlcolobj, pv=pv )
+                    """ ) ).format( sqlcolumns=sqlcolobj, pv=pv )
                 if gotsomepos:
                     q += sql.SQL( "LEFT JOIN (\n" )
                     q += positionclause
-                    q += sql.SQL(
+                    q += sql.SQL( textwrap.dedent(
                         """
                         ) p
                         ON p.diaobjectid=o.diaobjectid
-                        """ )
-                q += sql.SQL(
+                        """ ) )
+                q += sql.SQL( textwrap.dedent(
                     """
                     WHERE o.rootid=ANY(%(objids)s)
                     ORDER BY o.diaobjectid, pv.priority DESC
-                    """ )
+                    """ ) )
             else:
-                q = sql.SQL(
+                q = sql.SQL( textwrap.dedent(
                     """
                     /*+ IndexScan(o idx_diaobject_diaobjectid)
                         IndexScan(p1 idx_diaobject_position_diaobjectid)
                     */
                     SELECT {sqlcolumns}
                     FROM diaobject o
-                    """ ).format( sqlcolumns=sqlcolobj )
+                    """ ) ).format( sqlcolumns=sqlcolobj )
                 if gotsomepos:
                     q += sql.SQL( "LEFT JOIN (\n" )
                     q += positionclause
-                    q += sql.SQL(
+                    q += sql.SQL( textwrap.dedent(
                         """
                         ) p
                         ON p.diaobjectid=o.diaobjectid
-                        """ )
+                        """ ) )
                 q += sql.SQL( "WHERE o.diaobjectid=ANY(%(objids)s)" )
 
         rows, cols = dbcon.execute( q, { 'objids': objids } )
@@ -267,7 +268,7 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
          If not None, then this is the name of a table (probably a
          temporary table) that has the object ids already loaded into it
          in the column "diaobjectid".  Use of this requires dbcon to be
-         non None.
+         non-None.
 
       # Offset and limit don't work right, I have to think harder
       # offset: int, default None
@@ -401,13 +402,13 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                         ).format( objids_table=sql.Identifier( objids_table ) )
             dbcon.execute( q, explain=False )
             if objfield == 'rootid':
-                q = sql.SQL(
+                q = sql.SQL( textwrap.dedent(
                     """INSERT INTO {objids_table} (
                          SELECT diaobjectid FROM diaobject
                          WHERE rootid=ANY(%(roots)s)
                        )
                     """
-                ).format( objids_table=sql.Identifier(objids_table) )
+                ) ).format( objids_table=sql.Identifier(objids_table) )
                 dbcon.execute_nofetch( q, { 'roots': objids } )
             else:
                 q = sql.SQL( "COPY {objids_table}(diaobjectid) FROM STDIN"
@@ -421,20 +422,21 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                        "                               mjd double precision, band text, flux real, fluxerr real,"
                        "                               isdet bool, base_procver text )",
                        explain=False )
-        q = sql.SQL(
-            """/*+ IndexScan(s idx_diasource_diaobjectid) */
-               INSERT INTO tmp_sources
-               SELECT DISTINCT ON (s.diaobjectid, s.visit)
-                 s.diaobjectid, s.visit, s.midpointmjdtai AS mjd,
-                 s.band, s.psfflux AS flux, s.psffluxerr AS fluxerr,
-                 TRUE as isdet, p.description AS base_procver
-               FROM {objids_table} t
-               INNER JOIN diasource s ON s.diaobjectid=t.diaobjectid
-               INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id
-                                                    AND pv.procver_id={procver}
-               INNER JOIN base_processing_version p ON pv.base_procver_id=p.id
+        q = sql.SQL( textwrap.dedent(
             """
-        ).format( procver=pvid, objids_table=sql.Identifier(objids_table) )
+            /*+ IndexScan(s idx_diasource_diaobjectid) */
+            INSERT INTO tmp_sources
+            SELECT DISTINCT ON (s.diaobjectid, s.visit)
+              s.diaobjectid, s.visit, s.midpointmjdtai AS mjd,
+              s.band, s.psfflux AS flux, s.psffluxerr AS fluxerr,
+              TRUE as isdet, p.description AS base_procver
+            FROM {objids_table} t
+            INNER JOIN diasource s ON s.diaobjectid=t.diaobjectid
+            INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id
+                                                 AND pv.procver_id={procver}
+            INNER JOIN base_processing_version p ON pv.base_procver_id=p.id
+            """
+        ) ).format( procver=pvid, objids_table=sql.Identifier(objids_table) )
         _and = "WHERE"
         if mjd_now is not None:
             q += sql.SQL( f"                   {_and} s.midpointmjdtai<={{t0}}" ).format( t0=mjd_now )
@@ -442,10 +444,7 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
         if bands is not None:
             q += sql.SQL( f"                   {_and} s.band=ANY(%(bands)s)" )
             _and = "  AND"
-        q += sql.SQL(
-            """
-               ORDER BY s.diaobjectid, s.visit, pv.priority DESC
-            """ )
+        q += sql.SQL( "   ORDER BY s.diaobjectid, s.visit, pv.priority DESC\n")
         dbcon.execute_nofetch( q, { 'bands': bands } )
 
         if which == 'detections':
@@ -458,20 +457,21 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                            "                              flux real, fluxerr real,"
                            "                              isdet bool, base_procver text )",
                            explain=False )
-            q = sql.SQL(
-                """/*+ IndexScan(s idx_diaforcedsource_diaobjectid) */
-                   INSERT INTO tmp_forced
-                   SELECT DISTINCT ON (s.diaobjectid, s.visit)
-                     s.diaobjectid, s.visit, s.midpointmjdtai AS mjd,
-                     s.band, s.psfflux AS flux, s.psffluxerr AS fluxerr,
-                     FALSE as isdet, p.description AS base_procver
-                   FROM {objids_table} t
-                   INNER JOIN diaforcedsource s ON s.diaobjectid=t.diaobjectid
-                   INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id
-                                                        AND pv.procver_id={procver}
-                   INNER JOIN base_processing_version p ON pv.base_procver_id=p.id
+            q = sql.SQL( textwrap.dedent(
                 """
-            ).format( procver=pvid, objids_table=sql.Identifier(objids_table) )
+                /*+ IndexScan(s idx_diaforcedsource_diaobjectid) */
+                INSERT INTO tmp_forced
+                SELECT DISTINCT ON (s.diaobjectid, s.visit)
+                  s.diaobjectid, s.visit, s.midpointmjdtai AS mjd,
+                  s.band, s.psfflux AS flux, s.psffluxerr AS fluxerr,
+                  FALSE as isdet, p.description AS base_procver
+                FROM {objids_table} t
+                INNER JOIN diaforcedsource s ON s.diaobjectid=t.diaobjectid
+                INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id
+                                                     AND pv.procver_id={procver}
+                INNER JOIN base_processing_version p ON pv.base_procver_id=p.id
+                """
+            ) ).format( procver=pvid, objids_table=sql.Identifier(objids_table) )
             _and = "WHERE"
             if mjd_now is not None:
                 q += sql.SQL( f"                   {_and} s.midpointmjdtai<={{t0}}" ).format( t0=mjd_now )
@@ -479,28 +479,26 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
             if bands is not None:
                 q += sql.SQL( f"                   {_and} s.band=ANY(%(bands)s)" )
                 _and = "  AND"
-            q += sql.SQL(
-                """
-                   ORDER BY s.diaobjectid, s.visit, pv.priority DESC
-                """ )
+            q += sql.SQL( "   ORDER BY s.diaobjectid, s.visit, pv.priority DESC\n" )
             dbcon.execute_nofetch( q, { 'bands': bands } )
 
             # Join detections to forced photometry to set the 'isdet' and 'ispatch' flags
-            q = sql.SQL(
-                """SELECT CASE WHEN f.diaobjectid IS NULL THEN s.diaobjectid ELSE f.diaobjectid END AS diaobjectid,
-                          CASE WHEN f.visit IS NULL THEN s.visit ELSE f.visit END AS visit,
-                          CASE WHEN f.mjd IS NULL THEN s.mjd ELSE f.mjd END AS mjd,
-                          CASE WHEN f.band IS NULL THEN s.band ELSE f.band END AS band,
-                          CASE WHEN f.flux IS NULL THEN s.flux ELSE f.flux END AS flux,
-                          CASE WHEN f.fluxerr IS NULL THEN s.fluxerr ELSE f.fluxerr END AS fluxerr,
-                          CASE WHEN s.mjd IS NULL THEN FALSE ELSE TRUE END AS isdet,
-                          CASE WHEN f.mjd IS NULL THEN TRUE ELSE FALSE END as ispatch,
-                          CASE WHEN f.base_procver IS NULL THEN s.base_procver ELSE f.base_procver END
-                            AS base_procver
-                   FROM tmp_forced f
-                   FULL OUTER JOIN tmp_sources s ON f.diaobjectid=s.diaobjectid AND s.visit=f.visit
+            q = sql.SQL( textwrap.dedent(
+                """
+                SELECT CASE WHEN f.diaobjectid IS NULL THEN s.diaobjectid ELSE f.diaobjectid END AS diaobjectid,
+                       CASE WHEN f.visit IS NULL THEN s.visit ELSE f.visit END AS visit,
+                       CASE WHEN f.mjd IS NULL THEN s.mjd ELSE f.mjd END AS mjd,
+                       CASE WHEN f.band IS NULL THEN s.band ELSE f.band END AS band,
+                       CASE WHEN f.flux IS NULL THEN s.flux ELSE f.flux END AS flux,
+                       CASE WHEN f.fluxerr IS NULL THEN s.fluxerr ELSE f.fluxerr END AS fluxerr,
+                       CASE WHEN s.mjd IS NULL THEN FALSE ELSE TRUE END AS isdet,
+                       CASE WHEN f.mjd IS NULL THEN TRUE ELSE FALSE END as ispatch,
+                       CASE WHEN f.base_procver IS NULL THEN s.base_procver ELSE f.base_procver END
+                         AS base_procver
+                FROM tmp_forced f
+                FULL OUTER JOIN tmp_sources s ON f.diaobjectid=s.diaobjectid AND s.visit=f.visit
                 ORDER BY diaobjectid, mjd
-                """ )
+                """ ) )
             rows, cols = dbcon.execute( q )
 
     retframe = pandas.DataFrame( rows, columns=cols )
@@ -629,7 +627,8 @@ def debug_count_temp_table( con, table ):
     FDBLogger.debug( f"Table {table} has {res[0][0]} rows" )
 
 
-def object_search( processing_version='default', object_processing_version=None, return_format='json',
+def object_search( processing_version='default', object_processing_version=None, position_processing_version=None,
+                   return_format='json',
                    just_objids=False, noforced=False, dbcon=None, mjd_now=None,
                    **kwargs ):
     """Search for objects.
@@ -653,6 +652,10 @@ def object_search( processing_version='default', object_processing_version=None,
 
           (Notice that a None here behaves differently than a None
           passed to object_ltcv.)
+
+      position_processing_version : UUID or str, default None
+          The processing version of diaobject positions.  If None, will
+          use the same as processing_version.
 
       return_format : string
          Either "json" or "pandas".  (TODO: pyarrow? polars?)  See "Results" below.
@@ -933,6 +936,7 @@ def object_search( processing_version='default', object_processing_version=None,
 
     with db.DBCon( dbcon ) as con:
         procver = util.procver_id( processing_version, dbcon=con.con )
+        posprocver = procver if position_processing_version is None else util.procver_id( position_processing_version )
         objprocver = None if object_processing_version is None else util.procver_id( object_processing_version )
 
         # Search criteria consistency checks
@@ -957,22 +961,49 @@ def object_search( processing_version='default', object_processing_version=None,
         nexttable = 'diaobject'
         addlfields = []
 
+        # So that futher queries won't have to worry about the object procver join
+        #  or the diaboject position join, make a view that does it for us.
+        q = sql.SQL( textwrap.dedent(
+            """
+            CREATE TEMPORARY VIEW tmp_diaobject_with_position AS
+            SELECT o.diaobjectid, p.ra, p.dec""" ) )
+        if objprocver is not None:
+            q += sql.SQL( ", pv.prio" )
+        q += sql.SQL( "\nFROM diaobject o\n" )
+        if objprocver is not None:
+            q += sql.SQL( textwrap.dedent(
+                """
+                INNER JOIN base_procver_of_procver pv ON pv.base_procver_id=o.base_procver_id
+                                                     AND pv.procver_id={objprocver}
+                """ ) ).format( objprocver=sql.Identifier( objprocver ) )
+        q += sql.SQL( textwrap.dedent(
+            """
+            LEFT JOIN (
+              SELECT DISTINCT ON(p1.diaobjectid) p1.diaobjectid, p1.ra, p1.dec
+              FROM diaobject_position p1
+              INNER JOIN base_procver_of_procver p1pv ON p1.base_procver_id=p1pv.base_procveR_id
+                                                     AND p1pv.procver_id={pospv}
+              ORDER BY p1.diaobjectid, p1pv.priority DESC
+            ) p ON p.diaobjectid=o.diaobjectid
+            """ ) ).format( pospv=posprocver )
+        con.execute_nofetch( q )
+        nexttable = "tmp_diaobject_with_position"
+
         # Filter by ra and dec if given
         if ra is not None:
             FDBLogger.debug( "Object search filtering by ra/dec" )
             radius = util.float_or_none_from_dict( kwargs, 'radius' )
             radius = radius if radius is not None else 10.
-            # For reasons I don't understand, adding the hint slows this next query down.
-            # q3c / pg_hint_plan interaction weirdness?
-            q = ( # "/*+ IndexScan(o idx_diaobject_q3c) */"
-                  "SELECT DISTINCT ON(diaobjectid) diaobjectid,ra,dec INTO TEMP TABLE objsearch_radeccut\n"
-                  "FROM diaobject o\n" )
+            q = sql.SQL( textwrap.dedent(
+                """
+                SELECT DISTINCT ON(o.diaobjectid) o.diaobjectid,o.ra,o.dec INTO TEMP TABLE objsearch_radeccut
+                FROM {nexttable} o
+                WHERE q3c_radial_query( o.ra, o.dec, %(ra)s, %(dec)s, %(rad)s )
+                ORDER BY diaobjectid
+                """ ) ).format( nexttable=sql.Identifier( nexttable ) )
             if objprocver is not None:
-                q += ( "INNER JOIN base_procver_of_procver pv ON pv.base_procver_id=o.base_procver_id\n"
-                       "  AND pv.procver_id=%(pv)s\n" )
-            q += ( f"WHERE q3c_radial_query( ra, dec, %(ra)s, %(dec)s, %(rad)s )\n"
-                   f"ORDER BY diaobjectid{',pv.priority DESC' if objprocver is not None else ''}\n" )
-            subdict = { 'pv': objprocver, 'ra': ra, 'dec': dec, 'rad': radius/3600. }
+                q += sql.SQL( ", o.prio DESC\n" )
+            subdict = { 'ra': ra, 'dec': dec, 'rad': radius/3600. }
             con.execute_nofetch( q, subdict )
             # ****
             debug_count_temp_table( con, 'objsearch_radeccut' )
@@ -988,31 +1019,38 @@ def object_search( processing_version='default', object_processing_version=None,
                 con.execute_nofetch( f"ALTER TABLE {nexttable} ADD PRIMARY KEY (diaobjectid)",
                                      explain=False, analyze=False )
             subdict = { 'pv': procver, 't0': window_t0, 't1': window_t1 }
-            q = ( f"/*+ IndexScan(s idx_diasource_diaobjectid idx_diasource_mjd) */\n"
-                  f"SELECT diaobjectid, ra, dec, numdetinwindow\n"
-                  f"INTO TEMP TABLE objsearch_windowdet\n"
-                  f"FROM (\n"
-                  f"  SELECT diaobjectid,ra,dec,COUNT(visit) AS numdetinwindow\n"
-                  f"  FROM (\n"
-                  f"    SELECT DISTINCT ON (o.diaobjectid,s.visit) o.diaobjectid, o.ra, o.dec, s.visit\n"
-                  f"    FROM {nexttable} o\n"
-                  f"    INNER JOIN diasource s ON s.diaobjectid=o.diaobjectid \n"
-                  f"    INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id\n"
-                  f"           AND pv.procver_id=%(pv)s\n"
-                  f"    WHERE s.midpointmjdtai>=%(t0)s AND s.midpointmjdtai<=%(t1)s\n"
-                  f"    ORDER BY o.diaobjectid, s.visit, pv.priority DESC\n" )
+            q = sql.SQL( textwrap.dedent(
+                """
+                /*+ IndexScan(s idx_diasource_diaobjectid idx_diasource_mjd) */
+                SELECT diaobjectid, ra, dec, numdetinwindow
+                INTO TEMP TABLE objsearch_windowdet
+                FROM (
+                  SELECT diaobjectid,ra,dec,COUNT(visit) AS numdetinwindow
+                  FROM (
+                    SELECT DISTINCT ON (o.diaobjectid,s.visit) o.diaobjectid, o.ra, o.dec, s.visit
+                    FROM {nexttable} o
+                    INNER JOIN diasource s ON s.diaobjectid=o.diaobjectid
+                    INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id
+                           AND pv.procver_id=%(pv)s
+                    WHERE s.midpointmjdtai>=%(t0)s AND s.midpointmjdtai<=%(t1)s
+                    ORDER BY o.diaobjectid, s.visit, pv.priority DESC
+                """ ) ).format( nexttable=sql.Identifier(nexttable) )
             if statbands is not None:
-                q += "     AND s.band=ANY(%(bands)s)\n"
-            q += ( "  ) subsubq\n"
-                   "  GROUP BY diaobjectid, ra, dec\n"
-                   ") subq\n" )
+                q += sql.SQL( " AND s.band=ANY(%(bands)s)\n" )
+                subdict['bands'] = statbands
+            q += sql.SQL( textwrap.dedent(
+                """
+                  ) subsubq
+                  GROUP BY diaobjectid, ra, dec
+                ) subq
+                """ ) )
             _and = "WHERE"
             if min_window_numdetections is not None:
-                q += f"{_and} numdetinwindow>=%(minn)s\n"
+                q += sql.SQL( f"{_and} numdetinwindow>=%(minn)s" )
                 subdict['minn'] = min_window_numdetections
                 _and = "  AND"
             if max_window_numdetections is not None:
-                q += f"{_and} numdetinwindow<=%(maxn)s\n"
+                q += sql.SQL( f"{_and} numdetinwindow<=%(maxn)s" )
                 subdict['maxn'] = max_window_numdetections
                 _and = "  AND"
             con.execute_nofetch( q, subdict )
@@ -1021,7 +1059,6 @@ def object_search( processing_version='default', object_processing_version=None,
             # ****
             nexttable = 'objsearch_windowdet'
             addlfields.append( "numdetinwindow" )
-
 
         # First pass cut that has *any* detection with (min(minfirst,minlast) < t < max(maxfirst,maxlast)
         #   to try to cut down the total size of stuff to think about in our next big join
@@ -1034,35 +1071,38 @@ def object_search( processing_version='default', object_processing_version=None,
                 raise RuntimeError( "maxt_lastdetection > mint_firstdetection, which makes no sense." )
             FDBLogger.debug( "Object search doing first rough cut on detection times" )
             subdict = { 'pv': procver }
-            q = ( "/*+ IndexScan(s idx_diasource_diaobjectid idx_diasource_mjd) */\n"
-                  "SELECT * INTO TEMP TABLE objsearch_detcut FROM (\n"
-                  "  SELECT DISTINCT ON (o.diaobjectid) o.diaobjectid,o.ra,o.dec" )
-            if len(addlfields) > 0:
-                q += f",{','.join( [f'o.{x}' for x in addlfields] )}\n"
-            else:
-                q += "\n"
-            q += ( f"  FROM {nexttable} o\n"
-                   f"  INNER JOIN diasource s ON o.diaobjectid=s.diaobjectid\n"
-                   f"  INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id\n"
-                   f"    AND pv.procver_id=%(pv)s\n" )
+            q = sql.SQL( textwrap.dedent(
+                """
+                /*+ IndexScan(s idx_diasource_diaobjectid idx_diasource_mjd) */
+                SELECT * INTO TEMP TABLE objsearch_detcut FROM (
+                  SELECT DISTINCT ON (o.diaobjectid) o.diaobjectid,o.ra,o.dec""" ) )
+            for f in addlfields:
+                q += sql.SQL( "," ) + sql.Identifier( 'o', f )
+            q += sql.SQL( textwrap.dedent(
+                """
+                  FROM {nexttable} o
+                  INNER JOIN diasource s ON o.diaobjectid=s.diaobjectid
+                  INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id
+                    AND pv.procver_id=%(pv)s
+                """ ) ).format( nexttable=sql.Identifier( nexttable ) )
             _and = "WHERE"
             if ( mint_firstdetection is not None ) or ( mint_lastdetection is not None ):
-                q += f"  {_and} s.midpointmjdtai>=%(mint)s\n"
+                q += sql.SQL( f"  {_and} s.midpointmjdtai>=%(mint)s" )
                 subdict['mint'] = ( mint_firstdetection if mint_lastdetection is None
                                     else mint_lastdetection if mint_firstdetection is None
                                     else min( mint_firstdetection, mint_lastdetection ) )
                 _and = "  AND"
             if ( maxt_firstdetection is not None ) or ( maxt_lastdetection is not None ):
-                q += f"  {_and} s.midpointmjdtai<=%(maxt)s\n"
+                q += sql.SQL( f"  {_and} s.midpointmjdtai<=%(maxt)s\n" )
                 subdict['maxt'] = ( maxt_firstdetection if maxt_lastdetection is None
                                     else maxt_lastdetection if maxt_firstdetection is None
                                     else max( maxt_firstdetection, maxt_lastdetection ) )
                 _and = "  AND"
             if statbands is not None:
-                q += f"  {_and} s.band=ANY(%(bands)s)\n"
+                q += sql.SQL( f"  {_and} s.band=ANY(%(bands)s)\n" )
                 subdict['bands'] = statbands
-            q += ( "  ORDER BY o.diaobjectid\n"           # , s.visit, pv.priority DESC\n"
-                   ") subq\n" )
+            q += sql.SQL( "  ORDER BY o.diaobjectid\n"           # , s.visit, pv.priority DESC\n"
+                          ") subq\n" )
             con.execute_nofetch( q, subdict )
             # ****
             debug_count_temp_table( con, 'objsearch_detcut' )
@@ -1100,140 +1140,170 @@ def object_search( processing_version='default', object_processing_version=None,
 
         # First: build the table, put in first detection
         FDBLogger.debug( "Object search making stat tab with first detection" )
-        q = ( "/*+ IndexScan(s idx_diasource_diaobjectid)\n"
-              "    Leading( ( (o s) pv ) ) */\n"
-              "SELECT * INTO TEMP TABLE objsearch_stattab FROM (\n"
-              "  SELECT DISTINCT ON (diaobjectid)\n"
-              "         diaobjectid,ra,dec,\n" )
-        if len(addlfields) > 0:
-            q += f"         {','.join(addlfields)},\n"
-        q += ( "         NULL::integer as numdet,\n"
-               "         midpointmjdtai AS firstdetmjd, band AS firstdetband,\n"
-               "         psfflux AS firstdetflux, psffluxerr AS firstdetfluxerr,\n"
-               "         NULL::double precision as lastdetmjd, NULL::text as lastdetband,\n"
-               "         NULL::double precision as lastdetflux, NULL::double precision as lastdetfluxerr,\n"
-               "         NULL::double precision as maxdetmjd, NULL::text as maxdetband,\n"
-               "         NULL::double precision as maxdetflux, NULL::double precision as maxdetfluxerr\n"
-               "  FROM (\n"
-               "    SELECT diaobjectid, ra, dec, midpointmjdtai, band, psfflux, psffluxerr\n" )
-        if len(addlfields) > 0:
-            q += f"           ,{','.join(addlfields)}\n"
-        q += ( "    FROM (\n"
-               "      SELECT DISTINCT ON (o.diaobjectid,s.visit) o.diaobjectid, o.ra, o.dec,\n"
-               "                                                 s.midpointmjdtai, s.band, s.psfflux, s.psffluxerr\n"
-              )
-        if len(addlfields) > 0:
-            q += f"           ,{','.join( [ f'o.{x}' for x in addlfields ] )}\n"
-        q += ( f"      FROM {nexttable} o\n"
-               f"      INNER JOIN diasource s ON o.diaobjectid=s.diaobjectid\n"
-               f"      INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id\n"
-               f"        AND pv.procver_id=%(pv)s\n" )
+        q = sql.SQL( textwrap.dedent(
+            """
+            /*+ IndexScan(s idx_diasource_diaobjectid)
+                Leading( ( (o s) pv ) ) */
+            SELECT * INTO TEMP TABLE objsearch_stattab FROM (
+              SELECT DISTINCT ON (diaobjectid)
+                     diaobjectid,ra,dec""" ) )
+        for f in addlfields:
+            q += sql.SQL(",") + sql.Identifier( f )
+        q += sql.SQL( textwrap.dedent(
+            """,
+                     NULL::integer as numdet,
+                     midpointmjdtai AS firstdetmjd, band AS firstdetband,
+                     psfflux AS firstdetflux, psffluxerr AS firstdetfluxerr,
+                     NULL::double precision as lastdetmjd, NULL::text as lastdetband,
+                     NULL::double precision as lastdetflux, NULL::double precision as lastdetfluxerr,
+                     NULL::double precision as maxdetmjd, NULL::text as maxdetband,
+                     NULL::double precision as maxdetflux, NULL::double precision as maxdetfluxerr
+              FROM (
+                SELECT diaobjectid, ra, dec, midpointmjdtai, band, psfflux, psffluxerr""" ) )
+        for f in addlfields:
+            q += sql.SQL( ", " ) + sql.Identifier( f )
+        q += sql.SQL( textwrap.dedent(
+            """
+                FROM (
+                  SELECT DISTINCT ON (o.diaobjectid,s.visit) o.diaobjectid, o.ra, o.dec,
+                    s.midpointmjdtai, s.band, s.psfflux, s.psffluxerr""" ) )
+        for f in addlfields:
+            q += sql.SQL( ", " ) + sql.Identifier( 'o', f )
+        q += sql.SQL( textwrap.dedent(
+            """
+                  FROM {nexttable} o
+                  INNER JOIN diasource s ON o.diaobjectid=s.diaobjectid
+                  INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id
+                    AND pv.procver_id=%(pv)s\
+            """ ) ).format( nexttable=sql.Identifier(nexttable) )
         _and = "WHERE"
         if statbands is not None:
             subdict['bands'] = statbands
-            q += f"      {_and} s.band=ANY(%(bands)s)\n"
+            q += sql.SQL( f"      {_and} s.band=ANY(%(bands)s)\n" )
             _and = "  AND"
         if mjd_now is not None:
             subdict['mjdnow'] = mjd_now
-            q += f"      {_and} s.midpointmjdtai<=%(mjdnow)s\n"
+            q += sql.SQL( f"      {_and} s.midpointmjdtai<=%(mjdnow)s\n" )
             _and = "  AND"
-        q += ( "      ORDER BY o.diaobjectid, s.visit, pv.priority DESC\n"
-               "    ) subsubq\n"
-               "    ORDER BY diaobjectid, midpointmjdtai\n"
-               "  ) subq\n"
-               ") outersubq" )
+        q += sql.SQL( textwrap.dedent(
+            """
+                  ORDER BY o.diaobjectid, s.visit, pv.priority DESC
+                ) subsubq
+                ORDER BY diaobjectid, midpointmjdtai
+              ) subq
+            ) outersubq
+            """ ) )
         con.execute_nofetch( q, subdict )
 
         # Analyze the objsearch_stattab table to help postgres do the right thing.
         FDBLogger.debug( f"Object search analyzing diaobjectid on {nexttable}" )
-        con.execute( f"ANALYZE {nexttable}(diaobjectid)", explain=False )
+        con.execute( sql.SQL( "ANALYZE {nexttable}(diaobjectid)" ).format(nexttable=sql.Identifier(nexttable)),
+                     explain=False )
 
         # Add in last detection
         FDBLogger.debug( "Object search adding last detection to stat tab" )
-        q = ( f"/*+ IndexScan(s idx_diasource_diaobjectid)\n"
-              f"    Leading( ( (o s) pv ) ) */\n"
-              f"UPDATE objsearch_stattab ost\n"
-              f"SET lastdetmjd=midpointmjdtai, lastdetband=band,\n"
-              f"    lastdetflux=psfflux, lastdetfluxerr=psffluxerr\n"
-              f"FROM (\n"
-              f"  SELECT DISTINCT ON (diaobjectid) diaobjectid, midpointmjdtai, band, psfflux, psffluxerr\n"
-              f"  FROM (\n"
-              f"    SELECT DISTINCT ON (o.diaobjectid, s.visit) o.diaobjectid, s.midpointmjdtai,\n"
-              f"                                                s.band, s.psfflux, s.psffluxerr\n"
-              f"    FROM {nexttable} o\n"
-              f"    INNER JOIN diasource s ON o.diaobjectid=s.diaobjectid\n"
-              f"    INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id\n"
-              f"      AND pv.procver_id=%(pv)s\n" )
+        q = sql.SQL( textwrap.dedent(
+            """
+            /*+ IndexScan(s idx_diasource_diaobjectid)
+                Leading( ( (o s) pv ) ) */
+            UPDATE objsearch_stattab ost
+            SET lastdetmjd=midpointmjdtai, lastdetband=band,
+                lastdetflux=psfflux, lastdetfluxerr=psffluxerr
+            FROM (
+              SELECT DISTINCT ON (diaobjectid) diaobjectid, midpointmjdtai, band, psfflux, psffluxerr
+              FROM (
+                SELECT DISTINCT ON (o.diaobjectid, s.visit) o.diaobjectid, s.midpointmjdtai,
+                                                            s.band, s.psfflux, s.psffluxerr
+                FROM {nexttable} o
+                INNER JOIN diasource s ON o.diaobjectid=s.diaobjectid
+                INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id
+                  AND pv.procver_id=%(pv)s\n
+            """ ) ).format( nexttable=sql.Identifier( nexttable ) )
         _and = "WHERE"
         if statbands is not None:
-            q += f"    {_and} s.band=ANY(%(bands)s)\n"
+            q += sql.SQL( f"    {_and} s.band=ANY(%(bands)s)\n" )
             _and = "  AND"
         if mjd_now is not None:
-            q += f"    {_and} s.midpointmjdtai<=%(mjdnow)s\n"
+            q += sql.SQL( f"    {_and} s.midpointmjdtai<=%(mjdnow)s\n" )
             _and = "  AND"
-        q += ( "    ORDER BY o.diaobjectid, s.visit, pv.priority DESC\n"
-               "  ) subsubq\n"
-               "  ORDER BY diaobjectid, midpointmjdtai DESC\n"
-               ") subq\n"
-               "WHERE subq.diaobjectid=ost.diaobjectid" )
+        q += sql.SQL( textwrap.dedent(
+            """
+                ORDER BY o.diaobjectid, s.visit, pv.priority DESC
+              ) subsubq
+              ORDER BY diaobjectid, midpointmjdtai DESC
+            ) subq
+            WHERE subq.diaobjectid=ost.diaobjectid
+            """ ) )
         con.execute_nofetch( q, subdict )
 
         # Add in max detection
         FDBLogger.debug( "Object search adding max detection to stat tab" )
-        q = ( f"/*+ IndexScan(s idx_diasource_diaobjectid)\n"
-              f"    Leading( ( ( o s ) pv ) ) */\n"
-              f"UPDATE objsearch_stattab ost\n"
-              f"SET maxdetmjd=midpointmjdtai, maxdetband=band,\n"
-              f"    maxdetflux=psfflux, maxdetfluxerr=psffluxerr\n"
-              f"FROM (\n"
-              f"  SELECT DISTINCT ON (diaobjectid) diaobjectid, midpointmjdtai, band, psfflux, psffluxerr\n"
-              f"  FROM (\n"
-              f"    SELECT DISTINCT ON (o.diaobjectid, s.visit) o.diaobjectid, s.midpointmjdtai,\n"
-              f"                                                s.band, s.psfflux, s.psffluxerr\n"
-              f"    FROM {nexttable} o\n"
-              f"    INNER JOIN diasource s ON o.diaobjectid=s.diaobjectid\n"
-              f"    INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id\n"
-              f"      AND pv.procver_id=%(pv)s\n" )
+        q = sql.SQL( textwrap.dedent(
+            """
+            /*+ IndexScan(s idx_diasource_diaobjectid)
+                Leading( ( ( o s ) pv ) ) */
+            UPDATE objsearch_stattab ost
+            SET maxdetmjd=midpointmjdtai, maxdetband=band,
+                maxdetflux=psfflux, maxdetfluxerr=psffluxerr
+            FROM (
+              SELECT DISTINCT ON (diaobjectid) diaobjectid, midpointmjdtai, band, psfflux, psffluxerr
+              FROM (
+                SELECT DISTINCT ON (o.diaobjectid, s.visit) o.diaobjectid, s.midpointmjdtai,
+                                                            s.band, s.psfflux, s.psffluxerr
+                FROM {nexttable} o
+                INNER JOIN diasource s ON o.diaobjectid=s.diaobjectid
+                INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id
+                  AND pv.procver_id=%(pv)s
+            """ ) ).format( nexttable=sql.Identifier( nexttable ) )
         _and = "WHERE"
         if statbands is not None:
-            q += f"    {_and} s.band=ANY(%(bands)s)\n"
+            q += sql.SQL( f"    {_and} s.band=ANY(%(bands)s)\n" )
             _and = "  AND"
         if mjd_now is not None:
-            q += f"    {_and} s.midpointmjdtai<=%(mjdnow)s\n"
+            q += sql.SQL( f"    {_and} s.midpointmjdtai<=%(mjdnow)s\n" )
             _and = "  AND"
-        q += ( "    ORDER BY o.diaobjectid, s.visit, pv.priority DESC\n"
-               "  ) subsubq\n"
-               "  ORDER BY diaobjectid, psfflux DESC\n"
-               ") subq\n"
-               "WHERE subq.diaobjectid=ost.diaobjectid" )
+        q += sql.SQL( textwrap.dedent(
+            """
+                ORDER BY o.diaobjectid, s.visit, pv.priority DESC
+              ) subsubq
+              ORDER BY diaobjectid, psfflux DESC
+            ) subq
+            WHERE subq.diaobjectid=ost.diaobjectid
+            """ ) )
         con.execute_nofetch( q, subdict )
 
         # Add in number of detections
         FDBLogger.debug( "Object search adding detection count to stat tab" )
-        q = ( f"/*+ IndexScan(s idx_diasource_diaobjectid)\n"
-              f"    Leading( ( (o s) pv ) ) */\n"
-              f"UPDATE objsearch_stattab o\n"
-              f"SET numdet=n "
-              f"FROM (\n"
-              f"  SELECT diaobjectid, COUNT(visit) AS n\n"
-              f"  FROM (\n"
-              f"    SELECT DISTINCT ON (o.diaobjectid, s.visit) o.diaobjectid, s.visit\n"
-              f"    FROM {nexttable} o\n"
-              f"    INNER JOIN diasource s ON s.diaobjectid=o.diaobjectid\n"
-              f"    INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id\n"
-              f"      AND pv.procver_id=%(pv)s\n" )
+        q = sql.SQL( textwrap.dedent(
+            """
+            /*+ IndexScan(s idx_diasource_diaobjectid)
+                Leading( ( (o s) pv ) ) */
+            UPDATE objsearch_stattab o
+            SET numdet=n
+            FROM (
+              SELECT diaobjectid, COUNT(visit) AS n
+              FROM (
+                SELECT DISTINCT ON (o.diaobjectid, s.visit) o.diaobjectid, s.visit
+                FROM {nexttable} o
+                INNER JOIN diasource s ON s.diaobjectid=o.diaobjectid
+                INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id
+                  AND pv.procver_id=%(pv)s
+            """ ) ).format( nexttable=sql.Identifier( nexttable ) )
         _and = "WHERE"
         if statbands is not None:
-            q += f"    {_and} s.band=ANY(%(bands)s)\n"
+            q += sql.SQL( f"    {_and} s.band=ANY(%(bands)s)\n" )
             _and = "  AND"
         if mjd_now is not None:
-            q += f"    {_and} s.midpointmjdtai<=%(mjdnow)s\n"
+            q += sql.SQL( f"    {_and} s.midpointmjdtai<=%(mjdnow)s\n" )
             _and = "  AND"
-        q += ( "    ORDER BY o.diaobjectid, s.visit, pv.priority DESC\n"
-               "  ) subsubq\n"
-               "  GROUP BY diaobjectid\n"
-               ") subq\n"
-               "WHERE subq.diaobjectid=o.diaobjectid" )
+        q += sql.SQL( textwrap.dedent(
+            """
+                ORDER BY o.diaobjectid, s.visit, pv.priority DESC
+              ) subsubq
+              GROUP BY diaobjectid
+            ) subq
+            WHERE subq.diaobjectid=o.diaobjectid
+            """ ) )
         con.execute_nofetch( q, subdict )
         # ****
         debug_count_temp_table( con, 'objsearch_stattab' )
@@ -1327,32 +1397,38 @@ def object_search( processing_version='default', object_processing_version=None,
             con.execute( f"ANALYZE {nexttable}(diaobjectid)", explain=False )
 
             # Get the last forced source
-            q = ( f"/*+ IndexScan(f idx_diaforcedsource_diaobjectid )\n"
-                  # f"    HashJoin( f t )\n"
-                  f"    Leading( ( (f t) pv ) )\n"
-                  f"    Parallel( f 3 hard )\n"
-                  f"*/\n"
-                  f"SELECT * INTO TEMP TABLE objsearch_final FROM (\n"
-                  f"  SELECT DISTINCT ON (diaobjectid) *\n"
-                  f"  FROM (\n"
-                  f"    SELECT DISTINCT ON (t.diaobjectid, f.visit) t.*,\n"
-                  f"        f.psfflux AS lastforcedflux, f.psffluxerr AS lastforcedfluxerr,\n"
-                  f"        f.midpointmjdtai AS lastforcedmjd, f.band AS lastforcedband\n"
-                  f"    FROM {nexttable} t\n"
-                  f"    INNER JOIN diaforcedsource f ON f.diaobjectid=t.diaobjectid\n"
-                  f"    INNER JOIN base_procver_of_procver pv ON f.base_procver_id=pv.base_procver_id\n"
-                  f"      AND pv.procver_id=%(pv)s\n" )
+            # NOTE: I had a HashJoin( f t ) in here that I removed
+            q = sql.SQL( textwrap.dedent(
+                """
+                /*+ IndexScan(f idx_diaforcedsource_diaobjectid )
+                    Leading( ( (f t) pv ) )
+                    Parallel( f 3 hard )
+                */
+                SELECT * INTO TEMP TABLE objsearch_final FROM (
+                  SELECT DISTINCT ON (diaobjectid) *
+                  FROM (
+                    SELECT DISTINCT ON (t.diaobjectid, f.visit) t.*,
+                        f.psfflux AS lastforcedflux, f.psffluxerr AS lastforcedfluxerr,
+                        f.midpointmjdtai AS lastforcedmjd, f.band AS lastforcedband
+                    FROM {nexttable} t
+                    INNER JOIN diaforcedsource f ON f.diaobjectid=t.diaobjectid
+                    INNER JOIN base_procver_of_procver pv ON f.base_procver_id=pv.base_procver_id
+                      AND pv.procver_id=%(pv)s
+                """ ) ).format( nexttable=sql.Identifier( nexttable ) )
             _and = "WHERE"
             if statbands is not None:
-                q += f"    {_and} f.band=ANY(%(bands)s)\n"
+                q += sql.SQL( f"    {_and} f.band=ANY(%(bands)s)\n" )
                 _and = "  AND"
             if mjd_now is not None:
-                q += f"    {_and} f.midpointmjdtai<=%(mjdnow)s\n"
+                q += sql.SQL( f"    {_and} f.midpointmjdtai<=%(mjdnow)s\n" )
                 _and = "  AND"
-            q += ( "    ORDER BY t.diaobjectid, f.visit, pv.priority DESC\n"
-                   "  ) subsubq\n"
-                   "  ORDER BY diaobjectid, lastforcedmjd DESC\n"
-                   ") subq" )
+            q += sql.SQL( textwrap.dedent(
+                """
+                    ORDER BY t.diaobjectid, f.visit, pv.priority DESC
+                  ) subsubq
+                  ORDER BY diaobjectid, lastforcedmjd DESC
+                ) subq
+                """ ) )
             con.execute_nofetch( q, subdict )
             debug_count_temp_table( con, 'objsearch_final' )
 

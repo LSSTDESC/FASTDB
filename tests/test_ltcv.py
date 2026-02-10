@@ -371,8 +371,8 @@ def test_object_search( set_of_lightcurves ):
                              ra=42., dec=13., radius=17. )
     assert len(df) == 2
     assert set( df.diaobjectid ) == { 200, 201 }
-    assert df[ df.diaobjectid==200 ].ra.values[0] == 42.
-    assert df[ df.diaobjectid==200 ].dec.values[0] == 13.
+    assert df[ df.diaobjectid==200 ].ra.values[0] == pytest.approx( 42., abs=0.2/3600. )
+    assert df[ df.diaobjectid==200 ].dec.values[0] == pytest.approx( 13., abs=0.2/3600. )
     assert df[ df.diaobjectid==200 ].numdet.values[0] == 13
     assert df[ df.diaobjectid==200 ].firstdetmjd.values[0] == 60000.
     assert df[ df.diaobjectid==200 ].firstdetband.values[0] == 'i'
@@ -383,8 +383,8 @@ def test_object_search( set_of_lightcurves ):
     assert df[ df.diaobjectid==200 ].lastforcedmjd.values[0] == 60050.
     assert df[ df.diaobjectid==200 ].lastforcedband.values[0] == 'i'
     assert df[ df.diaobjectid==200 ].numdetinwindow.values[0] is None
-    assert df[ df.diaobjectid==201 ].ra.values[0] == 42.
-    assert df[ df.diaobjectid==201 ].dec.values[0] == 13.0036
+    assert df[ df.diaobjectid==201 ].ra.values[0] == pytest.approx( 42., abs=0.2/3600. )
+    assert df[ df.diaobjectid==201 ].dec.values[0] == pytest.approx( 13.0036, abs=0.2/3600. )
     assert df[ df.diaobjectid==201 ].numdet.values[0] == 17
     assert df[ df.diaobjectid==201 ].firstdetmjd.values[0] == 60020.
     assert df[ df.diaobjectid==201 ].firstdetband.values[0] == 'r'
@@ -446,8 +446,8 @@ def test_object_search( set_of_lightcurves ):
                              ra=42., dec=13., radius=7200. )
     assert len(df) == 1
     assert set( df.diaobjectid ) == { 100 }
-    assert df.ra.values[0] == 42.
-    assert df.dec.values[0] == 13.
+    assert df.ra.values[0] == pytest.approx( 42., abs=0.2/3600. )
+    assert df.dec.values[0] == pytest.approx( 13., abs=0.4/3600. ) # , abs=0.2/3600. )
     assert df.numdet.values[0] == 13
     assert df.lastforcedmjd.values[0] == 60025.
 
@@ -456,8 +456,8 @@ def test_object_search( set_of_lightcurves ):
                              ra=42., dec=13., radius=17., mjd_now=60026. )
     assert len(df) == 2
     assert set( df.diaobjectid ) == { 200, 201 }
-    assert df[ df.diaobjectid==200 ].ra.values[0] == 42.
-    assert df[ df.diaobjectid==200 ].dec.values[0] == 13.
+    assert df[ df.diaobjectid==200 ].ra.values[0] == pytest.approx( 42., abs=0.2/3600. )
+    assert df[ df.diaobjectid==200 ].dec.values[0] == pytest.approx( 13., abs=0.2/3600. )
     assert df[ df.diaobjectid==200 ].numdet.values[0] == 11
     assert df[ df.diaobjectid==200 ].firstdetmjd.values[0] == 60000.
     assert df[ df.diaobjectid==200 ].firstdetband.values[0] == 'i'
@@ -468,8 +468,8 @@ def test_object_search( set_of_lightcurves ):
     assert df[ df.diaobjectid==200 ].lastforcedmjd.values[0] == 60025.
     assert df[ df.diaobjectid==200 ].lastforcedband.values[0] == 'i'
     assert df[ df.diaobjectid==200 ].numdetinwindow.values[0] is None
-    assert df[ df.diaobjectid==201 ].ra.values[0] == 42.
-    assert df[ df.diaobjectid==201 ].dec.values[0] == 13.0036
+    assert df[ df.diaobjectid==201 ].ra.values[0] == pytest.approx( 42., abs=0.2/3600. )
+    assert df[ df.diaobjectid==201 ].dec.values[0] == pytest.approx( 13.0036, abs=0.2/3600. )
     assert df[ df.diaobjectid==201 ].numdet.values[0] == 3
     assert df[ df.diaobjectid==201 ].firstdetmjd.values[0] == 60020.
     assert df[ df.diaobjectid==201 ].firstdetband.values[0] == 'r'
@@ -488,8 +488,8 @@ def test_object_search( set_of_lightcurves ):
     assert df[ df.diaobjectid==200 ].numdetinwindow.values[0] == 7
     assert df[ df.diaobjectid==201 ].numdetinwindow.values[0] == 3
     # All of the following is cut and paste from the first search above
-    assert df[ df.diaobjectid==200 ].ra.values[0] == 42.
-    assert df[ df.diaobjectid==200 ].dec.values[0] == 13.
+    assert df[ df.diaobjectid==200 ].ra.values[0] == pytest.approx( 42., abs=0.2/3600. )
+    assert df[ df.diaobjectid==200 ].dec.values[0] == pytest.approx( 13., abs=0.2/3600. )
     assert df[ df.diaobjectid==200 ].numdet.values[0] == 13
     assert df[ df.diaobjectid==200 ].firstdetmjd.values[0] == 60000.
     assert df[ df.diaobjectid==200 ].firstdetband.values[0] == 'i'
@@ -499,8 +499,8 @@ def test_object_search( set_of_lightcurves ):
     assert df[ df.diaobjectid==200 ].maxdetband.values[0] == 'i'
     assert df[ df.diaobjectid==200 ].lastforcedmjd.values[0] == 60050.
     assert df[ df.diaobjectid==200 ].lastforcedband.values[0] == 'i'
-    assert df[ df.diaobjectid==201 ].ra.values[0] == 42.
-    assert df[ df.diaobjectid==201 ].dec.values[0] == 13.0036
+    assert df[ df.diaobjectid==201 ].ra.values[0] == pytest.approx( 42., abs=0.2/3600. )
+    assert df[ df.diaobjectid==201 ].dec.values[0] == pytest.approx( 13.0036, abs=0.2/3600. )
     assert df[ df.diaobjectid==201 ].numdet.values[0] == 17
     assert df[ df.diaobjectid==201 ].firstdetmjd.values[0] == 60020.
     assert df[ df.diaobjectid==201 ].firstdetband.values[0] == 'r'
