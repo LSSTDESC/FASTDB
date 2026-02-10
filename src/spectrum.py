@@ -15,7 +15,8 @@ import util
 _show_way_too_much_debug_info = False
 
 
-def what_spectra_are_wanted( procver='realtime', wantsince=None, requester=None, notclaimsince=None,
+def what_spectra_are_wanted( procver='realtime', position_procver=None,
+                             wantsince=None, requester=None, notclaimsince=None,
                              nospecsince=None, detsince=None, lim_mag=None, lim_mag_band=None,
                              mjdnow=None, logger=None ):
     """Find out what spectra have been requested.
@@ -47,6 +48,10 @@ def what_spectra_are_wanted( procver='realtime', wantsince=None, requester=None,
         there isn't any photometry of this processing version, will look
         for the object of this processing version.  If there's no object
         either, then that's an error.
+
+      position_procver : str, default None
+        The processing version for diaobject positions.  If not given,
+        will use what was passed in procver.
 
       wantsince : datetime or None
         If not None, only get spectra that have been requested since this time.

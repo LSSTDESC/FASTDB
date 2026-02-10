@@ -634,8 +634,6 @@ def test_object_search( set_of_lightcurves ):
 
 
 def test_get_hot_ltcvs( set_of_lightcurves ):
-    # TODO : test hostdf (fixture doesn't currently load any hosts)
-
     # ...not sure how to test this without mjd_now since it uses the current time,
     #    and that will be different based on when this is run
 

@@ -1470,7 +1470,8 @@ def object_search( processing_version='default', object_processing_version=None,
         raise RuntimeError( "This should never happen." )
 
 
-def get_hot_ltcvs( processing_version, detected_since_mjd=None, detected_in_last_days=None,
+def get_hot_ltcvs( processing_version, position_procesing_version=None, always_use_weighted_source_positions=False,
+                   detected_since_mjd=None, detected_in_last_days=None,
                    mjd_now=None, source_patch=False, include_hostinfo=False, host_processing_version=None,
                    object_processing_version=None, dbcon=None ):
     """Get lightcurves of objects with a recent detection.
@@ -1481,6 +1482,17 @@ def get_hot_ltcvs( processing_version, detected_since_mjd=None, detected_in_last
         The description of the processing version, or processing version
         alias, to use for searching diasource and diaforcedsource tables.
 
+      position_procesing_version: string, default None
+        Ignored if always_use_weighted_source_positions is True.
+        The processing version for getting object positions.  If not
+        given, will use processing_version.  Where positions aren't
+        found, some kind of weighted average of the positions for all
+        the objects will be used.
+
+      always_use_weighted_source_positions: bool, default False
+        Don't bother searching for object positions, but calculate them
+        from a (S/N)^2 weighted average of the positions of the sources.
+    
       detected_since_mjd: float, default None
         If given, will search for all objects detected (i.e. with an
         entry in the diasource table) since this mjd.
@@ -1513,12 +1525,12 @@ def get_hot_ltcvs( processing_version, detected_since_mjd=None, detected_in_last
         but *not* for any kind of precision photometry or lightcurve fitting.
 
       include_hostinfo : bool, default False
-        If true, return a second data frame with information about the hosts.
+        If True, return a second data frame with information about the
+        hosts.  WARNING: host extraction is not currently supported.  If
+        you set this to True, an exception will be raised.
 
       host_processing_version : str, default None
-        WARNING : not currently supported.  Right now, it just assumes
-        the base processing version of the host is the same as that of
-        the diaobject.
+        WARNING : host extraction is not currently supported.
 
       dbcon: psycopg.Connection, db.DBCon, or None
          Database connection to use.  If None, will make a new
@@ -1543,35 +1555,17 @@ def get_hot_ltcvs( processing_version, detected_since_mjd=None, detected_in_last
 
         objinfo: pandas.DataFrame
            Information about the objects.  Sorted and indexed by diaobjectid,
-           with all the columns from diaobject.
+           with the columns that get_object_infos returns
 
-        hostdf: pandas.DataFrame or None
-           If include_hostinfo is True, then this is a dataframe indexed by diaobjectid with the following columns:
-           the following columns
-
-             id -- UUID, the unique UUID primary key of the host galaxy
-             objectid -- the objectid of the host galaxy
-             base_procver_id -- the processing version of the host galaxy.
-             stdcolor_u_g -- "standard" colors as (not really) defined by the DPDD, in AB mags
-             stdcolor_g_r --
-             stdcolor_r_i --
-             stdcolor_i_z --
-             stdcolor_z_y --
-             stdcolor_u_g_err -- uncertainty on standard colors
-             stdcolor_g_r_err --
-             stdcolor_r_i_err --
-             stdcolor_i_z_err --
-             stdcolor_z_y_err --
-             petroflux_r -- the flux in nJy within some standard multiple of the petrosian radius
-             petroflux_r_err -- uncertainty on petroflux_r
-             nearbyextobj1sep -- "Second moment-based separation of nearbyExtObj1 (unitless)" [????]
-                                 For SNANA-based sims, this is ROB FIGURE THIS OUT
-             pzmean -- mean photoredshift (nominally from the "photoZ_pest" column of the DPD Object table)
-             pzstd -- standard deviation of photoredshift (also nominally from "photoZ_pest")
+        hostdf: None
+           NOT CURRENTLY SUPPORTED.
 
     """
 
     mjd0 = None
+
+    if include_hostinfo:
+        raise NotImplementedError( "Error, getting host info is not currently supported." )
 
     if host_processing_version is not None:
         raise NotImplementedError( "Error, host processing version is not currently supported." )
@@ -1593,14 +1587,15 @@ def get_hot_ltcvs( processing_version, detected_since_mjd=None, detected_in_last
         mjd0 = astropy.time.Time( datetime.datetime.now( tz=datetime.UTC )
                                   - datetime.timedelta( days=lastdays ) ).mjd
 
-    bands = [ 'u', 'g', 'r', 'i', 'z', 'y' ]
-
     with db.DBCon( dbcon ) as con:
         procver = util.procver_id( processing_version, dbcon=con.con )
 
         # First : get a table of all the object ids (root object ids)
         #   that have a detection (i.e. a diasource) in the
-        #   desired time period.
+        #   desired time period.  Note that if there are multiple
+        #   base processing versions for the desired processing version,
+        #   they will all be included, but that's not a big deal because
+        #   we're distincting on objectid anyway.
 
         q = ( "/*+ IndexScan(s idx_diasource_mjd) */\n"
               "SELECT DISTINCT ON(s.diaobjectid) s.diaobjectid\n"
@@ -1617,29 +1612,24 @@ def get_hot_ltcvs( processing_version, detected_since_mjd=None, detected_in_last
         # Second: pull out the object info for these objects
         objdf = get_object_infos( objids_table='tmp_objids', dbcon=con, return_format='pandas' )
 
-        # Third : pull out host info for those objects if requested
-        # TODO : right now it just pulls out nearby extended object 1.
-        # make it configurable to get up to all three.
-        # TODO : is distinct on objectid the right thing to do?
-        # TODO : think about host processing versions!  Issue #64
+        # Third: get the host stuff
         hostdf = None
-        if include_hostinfo:
-            q = "SELECT o.diaobjectid,\n"
-            for bandi in range( len(bands)-1 ):
-                q += ( f"       h.stdcolor_{bands[bandi]}_{bands[bandi+1]},"
-                       f"h.stdcolor_{bands[bandi]}_{bands[bandi+1]}_err,\n" )
-            q += ( "       h.petroflux_r, h.petroflux_r_err, o.nearbyextobj1sep, h.pzmean, h.pzstd\n"
-                   "FROM tmp_objids t\n"
-                   "INNER JOIN diaobject o ON t.diaobjectid=o.diaobjectid\n"
-                   "LEFT JOIN host_galaxy h ON o.nearbyextobj1id=h.objectid\n"
-                   "                       AND o.base_procver_id=h.base_procver_id\n"
-                   "ORDER BY o.diaobjectid" )
-            rows, columns = con.execute( q )
-            hostdf = pandas.DataFrame( rows, columns=columns )
 
         # Fourth: get the lightcurves
-        df = many_object_ltcvs( processing_version=processing_version, objids_table='tmp_objids',
+        columns = [ 'diaobjectid', 'rootid', 'obj_base_procver_id' ]
+        if position_processing_version is None:
+            position_processing_version = processing_version
+        if not always_use_weighted_source_positions:
+            columns.extend( [ 'pos_base_procver_id', 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ] )
+        df = many_object_ltcvs( processing_version=processing_version,
+                                position_processing_version=position_processing_version,
+                                objids_table='tmp_objids',
                                 which='patch' if source_patch else 'forced',
                                 return_format='pandas', mjd_now=mjd_now, dbcon=con )
+        if always_use_weighted_source_positions:
+            df.pos_base_procver_id = None
+            df.ra = ROB FIGURE OUT WHAT TO DO, pandas and null types or nan or whatever
+            df.dec = ROB
+            
 
     return df, objdf, hostdf
