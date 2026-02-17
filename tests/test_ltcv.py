@@ -113,7 +113,10 @@ def test_object_ltcv( procver_collection, set_of_lightcurves ):
     assert np.all( ~df[ df.mjd <= 60025 ].ispatch )
     assert np.all( df[ ( df.mjd >= 60000 ) & ( df.mjd <= 60030 ) ].isdet )
     assert np.all( ~df[ ( df.mjd < 60000 ) | ( df.mjd > 60030 ) ].isdet )
-
+    # Because we didn't say include_source_positions, there should be no source columns
+    for f in [ df, forced, sources ]:
+        for c in [ 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ]:
+            assert c not in f.columns
 
     # If we ask for roots[1] from pv1, we shouldn't get anything.
     # (Also trying using the root object this time.)
@@ -164,7 +167,26 @@ def test_object_ltcv( procver_collection, set_of_lightcurves ):
     assert ( df.mjd <= 60040 ).all()
     assert len( df ) == 13
 
+    # Test include_source_positions
 
+    sources = ltcv.object_ltcv( pvs['pv1'].id, roots[0]['objs'][2]['obj'].diaobjectid,
+                                return_format='pandas', which='detections',
+                                include_base_procver=True, include_source_positions=True )
+    forced = ltcv.object_ltcv( pvs['pv1'].id, roots[0]['objs'][2]['obj'].diaobjectid,
+                               return_format='pandas', which='forced',
+                               include_base_procver=True, include_source_positions=True )
+    df = ltcv.object_ltcv( pvs['pv1'].id, roots[0]['objs'][2]['obj'].diaobjectid,
+                           return_format='pandas', which='patch',
+                           include_base_procver=True, include_source_positions=True )
+    for field in [ 'ra', 'dec' ]:
+        assert not any( sources[field].isna() )
+        assert not any( forced[ forced.isdet == True ][field].isna() )
+        assert all( forced[ forced.isdet == False ][field].isna() )
+        assert not any( df[ df.isdet == True ][field].isna() )
+        assert all( df[ df.isdet == False ][field].isna() )
+
+    
+    
 def test_many_object_ltcvs( procver_collection, set_of_lightcurves ):
     roots = set_of_lightcurves
     _bpvs, pvs = procver_collection
@@ -209,6 +231,10 @@ def test_many_object_ltcvs( procver_collection, set_of_lightcurves ):
     assert np.all( ~df[ df.mjd <= 60025 ].ispatch )
     assert np.all( df[ ( df.mjd >= 60000 ) & ( df.mjd <= 60030 ) ].isdet )
     assert np.all( ~df[ ( df.mjd < 60000 ) | ( df.mjd > 60030 ) ].isdet )
+    # Because we didn't say include_source_positions, there should be no source columns
+    for f in [ df, forced, sources ]:
+        for c in [ 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ]:
+            assert c not in f.columns
 
     # Now ask for two lightcurves where we expect to get two lightcurves
     sources = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['root'].id for i in [0,2] ],
@@ -357,6 +383,24 @@ def test_many_object_ltcvs( procver_collection, set_of_lightcurves ):
     tmp = df.drop( 'ispatch', axis='columns' )
     assert ( tmp == forced ).all().all()
 
+    # Test include_source_positions
+    
+    sources = ltcv.many_object_ltcvs( pvs['pv1'].id, [ roots[i]['root'].id for i in [0,1] ],
+                                      return_format='pandas', which='detections',
+                                      include_base_procver=True, include_source_positions=True )
+    forced = ltcv.many_object_ltcvs( pvs['pv1'].id, [ roots[i]['root'].id for i in [0,1] ],
+                                     return_format='pandas', which='forced',
+                                     include_base_procver=True, include_source_positions=True )
+    df = ltcv.many_object_ltcvs( pvs['pv1'].id, [ roots[i]['root'].id for i in [0,1] ],
+                                 return_format='pandas', which='patch',
+                                 include_base_procver=True, include_source_positions=True )
+    for field in [ 'ra', 'dec' ]:
+        assert not any( sources[field].isna() )
+        assert not any( forced[ forced.isdet == True ][field].isna() )
+        assert all( forced[ forced.isdet == False ][field].isna() )
+        assert not any( df[ df.isdet == True ][field].isna() )
+        assert all( df[ df.isdet == False ][field].isna() )
+    
 
 # There is another test of ltcv_object_search that uses loaded SNANA data
 #   in test_ltcv_object_search.py
@@ -688,3 +732,30 @@ def test_get_hot_ltcvs( set_of_lightcurves ):
     assert df2[ df2.index.get_level_values('mjd') > 60025. ].isdet.all()
     assert not df2[ df2.index.get_level_values('mjd') <= 20025. ].ispatch.any()
     assert df2[ df2.index.get_level_values('mjd') > 60025. ].ispatch.all()
+
+    # Test using weighted positions.
+    # First, a baseline redo of the first
+    #   set of hot ltcvs we tested above, make sure that the positions are
+    #   coming out as expected.
+    # NOTE that the mjd_now stuff is not working right for position times!  It just
+    #   sorts on processing versions, and there will be processing times saved
+    #   later than 60056 for some of these sources.
+    # positions are saved for [ 6000, 60030, 60050, 60060, 60080 ] (procver_postimes fixture)
+    # 201 is detected trhough 60060, so will have 60060 as its position time
+    # 202 is detected through 60080, so will have 60080 as its position time
+    # 203 is detected through 60060, so will have 60006 as its position time
+    postime_procver_60060 = db.BaseProcessingVersion.base_procver_id( 'pvc_bpv3_60060' )
+    postime_procver_60080 = db.BaseProcessingVersion.base_procver_id( 'pvc_bpv3_60080' )
+
+    import pdb; pdb.set_trace()
+    df, objdf, _ = ltcv.get_hot_ltcvs( 'pvc_pv3', detected_since_mjd=60035, mjd_now=60056 )
+    assert set( df.index.names ) == { 'diaobjectid', 'mjd' }
+    assert set( df.columns ) == { 'visit', 'band', 'flux', 'fluxerr', 'isdet' }
+    assert set( df.index.get_level_values('diaobjectid') ) == { 201, 202, 203 }
+    assert set( objdf.index.get_level_values('diaobjectid') ) == set( df.index.get_level_values('diaobjectid') )
+    assert objdf.loc[201, 'pos_base_procver_id'] == postime_procver_60060
+    assert objdf.loc[202, 'pos_base_procver_id'] == postime_procver_60080
+    assert objdf.loc[203, 'pos_base_procver_id'] == postime_procver_60060
+    
+    # TODO : test the case where some objects have no positions, and make sure the patch position goes in there.
+    #  (This will require changing the set of lightcurves fixtures....)

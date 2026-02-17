@@ -246,7 +246,7 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None,
 
 
 def many_object_ltcvs( processing_version='default', objids=None, objids_table=None,
-                       bands=None, which='patch', include_base_procver=False,
+                       bands=None, which='patch', include_base_procver=False, include_source_positions=False,
                        return_format='json', string_keys=False, mjd_now=None, dbcon=None ):
     """Get lightcurves for objects.
 
@@ -291,6 +291,11 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
          base_procver_s and base_procver_f, that are the descriptions
          of the base processing versions of the object for sources and
          forced sources respectively (or NaN if not defined).
+
+      include_source_positions : bool, default False
+         If True, there will be additional columns (ra, dec, raerr,
+         decerr, ra_dec_cov) that have the positions that were found for
+         the sources (the detections).
 
       return_format : str, default 'json'
          'json' or 'pandas'
@@ -341,7 +346,13 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
             'fluxerr': list of float
             'isdet': list of int,      (1 for true, 0 for false; javascript JSON chokes on booleans)
             [ 'ispatch': list of int, ] (only included if which is 'patch')
-            [ 'base_procver': list of str, ] (only included if include_base_procver is True)
+            [ 'base_procver_s': list of str, ] (only included if include_base_procver is True)
+            [ 'base_procver_f': list of str, ] (only included if include_base_procver is True)
+            [ 'det_ra': list of float, ] (only included if include_source_positions is True )
+            [ 'det_dec': list of float, ] (only included if include_source_positions is True )
+            [ 'det_raerr': list of float, ] (only included if include_source_positions is True )
+            [ 'det_decerr': list of float, ] (only included if include_source_positions is True )
+            [ 'det_dec_cov': list of float, ] (only included if include_source_positions is True )
          }
 
     """
@@ -418,17 +429,31 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                         copier.write_row( [ objid ] )
 
         # Extract detections
-        dbcon.execute( "CREATE TEMP TABLE tmp_sources( diaobjectid bigint, visit bigint,"
-                       "                               mjd double precision, band text, flux real, fluxerr real,"
-                       "                               isdet bool, base_procver text )",
-                       explain=False )
+        if include_source_positions:
+            source_fields = sql.SQL( "ra double precision, dec double precision, "
+                                     "raerr real, decerr real, ra_dec_cov real," )
+        else:
+            source_fields = sql.SQL( "" )
+        q = sql.SQL( textwrap.dedent(
+            """
+            CREATE TEMP TABLE tmp_sources( diaobjectid bigint, visit bigint,
+                                           mjd double precision, band text, flux real, fluxerr real,
+                                           {source_fields}
+                                           isdet bool, base_procver text )
+            """
+        ) ).format( source_fields=source_fields )
+        dbcon.execute( q, explain=False )
+        if include_source_positions:
+            source_fields = sql.SQL( "ra, dec, raerr, decerr, ra_dec_cov, " )
+        else:
+            source_fields = sql.SQL( "" )
         q = sql.SQL( textwrap.dedent(
             """
             /*+ IndexScan(s idx_diasource_diaobjectid) */
             INSERT INTO tmp_sources
             SELECT DISTINCT ON (s.diaobjectid, s.visit)
               s.diaobjectid, s.visit, s.midpointmjdtai AS mjd,
-              s.band, s.psfflux AS flux, s.psffluxerr AS fluxerr,
+              s.band, s.psfflux AS flux, s.psffluxerr AS fluxerr, {source_fields}
               TRUE as isdet, p.description AS base_procver
             FROM {objids_table} t
             INNER JOIN diasource s ON s.diaobjectid=t.diaobjectid
@@ -436,7 +461,7 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                                                  AND pv.procver_id={procver}
             INNER JOIN base_processing_version p ON pv.base_procver_id=p.id
             """
-        ) ).format( procver=pvid, objids_table=sql.Identifier(objids_table) )
+        ) ).format( procver=pvid, objids_table=sql.Identifier(objids_table), source_fields=source_fields )
         _and = "WHERE"
         if mjd_now is not None:
             q += sql.SQL( f"                   {_and} s.midpointmjdtai<={{t0}}" ).format( t0=mjd_now )
@@ -452,11 +477,14 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
 
         else:
             # Extract forced photometry if necessary
-            dbcon.execute( "CREATE TEMP TABLE tmp_forced( diaobjectid bigint, visit bigint,"
-                           "                              mjd double precision, band text, "
-                           "                              flux real, fluxerr real,"
-                           "                              isdet bool, base_procver text )",
-                           explain=False )
+            q = sql.SQL( textwrap.dedent(
+                """CREATE TEMP TABLE tmp_forced( diaobjectid bigint, visit bigint,
+                                                 mjd double precision, band text,
+                                                 flux real, fluxerr real,
+                                                 isdet bool, base_procver text )
+                """
+            ) ).format( source_fields=source_fields )
+            dbcon.execute( q, explain=False )
             q = sql.SQL( textwrap.dedent(
                 """
                 /*+ IndexScan(s idx_diaforcedsource_diaobjectid) */
@@ -471,7 +499,7 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                                                      AND pv.procver_id={procver}
                 INNER JOIN base_processing_version p ON pv.base_procver_id=p.id
                 """
-            ) ).format( procver=pvid, objids_table=sql.Identifier(objids_table) )
+            ) ).format( source_fields=source_fields, procver=pvid, objids_table=sql.Identifier(objids_table) )
             _and = "WHERE"
             if mjd_now is not None:
                 q += sql.SQL( f"                   {_and} s.midpointmjdtai<={{t0}}" ).format( t0=mjd_now )
@@ -483,6 +511,10 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
             dbcon.execute_nofetch( q, { 'bands': bands } )
 
             # Join detections to forced photometry to set the 'isdet' and 'ispatch' flags
+            if include_source_positions:
+                source_fields = sql.SQL( "s.ra, s.dec, s.raerr, s.decerr, s.ra_dec_cov," )
+            else:
+                source_fields = sql.SQL( "" )
             q = sql.SQL( textwrap.dedent(
                 """
                 SELECT CASE WHEN f.diaobjectid IS NULL THEN s.diaobjectid ELSE f.diaobjectid END AS diaobjectid,
@@ -491,6 +523,7 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                        CASE WHEN f.band IS NULL THEN s.band ELSE f.band END AS band,
                        CASE WHEN f.flux IS NULL THEN s.flux ELSE f.flux END AS flux,
                        CASE WHEN f.fluxerr IS NULL THEN s.fluxerr ELSE f.fluxerr END AS fluxerr,
+                       {source_fields}
                        CASE WHEN s.mjd IS NULL THEN FALSE ELSE TRUE END AS isdet,
                        CASE WHEN f.mjd IS NULL THEN TRUE ELSE FALSE END as ispatch,
                        CASE WHEN f.base_procver IS NULL THEN s.base_procver ELSE f.base_procver END
@@ -498,7 +531,7 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                 FROM tmp_forced f
                 FULL OUTER JOIN tmp_sources s ON f.diaobjectid=s.diaobjectid AND s.visit=f.visit
                 ORDER BY diaobjectid, mjd
-                """ ) )
+                """ ) ).format( source_fields=source_fields )
             rows, cols = dbcon.execute( q )
 
     retframe = pandas.DataFrame( rows, columns=cols )
@@ -527,6 +560,13 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                            'flux': list( subf.flux.values ),
                            'fluxerr': list( subf.fluxerr.values ),
                            'isdet': [ int(i) for i in subf.isdet.values ] }
+            if include_source_positions:
+                thisretval.update( { 'ra': list( subdf.ra.values ),
+                                     'dec': list( subdf.dec.values ),
+                                     'raerr': list( subdf.raerr.values ),
+                                     'decerr': list( subdf.decerr.values ),
+                                     'ra_dec_cov': list( subdf.ra_dec_cov.values )
+                                    } )
             if which == 'patch':
                 thisretval['ispatch'] = [ int(i) for i in subf.ispatch.values ]
             if include_base_procver:
@@ -539,9 +579,9 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
         raise RuntimeError( "This should never happen." )
 
 
-def object_ltcv( processing_version='default', diaobjectid=None,
-                 bands=None, which='patch', include_base_procver=False, return_format='json',
-                 mjd_now=None, dbcon=None ):
+def object_ltcv( processing_version='default', diaobjectid=None, bands=None, which='patch',
+                 include_base_procver=False, include_source_positions=False,
+                 return_format='json', mjd_now=None, dbcon=None ):
     """Get the lightcurve for an object.
 
     Parameters
@@ -568,6 +608,11 @@ def object_ltcv( processing_version='default', diaobjectid=None,
           base_procver_s and base_procver_f, that are the descriptions
           of the base processing versions of the object for sources and
           forced sources respectively (or NaN if not defined).
+
+      include_source_positions : bool, default False
+         If True, there will be additional columns (ra, dec, raerr,
+         decerr, ra_dec_cov) that have the positions that were found for
+         the sources (the detections).
 
        return_format : str, default 'json'
           'json' or 'pandas'
@@ -608,6 +653,7 @@ def object_ltcv( processing_version='default', diaobjectid=None,
 
     rval = many_object_ltcvs( processing_version=processing_version, objids=[ diaobjectid ],
                               bands=bands, which=which, include_base_procver=include_base_procver,
+                              include_source_positions=include_source_positions,
                               return_format=return_format, mjd_now=mjd_now, dbcon=dbcon )
     if len(rval) == 0:
         raise RuntimeError( f"Could not find object for diaobjectid {diaobjectid}" )
@@ -1470,7 +1516,8 @@ def object_search( processing_version='default', object_processing_version=None,
         raise RuntimeError( "This should never happen." )
 
 
-def get_hot_ltcvs( processing_version, position_procesing_version=None, always_use_weighted_source_positions=False,
+def get_hot_ltcvs( processing_version, position_processing_version=None,
+                   use_weighted_source_positions=False, always_use_weighted_source_positions=False,
                    detected_since_mjd=None, detected_in_last_days=None,
                    mjd_now=None, source_patch=False, include_hostinfo=False, host_processing_version=None,
                    object_processing_version=None, dbcon=None ):
@@ -1485,13 +1532,20 @@ def get_hot_ltcvs( processing_version, position_procesing_version=None, always_u
       position_procesing_version: string, default None
         Ignored if always_use_weighted_source_positions is True.
         The processing version for getting object positions.  If not
-        given, will use processing_version.  Where positions aren't
-        found, some kind of weighted average of the positions for all
-        the objects will be used.
-
+        given, will use processing_version.  If the position from
+        the desired processing version isn't found, then the position
+        fields in the returned object info dataframe will be null, unless
+        use_weighted_source_positions is true, in which case 
+    
+      use_weighted_source_positions: bool, default False
+        Normally, if a position is not found with the desired position
+        processing version, the ra and dec fields are NULL or NA or
+        something.  Set this to True to fill them in with a (S/N)^2
+        weighted average of the positions from the detections.
+    
       always_use_weighted_source_positions: bool, default False
-        Don't bother searching for object positions, but calculate them
-        from a (S/N)^2 weighted average of the positions of the sources.
+        Don't bother searching for object positions, just use weighted
+        source positions.  Implies use_weighted_source_positions.
     
       detected_since_mjd: float, default None
         If given, will search for all objects detected (i.e. with an
@@ -1570,6 +1624,8 @@ def get_hot_ltcvs( processing_version, position_procesing_version=None, always_u
     if host_processing_version is not None:
         raise NotImplementedError( "Error, host processing version is not currently supported." )
 
+    use_weighted_source_positions = use_weighted_source_positions or always_use_weighted_source_positions
+    
     if detected_since_mjd is not None:
         if detected_in_last_days is not None:
             raise ValueError( "Only specify at most one of detected_since_mjd and detected_in_last_days" )
@@ -1610,26 +1666,28 @@ def get_hot_ltcvs( processing_version, position_procesing_version=None, always_u
         con.execute_nofetch( q, { 'procver': procver, 't0': mjd0, 't1': mjd_now } )
 
         # Second: pull out the object info for these objects
-        objdf = get_object_infos( objids_table='tmp_objids', dbcon=con, return_format='pandas' )
+        if always_use_weighted_source_positions:
+            position_processing_version = None
+        elif position_processing_version is None:
+            position_processing_version = processing_version
+        objdf = get_object_infos( objids_table='tmp_objids', position_processing_version=position_processing_version,
+                                  dbcon=con, return_format='pandas' )
 
         # Third: get the host stuff
         hostdf = None
 
         # Fourth: get the lightcurves
-        columns = [ 'diaobjectid', 'rootid', 'obj_base_procver_id' ]
-        if position_processing_version is None:
-            position_processing_version = processing_version
-        if not always_use_weighted_source_positions:
-            columns.extend( [ 'pos_base_procver_id', 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ] )
         df = many_object_ltcvs( processing_version=processing_version,
-                                position_processing_version=position_processing_version,
                                 objids_table='tmp_objids',
                                 which='patch' if source_patch else 'forced',
+                                include_source_positions=use_weighted_source_positions,
                                 return_format='pandas', mjd_now=mjd_now, dbcon=con )
         if always_use_weighted_source_positions:
-            df.pos_base_procver_id = None
-            df.ra = ROB FIGURE OUT WHAT TO DO, pandas and null types or nan or whatever
-            df.dec = ROB
-            
+            objdf.pos_base_procver_id = None
+            objdf.ra = None
+            objdf.dec = None
+        if use_weighted_source_positiosn:
+            import pdb; pdb.set_trace()
+            pass
 
     return df, objdf, hostdf
