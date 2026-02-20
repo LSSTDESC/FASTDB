@@ -18,4 +18,5 @@ admin_DATA = admin/csv_to_avsc.py \
 	admin/dump_to_parquet.py \
 	admin/fastdb_loader.py \
 	admin/load_dp1_parquet.py \
-	admin/load_snana_fits.py
+	admin/load_snana_fits.py \
+	admin/load_snana_fits_ppdb.py

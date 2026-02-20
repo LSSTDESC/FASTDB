@@ -22,6 +22,7 @@ from db import ( BaseProcessingVersion,
                  DBCon,
                  AuthUser )
 from util import asUUID
+import admin.load_snana_fits_ppdb
 from admin.load_snana_fits import FITSLoader
 from fastdb.fastdb_client import FASTDBClient
 
@@ -802,7 +803,7 @@ def snana_fits_ppdb_loaded():
     assert len(dirs) > 0
 
     try:
-        loader = FITSLoader( nprocs=5, directories=dirs, verbose=True, ppdb=True, really_do=True )
+        loader = admin.load_snana_fits_ppdb.FITSLoader( nprocs=5, directories=dirs, verbose=True, really_do=True )
         loader()
 
         yield True
