@@ -317,7 +317,7 @@ class FITSFileHandler( SNANAColumnMapper ):
                 phot['diaobjectid'][pmin:pmax+1] = headrow['diaobjectid']
                 phot['visit'][pmin:pmax+1] = np.array( np.floor( phot['midpointmjdtai'][pmin:pmax+1] * 20000 ),
                                                        dtype=np.int32 )
-                phot['diaforcedsourceid'][pmin:pmax+1] = ( obj['SNID'] + self.max_sources_per_object
+                phot['diaforcedsourceid'][pmin:pmax+1] = ( obj['SNID'] * self.max_sources_per_object
                                                            + np.arange( pmax - pmin + 1 ) )
                 phot['ra'][pmin:pmax+1] = obj['RA']
                 phot['dec'][pmin:pmax+1] = obj['DEC']

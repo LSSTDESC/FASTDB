@@ -36,7 +36,7 @@ class FastDBLoader:
         self._all_tables.remove( "passwordlink" )
         self._all_tables.remove( "migrations_applied" )
 
-        self.base_processing_version = None
+        self.base_processing_version = {}
         self.processing_version = None
         self.processing_version_name = processing_version
 
@@ -53,30 +53,37 @@ class FastDBLoader:
                 self.processing_version = rows[0]['id']
             else:
                 self.processing_version = uuid.uuid4()
-                dbcon.execute_nofetch( "INSERT INTO processing_version(id,description) "
+                dbcon.execute_nofetch( "INSERT INTO processing_version(id,description)\n"
                                        "VALUES (%(id)s,%(desc)s)",
                                        { 'id': self.processing_version, 'desc': self.processing_version_name } )
 
-            rows = dbcon.execute( "SELECT b.id FROM base_processing_version b\n"
-                                  "INNER JOIN base_procver_of_procver j ON j.base_procver_id=b.id\n"
-                                  "WHERE j.procver_id=%(pvid)s\n"
-                                  "ORDER BY j.priority DESC\n"
-                                  "LIMIT 1\n",
-                                  { 'pvid': self.processing_version } )
-            if len(rows) >=1:
-                self.base_processing_version = rows[0]['id']
-            else:
-                # We're assuming that if a base processing version wasn't found, then
-                #   the base processing version with description self.processing_version_name
-                #   doesn't exist.  As long as we choose names carefully, this should be OK.
-                self.base_processing_version = uuid.uuid4()
-                dbcon.execute_nofetch( "INSERT INTO base_processing_version(id,description) "
-                                       "VALUES (%(id)s,%(desc)s)",
-                                       { 'id': self.base_processing_version,
-                                         'desc': self.processing_version_name } )
-                dbcon.execute_nofetch( "INSERT INTO base_procver_of_procver(base_procver_id,procver_id,priority) "
-                                       "VALUES (%(bpv)s,%(pv)s,0)",
-                                       { 'bpv': self.base_processing_version, 'pv': self.processing_version } )
+            for table in [ 'host_galaxy', 'diaobject', 'diaobject_host_match', 'diaobject_position',
+                           'diasource', 'diaforcedsource' ]:
+                rows = dbcon.execute( "SELECT b.id FROM base_processing_version b\n"
+                                      "INNER JOIN base_procver_of_procver j ON j.base_procver_id=b.id\n"
+                                      "WHERE j.procver_id=%(pvid)s AND j._table=%(table)s\n"
+                                      "ORDER BY j.priority DESC\n"
+                                      "LIMIT 1\n",
+                                      { 'pvid': self.processing_version, 'table': table } )
+                if len(rows) >=1:
+                    self.base_processing_version[table] = rows[0]['id']
+                else:
+                    # We're assuming that if a base processing version wasn't found, then
+                    #   the base processing version with description self.processing_version_name
+                    #   doesn't exist.  As long as we choose names carefully, this should be OK.
+                    bpvid = uuid.uuid4()
+                    self.base_processing_version[table] = bpvid
+                    dbcon.execute_nofetch( "INSERT INTO base_processing_version(id,_table,description)\n"
+                                           "VALUES (%(id)s,%(table)s,%(desc)s)",
+                                           { 'id': bpvid,
+                                             'table': table,
+                                             'desc': self.processing_version_name } )
+                    dbcon.execute_nofetch( "INSERT INTO base_procver_of_procver(base_procver_id,procver_id,\n"
+                                           "                                    _table,priority)\n"
+                                           "VALUES (%(bpv)s,%(pv)s,%(table)s,0)",
+                                           { 'bpv': bpvid,
+                                             'table': table,
+                                             'pv': self.processing_version } )
 
             dbcon.commit()
 

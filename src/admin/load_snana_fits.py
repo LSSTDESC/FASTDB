@@ -3,7 +3,6 @@ import re
 import pathlib
 import argparse
 import logging
-import datetime
 import uuid
 import multiprocessing
 import traceback
@@ -11,19 +10,18 @@ import functools
 
 import numpy as np
 import astropy.table
-import astropy.time
 
 from admin.fastdb_loader import FastDBLoader, ColumnMapper
-from util import NULLUUID, FDBLogger
-from db import ( DB, RootDiaObject, HostGalaxy, DiaObject, DiaSource, DiaForcedSource,
-                 PPDBDiaObject, PPDBHostGalaxy, PPDBDiaSource, PPDBDiaForcedSource )
+from util import FDBLogger
+from db import ( DB, RootDiaObject, DiaObject, DiaObjectPosition,
+                 DiaSource, DiaForcedSource )
 
 
 # ======================================================================
 
 class SNANAColumnMapper( ColumnMapper ):
     @classmethod
-    def _map_columns( cls, tab, mapper, lcs, manuals={} ):
+    def _map_columns( cls, tab, mapper, lcs=set(), manuals={} ):
         yanks = []
         renames = {}
         for col in tab.columns:
@@ -47,39 +45,37 @@ class SNANAColumnMapper( ColumnMapper ):
     @classmethod
     def diaobject_map_columns( cls, tab ):
         """Map from the HEAD.FITS.gz files to the diaobject table"""
-        mapper = { 'SNID': 'diaobjectid',
-                   'HOSTGAL_OBJID': 'nearbyextobj1',
-                   'HOSTGAL2_OBJID': 'nearbyextobj2',
-                   'HOSTGAL3_OBJID': 'nearbyextobj3',
-                   'HOSTGAL_SNSEP': 'nearbyextobj1sep',
-                   'HOSTGAL2_SNSEP': 'nearbyextobj2sep',
-                   'HOSTGAL3_SNSEP': 'nearbyextobj3sep',
-                  }
-        lcs = { 'RA', 'DEC' }
-
-        cls._map_columns( tab, mapper, lcs )
-
+        mapper = { 'SNID': 'diaobjectid' }
+        cls._map_columns( tab, mapper )
 
     @classmethod
-    def hostgalaxy_map_columns( cls, n, tab ):
-        """Map from the HEAD.FITS.gz files to the host_galaxy table"""
-
-        n = "" if n == 1 else str(n)
-
-        mapper = { f'HOSTGAL{n}_OBJID': 'objectid',
-                   f'HOSTGAL{n}_RA': 'ra',
-                   f'HOSTGAL{n}_DEC': 'dec',
-                   f'HOSTGAL{n}_PHOTOZ': 'pzmean',
-                   f'HOSTGAL{n}_PHOTOZ_ERR': 'pzstd',
-                  }
-        lcs = {}
-        for band in [ 'u', 'g', 'r', 'i', 'z', 'Y' ]:
-            mapper[ f'HOSTGAL{n}_MAG_{band}' ] = f'mag_{band.lower()}'
-            mapper[ f'HOSTGAL{n}_MAGERR_{band}' ] = f'mag_{band.lower()}_err'
-        for quant in range(0, 110, 10):
-            mapper[ f'HOSTGAL{n}_ZPHOT_Q{quant:03d}' ] = f'pzquant{quant:03d}'
-
+    def diaobject_position_map_columns( cls, tab ):
+        """Man from the HEAD.FITS.gz files to the diaobject_position table"""
+        mapper = { 'SNID': 'diaobjectid' }
+        lcs = { 'RA', 'DEC' }
         cls._map_columns( tab, mapper, lcs )
+
+
+    # @classmethod
+    # def hostgalaxy_map_columns( cls, n, tab ):
+    #     """Map from the HEAD.FITS.gz files to the host_galaxy table"""
+
+    #     n = "" if n == 1 else str(n)
+
+    #     mapper = { f'HOSTGAL{n}_OBJID': 'objectid',
+    #                f'HOSTGAL{n}_RA': 'ra',
+    #                f'HOSTGAL{n}_DEC': 'dec',
+    #                f'HOSTGAL{n}_PHOTOZ': 'pzmean',
+    #                f'HOSTGAL{n}_PHOTOZ_ERR': 'pzstd',
+    #               }
+    #     lcs = {}
+    #     for band in [ 'u', 'g', 'r', 'i', 'z', 'Y' ]:
+    #         mapper[ f'HOSTGAL{n}_MAG_{band}' ] = f'mag_{band.lower()}'
+    #         mapper[ f'HOSTGAL{n}_MAGERR_{band}' ] = f'mag_{band.lower()}_err'
+    #     for quant in range(0, 110, 10):
+    #         mapper[ f'HOSTGAL{n}_ZPHOT_Q{quant:03d}' ] = f'pzquant{quant:03d}'
+
+    #     cls._map_columns( tab, mapper, lcs )
 
 
     @classmethod
@@ -101,7 +97,7 @@ class SNANAColumnMapper( ColumnMapper ):
 class FITSFileHandler( SNANAColumnMapper ):
     def __init__( self, max_sources_per_object=None, photflag_detect=None, snana_zeropoint=None,
                   base_processing_version=None, processing_version=None,
-                  really_do=None, verbose=None, ppdb=None, oneproc=False ):
+                  really_do=None, verbose=None, oneproc=False ):
         super().__init__()
 
         self.max_sources_per_object = max_sources_per_object
@@ -111,7 +107,6 @@ class FITSFileHandler( SNANAColumnMapper ):
         self.processing_version = processing_version
         self.really_do = really_do
         self.verbose = verbose
-        self.ppdb = ppdb
 
         if not oneproc:
             FDBLogger.multiprocessing_replace()
@@ -121,153 +116,40 @@ class FITSFileHandler( SNANAColumnMapper ):
         try:
             FDBLogger.info( f"PID {os.getpid()} reading {headfile.name}" )
 
-            orig_head = astropy.table.Table.read( headfile )
+            head = astropy.table.Table.read( headfile )
             # SNID was written as a string, we need it to be a bigint
-            orig_head['SNID'] = orig_head['SNID'].astype( np.int64 )
-            head = astropy.table.Table( orig_head )
+            head['SNID'] = head['SNID'].astype( np.int64 )
 
             if len(head) == 0:
                 return { 'ok': True, 'headfile': headfile, 'msg': '0-length headfile' }
 
             phot = astropy.table.Table.read( photfile )
 
-            # Load the host_galaxy and diaobject tables, both built from the head file
+            # Build the diaobject and diaobject position tables
+            diaobject = astropy.table.Table( head )
+            self.diaobject_map_columns( diaobject )
+            diaobject.add_column( self.base_processing_version['diaobject'], name='base_procver_id' )
+            diaobject.add_column( [ str(uuid.uuid4()) for i in range(len(head)) ], name='rootid' )
 
-            # Build the hostgal table in hostgal
-            hostgal1 = astropy.table.Table( orig_head )
-            self.hostgalaxy_map_columns( 1, hostgal1 )
-            hostgal2 = astropy.table.Table( orig_head )
-            self.hostgalaxy_map_columns( 2, hostgal2 )
-            hostgal3 = astropy.table.Table( orig_head )
-            self.hostgalaxy_map_columns( 3, hostgal3 )
-            hostgal = astropy.table.vstack( [ hostgal1, hostgal2, hostgal3 ] )
-            hostgal = hostgal[ hostgal[ 'objectid' ] > 0 ]
-            hostgal = astropy.table.unique( hostgal, keys='objectid' )
-            hostgal.add_column( [ str(uuid.uuid4()) for i in range(len(hostgal)) ], name='id' )
-
-            # Calculate some derived quantities and remove the quantities we don't need
-            #   from the table.  Also turn Rick's -99's into None (I think!)
-            tp5ln10 = np.log( 10 ) * 2.5
-            hostgal.add_column( 10. ** (-0.4 * ( hostgal['mag_r'] - 31.4 ) ), name='petroflux_r' )
-            hostgal.add_column( tp5ln10 * hostgal['mag_r_err'] * hostgal['petroflux_r'], name='petroflux_r_err' )
-            hostgal[hostgal['mag_r'] < 0]['petroflux_r' ] = None
-            hostgal[hostgal['mag_r'] < 0]['petroflux_r_err' ] = None
-
-            bands = [ 'u', 'g', 'r', 'i', 'z', 'y' ]
-            for bandi in range( len(bands)-1 ):
-                hostgal.add_column( hostgal[f'mag_{bands[bandi]}'] - hostgal[f'mag_{bands[bandi+1]}'],
-                                    name=f'stdcolor_{bands[bandi]}_{bands[bandi+1]}' )
-                hostgal.add_column( np.sqrt( hostgal[f'mag_{bands[bandi]}']**2 + hostgal[f'mag_{bands[bandi+1]}']**2 ),
-                                    name=f'stdcolor_{bands[bandi]}_{bands[bandi+1]}_err' )
-                hostgal[ hostgal[f'mag_{bands[bandi]}'] < 0][f'stdcolor_{bands[bandi]}_{bands[bandi+1]}' ] = None
-                hostgal[ hostgal[f'mag_{bands[bandi+1]}'] < 0][f'stdcolor_{bands[bandi]}_{bands[bandi+1]}' ] = None
-                hostgal[ hostgal[f'mag_{bands[bandi]}'] < 0][f'stdcolor_{bands[bandi]}_{bands[bandi+1]}_err' ] = None
-                hostgal[ hostgal[f'mag_{bands[bandi+1]}'] < 0][f'stdcolor_{bands[bandi]}_{bands[bandi+1]}_err' ] = None
-
-            for bandi in bands:
-                hostgal.remove_column( f'mag_{bandi}'  )
-                hostgal.remove_column( f'mag_{bandi}_err' )
-
-            if not self.ppdb:
-                hostgal.add_column( self.base_processing_version, name='base_procver_id' )
-
-            # At this point, hostgal should be ready for feeding to bulk_insert_or_upsert
-            #   (onced processed through dict()).
-
-            # Build the diaobject table in head
-            self.diaobject_map_columns( head )
-            head.add_column( astropy.time.Time( datetime.datetime.now( tz=datetime.UTC ) ).mjd,
-                             name='validitystartmjdtai' )
-            if not self.ppdb:
-                head.add_column( self.base_processing_version, name='base_procver_id' )
-                head.add_column( [ str(uuid.uuid4()) for i in range(len(head)) ], name='rootid' )
-
-            head.add_column( str(NULLUUID), name='nearbyextobj1id' )
-            head.add_column( str(NULLUUID), name='nearbyextobj2id' )
-            if 'nearbyextobj3' in head.columns:
-                head.add_column( str(NULLUUID), name='nearbyextobj3id' )
-
-            # GAAAAAAAAAH.
-            #
-            # OK.  I put in a unique index that made everything break
-            #   when the same host galaxy was loaded in more than once.
-            #   So, we can't identify the host galaxy IDs right now, but
-            #   will have to do it at the end of the whole load process.
-            #   Leave them all as null right now.
-            #
-            # # By construction, in each of the joins below, joint should
-            # #   have w rows.  hostgal was selected from all the known
-            # #   nearbyextobj* in the HEAD file, and was made unique.
-            # # So, when we are done, everything with a nearbyextobj{n}
-            # #   that is >=0 should have a non-NULL uuid in
-            # #   nearbyextobj{n}id.
-            # # The bigger worry is that different HEAD files will use the
-            # #   same hostgal more than once.  In that case, the same
-            # #   hostgal will show up with different uuids.  The database
-            # #   structure sould be OK with that (since there's no unique
-            # #   constraint on (objectid, processing_version) in
-            # #   host_galaxy), but it would be better to identify the
-            # #   same host gal as the same host gal!
-            # # For handling actual alerts, we need to be able to do this
-            # #   better, as we're already going to need to be able to
-            # #   handle repeated reports of the same sources, never mind
-            # #   host galaxies.
-            # w = np.where( head['nearbyextobj1'] > 0 )[0]
-            # if len(w) > 0:
-            #     joint = astropy.table.join( head[w], hostgal, keys_left='nearbyextobj1', keys_right=['objectid'] )
-            #     head['nearbyextobj1id'][w] = joint['id']
-            # w = np.where( head['nearbyextobj2'] > 0 )[0]
-            # if len(w) > 0:
-            #     joint = astropy.table.join( head[w], hostgal, keys_left='nearbyextobj2', keys_right=['objectid'] )
-            #     head['nearbyextobj2id'][w] = joint['id']
-            # if 'nearbyextobj3' in head.columns:
-            #     w = np.where( head['nearbyextobj3'] > 0 )[0]
-            #     if len(w) > 0:
-            #         joint = astropy.table.join( head[w], hostgal, keys_left='nearbyextobj3', keys_right=['objectid'] )
-            #         head['nearbyextobj3id'][w] = joint['id']
+            diaobject_position = astropy.table.Table( head )
+            self.diaobject_position_map_columns( diaobject_position )
+            diaobject_position.add_column( self.base_processing_version['diaobject_position'], name='base_procver_id' )
 
             if self.really_do:
                 with DB() as conn:
-                    if not self.ppdb:
-                        RootDiaObject.bulk_insert_or_upsert( { 'id': list( head['rootid'] ) },
-                                                             assume_no_conflict=True, dbcon=conn )
+                    RootDiaObject.bulk_insert_or_upsert( { 'id': list( diaobject['rootid'] ) },
+                                                         assume_no_conflict=True, dbcon=conn )
 
-                    cls = PPDBHostGalaxy if self.ppdb else HostGalaxy
-                    # NOTE -- we have to leave assume_no_conflict=False
-                    #   on host_galaxy, as this process ends up with lots of duplicate
-                    #   records.  We left the host galaxy unique constraints in place
-                    # nhost = cls.bulk_insert_or_upsert( dict(hostgal), assume_no_conflict=True, dbcon=conn )
-                    nhost = cls.bulk_insert_or_upsert( dict(hostgal), assume_no_conflict=False, dbcon=conn )
-                    FDBLogger.info( f"PID {os.getpid()} loaded {nhost} host galaxies from {headfile.name}" )
-
-                    cls = PPDBDiaObject if self.ppdb else DiaObject
-                    q = cls.bulk_insert_or_upsert( dict(head), assume_no_conflict=True,
-                                                   dbcon=conn, nocommit=True )
-                    cursor = conn.cursor()
-                    cursor.execute( "UPDATE temp_bulk_upsert SET nearbyextobj1=NULL, nearbyextobj1id=NULL, "
-                                    "                            nearbyextobj1sep=NULL "
-                                    "WHERE nearbyextobj1 <= 0" )
-                    cursor.execute( "UPDATE temp_bulk_upsert SET nearbyextobj2=NULL, nearbyextobj2id=NULL, "
-                                    "                            nearbyextobj2sep=NULL "
-                                    "WHERE nearbyextobj2 <= 0" )
-                    if 'nearbyextobj3' in head.columns:
-                        cursor.execute( "UPDATE temp_bulk_upsert SET nearbyextobj3=NULL, nearbyextobj3id=NULL, "
-                                        "                            nearbyextobj3sep=NULL "
-                                        "WHERE nearbyextobj3 <= 0" )
-                    # Null out ALL nearbyextids to get rid of the nulluuids we put there before
-                    #   because of astropy tables and types and oh my
-                    cursor.execute( "UPDATE temp_bulk_upsert SET nearbyextobj1id=NULL, nearbyextobj2id=NULL, "
-                                    "  nearbyextobj3id=NULL" )
-                    cursor.execute( q )
-                    nobj = cursor.rowcount
-                    conn.commit()
-                    FDBLogger.info( f"PID {os.getpid()} loaded {nhost} hosts and {nobj} objects "
-                                    f"from {headfile.name}" )
+                    nobjs = DiaObject.bulk_insert_or_upsert( dict(diaobject), assume_no_conflict=True, dbcon=conn )
+                    n = DiaObjectPosition.bulk_insert_or_upsert( dict(diaobject_position),
+                                                                 assume_no_conflict=True, dbcon=conn )
+                    if ( n != nobjs ):
+                        raise RuntimeError( f"Woah!  Inserted {nobjs} but {n} positions; they should match!" )
+                    FDBLogger.info( f"PID {os.getpid()} loaded {nobjs} diaobjects from {headfile.name}" )
 
             else:
-                nhost = len(hostgal)
-                nobj = len(head)
-                FDBLogger.info( f"PID {os.getpid()} would try to load {nobj} objects and {nhost} host galaxies" )
+                nobjs = len(head)
+                FDBLogger.info( f"PID {os.getpid()} would try to load {nobjs} objects from {headfile.name}" )
 
             # Calculate some derived fields we'll need for source and forced sourced tables
             # diasource psfflux is supposed to be in nJY
@@ -304,36 +186,28 @@ class FITSFileHandler( SNANAColumnMapper ):
             phot.add_column( np.int64(-1), name='diaobjectid' )
             phot['band'] = [ i.strip() for i in phot['band'] ]
             phot.add_column( np.int64(-1), name='diaforcedsourceid' )
-            if not self.ppdb:
-                phot.add_column( self.base_processing_version, name='base_procver_id' )
-            phot.add_column( astropy.time.Time( datetime.datetime.now( tz=datetime.UTC ) ).mjd,
-                             name='timeprocessedmjdtai' )
+            phot.add_column( self.base_processing_version['diaforcedsource'], name='base_procver_id' )
             phot.add_column( -1., name='ra' )
             phot.add_column( -100., name='dec' )
             phot.add_column( 0, name='visit' )
-            phot.add_column( 0, name='detector' )       # Just something
-            phot.add_column( 0., name='x' )             # Just something
-            phot.add_column( 0., name='y' )             # Just something
-            phot.add_column( 0., name='scienceflux' )
-            phot.add_column( 0., name='sciencefluxerr' )
 
             # Load the DiaForcedSource table
 
-            for obj, headrow in zip( orig_head, head ):
+            for headrow, dobj in zip( head, diaobject ):
                 # All the -1 is because the files are 1-indexed, but astropy is 0-indexed
-                pmin = obj['PTROBS_MIN'] -1
-                pmax = obj['PTROBS_MAX'] -1
+                pmin = headrow['PTROBS_MIN'] -1
+                pmax = headrow['PTROBS_MAX'] -1
                 if ( pmax - pmin + 1 ) > self.max_sources_per_object:
-                    FDBLogger.error( f'SNID {obj["SNID"]} in {headfile.name} has {pmax-pmin+1} sources, '
+                    FDBLogger.error( f'SNID {headrow["SNID"]} in {headfile.name} has {pmax-pmin+1} sources, '
                                      f'which is more than max_sources_per_object={self.max_sources_per_object}' )
                     raise RuntimeError( "Too many sources" )
-                phot['diaobjectid'][pmin:pmax+1] = headrow['diaobjectid']
+                phot['diaobjectid'][pmin:pmax+1] = dobj['diaobjectid']
                 phot['visit'][pmin:pmax+1] = np.array( np.floor( phot['midpointmjdtai'][pmin:pmax+1] * 20000 ),
                                                        dtype=np.int32 )
-                phot['diaforcedsourceid'][pmin:pmax+1] = ( obj['SNID'] + self.max_sources_per_object
+                phot['diaforcedsourceid'][pmin:pmax+1] = ( headrow['SNID'] * self.max_sources_per_object
                                                            + np.arange( pmax - pmin + 1 ) )
-                phot['ra'][pmin:pmax+1] = obj['RA']
-                phot['dec'][pmin:pmax+1] = obj['DEC']
+                phot['ra'][pmin:pmax+1] = headrow['RA']
+                phot['dec'][pmin:pmax+1] = headrow['DEC']
 
             # The phot table has separators, so there will still be some junk data in there I need to purge
             phot = phot[ phot['diaobjectid'] >= 0 ]
@@ -341,37 +215,29 @@ class FITSFileHandler( SNANAColumnMapper ):
             if self.really_do:
                 forcedphot = astropy.table.Table( phot )
                 forcedphot.remove_column( 'photflag' )
-                forcedphot.remove_column( 'x' )
-                forcedphot.remove_column( 'y' )
-                cls = PPDBDiaForcedSource if self.ppdb else DiaForcedSource
-                nfrc = cls.bulk_insert_or_upsert( dict(forcedphot), assume_no_conflict=True )
+                nfrc = DiaForcedSource.bulk_insert_or_upsert( dict(forcedphot), assume_no_conflict=True )
                 FDBLogger.info( f"PID {os.getpid()} loaded {nfrc} forced photometry points from {photfile.name}" )
                 del forcedphot
             else:
                 nfrc = len(phot)
-                FDBLogger.info( f"PID {os.getpid()} would try to load {nfrc} forced photometry points" )
+                FDBLogger.info( f"PID {os.getpid()} would try to load {nfrc} forced photometry points "
+                                f"from {photfile.name}" )
 
             # Load the DiaSource table
             phot.rename_column( 'diaforcedsourceid', 'diasourceid' )
-            phot['snr'] = phot['psfflux'] / phot['psffluxerr']
+            phot['base_procver_id'] = self.base_processing_version['diasource']
             phot = phot[ ( phot['photflag'] & self.photflag_detect ) !=0 ]
             phot.remove_column( 'photflag' )
 
             if self.really_do:
-                cls = PPDBDiaSource if self.ppdb else DiaSource
-                nsrc = cls.bulk_insert_or_upsert( dict(phot), assume_no_conflict=True )
+                nsrc = DiaSource.bulk_insert_or_upsert( dict(phot), assume_no_conflict=True )
                 FDBLogger.info( f"PID {os.getpid()} loaded {nsrc} sources from {photfile.name}" )
             else:
                 nsrc = len(phot)
-                FDBLogger.info( f"PID {os.getpid()} would try to load {nsrc} sources" )
+                FDBLogger.info( f"PID {os.getpid()} would try to load {nsrc} sources from {photfile.name}" )
 
-            if self.ppdb:
-                return { 'ok': True, 'headfile': headfile,
-                         'msg': ( f"Loaded {nobj} ppdb objects, {nsrc} ppdb sources, "
-                                  f"{nfrc} ppdb forced sources" ) }
-            else:
-                return { 'ok': True, 'headfile': headfile,
-                         'msg': ( f"Loaded {nobj} objects, {nsrc} sources, {nfrc} forced sources" ) }
+            return { 'ok': True, 'headfile': headfile,
+                     'msg': ( f"Loaded {nobjs} objects, {nsrc} sources, {nfrc} forced sources" ) }
         except Exception:
             FDBLogger.error( f"Exception loading {headfile}: {traceback.format_exc()}" )
             return { "ok": False, "headfile": headfile, "msg": traceback.format_exc() }
@@ -388,7 +254,7 @@ def do_loadOneFitsFile( filepair, **kwargs ):
 class FITSLoader( FastDBLoader ):
     def __init__( self, nprocs, directories, files=[],
                   max_sources_per_object=100000, photflag_detect=4096, snana_zeropoint=27.5,
-                  really_do=False, verbose=False, dont_disable_indexes_fks=False, ppdb=False,
+                  really_do=False, verbose=False, dont_disable_indexes_fks=False,
                   **kwargs
                  ):
         super().__init__( **kwargs )
@@ -401,10 +267,6 @@ class FITSLoader( FastDBLoader ):
         self.really_do = really_do
         self.dont_disable_indexes_fks = dont_disable_indexes_fks
         self.verbose = verbose
-        self.ppdb = ppdb
-
-        if self.ppdb != ( self.processing_version_name is None ):
-            raise ValueError( "Cannot use processing version with ppdb; it's required for non-ppdb." )
 
         # This is a little bit naughty; we're changing the global
         #   logger object setting.  But, oh well.
@@ -448,8 +310,7 @@ class FITSLoader( FastDBLoader ):
 
         # Get the ids of the processing version
         #  (and load it into the database if it's not there already)
-        if not self.ppdb:
-            self.make_procver()
+        self.make_procver()
 
         # Be very scary and remove all indexes and foreign key constraints
         #   from the database.  This will make all the bulk inserts
@@ -473,7 +334,6 @@ class FITSLoader( FastDBLoader ):
                                                      'processing_version': self.processing_version,
                                                      'really_do': self.really_do,
                                                      'verbose': self.verbose,
-                                                     'ppdb': self.ppdb,
                                                      'oneproc': self.nprocs==1
                                                  } )
 
@@ -536,23 +396,6 @@ class FITSLoader( FastDBLoader ):
         finally:
             if not self.dont_disable_indexes_fks:
                 self.recreate_indexes_and_fks()
-
-            FDBLogger.info( "Done recreating indices, now filling in host IDs." )
-            with DB() as conn:
-                cursor = conn.cursor()
-                FDBLogger.info( "...nearbyextobj1..." )
-                cursor.execute( "UPDATE diaobject o SET nearbyextobj1id=h.id "
-                                "  FROM host_galaxy h "
-                                "  WHERE o.nearbyextobj1=h.objectid" )
-                FDBLogger.info( "...nearbyextobj2..." )
-                cursor.execute( "UPDATE diaobject o SET nearbyextobj2id=h.id "
-                                "  FROM host_galaxy h "
-                                "  WHERE o.nearbyextobj2=h.objectid" )
-                FDBLogger.info( "...nearbyextobj2..." )
-                cursor.execute( "UPDATE diaobject o SET nearbyextobj3id=h.id "
-                                "  FROM host_galaxy h "
-                                "  WHERE o.nearbyextobj3=h.objectid" )
-                conn.commit()
             FDBLogger.info( "Done." )
 
 
@@ -594,8 +437,6 @@ Does *not* load root_diaobject.
                          help="String value of the processing version to set for all objects" )
     parser.add_argument( '--dont-disable-indexes-fks', action='store_true', default=False,
                          help="Don't temporarily disable indexes and foreign keys (by default will)" )
-    parser.add_argument( '--ppdb', action='store_true', default=False,
-                         help="Load PPDB tables instead of main tables." )
     parser.add_argument( '--do', action='store_true', default=False,
                          help="Actually do it (otherwise, slowly reads FITS files but doesn't affect db" )
 
@@ -610,7 +451,6 @@ Does *not* load root_diaobject.
                              processing_version=args.processing_version,
                              really_do=args.do,
                              dont_disable_indexes_fks=args.dont_disable_indexes_fks,
-                             ppdb=args.ppdb,
                              verbose=args.verbose )
 
     fitsloader()
