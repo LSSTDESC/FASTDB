@@ -137,10 +137,10 @@ class AlertReconstructor:
                     curdict[col] = None
 
             # diasource has some pixel flags that are converted to a bitmask in the database
-            for mask, field in db.DiaSource._flags_bits.items():
+            for mask, field in db.DiaSourceExtra._flags_bits.items():
                 curdict[field] = bool( row[columns['flags']] & mask )
 
-            for mask, field in db.DiaSource._pixelflags_bits.items():
+            for mask, field in db.DiaSourceExtra._pixelflags_bits.items():
                 curdict[field] = bool( row[columns['pixelflags']] & mask )
 
             dicts.append( curdict )

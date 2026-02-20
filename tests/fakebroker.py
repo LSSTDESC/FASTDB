@@ -18,8 +18,8 @@ from kafka_consumer import KafkaConsumer
 _rundir = pathlib.Path( __file__ ).parent
 
 # These next two are used as defaults
-_alert_schema_namespace = "lsst.v9_0"
-_brokermessage_schema_namespace = "fastdb_9_0_2"
+_alert_schema_namespace = "lsst.v10_0"
+_brokermessage_schema_namespace = "fastdb.v10_0_0"
 
 
 # ======================================================================
@@ -27,7 +27,7 @@ _brokermessage_schema_namespace = "fastdb_9_0_2"
 class Classifier:
     def __init__( self, brokername, brokerversion, classifiername, classifierparams,
                   kafkaserver="brahms.lbl.gov:9092", topic="somebody-didnt-replace-a-default",
-                  alertschema=None, brokermessageschema=None, logger=None ):
+                  send_schemaless=False, alertschema=None, brokermessageschema=None, logger=None ):
 
         if logger is None:
             raise ValueError( "I need a logger." )
@@ -38,6 +38,7 @@ class Classifier:
         self.classifierparams = classifierparams
         self.kafkaserver = kafkaserver
         self.topic = topic
+        self.send_schemaless = send_schemaless
         self.alertschema = alertschema
         self.brokermessageschema = brokermessageschema
 
@@ -105,7 +106,10 @@ class Classifier:
                                                    "probability": prob[1] } )
             t4 = time.perf_counter()
             outdata = io.BytesIO()
-            fastavro.write.schemaless_writer( outdata, self.brokermessageschema, alert )
+            if self.send_schemaless:
+                fastavro.write.schemaless_writer( outdata, self.brokermessageschema, alert )
+            else:
+                fastavro.write.writer( outdata, self.brokermessageschema, [ alert ] )
             t5 = time.perf_counter()
             producer.produce( self.topic, outdata.getvalue() )
             t6 = time.perf_counter()
@@ -192,6 +196,7 @@ class FakeBroker:
                   group_id="rknop-test",
                   alert_schema=f"/fastdb/share/avsc/{_alert_schema_namespace}.alert.avsc",
                   brokermessage_schema=f"/fastdb/share/avsc/{_brokermessage_schema_namespace}.BrokerMessage.avsc",
+                  send_schemaless=False,
                   runtime=datetime.timedelta(minutes=10),
                   consume_nmsgs=1000,
                   notopic_sleeptime=10,
@@ -222,13 +227,14 @@ class FakeBroker:
 
         self.alert_schema = alert_schema
         alertschemaobj = fastavro.schema.parse_schema( fastavro.schema.load_schema( alert_schema ) )
+
         brokermsgschema = fastavro.schema.parse_schema( fastavro.schema.load_schema( brokermessage_schema ) )
         self.classifiers = [ NugentClassifier( kafkaserver=self.dest, topic=self.dest_topic,
                                                alertschema=alertschemaobj, brokermessageschema=brokermsgschema,
-                                               logger=self.logger ),
+                                               send_schemaless=send_schemaless, logger=self.logger ),
                              RandomSNType(  kafkaserver=self.dest, topic=self.dest_topic,
                                             alertschema=alertschemaobj, brokermessageschema=brokermsgschema,
-                                            logger=self.logger )
+                                            send_schemaless=send_schemaless, logger=self.logger )
                             ]
         self.classifier_procs = []
         self.classifier_pipes = []

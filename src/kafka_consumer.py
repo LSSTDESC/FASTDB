@@ -32,7 +32,7 @@ def _close_kafka_consumer( obj ):
 class KafkaConsumer:
     """Consume messages from a kafka server using a confluent_kafka.Consumer."""
 
-    def __init__( self, server, groupid, schema=None, topics=None, reset=False,
+    def __init__( self, server, groupid, schemaless=False, schema=None, topics=None, reset=False,
                   extraconsumerconfig={},
                   consume_nmsgs=100, consume_timeout=1, nomsg_sleeptime=1,
                   logger=_logger ):
@@ -46,6 +46,10 @@ class KafkaConsumer:
           groupid : str
             The group id to send to the server.  Servers remember which
             messages a given groupid has consumed.
+
+          schemaless : bool, default False
+            Are messages consumed with embedded schema or without?
+            Ignored if you aren't using the echoing message handler.
 
           schema : str or Path, or None
             Path to the avro schema to load.  Only needed if you
@@ -91,6 +95,7 @@ class KafkaConsumer:
         else:
             raise TypeError( f"topics must be either a string or a list, not a {type(topics)}" )
 
+        self.schemaless = schemaless
         self.schema = fastavro.schema.load_schema( schema ) if schema is not None else None
         self.consume_nmsgs = consume_nmsgs
         self.consume_timeout = consume_timeout

@@ -20,8 +20,8 @@ def check_mongodb( mongoclient, dbname, collection ):
 
     # Pull out the diaSourceId from all the messages, make sure they're as expected
     # (Based on the Postgres ppdb_alerts_sent table.)
-    mgcursor = coll.find( {}, projection={ 'msg.diaSource.diaObjectId': 1, 'msg.diaSource.visit': 1 } )
-    srcids = [ f"{c['msg']['diaSource']['diaObjectId']}_{c['msg']['diaSource']['visit']}" for c in mgcursor ]
+    mgcursor = coll.find( {}, projection={ 'diaobjectid': 1, 'diasource.visit': 1 } )
+    srcids = [ f"{c['diaobjectid']}_{c['diasource']['visit']}" for c in mgcursor ]
     assert len(srcids) == 154
     srcids = set( srcids )
     assert len(srcids) == 77

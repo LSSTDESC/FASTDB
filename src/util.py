@@ -21,8 +21,8 @@ import rkwebutil
 
 import db
 
-_fastdb_schema_namespace = 'fastdb_9_0_2'
-_lsst_schema_namespace = 'lsst.v9_0'
+_fastdb_schema_namespace = 'fastdb.v10_0_0'
+_lsst_schema_namespace = 'lsst.v10_0'
 
 _default_datefmt = '%Y-%m-%d %H:%M:%S'
 _default_log_level = logging.DEBUG
@@ -356,13 +356,13 @@ def get_alert_schema( schemadir=None ):
     diasource_schema = fastavro.schema.load_schema( schemadir / f"{_lsst_schema_namespace}.diaSource.avsc" )
     diaforcedsource_schema = fastavro.schema.load_schema( schemadir /
                                                           f"{_lsst_schema_namespace}.diaForcedSource.avsc" )
-    MPCORB_schema = fastavro.schema.load_schema( schemadir / f"{_lsst_schema_namespace}.MPCORB.avsc" )
     sssource_schema = fastavro.schema.load_schema( schemadir / f"{_lsst_schema_namespace}.ssSource.avsc" )
+    mpc_orbits_schema = fastavro.schema.load_schema( schemadir / f"{_lsst_schema_namespace}.mpc_orbits.avsc" )
     named_schemas = { f'{_lsst_schema_namespace}.diaObject': diaobject_schema,
                       f'{_lsst_schema_namespace}.diaSource': diasource_schema,
                       f'{_lsst_schema_namespace}.diaForcedSource': diaforcedsource_schema,
-                      f'{_lsst_schema_namespace}.MPCORB': MPCORB_schema,
-                      f'{_lsst_schema_namespace}.ssSource': sssource_schema
+                      f'{_lsst_schema_namespace}.ssSource': sssource_schema,
+                      f'{_lsst_schema_namespace}.mpc_orbits': mpc_orbits_schema,
                      }
     alert_schema = fastavro.schema.load_schema( schemadir / f"{_lsst_schema_namespace}.alert.avsc",
                                                 named_schemas=named_schemas )
@@ -373,8 +373,8 @@ def get_alert_schema( schemadir=None ):
              'diaobject': fastavro.schema.parse_schema( diaobject_schema ),
              'diasource': fastavro.schema.parse_schema( diasource_schema ),
              'diaforcedsource': fastavro.schema.parse_schema( diaforcedsource_schema ),
-             'MPCORB': fastavro.schema.parse_schema( MPCORB_schema ),
              'sssource': fastavro.schema.parse_schema( sssource_schema ),
+             'mpc_orbits': fastavro.schema.parse_schema( mpc_orbits_schema ),
              'brokermessage': fastavro.schema.parse_schema( brokermessage_schema ),
              'alert_schema_file': schemadir / f"{_lsst_schema_namespace}.alert.avsc",
              'brokermessage_schema_file': schemadir / f"{_fastdb_schema_namespace}.BrokerMessage.avsc"

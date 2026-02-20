@@ -20,7 +20,7 @@ from pymongo import MongoClient
 from kafka_consumer import KafkaConsumer
 
 # Default location of BrokerMessage schema
-_default_brokermessage_schemafile = "/fastdb/share/avsc/fastdb_9_0_2.BrokerMessage.avsc"
+_default_brokermessage_schemafile = "/fastdb/share/avsc/fastdb.v10_0_0.BrokerMessage.avsc"
 
 from concurrent.futures import ThreadPoolExecutor  # for pittgoogle
 import pittgoogle
@@ -31,6 +31,29 @@ _logdir = pathlib.Path( os.getenv( 'LOGDIR', '/logs' ) )
 
 class BrokerConsumer:
     """A class for consuming broker messages from brokers.
+
+    It stuffs the alerts into the mongodb.  Previously, what went into
+    the mongodb was what was in the fastdb*BrokerMessage.avsc schema.
+    However, we can't expect that from every broker, so we will need to
+    write alert_wranger for each broker.
+
+    What is expected in the mongodb now matches our database tables:
+
+       { 'topic': <from kafka header>,
+         'msgoffset': <from kafka heeader>,
+         'timestamp': <from kafka header>,
+         'now': datetime.datetme
+         'diaobjectid': long long,
+         'diaobjectposition': diaobject_position columns (omit: diaobjectid, base_procver_id, created_at)
+         'diasource': diasource columns (omit: diaobjectid base_procver_id)
+         'diasource_extra': None or diasource_extra columns (omit: base_procver_id)
+         'prvdiasources': array of same format as 'diasource'
+         'prvdiasources_extra': None or array of same format as diasource_extra
+         'prvdiaforcedsources': array of diaforcedsource columns (omit: base_procver_id, diaobjectid)
+         'prvdiaforcedsources_extra': None or array of (None or diaforcedsource_extra columns,
+                                                        omit diaobjectdid an dbase_procver_id)
+         'broker_info': dict
+       }
 
     This class will work as-is only if the broker is a kafka server
     requiring no authentication (though you may be able to get it to
@@ -53,7 +76,7 @@ class BrokerConsumer:
     """
 
     def __init__( self, server, groupid, topics=None, updatetopics=False, extraconfig={},
-                  schemaless=True, schemafile=None, pipe=None, loggername="BROKER", loggername_prefix='',
+                  schemaless=False, schemafile=None, pipe=None, loggername="BROKER", loggername_prefix='',
                   nomsg_sleeptime=5,
                   mongodb_host=None, mongodb_dbname=None, mongodb_collection=None,
                   mongodb_user=None, mongodb_password=None ):
@@ -84,19 +107,19 @@ class BrokerConsumer:
             auto.offset.reset, or group.id; those are automatically
             constructed and sent.)
 
-          schemaless : bool, default True
+          schemaless : bool, default False
             If True, expecting schemaless avro messages.  If False,
             expecting embedded schema.  Ignored if you pass a handler to
-            poll.  Currently can't handle False.
+            poll.
 
           schemafile : Path or str
-            The .avsc the that holds the schema of the messsages we'll be
-            ingesting.  Required if schemaless is True (which, right now, it
-            has to be).  The schema must be named properly for its namespace,
-            and any other schema in the same namespace referred to by that
-            .avsc file must be in the same directory with the right names.  If
-            not given, uses the location where it is find in the docker image
-            we use.
+            The .avsc the that holds the schema of the messsages we'll
+            be ingesting.  Required if schemaless is True.  The schema
+            must be named properly for its namespace, and any other
+            schema in the same namespace referred to by that .avsc file
+            must be in the same directory with the right names.  If not
+            given, uses the location where it is find in the docker
+            image we use.
 
           pipe : multiprocessing.Pipe or None
             If not None, a call to poll will regularly send hearbeats to
@@ -173,14 +196,12 @@ class BrokerConsumer:
         self.nomsg_sleeptime = nomsg_sleeptime
 
         self.schemaless = schemaless
-        if not self.schemaless:
-            self.countlogger.error( "CRASHING.  I only know how to handle schemaless streams." )
-            raise RuntimeError( "I only know how to handle schemaless streams" )
-        self.schemafile = schemafile
-        # ****
-        self.logger.warning( f"self.schemafile = {self.schemafile}" )
-        # ****
-        self.schema = fastavro.schema.load_schema( self.schemafile )
+        if schemafile is None:
+            self.schemafile = None
+            self.schema = None
+        else:
+            self.schemafile = schemafile
+            self.schema = fastavro.schema.load_schema( self.schemafile )
 
         self.nmessagesconsumed = 0
 
@@ -217,8 +238,9 @@ class BrokerConsumer:
             self.countlogger.info( "*************** Connecting to kafka stream without reset  ***************" )
         while countdown >= 0:
             try:
-                self.consumer = KafkaConsumer( self.server, self.groupid, self.schemafile,
-                                               self.topics, reset=reset,
+                self.consumer = KafkaConsumer( self.server, self.groupid,
+                                               schema=self.schemafile, schemaless=self.schemaless,
+                                               topics=self.topics, reset=reset,
                                                extraconsumerconfig=self.extraconfig,
                                                consume_nmsgs=1000, consume_timeout=1,
                                                nomsg_sleeptime=self.nomsg_sleeptime,
@@ -255,6 +277,78 @@ class BrokerConsumer:
         for topic in self.topics:
             self.consumer.reset_to_start( topic )
 
+    def alert_wrangler( self, messagebatch ):
+        """Convert the alert structure from what we get to what we want to stuff in the mongo db.
+
+        Subclasses should override this to customize the behavior for
+        each broker.  This default assumes the message came in following
+        hte fastdb*brokerMessage schema.
+
+        The list is expected to be modified in place, so make sure to use indexes
+        if you're totally replacing an element of the list.  If you're just editing
+        the dictionary, then you shouldn't need to use indexes.  (Do it right.)
+
+        """
+
+        diasource_fields = [ 'visit', 'band', 'midpointMjdTai', 'psfFlux', 'psfFluxErr',
+                             'ra', 'dec', 'raErr', 'decErr', 'ra_dec_Cov' ]
+        diasource_extra_fields = [ 'detector', 'x', 'y', 'xErr', 'yErr', 'psfLnL', 'psfChi2',
+                                   'psfNdata', 'snr', 'scienceFlux', 'scienceFluxErr',
+                                   'templateFlux', 'templateFluxErr', 'extendedness', 'reliability',
+                                   'ixx', 'iyy', 'ixy', 'ixxPSF', 'iyyPSF', 'ixyPSF',
+                                   'apFlux', 'apFluxErr', 'bboxSize',
+                                   'timeProcessedMjdTai', 'timeWithdrawnMjdTai',
+                                   'parentDiaSourceId' ]
+        diaforcedsource_fields = [ 'visit', 'band', 'midpointMjdTai', 'psfFlux', 'psfFluxErr', 'ra', 'dec' ]
+        diaforcedsource_extra_fields = [ 'visit', 'detector', 'scienceFlux', 'scienceFluxErr',
+                                         'timeProcessedMjdTai', 'timeWithdrawnMjdTai' ]
+
+
+        for i in range( len(messagebatch) ):
+            metamsg = messagebatch[i]
+            msg = metamsg['msg']
+            messagebatch[i] = { 'topic': metamsg['topic'],
+                                'msgoffset': metamsg['msgoffset'],
+                                'timestamp': metamsg['timestamp'],
+                                'savetime': metamsg['savetime'],
+                                'diaobjectid': msg['diaObject']['diaObjectId'],
+                                'diaobjectposition': {
+                                    'ra': msg['diaObject']['ra'],
+                                    'dec': msg['diaObject']['dec'],
+                                    'raerr': msg['diaObject']['raErr'],
+                                    'decerr': msg['diaObject']['decErr'],
+                                    'ra_dec_cov': msg['diaObject']['ra_dec_Cov']
+                                },
+                                'diasource': { k.lower(): msg['diaSource'][k] for k in diasource_fields },
+                                'diasource_extra': { k.lower(): msg['diaSource'][k] for k in diasource_extra_fields },
+                                'broker_info': {
+                                    'brokerName': msg['brokerName'],
+                                    'classifierName': msg['classifierName'],
+                                    'classifierVersion': msg['classifierVersion'],
+                                    'classifications': msg['classifications']
+                                }
+                               }
+
+            if msg['prvDiaSources'] is None:
+                messagebatch[i]['prvdiasources']  = None
+                messagebatch[i]['provdiasources_extra'] = None
+            else:
+                messagebatch[i]['prvdiasources'] =  [ { k.lower(): p[k] for k in diasource_fields }
+                                                      for p in msg['prvDiaSources'] ]
+                messagebatch[i]['prvdiasources_extra'] = [ { k.lower(): p[k] for k in diasource_extra_fields }
+                                                           for p in msg['prvDiaSources'] ]
+
+            if msg['prvDiaForcedSources'] is None:
+                messagebatch[i]['prvdiaforcedsources'] = None
+                messagebatch[i]['provdiaforcedsources_extra'] = None
+            else:
+                messagebatch[i]['prvdiaforcedsources'] =  [ { k.lower(): p[k] for k in diaforcedsource_fields }
+                                                            for p in msg['prvDiaForcedSources'] ]
+                messagebatch[i]['provdiaforcedsources_extra'] = [ { k.lower(): p[k]
+                                                                    for k in diaforcedsource_extra_fields }
+                                                              for p in msg['prvDiaForcedSources'] ]
+
+
     def handle_message_batch( self, msgs ):
         messagebatch = []
         self.countlogger.info( f"Handling {len(msgs)} messages; consumer has received "
@@ -269,16 +363,24 @@ class BrokerConsumer:
                 timestamp = datetime.datetime.fromtimestamp( timestamp / 1000, tz=datetime.UTC )
 
             payload = msg.value()
-            if not self.schemaless:
-                self.countlogger.error( "I only know how to handle schemaless streams" )
-                raise RuntimeError( "I only know how to handle schemaless streams" )
-            alert = fastavro.schemaless_reader( io.BytesIO( payload ), self.schema )
+            if self.schemaless:
+                alert = fastavro.schemaless_reader( io.BytesIO( payload ), self.schema )
+            else:
+                # ...there may be a better way than instantiating a new reader for every
+                #   message.  Figure it out.
+                reader = fastavro.read.reader( io.BytesIO( payload ) )
+                alertlist = [ m for m in reader ]
+                if len(alertlist) != 1:
+                    raise RuntimeError( "This should never happen." )
+                alert = alertlist[0]
+
             messagebatch.append( { 'topic': msg.topic(),
                                    'msgoffset': msg.offset(),
                                    'timestamp': timestamp,
                                    'savetime': now,
                                    'msg': alert } )
 
+        self.alert_wrangler( messagebatch )
         nadded = self.mongodb_store( messagebatch )
         self.countlogger.info( f"...added {nadded} messages to mongodb {self.mongodb_dbname} "
                                f"collection {self.mongodb_collection}" )
