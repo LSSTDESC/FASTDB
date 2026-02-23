@@ -88,11 +88,12 @@ class TestProcessingVersion( BaseTestDB ):
             ProcessingVersion.procver_id( 'foo' )
 
     # This is basically a test of the base_procver_of_procver table.
+    # Probably more tests should be written.
     # THIS TEST HAS TO GO LAST because it runs the procver_collection fixture that's module scope
     def test_highest_prio_base_procver( self, procver_collection ):
         bpv, pv = procver_collection
-        assert pv['pv1'].highest_prio_base_procver('table1').id == bpv['bpv1b'].id
-        assert pv['pv2'].highest_prio_base_procver('table1').id == bpv['bpv2a'].id
-        assert pv['pv3'].highest_prio_base_procver('table1').id == bpv['bpv3'].id
+        assert pv['pv1'].highest_prio_base_procver('diaobject').id == bpv['bpv1b'].id
+        assert pv['pv2'].highest_prio_base_procver('diaobject').id == bpv['bpv2a'].id
+        assert pv['pv3'].highest_prio_base_procver('diaobject').id == bpv['bpv3'].id
         assert pv['realtime'].highest_prio_base_procver('diaobject').id == bpv['realtime'].id
-        assert pv['realtime'].highest_prio_base_procver('diasource').id == bpv['realtime_source'].id
+        assert pv['realtime'].highest_prio_base_procver('diasource').id == bpv['realtime_diasource'].id

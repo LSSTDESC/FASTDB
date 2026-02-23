@@ -99,7 +99,7 @@ def obj3( procver_collection, rootobj3 ):
 @pytest.fixture
 def obj1_src1( obj1, procver_collection ):
     bpvs, _pvs = procver_collection
-    src = DiaSource( base_procver_id=bpvs['bpv1'].id,
+    src = DiaSource( base_procver_id=bpvs['bpv1_diasource'].id,
                      diaobjectid=obj1.diaobjectid,
                      diasourceid=1,
                      visit=64,
@@ -126,7 +126,7 @@ def obj1_src1( obj1, procver_collection ):
 @pytest.fixture
 def obj1_src1_pv2( obj1, procver_collection ):
     bpvs, _pvs = procver_collection
-    src = DiaSource( base_procver_id=bpvs['bpv2'].id,
+    src = DiaSource( base_procver_id=bpvs['bpv2_diasource'].id,
                      diaobjectid=obj1.diaobjectid,
                      diasourceid=2,
                      visit=64,
@@ -151,7 +151,7 @@ def obj1_src1_pv2( obj1, procver_collection ):
 @pytest.fixture
 def obj1_src2( obj1, procver_collection ):
     bpvs, _pvs = procver_collection
-    src = DiaSource( base_procver_id=bpvs['bpv1'].id,
+    src = DiaSource( base_procver_id=bpvs['bpv1_diasource'].id,
                      diaobjectid=obj1.diaobjectid,
                      diasourceid=2,
                      visit=128,
@@ -178,7 +178,7 @@ def obj1_src2( obj1, procver_collection ):
 @pytest.fixture
 def obj1_src3( obj1, procver_collection ):
     bpvs, _pvs = procver_collection
-    src = DiaSource( base_procver_id=bpvs['bpv1'].id,
+    src = DiaSource( base_procver_id=bpvs['bpv1_diasource'].id,
                      diaobjectid=obj1.diaobjectid,
                      diasourceid=3,
                      visit=256,
@@ -205,7 +205,7 @@ def obj1_src3( obj1, procver_collection ):
 @pytest.fixture
 def obj1_frced1( obj1, procver_collection ):
     bpvs, _pvs = procver_collection
-    frc = DiaForcedSource( base_procver_id=bpvs['bpv1'].id,
+    frc = DiaForcedSource( base_procver_id=bpvs['bpv1_diaforcedsource'].id,
                            diaobjectid=obj1.diaobjectid,
                            visit=64,
                            band='r',
@@ -230,7 +230,7 @@ def obj1_frced1( obj1, procver_collection ):
 @pytest.fixture
 def obj1_frced2( obj1, procver_collection ):
     bpvs, _pvs = procver_collection
-    frc = DiaForcedSource( base_procver_id=bpvs['bpv1'].id,
+    frc = DiaForcedSource( base_procver_id=bpvs['bpv1_diaforcedsource'].id,
                            diaobjectid=obj1.diaobjectid,
                            visit=128,
                            band='i',
@@ -255,7 +255,7 @@ def obj1_frced2( obj1, procver_collection ):
 @pytest.fixture
 def obj1_frced3( obj1, procver_collection ):
     bpvs, _pvs = procver_collection
-    frc = DiaForcedSource( base_procver_id=bpvs['bpv1'].id,
+    frc = DiaForcedSource( base_procver_id=bpvs['bpv1_diaforcedsource'].id,
                            diaobjectid=obj1.diaobjectid,
                            visit=256,
                            band='z',

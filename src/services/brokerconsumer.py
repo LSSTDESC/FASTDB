@@ -17,6 +17,7 @@ import confluent_kafka
 import fastavro
 from pymongo import MongoClient
 
+import db
 from kafka_consumer import KafkaConsumer
 
 # Default location of BrokerMessage schema
@@ -37,7 +38,7 @@ class BrokerConsumer:
     However, we can't expect that from every broker, so we will need to
     write alert_wranger for each broker.
 
-    What is expected in the mongodb now matches our database tables:
+    What is expected in the mongodb now sorta matches our database tables:
 
        { 'topic': <from kafka header>,
          'msgoffset': <from kafka heeader>,
@@ -277,6 +278,15 @@ class BrokerConsumer:
         for topic in self.topics:
             self.consumer.reset_to_start( topic )
 
+    @classmethod
+    def build_flags( cls, flagmap, row ):
+        val = 0
+        for mask, field in flagmap.items():
+            if ( field in row ) and ( row[field] ):
+                val |= mask
+        return mask
+
+
     def alert_wrangler( self, messagebatch ):
         """Convert the alert structure from what we get to what we want to stuff in the mongo db.
 
@@ -290,24 +300,30 @@ class BrokerConsumer:
 
         """
 
-        diasource_fields = [ 'visit', 'band', 'midpointMjdTai', 'psfFlux', 'psfFluxErr',
-                             'ra', 'dec', 'raErr', 'decErr', 'ra_dec_Cov' ]
-        diasource_extra_fields = [ 'detector', 'x', 'y', 'xErr', 'yErr', 'psfLnL', 'psfChi2',
-                                   'psfNdata', 'snr', 'scienceFlux', 'scienceFluxErr',
+        # These fields don't exactly match what's in the table, because there are some additional
+        #   things here that the postgres importer uses to uniquely identify rows
+
+        diasource_fields = [ 'diaSourceId', 'diaObjectId', 'visit', 'band', 'midpointMjdTai',
+                             'psfFlux', 'psfFluxErr', 'ra', 'dec', 'raErr', 'decErr', 'ra_dec_Cov' ]
+        diasource_extra_fields = [ 'diaObjectId', 'visit',
+                                   'diaSourceId', 'detector', 'x', 'y', 'xErr', 'yErr',
+                                   'psfLnL', 'psfChi2', 'psfNdata', 'snr', 'scienceFlux', 'scienceFluxErr',
                                    'templateFlux', 'templateFluxErr', 'extendedness', 'reliability',
                                    'ixx', 'iyy', 'ixy', 'ixxPSF', 'iyyPSF', 'ixyPSF',
                                    'apFlux', 'apFluxErr', 'bboxSize',
                                    'timeProcessedMjdTai', 'timeWithdrawnMjdTai',
                                    'parentDiaSourceId' ]
-        diaforcedsource_fields = [ 'visit', 'band', 'midpointMjdTai', 'psfFlux', 'psfFluxErr', 'ra', 'dec' ]
-        diaforcedsource_extra_fields = [ 'visit', 'detector', 'scienceFlux', 'scienceFluxErr',
+        diaforcedsource_fields = [ 'diaObjectId', 'visit', 'band', 'midpointMjdTai',
+                                   'psfFlux', 'psfFluxErr', 'ra', 'dec' ]
+        diaforcedsource_extra_fields = [ 'diaObjectId', 'visit', 'detector', 'scienceFlux', 'scienceFluxErr',
                                          'timeProcessedMjdTai', 'timeWithdrawnMjdTai' ]
 
 
         for i in range( len(messagebatch) ):
             metamsg = messagebatch[i]
             msg = metamsg['msg']
-            messagebatch[i] = { 'topic': metamsg['topic'],
+            messagebatch[i] = { 'brokername': msg['brokerName'],
+                                'topic': metamsg['topic'],
                                 'msgoffset': metamsg['msgoffset'],
                                 'timestamp': metamsg['timestamp'],
                                 'savetime': metamsg['savetime'],
@@ -328,25 +344,31 @@ class BrokerConsumer:
                                     'classifications': msg['classifications']
                                 }
                                }
-
+            messagebatch[i]['diasource_extra']['flags'] = self.build_flags( db.DiaSourceExtra._flags_bits,
+                                                                            msg['diaSource'] )
+            messagebatch[i]['diasource_extra']['pixelflags'] = self.build_flags( db.DiaSourceExtra._pixelflags_bits,
+                                                                                 msg['diaSource'] )
             if msg['prvDiaSources'] is None:
                 messagebatch[i]['prvdiasources']  = None
-                messagebatch[i]['provdiasources_extra'] = None
+                messagebatch[i]['prvdiasources_extra'] = None
             else:
                 messagebatch[i]['prvdiasources'] =  [ { k.lower(): p[k] for k in diasource_fields }
                                                       for p in msg['prvDiaSources'] ]
                 messagebatch[i]['prvdiasources_extra'] = [ { k.lower(): p[k] for k in diasource_extra_fields }
                                                            for p in msg['prvDiaSources'] ]
+                for src, dest in zip( msg['prvDiaSources'], messagebatch[i]['prvdiasources_extra'] ):
+                    dest['flags'] = self.build_flags( db.DiaSourceExtra._flags_bits, src )
+                    dest['pixelflags'] = self.build_flags( db.DiaSourceExtra._pixelflags_bits, src )
 
             if msg['prvDiaForcedSources'] is None:
                 messagebatch[i]['prvdiaforcedsources'] = None
-                messagebatch[i]['provdiaforcedsources_extra'] = None
+                messagebatch[i]['prvdiaforcedsources_extra'] = None
             else:
                 messagebatch[i]['prvdiaforcedsources'] =  [ { k.lower(): p[k] for k in diaforcedsource_fields }
                                                             for p in msg['prvDiaForcedSources'] ]
-                messagebatch[i]['provdiaforcedsources_extra'] = [ { k.lower(): p[k]
-                                                                    for k in diaforcedsource_extra_fields }
-                                                              for p in msg['prvDiaForcedSources'] ]
+                messagebatch[i]['prvdiaforcedsources_extra'] = [ { k.lower(): p[k]
+                                                                   for k in diaforcedsource_extra_fields }
+                                                                 for p in msg['prvDiaForcedSources'] ]
 
 
     def handle_message_batch( self, msgs ):

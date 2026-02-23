@@ -1,6 +1,6 @@
 import pytest
 
-from db import DiaSource, DiaSourceExtra
+from db import DiaSource, DiaSourceExtra, DiaSourceBrokerInfo
 
 from basetest import BaseTestDB
 
@@ -112,8 +112,7 @@ class TestDiaSourceExtra( BaseTestDB ):
             "bboxsize",
             "timeprocessedmjdtai",
             "timewithdrawnmjdtai",
-            "parentdiasourceid",
-            "info"
+            "parentdiasourceid"
         }
         self.safe_to_modify = [
             "detector",
@@ -145,8 +144,7 @@ class TestDiaSourceExtra( BaseTestDB ):
             "bboxsize",
             "timeprocessedmjdtai",
             "timewithdrawnmjdtai",
-            "parentdiasourceid",
-            "info"
+            "parentdiasourceid"
         ]
         self.uniques = []
 
@@ -156,8 +154,7 @@ class TestDiaSourceExtra( BaseTestDB ):
                                     x=128,
                                     y=128,
                                     pixelflags=0,
-                                    flags=0,
-                                    info={}
+                                    flags=0
                                    )
         self.dict1 = { k: getattr( self.obj1, k ) for k in self.columns }
         self.obj2 = DiaSourceExtra( diasourceid=obj1_src2.diasourceid,
@@ -166,8 +163,7 @@ class TestDiaSourceExtra( BaseTestDB ):
                                     x=131.5,
                                     y=131.5,
                                     pixelflags=1,
-                                    flags=2,
-                                    info={}
+                                    flags=2
                                    )
         self.dict2 = { k: getattr( self.obj2, k ) for k in self.columns }
         self.dict3 = { 'diasourceid': obj1_src3.diasourceid,
@@ -176,5 +172,37 @@ class TestDiaSourceExtra( BaseTestDB ):
                        'x': 148.7,
                        'y': 148.7,
                        'pixelflags': 4,
-                       'flags': 8,
-                       'info': { 'cat': 'meow' } }
+                       'flags': 8 }
+
+
+class TestDiaSourceBrokerInfo( BaseTestDB ):
+
+    @pytest.fixture
+    def basetest_setup( self, obj1_src1 ):
+        self.cls = DiaSourceBrokerInfo
+        self.columns = { 'brokername', 'diasourceid', 'base_procver_id', 'diaobjectid', 'visit', 'info' }
+        self.safe_to_modify = [ 'info' ]
+        self.uniques = []
+
+        self.obj1 = DiaSourceBrokerInfo( brokername='broker1',
+                                         diasourceid=obj1_src1.diasourceid,
+                                         base_procver_id=obj1_src1.base_procver_id,
+                                         diaobjectid=obj1_src1.diaobjectid,
+                                         visit=obj1_src1.visit,
+                                         info={ 'foo': 'bar' }
+                                        )
+        self.dict1 = { k: getattr( self.obj1, k ) for k in self.columns }
+        self.obj2 = DiaSourceBrokerInfo( brokername='broker2',
+                                         diasourceid=obj1_src1.diasourceid,
+                                         base_procver_id=obj1_src1.base_procver_id,
+                                         diaobjectid=obj1_src1.diaobjectid,
+                                         visit=obj1_src1.visit,
+                                         info={ 'cat': 'fluffy' }
+                                        )
+        self.dict2 = { k: getattr( self.obj2, k ) for k in self.columns }
+        self.dict3 = { 'brokername': 'broker3',
+                       'diasourceid': obj1_src1.diasourceid,
+                       'base_procver_id': obj1_src1.base_procver_id,
+                       'diaobjectid': obj1_src1.diaobjectid,
+                       'visit': obj1_src1.visit,
+                       'info': { "xyzzy": "plugh" } }

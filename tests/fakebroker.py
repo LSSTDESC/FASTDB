@@ -139,7 +139,7 @@ class Classifier:
 
 class NugentClassifier(Classifier):
     def __init__( self, *args, **kwargs ):
-        super().__init__( "FakeBroker", "v1.0", "NugentClassifier", "100%", **kwargs )
+        super().__init__( "FakeBroker-Nugent", "v1.0", "NugentClassifier", "100%", **kwargs )
 
     def determine_types_and_probabilities( self, alert ):
         return [ ( 2222, 1.0 ) ]
@@ -149,7 +149,7 @@ class NugentClassifier(Classifier):
 
 class RandomSNType(Classifier):
     def __init__( self, *args, **kwargs ):
-        super().__init__( "FakeBroker", "v1.0", "RandomSNType", "Perfect", **kwargs )
+        super().__init__( "FakeBroker-Random", "v1.0", "RandomSNType", "Perfect", **kwargs )
         self.rng = numpy.random.default_rng()
 
     def determine_types_and_probabilities( self, alert ):

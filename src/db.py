@@ -48,7 +48,7 @@ _alwaysanalyze = False
 all_table_names = [ 'query_queue',
                     'spectruminfo', 'plannedspectra', 'wantedspectra',
                     'ppdb_alerts_sent', 'ppdb_diaforcedsource', 'ppdb_diasource', 'ppdb_diaobject', 'ppdb_host_galaxy',
-                    'diaforcedsource_extra', 'diaforcedsource', 'diasource_extra', 'diasource',
+                    'diaforcedsource_extra', 'diaforcedsource', 'diasource_brokerinfo', 'diasource_extra', 'diasource',
                     'diaobject_host_match', 'diaobject_position', 'diaobject', 'root_diaobject', 'host_galaxy',
                     'diasource_import_time',
                     'processing_version_alias', 'base_procver_of_procver',
@@ -1326,7 +1326,8 @@ class ProcessingVersion( DBBase ):
                                "LIMIT 1",
                                { 'pv': self.id, 'tab': table } )
             if len(bpv) == 0:
-                raise ValueError( f"Can't find base processing version for processing version {self.description}" )
+                raise ValueError( f"Can't find base processing version for processing version "
+                                  f"{self.description} and table {table}" )
             bpv = bpv[0]
             return BaseProcessingVersion( **bpv, noconvert=False )
 
@@ -1435,6 +1436,14 @@ class DiaSourceExtra( DBBase ):
                          0x00040000: 'pixelFlags_injected_template',
                          0x00080000: 'pixelFlags_injectedd_templateCenter',
                         }
+
+
+# ======================================================================
+
+class DiaSourceBrokerInfo( DBBase ):
+    __tablename__ = "diasource_brokerinfo"
+    _tablemeta = None
+    _pk = [ 'brokername', 'diasourceid', 'base_procver_id' ]
 
 
 # ======================================================================

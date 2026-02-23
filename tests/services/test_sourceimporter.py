@@ -1,4 +1,5 @@
 # At the moment, this also tests dr_importer.py
+# Except that has been temporarily deprecated
 
 import pytest
 import datetime
@@ -8,7 +9,7 @@ import psycopg
 import db
 from util import env_as_bool
 from services.source_importer import SourceImporter
-from services.dr_importer import DRImporter
+# from services.dr_importer import DRImporter
 
 # Ordering of these tests matters, because they use module scope fixtures.
 # See the comment before class TestImport
@@ -27,31 +28,34 @@ def import_first30days_objects( barf, alerts_30days_sent_and_brokermessage_consu
     t1 = alerts_30days_sent_and_brokermessage_consumed
 
     try:
-        si = SourceImporter( bpv['realtime'].id, bpv['realtime'].id )
+        si = SourceImporter( bpv['realtime'].id,
+                             bpv['realtime_diaobject_position_60000'].id,
+                             bpv['realtime_diasource'].id,
+                             bpv['realtime_diaforcedsource'].id,
+                             None )
         with db.MG() as mongoclient:
             collection = db.get_mongo_collection( mongoclient, collection_name )
-            nobj, nroot = si.import_objects_from_collection( collection, t1=t1 )
+            nobjs, nroot, npos = si.import_objects_from_collection( collection, t1=t1 )
 
-        yield nobj, nroot
+        yield nobjs, nroot, npos
     finally:
-        with db.DB() as conn:
-            cursor = conn.cursor()
+        with db.DBCon() as conn:
             # We can be cavalier here becasue diaobject was supposed to be empty when we started
-            cursor.execute( "DELETE FROM diaobject" )
-            cursor.execute( "DELETE FROM root_diaobject" )
+            conn.execute( "DELETE FROM diaobject_position" )
+            conn.execute( "DELETE FROM diaobject" )
+            conn.execute( "DELETE FROM root_diaobject" )
             conn.commit()
 
 
-def import_first30days_hosts( import_first30days_objects, procver_collection ):
-    bpv, _pv = procver_collection
-    try:
-        dri = DRImporter( bpv['realtime'].id )
-        yield dri.import_host_info()
-    finally:
-        with db.DB() as conn:
-            cursor = conn.cursor()
-            cursor.execute( "DELETE FROM host_galaxy" )
-            conn.commit()
+# def import_first30days_hosts( import_first30days_objects, procver_collection ):
+#     bpv, _pv = procver_collection
+#     try:
+#         dri = DRImporter( bpv['realtime'].id )
+#         yield dri.import_host_info()
+#     finally:
+#         with db.DBCon() as conn:
+#             conn.execute( "DELETE FROM host_galaxy" )
+#             conn.commit()
 
 
 @pytest.fixture
@@ -62,36 +66,23 @@ def import_first30days_sources( barf, import_first30days_objects, procver_collec
     t1 = alerts_30days_sent_and_brokermessage_consumed
 
     try:
-        si = SourceImporter( bpv['realtime'].id, bpv['realtime'].id )
+        si = SourceImporter( bpv['realtime'].id,
+                             bpv['realtime_diaobject_position_60000'].id,
+                             bpv['realtime_diasource'].id,
+                             bpv['realtime_diaforcedsource'].id,
+                             None )
         with db.MG() as mongoclient:
             collection = db.get_mongo_collection( mongoclient, collection_name )
-            n = si.import_sources_from_collection( collection, t1=t1 )
+            nsrc, nprvsrc = si.import_sources_from_collection( collection, t1=t1 )
+            ninfo = si.import_brokerinfo_from_collection( collection, t1=t1 )
 
-        yield n
+        yield nsrc, nprvsrc, ninfo
     finally:
-        with db.DB() as conn:
-            cursor = conn.cursor()
-            cursor.execute( "DELETE FROM diasource" )
+        with db.DBCon() as conn:
+            conn.execute( "DELETE FROM diasource_brokerinfo" )
+            conn.execute( "DELETE FROM diasource_extra" )
+            conn.execute( "DELETE FROM diasource" )
             conn.commit()
-
-
-@pytest.fixture
-def import_30days_prvsources( barf, import_first30days_sources, procver_collection,
-                              alerts_30days_sent_and_brokermessage_consumed ):
-    bpv, _pv = procver_collection
-    collection_name = f'fastdb_{barf}'
-    t1 = alerts_30days_sent_and_brokermessage_consumed
-
-    try:
-        si = SourceImporter( bpv['realtime'].id, bpv['realtime'].id )
-        with db.MG() as mongoclient:
-            collection = db.get_mongo_collection( mongoclient, collection_name )
-            n = si.import_prvsources_from_collection( collection, t1=t1 )
-
-        yield n
-    finally:
-        # Don't have to clean up; import_first30days_sources will clean up the diasources table
-        pass
 
 
 @pytest.fixture
@@ -102,82 +93,72 @@ def import_30days_prvforcedsources( barf, import_first30days_sources, procver_co
     t1 = alerts_30days_sent_and_brokermessage_consumed
 
     try:
-        si = SourceImporter( bpv['realtime'].id, bpv['realtime'].id )
+        si = SourceImporter( bpv['realtime'].id,
+                             bpv['realtime_diaobject_position_60000'].id,
+                             bpv['realtime_diasource'].id,
+                             bpv['realtime_diaforcedsource'].id,
+                             None )
         with db.MG() as mongoclient:
             collection = db.get_mongo_collection( mongoclient, collection_name )
             n = si.import_prvforcedsources_from_collection( collection, t1=t1 )
 
         yield n
     finally:
-        with db.DB() as conn:
-            cursor = conn.cursor()
-            cursor.execute( "DELETE FROM diaforcedsource" )
+        with db.DBCon() as conn:
+            conn.execute( "DELETE FROM diaforcedsource_extra" )
+            conn.execute( "DELETE FROM diaforcedsource" )
             conn.commit()
 
 
 # Import days 30-90 without importing days 0-30
 # This uses the timestamps returned by some of the other fixtures
 @pytest.fixture
-def import_next60days_noprv( barf, procver_collection,
-                             alerts_30days_sent_and_brokermessage_consumed,
-                             alerts_60moredays_sent_and_brokermessage_consumed
-                            ):
+def import_next60days( barf, procver_collection,
+                       alerts_30days_sent_and_brokermessage_consumed,
+                       alerts_60moredays_sent_and_brokermessage_consumed
+                      ):
     bpv, _pv = procver_collection
     collection_name = f'fastdb_{barf}'
     t0 = alerts_30days_sent_and_brokermessage_consumed
     t1 = alerts_60moredays_sent_and_brokermessage_consumed
 
     try:
-        si = SourceImporter( bpv['realtime'].id, bpv['realtime'].id )
+        si = SourceImporter( bpv['realtime'].id,
+                             bpv['realtime_diaobject_position_60000'].id,
+                             bpv['realtime_diasource'].id,
+                             bpv['realtime_diaforcedsource'].id,
+                             None )
         with db.MG() as mongoclient:
             collection = db.get_mongo_collection( mongoclient, collection_name )
-            nobj, nroot = si.import_objects_from_collection( collection, t0=t0, t1=t1 )
-            nsrc = si.import_sources_from_collection( collection, t0=t0, t1=t1 )
+            nobj, nroot, npos = si.import_objects_from_collection( collection, t0=t0, t1=t1 )
+            nsrc, nprvsrc = si.import_sources_from_collection( collection, t0=t0, t1=t1 )
+            nfrc = si.import_forcedsources_from_collection( collection, t0=t0, t1=t1 )
+            ninfo = si.import_brokerinfo_from_collection( collection, t0=t0, t1=t1 )
 
-        yield nobj, nroot, nsrc
+        yield nobj, nroot, npos, nsrc, nprvsrc, nfrc, ninfo
     finally:
-        with db.DB() as conn:
-            cursor = conn.cursor()
-            cursor.execute( "DELETE FROM diaforcedsource" )
-            cursor.execute( "DELETE FROM diasource" )
-            cursor.execute( "DELETE FROM diaobject" )
-            cursor.execute( "DELETE FROM root_diaobject" )
+        with db.DBCon() as conn:
+            conn.execute( "DELETE FROM diaforcedsource_extra" )
+            conn.execute( "DELETE FROM diaforcedsource" )
+            conn.execute( "DELETE FROM diasource_brokerinfo" )
+            conn.execute( "DELETE FROM diasource_extra" )
+            conn.execute( "DELETE FROM diasource" )
+            conn.execute( "DELETE FROM diaobject_position" )
+            conn.execute( "DELETE FROM diaobject" )
+            conn.execute( "DELETE FROM root_diaobject" )
             conn.commit()
 
 
-@pytest.fixture
-def import_next60days_hosts( import_next60days_noprv, procver_collection ):
-    bpv, _pv = procver_collection
-    try:
-        dri = DRImporter( bpv['realtime'].id )
-        yield dri.import_host_info()
-    finally:
-        with db.DB() as conn:
-            cursor = conn.cursor()
-            cursor.execute( "DELETE FROM host_galaxy" )
-            conn.commit()
-
-
-@pytest.fixture
-def import_next60days_prv( barf, procver_collection, import_next60days_noprv,
-                           alerts_30days_sent_and_brokermessage_consumed,
-                           alerts_60moredays_sent_and_brokermessage_consumed ):
-    bpv, _pv = procver_collection
-    collection_name = f'fastdb_{barf}'
-    t0 = alerts_30days_sent_and_brokermessage_consumed
-    t1 = alerts_60moredays_sent_and_brokermessage_consumed
-
-    try:
-        si = SourceImporter( bpv['realtime'].id, bpv['realtime'].id )
-        with db.MG() as mongoclient:
-            collection = db.get_mongo_collection( mongoclient, collection_name )
-            nsrc = si.import_prvsources_from_collection( collection, t0=t0, t1=t1 )
-            nfrc = si.import_prvforcedsources_from_collection( collection, t0=t0, t1=t1 )
-
-        yield nsrc, nfrc
-    finally:
-        # Parent fixture does cleanup
-        pass
+# @pytest.fixture
+# def import_next60days_hosts( import_next60days_noprv, procver_collection ):
+#     bpv, _pv = procver_collection
+#     try:
+#         dri = DRImporter( bpv['realtime'].id )
+#         yield dri.import_host_info()
+#     finally:
+#         with db.DBCon() as conn:
+#             conn.execute( "DELETE FROM host_galaxy" )
+#             conn.commit()
 
 
 # Import days 30-90 after importing days 0-30
@@ -191,23 +172,27 @@ def import_30days_60days( barf, procver_collection, import_30days_prvsources, im
     t1 = alerts_60moredays_sent_and_brokermessage_consumed
 
     try:
-        si = SourceImporter( bpv['realtime'].id, bpv['realtime'].id )
+        si = SourceImporter( bpv['realtime'].id,
+                             bpv['realtime_diaobject_position_60000'].id,
+                             bpv['realtime_diasource'].id,
+                             bpv['realtime_diaforcedsource'].id,
+                             None )
         with db.MG() as mongoclient:
             collection = db.get_mongo_collection( mongoclient, collection_name )
-            nobj, nroot = si.import_objects_from_collection( collection, t0=t0, t1=t1 )
-            nsrc = si.import_sources_from_collection( collection, t0=t0, t1=t1 )
-            nprvsrc = si.import_prvsources_from_collection( collection, t0=t0, t1=t1 )
+            nobj, nroot, npos = si.import_objects_from_collection( collection, t0=t0, t1=t1 )
+            nsrc, nprvsrc = si.import_sources_from_collection( collection, t0=t0, t1=t1 )
             nprvfrc = si.import_prvforcedsources_from_collection( collection, t0=t0, t1=t1 )
-        dri = DRImporter( bpv['realtime'].id )
-        nhosts = dri.import_host_info()
+            ninfo = si.import_brokerinfo_from_collection( collection, t0=t0, t1=t1 )
+        # dri = DRImporter( bpv['realtime'].id )
+        # nhosts = dri.import_host_info()
 
-        yield nobj, nroot, nsrc, nprvsrc, nprvfrc, nhosts
+        yield nobj, nroot, npos, nsrc, nprvsrc, nprvfrc, ninfo
     finally:
-        # Parent fixtures do most cleanup, but not of hosts
-        with db.DB() as conn:
-            cursor = conn.cursor()
-            cursor.execute( "DELETE FROM host_galaxy" )
-            conn.commit()
+        # # Parent fixtures do most cleanup, but not of hosts
+        # with db.DConB() as conn:
+        #     conn.execute( "DELETE FROM host_galaxy" )
+        #     conn.commit()
+        pass
 
 
 # **********************************************************************
@@ -217,48 +202,43 @@ def test_read_mongo_objects( barf, alerts_30days_sent_and_brokermessage_consumed
     bpv, _pv = procver_collection
     collection_name = f'fastdb_{barf}'
 
-    si = SourceImporter( bpv['realtime'].id, bpv['realtime'].id )
+    si = SourceImporter( bpv['realtime'].id,
+                         bpv['realtime_diaobject_position_60000'].id,
+                         bpv['realtime_diasource'].id,
+                         bpv['realtime_diaforcedsource'].id,
+                         None )
     with db.MG() as mongoclient:
         collection = db.get_mongo_collection( mongoclient, collection_name )
 
         # First: make sure it finds everyting with no time cut
-        with db.DB() as pqconn:
-            si.read_mongo_objects( pqconn, collection )
-            cursor = pqconn.cursor()
-            cursor.execute( "SELECT * FROM temp_diaobject_import" )
-            rows = cursor.fetchall()
-        assert len(rows) == 12
+        with db.DBCon() as conn:
+            si.read_mongo_objects( conn, collection )
+            rows, _cols = conn.execute( "SELECT * FROM temp_diaobject_import" )
+            assert len(rows) == 12
 
         # Second: make sure it finds everything with a top time cut of now
         #   (which is assuredly after when things were inserted)
-        with db.DB() as pqconn:
-            si.read_mongo_objects( pqconn, collection, t1=datetime.datetime.now( tz=datetime.UTC ) )
-            cursor = pqconn.cursor()
-            cursor.execute( "SELECT * FROM temp_diaobject_import" )
-            rows = cursor.fetchall()
-        assert len(rows) == 12
+        with db.DBCon() as conn:
+            si.read_mongo_objects( conn, collection, t1=datetime.datetime.now( tz=datetime.UTC ) )
+            rows, _cols = conn.execute( "SELECT * FROM temp_diaobject_import" )
+            assert len(rows) == 12
 
         # Third: make sure it finds nothing with a bottom time cut of now
-        with db.DB() as pqconn:
-            si.read_mongo_objects( pqconn, collection, t0=datetime.datetime.now( tz=datetime.UTC ) )
-            cursor = pqconn.cursor()
-            cursor.execute( "SELECT * FROM temp_diaobject_import" )
-            rows = cursor.fetchall()
-        assert len(rows) == 0
+        with db.DBCon() as conn:
+            si.read_mongo_objects( conn, collection, t0=datetime.datetime.now( tz=datetime.UTC ) )
+            rows, _cols = conn.execute( "SELECT * FROM temp_diaobject_import" )
+            assert len(rows) == 0
 
         # Testing between times is hard, because I belive all of the things
         # saved will have the same time cut!  So, resort to just giving
         # a ridiculously early t0 and make sure we get everything
         # Third: make sure it finds nothing with a bottom time cut of now
-        with db.DB() as pqconn:
-            si.read_mongo_objects( pqconn, collection,
+        with db.DBCon() as conn:
+            si.read_mongo_objects( conn, collection,
                                    t0=datetime.datetime( 2000, 1, 1, 0, 0, 0, tzinfo=datetime.UTC ),
                                    t1=datetime.datetime.now( tz=datetime.UTC ) )
-            cursor = pqconn.cursor()
-            cursor.execute( "SELECT * FROM temp_diaobject_import" )
-            rows = cursor.fetchall()
-        assert len(rows) == 12
-
+            rows, _cols = conn.execute( "SELECT * FROM temp_diaobject_import" )
+            assert len(rows) == 12
 
     # TODO : look at other fields?
 
@@ -270,16 +250,19 @@ def test_read_mongo_sources( barf, alerts_30days_sent_and_brokermessage_consumed
     # Not going to test time cuts here because it's the same code path that
     #   was already tested intest_read_mongo_objects
 
-    si = SourceImporter( bpv['realtime'].id, bpv['realtime'].id )
+    si = SourceImporter( bpv['realtime'].id,
+                         bpv['realtime_diaobject_position_60000'].id,
+                         bpv['realtime_diasource'].id,
+                         bpv['realtime_diaforcedsource'].id,
+                         None )
     with db.MG() as mongoclient:
         collection = db.get_mongo_collection( mongoclient, collection_name )
-        with db.DB() as pqconn:
-            si.read_mongo_sources( pqconn, collection )
-            cursor = pqconn.cursor()
-            cursor.execute( "SELECT * FROM temp_diasource_import" )
-            rows = cursor.fetchall()
-
-    assert len(rows) == 77
+        with db.DBCon() as conn:
+            si.read_mongo_sources( conn, collection )
+            rows, _cols = conn.execute( "SELECT * FROM temp_diasource_import" )
+            assert len(rows) == 77
+            rows, _cols = conn.execute( "SELECT * FROM temp_diasource_extra_import" )
+            assert len(rows) == 77
 
     # TODO : more stringent tests
 
@@ -288,17 +271,21 @@ def test_read_mongo_previous_sources( barf, alerts_30days_sent_and_brokermessage
     bpv, _pv = procver_collection
     collection_name = f'fastdb_{barf}'
 
-    si = SourceImporter( bpv['realtime'].id, bpv['realtime'].id )
+    si = SourceImporter( bpv['realtime'].id,
+                         bpv['realtime_diaobject_position_60000'].id,
+                         bpv['realtime_diasource'].id,
+                         bpv['realtime_diaforcedsource'].id,
+                         None )
     with db.MG() as mongoclient:
         collection = db.get_mongo_collection( mongoclient, collection_name )
-        with db.DB() as pqconn:
-            si.read_mongo_prvsources( pqconn, collection )
-            cursor = pqconn.cursor()
-            cursor.execute( "SELECT * FROM temp_prvdiasource_import" )
-            coldex = { desc[0]: i for i, desc in enumerate(cursor.description) }
-            rows = cursor.fetchall()
+        with db.DBCon() as conn:
+            si.read_mongo_prvsources( conn, collection )
+            rows, cols = conn.execute( "SELECT * FROM temp_prvdiasource_import" )
+            coldex = { c: i for i, c in enumerate(cols) }
+            assert len(rows) == 65
+            exrows, _excols = conn.execute( "SELECT * FROM temp_prvdiasource_extra_import" )
+            assert len(exrows) == 65
 
-        assert len(rows) == 65
 
         # Check that the mongo aggregation stuff in read_mongo_provsources is
         #   right by doing it long-form in python
@@ -308,9 +295,9 @@ def test_read_mongo_previous_sources( barf, alerts_30days_sent_and_brokermessage
         prvsources = {}
 
         for src in collection.find( {} ):
-            if src['msg']['prvDiaSources'] is not None:
-                for prvsrc in src['msg']['prvDiaSources']:
-                    prvsrcid = f"{prvsrc['diaObjectId']}_{prvsrc['visit']}"
+            if src['prvdiasources'] is not None:
+                for prvsrc in src['prvdiasources']:
+                    prvsrcid = f"{prvsrc['diaobjectid']}_{prvsrc['visit']}"
                     if prvsrcid not in prvsources:
                         prvsources[ prvsrcid ] = prvsrc
 
@@ -323,17 +310,20 @@ def test_read_mongo_previous_forced_sources( barf, alerts_30days_sent_and_broker
     bpv, _pv = procver_collection
     collection_name = f'fastdb_{barf}'
 
-    si = SourceImporter( bpv['realtime'].id, bpv['realtime'].id )
+    si = SourceImporter( bpv['realtime'].id,
+                         bpv['realtime_diaobject_position_60000'].id,
+                         bpv['realtime_diasource'].id,
+                         bpv['realtime_diaforcedsource'].id,
+                         None )
     with db.MG() as mongoclient:
         collection = db.get_mongo_collection( mongoclient, collection_name )
-        with db.DB() as pqconn:
-            si.read_mongo_prvforcedsources( pqconn, collection )
-            cursor = pqconn.cursor()
-            cursor.execute( "SELECT * FROM temp_prvdiaforcedsource_import" )
-            coldex = { desc[0]: i for i, desc in enumerate(cursor.description) }
-            rows = cursor.fetchall()
-
-        assert len(rows) == 148
+        with db.DBCon() as conn:
+            si.read_mongo_prvforcedsources( conn, collection )
+            rows, cols = conn.execute( "SELECT * FROM temp_prvdiaforcedsource_import" )
+            coldex = { c: i for i, c in enumerate(cols) }
+            assert len(rows) == 148
+            exrows, _excols = conn.execute( "SELECT * FROM temp_prvdiaforcedsource_extra_import" )
+            assert len(exrows) == 148
 
         # Check that the mongo aggregation stuff in read_mongo_provsources is
         #   right by doing it long-form in python
@@ -343,9 +333,9 @@ def test_read_mongo_previous_forced_sources( barf, alerts_30days_sent_and_broker
         prvsources = {}
 
         for src in collection.find( {} ):
-            if src['msg']['prvDiaForcedSources'] is not None:
-                for prvsrc in src['msg']['prvDiaForcedSources']:
-                    prvsrcid = f"{prvsrc['diaObjectId']}_{prvsrc['visit']}"
+            if src['prvdiaforcedsources'] is not None:
+                for prvsrc in src['prvdiaforcedsources']:
+                    prvsrcid = f"{prvsrc['diaobjectid']}_{prvsrc['visit']}"
                     if prvsrcid not in prvsources:
                         prvsources[ prvsrcid ] = prvsrc
 
@@ -354,16 +344,56 @@ def test_read_mongo_previous_forced_sources( barf, alerts_30days_sent_and_broker
     # TODO: check more fields
 
 
+def test_read_mongo_brokerinfo( barf, alerts_30days_sent_and_brokermessage_consumed, procver_collection ):
+    bpv, _pv = procver_collection
+    collection_name = f"fastdb_{barf}"
+
+    si = SourceImporter( bpv['realtime'].id,
+                         bpv['realtime_diaobject_position_60000'].id,
+                         bpv['realtime_diasource'].id,
+                         bpv['realtime_diaforcedsource'].id,
+                         None )
+    with db.MG() as mongoclient:
+        collection = db.get_mongo_collection( mongoclient, collection_name )
+        with db.DBCon() as conn:
+            si.read_mongo_brokerinfo( conn, collection )
+            rows, cols = conn.execute( "SELECT * FROM temp_diasource_brokerinfo_import" )
+            coldex = { c: i for i, c in enumerate(cols) }
+
+        assert len(rows) == 154
+
+        pulledids = set( f"{row[coldex['brokername']]}_{row[coldex['diaobjectid']]}_{row[coldex['visit']]}"
+                         for row in rows )
+        assert len( pulledids ) == len( rows )
+        msgids = [ f"{c['brokername']}_{c['diaobjectid']}_{c['diasource']['visit']}"
+                   for c in collection.find( {},
+                                             projection={ 'diaobjectid': 1,
+                                                          'diasource.visit': 1,
+                                                          'brokername': 1 } ) ]
+        assert len( msgids ) == len( pulledids )
+        assert set( msgids ) == pulledids
+
+        # TODO : check actual content....
+
+
 def test_import_objects( import_first30days_objects ):
-    nobj, nroot = import_first30days_objects
+    nobj, nroot, npos = import_first30days_objects
     assert nobj == 12
     assert nroot == 12
+    assert npos == 12
     with db.DB() as conn:
         cursor = conn.cursor()
         cursor.execute( "SELECT * FROM diaobject" )
         objrows = cursor.fetchall()
         objcols = { cursor.description[i].name: i for i in range( len(cursor.description) ) }
         assert len(objrows) == 12
+
+        cursor.execute( "SELECT * FROM diaobject_position" )
+        posrows = cursor.fetchall()
+        poscols = { cursor.description[i].name: i for i in range( len(cursor.description) ) }
+        assert set( p[poscols['diaobjectid']] for p in posrows ) == set( o[objcols['diaobjectid']] for o in objrows )
+        assert all( p[poscols['ra']] is not None for p in posrows )
+        assert all( p[poscols['dec']] is not None for p in posrows )
 
         cursor.execute( "SELECT id FROM root_diaobject" )
         rootids = [ r[0] for r in cursor.fetchall() ]
@@ -385,7 +415,10 @@ def test_import_hosts( import_first30days_hosts ):
 
 
 def test_import_sources( import_first30days_sources ):
-    assert import_first30days_sources == 77
+    nsrc, nprvsrc, ninfo = import_first30days_sources
+    assert nsrc == 77
+    assert nprvsrc == 65
+    assert ninfo == 154
     with db.DB() as conn:
         cursor = conn.cursor()
         cursor.execute( "SELECT * FROM diasource" )
@@ -398,21 +431,7 @@ def test_import_sources( import_first30days_sources ):
     # TODO :more?
 
 
-def test_import_prvsources( import_30days_prvsources ):
-    assert import_30days_prvsources == 0
-    with db.DB() as conn:
-        cursor = conn.cursor()
-        cursor.execute( "SELECT * FROM diasource" )
-        rows = cursor.fetchall()
-    # There won't be any new sources, because all sources that might
-    #   have been a previous already got imported by
-    #   import_sources.
-    assert len(rows) == 77
-
-    # TODO : More
-
-
-def test_import_provforcedsources( import_30days_prvforcedsources ):
+def test_import_prvforcedsources( import_30days_prvforcedsources ):
     assert import_30days_prvforcedsources == 148
     with db.DB() as conn:
         cursor = conn.cursor()
@@ -459,38 +478,56 @@ class TestImport:
         try:
             with db.MG() as mongoclient:
                 collection = db.get_mongo_collection( mongoclient, collection_name )
-                si = SourceImporter( bpv['realtime'].id, bpv['realtime'].id )
-                nobj, nroot, nsrc, nfrc = si.import_from_mongo( collection )
+                si = SourceImporter( bpv['realtime'].id,
+                                     bpv['realtime_diaobject_position_60000'].id,
+                                     bpv['realtime_diasource'].id,
+                                     bpv['realtime_diaforcedsource'].id,
+                                     None )
+                nobj, nroot, npos, nsrc, nprvsrc, nfrc, ninfo = si.import_from_mongo( collection )
 
-            yield nobj, nroot, nsrc, nfrc, tsent, datetime.datetime.now( tz=datetime.UTC )
+            yield nobj, nroot, npos, nsrc, nprvsrc, nfrc, ninfo, tsent, datetime.datetime.now( tz=datetime.UTC )
         finally:
-            with db.DB() as conn:
-                cursor = conn.cursor()
-                cursor.execute( "DELETE FROM diaforcedsource" )
-                cursor.execute( "DELETE FROM diasource" )
-                cursor.execute( "DELETE FROM diasource_import_time WHERE collection=%(col)s",
-                                { 'col': collection_name} )
-                cursor.execute( "DELETE FROM diaobject" )
-                cursor.execute( "DELETE FROM root_diaobject" )
+            with db.DBcon() as conn:
+                conn.execute( "DELETE FROM diaforcedsource_extra" )
+                conn.execute( "DELETE FROM diaforcedsource" )
+                conn.execute( "DELETE FROM diasource_brokerinfo" )
+                conn.execute( "DELETE FROM diasource_extra" )
+                conn.execute( "DELETE FROM diasource" )
+                conn.execute( "DELETE FROM diasource_import_time WHERE collection=%(col)s",
+                             { 'col': collection_name} )
+                conn.execute( "DELETE FROM diaobject_postiion" )
+                conn.execute( "DELETE FROM diaobject" )
+                conn.execute( "DELETE FROM root_diaobject" )
                 conn.commit()
 
 
     def test_run_import_30days( self, barf, run_import_30days ):
         collection_name = f'fastdb_{barf}'
 
-        nobj, nroot, nsrc, nfrc, tsent, t30 = run_import_30days
+        nobj, nroot, npos, nsrc, nprvsrc, nfrc, ninfo, tsent, t30 = run_import_30days
         assert nobj == 12
         assert nroot == 12
+        assert npos == 12
         assert nsrc == 77
+        import pdb; pdb.set_trace()
         assert nfrc == 148
+        assert ninfo == 154
         with db.DB() as conn:
             cursor = conn.cursor()
             cursor.execute( "SELECT COUNT(*) FROM diaobject" )
             assert cursor.fetchone()[0] == nobj
+            cursor.execute( "SELECT COUNT(*) FROM diaobject_position" )
+            assert cursor.fetchone()[0] == nobj
             cursor.execute( "SELECT COUNT(*) FROM diasource" )
+            assert cursor.fetchone()[0] == nsrc
+            cursor.execute( "SELECT COUNT(*) FROM diasource_extra" )
             assert cursor.fetchone()[0] == nsrc
             cursor.execute( "SELECT COUNT(*) FROM diaforcedsource" )
             assert cursor.fetchone()[0] == nfrc
+            cursor.execute( "SELECT COUNT(*) FROM diaforcedsource_extra" )
+            assert cursor.fetchone()[0] == nfrc
+            cursor.execute( "SELECT COUNT(*) FROM diasource_brokerinfo" )
+            assert cursor.fethcone()[0] == ninfo
             cursor.execute( "SELECT t FROM diasource_import_time WHERE collection=%(col)s", { 'col': collection_name } )
             t = cursor.fetchone()[0]
             assert t > tsent
@@ -506,7 +543,7 @@ class TestImport:
                                        alerts_60moredays_sent_and_brokermessage_consumed
                                       ):
         bpv, _pv = procver_collection
-        nobj30, nroot30, nsrc30, nfrc30, t30send, t30 = run_import_30days
+        nobj30, nroot30, npos30, nsrc30, nprvsrc30, nfrc30, ninfo30, t30send, t30 = run_import_30days
         t60send = alerts_60moredays_sent_and_brokermessage_consumed
         collection_name = f'fastdb_{barf}'
 
@@ -526,8 +563,12 @@ class TestImport:
 
             with db.MG() as mongoclient:
                 collection = db.get_mongo_collection( mongoclient, collection_name )
-                si = SourceImporter( bpv['realtime'].id, bpv['realtime'].id )
-                nobj, nroot, nsrc, nfrc = si.import_from_mongo( collection )
+                si = SourceImporter( bpv['realtime'].id,
+                                     bpv['realtime_diaobject_position_60000'].id,
+                                     bpv['realtime_diasource'].id,
+                                     bpv['realtime_diaforcedsource'].id,
+                                     None )
+                nobj, nroot, npos, nsrc, nprvsrc, nfrc, ninfo = si.import_from_mongo( collection )
             t1 = datetime.datetime.now( tz=datetime.UTC )
 
             with db.DB() as conn:
@@ -539,8 +580,11 @@ class TestImport:
 
             assert nobj30 == 12
             assert nroot30 == 12
+            assert npos30 == 12
+            import pdb; pdb.set_trace()
             assert nsrc30 == 77
             assert nfrc30 == 148
+            assert ninfo30 == 154
             assert objrootids30 == rootids30
             assert nobj == 25
             assert nroot == 25

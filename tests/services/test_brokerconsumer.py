@@ -18,18 +18,86 @@ def check_mongodb( mongoclient, dbname, collection ):
     # 77 diasources in the database, two classifiers per alert = 154 broker messages
     assert coll.count_documents({}) == 154
 
-    # Pull out the diaSourceId from all the messages, make sure they're as expected
-    # (Based on the Postgres ppdb_alerts_sent table.)
+    # Pull out the diaSourceId from all the messages, make sure we got the right amount
     mgcursor = coll.find( {}, projection={ 'diaobjectid': 1, 'diasource.visit': 1 } )
     srcids = [ f"{c['diaobjectid']}_{c['diasource']['visit']}" for c in mgcursor ]
     assert len(srcids) == 154
     srcids = set( srcids )
     assert len(srcids) == 77
+
+    # Pull out the previous diasources
+
+    msgcursor = coll.aggregate( [ { "$unwind": "$prvdiasources" } ] )
+    prvsrcids = [ f"{c['prvdiasources']['diaobjectid']}_{c['prvdiasources']['visit']}" for c in msgcursor ]
+    assert len(prvsrcids) == 770
+    # But they're mostly redundant
+    prvsrcids = set( prvsrcids )
+    assert len(prvsrcids) == 65
+
+    msgcursor = coll.aggregate( [ { "$unwind": "$prvdiasources_extra" } ] )
+    prvsrcextraids = [ f"{c['prvdiasources_extra']['diaobjectid']}_{c['prvdiasources_extra']['visit']}"
+                       for c in msgcursor ]
+    assert len(prvsrcextraids) == 770
+    prvsrcextraids = set( prvsrcextraids )
+    assert prvsrcextraids == prvsrcids
+
+    # Pull out the previous diaforcedsources
+
+    msgcursor = coll.aggregate( [ { "$unwind": "$prvdiaforcedsources" } ] )
+    prvfrcedids = [ f"{c['prvdiaforcedsources']['diaobjectid']}_{c['prvdiaforcedsources']['visit']}"
+                    for c in msgcursor ]
+    assert len(prvfrcedids) == 1382
+    prvfrcedids = set( prvfrcedids )
+    assert len(prvfrcedids) == 148
+
+    msgcursor = coll.aggregate( [ { "$unwind": "$prvdiaforcedsources_extra" } ] )
+    prvfrcedextraids = [ f"{c['prvdiaforcedsources_extra']['diaobjectid']}_{c['prvdiaforcedsources_extra']['visit']}"
+                         for c in msgcursor ]
+    assert len(prvfrcedextraids) == 1382
+    prvfrcedextraids = set( prvfrcedextraids )
+    assert prvfrcedextraids == prvfrcedids
+
+    msgcursor = coll.find( { "brokername": "FakeBroker-Nugent" }, projection={ 'diasource.diasourceid': 1 } )
+    nugentsrces = [ c['diasource']['diasourceid'] for c in msgcursor ]
+    assert len(nugentsrces) == 77
+    nugentsrces = set( nugentsrces )
+    assert len(nugentsrces) == 77
+    msgcursor = coll.find( { "brokername": "FakeBroker-Random" }, projection={ 'diasource.diasourceid': 1 } )
+    randomsrces = [ c['diasource']['diasourceid'] for c in msgcursor ]
+    assert len(randomsrces) == 77
+    randomsrces = set( randomsrces )
+    assert randomsrces == nugentsrces
+
+    # Make sure sources and previous sources match what's expected
+    #  (Sadly, because of how this test works, there won't be any
+    #   sources in previous sources that weren't also in sources.
+    #   that'd be nice to be able to check all functionality.)
+
     with db.DB() as conn:
         cursor = conn.cursor()
         cursor.execute( "SELECT diaobjectid, visit FROM ppdb_alerts_sent" )
         alertssent = set( f"{row[0]}_{row[1]}" for row in cursor.fetchall() )
-    assert alertssent == srcids
+        assert alertssent == srcids
+
+        cursor.execute( "SELECT DISTINCT ON(s.diaobjectid, s.visit) s.diaobjectid, s.visit\n"
+                        "FROM ppdb_alerts_sent a\n"
+                        "INNER JOIN ppdb_diasource sprime ON a.diaobjectid=sprime.diaobjectid\n"
+                        "                                AND a.visit=sprime.visit\n"
+                        "INNER JOIN ppdb_diasource s ON s.diaobjectid=sprime.diaobjectid\n"
+                        "                           AND s.midpointmjdtai<sprime.midpointmjdtai\n"
+                        "GROUP BY s.diaobjectid, s.visit\n" )
+        prvsrcexpected = set( f"{row[0]}_{row[1]}" for row in cursor.fetchall() )
+        assert prvsrcexpected == prvsrcids
+
+        cursor.execute( "SELECT DISTINCT ON(f.diaobjectid, f.visit) f.diaobjectid, f.visit\n"
+                        "FROM ppdb_alerts_sent a\n"
+                        "INNER JOIN ppdb_diasource s ON a.diaobjectid=s.diaobjectid\n"
+                        "                           AND a.visit=s.visit\n"
+                        "INNER JOIN ppdb_diaforcedsource f ON f.diaobjectid=s.diaobjectid\n"
+                        "                                 AND f.midpointmjdtai<=s.midpointmjdtai-1\n"
+                        "GROUP BY f.diaobjectid, f.visit\n" )
+        prvfrcedexpected = set( f"{row[0]}_{row[1]}" for row in cursor.fetchall() )
+        assert prvfrcedexpected == prvfrcedids
 
     # TODO : more checks?
 

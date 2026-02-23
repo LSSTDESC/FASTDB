@@ -1,9 +1,10 @@
-import re
 import datetime
 import argparse
+import simplejson
+import textwrap
 
+import psycopg.sql as sql
 import db
-
 import util
 
 
@@ -15,43 +16,23 @@ class SourceImporter:
     MongoDB collection (see db.py::get_mongo_collection) to import from.
     """
 
+    diaobject_fields = [ 'diaobjectid', 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ]
 
-    object_lcfields = [ 'diaObjectId', 'validityStartMjdTai',
-                        'ra', 'raErr', 'dec', 'decErr', 'ra_dec_Cov' ]
+    diasource_fields = [ 'diasourceid', 'diaobjectid', 'visit', 'band', 'midpointmjdtai',
+                         'psfflux', 'psffluxerr', 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ]
 
-    object_funcmongofields = None
+    diasource_extra_fields = [ 'diasourceid', 'detector', 'x', 'y', 'xerr', 'yerr', 'x_y_cov',
+                               'psflnl', 'psfchi2', 'psfndata', 'snr',
+                               'scienceflux', 'sciencefluxerr', 'templateflux', 'templatefluxerr',
+                               'extendedness', 'reliability', 'ixx', 'iyy', 'ixy', 'ixxpsf', 'iyypsf', 'ixypsf',
+                               'flags', 'pixelflags', 'apflux', 'apfluxerr', 'bboxsize',
+                               'timeprocessedmjdtai', 'timewithdrawnmjdtai', 'parentdiasourceid' ]
 
-    object_funcfields = None
+    diaforcedsource_fields = [ 'diaforcedsourceid', 'diaobjectid', 'visit', 'band', 'midpointmjdtai',
+                               'psfflux', 'psffluxerr', 'ra', 'dec' ]
 
-    # The following fields may eventually be there, but aren't in the lsst 9.0 alerts
-    #                    'nearbyExtObj1', 'nearbyExtObj1Sep', 'nearbyExtObj2', 'nearbyExtObj2Sep',
-    #                      'nearbyExtObj3', 'nearbyExtObj3Sep', 'nearbyLowzGal', 'nearbyLowzGalSep',
-
-
-    source_lcfields = [ 'diaSourceId', 'visit', 'detector', 'diaObjectId', 'ssObjectId',
-                        'parentDiaSourceId', 'midpointMjdTai', 'ra', 'raErr', 'dec', 'decErr', 'ra_dec_Cov',
-                        'x', 'xErr', 'y', 'yErr', 'apFlux', 'apFluxErr', 'snr',
-                        'psfFlux', 'psfFluxErr', 'psfLnL', 'psfChi2', 'psfNdata',
-                        'scienceFlux', 'scienceFluxErr', 'templateFlux', 'templateFluxErr',
-                        'ixx', 'iyy', 'ixy', 'ixxPSF', 'iyyPSF', 'ixyPSF',
-                        'extendedness', 'reliability', 'band',
-                        'timeProcessedMjdTai','timeWithdrawnMjdTai', 'bboxSize' ]
-
-    source_funcmongofields = ( [ v for v in db.DiaSource._flags_bits.values() ] +
-                               [ v for v in db.DiaSource._pixelflags_bits.values() ] )
-
-    source_funcfields = { 'flags': lambda row: SourceImporter.build_flags( db.DiaSource._flags_bits, row ),
-                          'pixelflags': lambda row: SourceImporter.build_flags( db.DiaSource._pixelflags_bits, row )
-                         }
-
-    forcedsource_lcfields = [ 'diaForcedSourceId', 'diaObjectId', 'ra', 'dec', 'visit', 'detector',
-                              'psfFlux', 'psfFluxErr', 'midpointMjdTai',
-                              'scienceFlux', 'scienceFluxErr', 'band',
-                              'timeProcessedMjdTai', 'timeWithdrawnMjdTai' ]
-
-    forcedsource_funcmongofields = None
-
-    forcedsource_funcfields = None
+    diaforcedsource_extra_fields = [ 'diaobjectid', 'visit', 'detector', 'scienceflux', 'sciencefluxerr',
+                                     'timeprocessedmjdtai', 'timewithdrawnmjdtai' ]
 
 
     @classmethod
@@ -63,8 +44,9 @@ class SourceImporter:
         return mask
 
 
-    def __init__( self, object_base_processing_version, source_base_processing_version,
-                  forcedsource_base_processing_version, host_base_processing_version, object_match_radius=1. ):
+    def __init__( self, object_base_processing_version, object_position_base_processing_version,
+                  source_base_processing_version, forcedsource_base_processing_version,
+                  host_base_processing_version, object_match_radius=1. ):
         """Create a SourceImporter.
 
         Parameters
@@ -72,6 +54,11 @@ class SourceImporter:
           object_base_processing_version : UUID or str
             The processing version for diaobject.  This must be a valid entry (id or
             description) in the base_processing_version table.
+
+          object_position_base_processing_version : UUID or str
+            The processing version for diaobject_position.  This must be
+            a valid entry (id or description) in the
+            base_processing_version table.
 
           source_base_processing_version : UUID or str
             The processing version for diasource.  This must be a valid entry (id or
@@ -84,36 +71,22 @@ class SourceImporter:
           host_base_processing_verson : UUID or str
             The processing version for hsot_galaxy.  This must be a valid entry (id or
             description) in the base_processing_version table.
-        
+
           object_match_radius : float, default 1.
             Objects within this many arcsec of an existing object will be considered
             the same root_diaobject.
 
         """
         self.object_base_processing_version = util.base_procver_id( object_base_processing_version )
+        self.object_position_base_processing_version = util.base_procver_id( object_position_base_processing_version )
         self.source_base_processing_version = util.base_procver_id( source_base_processing_version )
         self.forcedsource_base_processing_version = util.base_procver_id( forcedsource_base_processing_version )
-        self.host_base_processing_version = util.base_procver_id( host_base_processing_version )
+        # self.host_base_processing_version = util.base_procver_id( host_base_processing_version )
         self.object_match_radius = float( object_match_radius )
 
 
-    def _read_mongo_fields( self, pqconn, collection, pipeline, lcfields, funcfields, funcmongofields,
-                            temptable, liketable, t0=None, t1=None, batchsize=10000,
-                            procver_fields=['base_procver_id'],
-                            isobj=False ):
-        if not re.search( "^[a-zA-Z0-9_]+$", temptable ):
-            raise ValueError( f"Invalid temp table name {temptable}" )
-        if not re.search( "^[a-zA-Z0-9_]+$", liketable ):
-            raise ValueError( f"Invalid temp table name {liketable}" )
-        pqcursor = pqconn.cursor()
-        pqcursor.execute( f"CREATE TEMP TABLE {temptable} (LIKE {liketable})" )
-        # Special case hack alert : in the case of diaobject, we have to make
-        # the root object nullable in the temp table.  (This is just because
-        # when we import objects, they start that way, and only get root ids
-        # after we figure out which ones need them and they've been created.)
-        if liketable == 'diaobject':
-            pqcursor.execute( f"ALTER TABLE {temptable} ALTER COLUMN rootid DROP NOT NULL" )
-
+    @classmethod
+    def _add_mongo_time_limits_to_pipeline( cls, pipeline, t0, t1 ):
         if ( t0 is not None ) or ( t1 is not None ):
             if ( t0 is not None ) and ( t1 is not None ):
                 pipeline.insert( 0, { "$match": { "$and": [ { "savetime": { "$gt": t0 } },
@@ -123,34 +96,15 @@ class SourceImporter:
             else:
                 pipeline.insert( 0, { "$match": { "savetime": { "$lte": t1 } } } )
 
-        mongocursor = collection.aggregate( pipeline )
-        writefields = [ str(f).lower() for f in lcfields ]
-        if funcfields is not None:
-            writefields.extend( [ str(f).lower() for f in funcfields ] )
-        writefields.extend( procver_fields )
-        bpv = self.object_base_processing_version if isobj else self.base_processing_version
-        procverextend = [ bpv for i in procver_fields ]
-        with pqcursor.copy( f"COPY {temptable}({','.join(writefields)}) FROM STDIN" ) as pgcopy:
-            for row in mongocursor:
-                # This is probably inefficient.  Generator to list to tuple.  python makes
-                #   writing this easy, but it's probably doing multiple gratuitous memory copies
-                data = [ None if row[f] is None else str(row[f]) for f in lcfields ]
-                if funcfields is not None:
-                    for field, func  in funcfields.items():
-                        data.append( func(row) )
-                data.extend( procverextend )
-                pgcopy.write_row( tuple( data ) )
+    def read_mongo_objects( self, dbcon, collection, t0=None, t1=None, batchsize=10000 ):
+        """Read all diaobject records from a mongo collection and stick them a temp table.
 
-
-    def read_mongo_objects( self, pqconn, collection, t0=None, t1=None, batchsize=10000 ):
-        """Read all diaObject records from a mongo collection and stick them in a temp table.
-
-        Populates temp table temp_diaobject_import.  It will only live
-        as long as the pqconn session is open.
+        Populates temp tables temp_diaobject_import.  It will only live
+        as long as the dbcon session is open.
 
         Parameters
         ----------
-          pqconn : psycopg.Connection
+          dbcon : db.DBCon
 
           collection : pymongo.collection
             The PyMongo collection we're pulling from.
@@ -166,211 +120,377 @@ class SourceImporter:
 
         """
 
-        lcfields = self.object_lcfields
-        funcfields = self.object_funcfields
-        funcmongofields = self.object_funcmongofields
-        allfields = lcfields if funcmongofields is None else lcfields + funcmongofields
-        group = { "_id": "$msg.diaObject.diaObjectId" }
-        group.update( { k: { "$first": f"$msg.diaObject.{k}" } for k in allfields } )
-        pipeline = [ { "$group": group } ]
+        q = sql.SQL( textwrap.dedent(
+            """
+            CREATE TEMP TABLE temp_diaobject_import (
+              diaobjectid bigint NOT NULL,
+              rootid uuid,
+              base_procver_id uuid NOT NULL,
+              base_pos_procver_id uuid,
+              ra double precision,
+              dec double precision,
+              raerr real,
+              decerr real,
+              ra_dec_cov real )
+            """ ) )
+        dbcon.execute( q )
 
-        self._read_mongo_fields( pqconn, collection, pipeline, lcfields, funcfields, funcmongofields,
-                                 "temp_diaobject_import", "diaobject",
-                                 t0=t0, t1=t1, batchsize=batchsize, isobj=True )
+        pipeline = [ { "$group": { "_id": "$diaobjectid",
+                                   "diaobjectid": { "$first": "$diaobjectid" },
+                                   "diaobjectposition": { "$first": "$diaobjectposition" }
+                                  }
+                      } ]
+        self._add_mongo_time_limits_to_pipeline( pipeline, t0, t1 )
+        mongocursor = collection.aggregate( pipeline )
+        with ( dbcon.cursor.copy( "COPY temp_diaobject_import(diaobjectid, rootid, base_procver_id,\n"
+                                  "                           base_pos_procver_id, ra, dec, raerr,\n"
+                                  "                           decerr, ra_dec_cov) FROM STDIN" )
+               as pgcopy ):
+            for row in mongocursor:
+                data = [ str(row['diaobjectid']), None, str(self.object_base_processing_version) ]
+                if row['diaobjectposition'] is None:
+                    data.extend( [ None, None, None, None, None, None ] )
+                else:
+                    data.append( str(self.object_position_base_processing_version) ),
+                    for f in [ 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ]:
+                        data.append( None if row['diaobjectposition'][f] is None
+                                     else str(row['diaobjectposition'][f]) )
+                pgcopy.write_row( tuple( data ) )
 
 
-    def read_mongo_sources( self, pqconn, collection, t0=None, t1=None, batchsize=10000 ):
-        """Read all top-level diaSource records from a mongo collection and stick them in a temp table.
+    def _read_mongo_fields( self, dbcon, collection, pipeline, fields,
+                            temptable, liketable, t0=None, t1=None, batchsize=10000,
+                            base_procver_id=None ):
 
-        Populates temp table temp_diasource_import.  It will only live
-        as long as the pqconn session is open.
+        q = sql.SQL( "CREATE TEMP TABLE {temptable} (LIKE {liketable})"
+                    ).format( temptable=sql.Identifier(temptable), liketable=sql.Identifier(liketable) )
+        dbcon.execute( q )
+
+        self._add_mongo_time_limits_to_pipeline( pipeline, t0, t1 )
+
+        mongocursor = collection.aggregate( pipeline )
+        writefields = fields.copy()
+        if base_procver_id is not None:
+            writefields.append( 'base_procver_id' )
+        with dbcon.cursor.copy( f"COPY {temptable}({','.join(writefields)}) FROM STDIN" ) as pgcopy:
+            for row in mongocursor:
+                # This is probably inefficient.  Generator to list to tuple.  python makes
+                #   writing this easy, but it's probably doing multiple gratuitous memory copies
+                data = [ None if row[f] is None
+                         else simplejson.dumps(row[f]) if isinstance( row[f], ( dict, list ) )
+                         else str(row[f])
+                         for f in fields ]
+                if base_procver_id is not None:
+                    data.append( base_procver_id )
+                pgcopy.write_row( tuple( data ) )
+
+
+    def read_mongo_sources( self, dbcon, collection, t0=None, t1=None, batchsize=10000 ):
+        """Read all top-level diaSource records from a mongo collection and stick them in temp tables.
+
+        Populates temp tables temp_diasource_import and
+        temp_diasource_extra_import.  They will only live as long as the
+        dbcon session is open.
 
         Parmeters are the same as read_mongo_objects.
 
         """
 
-        lcfields = self.source_lcfields
-        funcfields = self.source_funcfields
-        funcmongofields = self.source_funcmongofields
-        allfields = lcfields if funcmongofields is None else lcfields + funcmongofields
-        group = { "_id": { "diaObjectId": "$msg.diaSource.diaObjectId", "visit": "$msg.diaSource.visit" } }
-        group.update( { k: { "$first": f"$msg.diaSource.{k}" } for k in allfields } )
+        group = { "_id": { "diaobjectid": "$diaobjectid", "visit": "$diasource.visit" } }
+        group.update( { k: { "$first": f"$diasource.{k}" } for k in self.diasource_fields } )
         pipeline = [ { "$group": group } ]
-
-        self._read_mongo_fields( pqconn, collection, pipeline, lcfields, funcfields, funcmongofields,
+        self._read_mongo_fields( dbcon, collection, pipeline, self.diasource_fields,
                                  "temp_diasource_import", "diasource",
                                  t0=t0, t1=t1, batchsize=batchsize,
-                                 procver_fields=[ 'base_procver_id' ] )
+                                 base_procver_id=self.source_base_processing_version )
+
+        group = { "_id": { "diaobjectid": "$diaobjectid", "visit": "$diasource_extra.visit" } }
+        group.update( { k: { "$first": f"$diasource_extra.{k}" } for k in self.diasource_extra_fields } )
+        pipeline = [ { "$match": { "diasource_extra": { "$ne": None } } },
+                     { "$group": group } ]
+        self._read_mongo_fields( dbcon, collection, pipeline, self.diasource_extra_fields,
+                                 "temp_diasource_extra_import", "diasource_extra",
+                                 t0=t0, t1=t1, batchsize=batchsize,
+                                 base_procver_id=self.source_base_processing_version )
 
 
-    def read_mongo_prvsources( self, pqconn, collection, t0=None, t1=None, batchsize=10000 ):
+    def read_mongo_prvsources( self, dbcon, collection, t0=None, t1=None, batchsize=10000 ):
         """Read all prvDiaSource records from a mongo collection and stick them in a temp table.
 
         Gets all prvDiaSources from all sources in the time range.
-        Deduplicates.  Populates temp_prvdiasource_import, which will
-        only live as long as the pqconn session is open.
+        Deduplicates.  Populates temp_prvdiasource_import and
+        tmp_prvdiasource_extra_import, which will only live as long as
+        the dbcon session is open.
 
         Parameters are the same as read_mongo_objects.
 
         """
 
-        lcfields = self.source_lcfields
-        funcfields = self.source_funcfields
-        funcmongofields = self.source_funcmongofields
-        allfields = lcfields if funcmongofields is None else lcfields + funcmongofields
-        group = { "_id": { "diaObjectId": "$msg.prvDiaSources.diaObjectId", "visit": "$msg.prvDiaSources.visit" } }
-        group.update( { k: { "$first": f"$msg.prvDiaSources.{k}" } for k in allfields } )
-        pipeline = [ { "$unwind": "$msg.prvDiaSources" },
+        group = { "_id": { "diaobjectid": "$diaobjectid", "visit": "$prvdiasources.visit" } }
+        group.update( { k: { "$first": f"$prvdiasources.{k}" } for k in self.diasource_fields } )
+        pipeline = [ { "$match": { "prvdiasources": { "$ne": None } } },
+                     { "$unwind": "$prvdiasources" },
                      { "$group": group } ]
-
-        self._read_mongo_fields( pqconn, collection, pipeline, lcfields, funcfields, funcmongofields,
+        self._read_mongo_fields( dbcon, collection, pipeline, self.diasource_fields,
                                  "temp_prvdiasource_import", "diasource",
                                  t0=t0, t1=t1, batchsize=batchsize,
-                                 procver_fields=[ 'base_procver_id' ] )
+                                 base_procver_id=self.source_base_processing_version )
+
+        group = { "_id": { "diaobjectid": "$diaobjectid", "visit": "$prvdiasources_extra.visit" } }
+        group.update( { k: { "$first": f"$prvdiasources_extra.{k}" } for k in self.diasource_extra_fields } )
+        pipeline = [ { "$match": { "prvdiasources_extra": { "$ne": None } } },
+                     { "$unwind": "$prvdiasources_extra" },
+                     { "$group": group } ]
+        self._read_mongo_fields( dbcon, collection, pipeline, self.diasource_extra_fields,
+                                 "temp_prvdiasource_extra_import", "diasource_extra",
+                                 t0=t0, t1=t1, batchsize=batchsize,
+                                 base_procver_id=self.source_base_processing_version )
 
 
-    def read_mongo_prvforcedsources( self, pqconn, collection, t0=None, t1=None, batchsize=10000 ):
-        """Read all prvForcedDiaSource records from a mongo collection and stick them in a temp table.
+    def read_mongo_prvforcedsources( self, dbcon, collection, t0=None, t1=None, batchsize=10000 ):
+        """Read all prvForcedDiaSource records from a mongo collection and stick them in temp tables.
 
         Gets all prvForcedDiaSources from all sources in the time range.
-        Deduplicates.  Populates temp_prvdiaforcedsource_import, which will
-        only live as long as the pqconn session is open.
+        Deduplicates.  Populates temp_prvdiaforcedsource_import and
+        temp_prvdiaforcedsource_extra_import, which will only live as
+        long as the dbcon session is open.
 
         Parameters are the same as read_mongo_objects.
 
         """
 
-        lcfields = self.forcedsource_lcfields
-        funcfields = self.forcedsource_funcfields
-        funcmongofields = self.forcedsource_funcmongofields
-        allfields = lcfields if funcmongofields is None else lcfields + funcmongofields
-        group = { "_id": { "diaObjectId": "$msg.prvDiaForcedSources.diaObjectId",
-                           "visit": "$msg.prvDiaForcedSources.visit" } }
-        group.update( { k: { "$first": f"$msg.prvDiaForcedSources.{k}" } for k in allfields } )
-        pipeline = [ { "$unwind": "$msg.prvDiaForcedSources" },
+        group = { "_id": { "diaobjectid": "$diaobjectid", "visit": "$prvdiaforcedsources.visit" } }
+        group.update( { k: { "$first": f"$prvdiaforcedsources.{k}" } for k in self.diaforcedsource_fields } )
+        pipeline = [ { "$match": { "prvdiaforcedsources": { "$ne": None } } },
+                     { "$unwind": "$prvdiaforcedsources" },
                      { "$group": group } ]
-
-        self._read_mongo_fields( pqconn, collection, pipeline, lcfields, funcfields, funcmongofields,
+        self._read_mongo_fields( dbcon, collection, pipeline, self.diaforcedsource_fields,
                                  "temp_prvdiaforcedsource_import", "diaforcedsource",
                                  t0=t0, t1=t1, batchsize=batchsize,
-                                 procver_fields=[ 'base_procver_id' ] )
+                                 base_procver_id=self.forcedsource_base_processing_version )
+
+        group = { "_id": { "diaobjectid": "$diaobjectid", "visit": "$prvdiaforcedsources_extra.visit" } }
+        group.update( { k: { "$first": f"$prvdiaforcedsources_extra.{k}" }
+                        for k in self.diaforcedsource_extra_fields } )
+        pipeline = [ { "$match": { "prvdiaforcedsources_extra": { "$ne": None } } },
+                     { "$unwind": "$prvdiaforcedsources_extra" },
+                     { "$group": group } ]
+        self._read_mongo_fields( dbcon, collection, pipeline, self.diaforcedsource_extra_fields,
+                                 "temp_prvdiaforcedsource_extra_import", "diaforcedsource_extra",
+                                 t0=t0, t1=t1, batchsize=batchsize,
+                                 base_procver_id=self.forcedsource_base_processing_version )
+
+
+    def read_mongo_brokerinfo( self, dbcon, collection, t0=None, t1=None, batchsize=1000 ):
+        group = { "_id": { "brokername": "$brokername", "diaobjectid": "$diaobjectid",
+                           "visit": "$diasource.visit" },
+                  "brokername": { "$first": "$brokername" },
+                  "diasourceid": { "$first": "$diasource.diasourceid" },
+                  "diaobjectid": { "$first": "$diaobjectid" },
+                  "visit": { "$first": "$diasource.visit" },
+                  "info": { "$first": "$broker_info" }
+                 }
+        pipeline = [ { "$match": { "broker_info": { "$ne": None } } },
+                     { "$group": group } ]
+        self._read_mongo_fields( dbcon, collection, pipeline, [ "brokername", "diasourceid",
+                                                                "diaobjectid", "visit", "info" ],
+                                 "temp_diasource_brokerinfo_import", "diasource_brokerinfo",
+                                 t0=t0, t1=t1, batchsize=batchsize,
+                                 base_procver_id=self.source_base_processing_version )
 
 
     def import_objects_from_collection( self, collection, t0=None, t1=None, batchsize=10000,
-                                        conn=None, commit=True ):
+                                        dbcon=None, commit=True ):
         """Write docs.
 
         Do.
         """
-        with db.DB( conn ) as pqconn:
-            self.read_mongo_objects( pqconn, collection, t0=t0, t1=t1, batchsize=batchsize )
-
-            cursor = pqconn.cursor()
+        with db.DBCon( dbcon ) as dbcon:
+            self.read_mongo_objects( dbcon, collection, t0=t0, t1=t1, batchsize=batchsize )
 
             # Filter the temp table to just new objects
-            cursor.execute( "DROP TABLE IF EXISTS temp_new_diaobject" )
-            cursor.execute( "CREATE TEMP TABLE temp_new_diaobject AS "
-                            "( SELECT tdi.* FROM temp_diaobject_import tdi "
-                            "  LEFT JOIN diaobject o ON "
-                            "    o.diaobjectid=tdi.diaobjectid AND o.base_procver_id=tdi.base_procver_id "
-                            "  WHERE o.diaobjectid IS NULL )" )
+            dbcon.execute( "DROP TABLE IF EXISTS temp_new_diaobject" )
+            dbcon.execute( "CREATE TEMP TABLE temp_new_diaobject AS "
+                           "( SELECT tdi.* FROM temp_diaobject_import tdi "
+                           "  LEFT JOIN diaobject o ON "
+                           "    o.diaobjectid=tdi.diaobjectid AND o.base_procver_id=tdi.base_procver_id "
+                           "  WHERE o.diaobjectid IS NULL )" )
 
             # Link new objects to existing root objects
-            # TODO : test this with multiple processing versions and multiple#
+            # TODO : test this with multiple processing versions and multiple
             #   objects that match!!!
-            cursor.execute( "UPDATE temp_new_diaobject tno SET rootid=o.rootid "
-                            "FROM diaobject o "
-                            "WHERE o.base_procver_id=tno.base_procver_id "
-                            " AND q3c_radial_query(o.ra, o.dec, tno.ra, tno.dec, %(rad)s)",
-                            { 'rad': self.object_match_radius/3600. } )
+            dbcon.execute( "UPDATE temp_new_diaobject tno SET rootid=o.rootid\n"
+                           "FROM diaobject o\n"
+                           "INNER JOIN diaobject_position p ON p.diaobjectid=o.diaobjectid\n"
+                           "                               AND p.base_procver_id=%(bpv)s\n"
+                           "WHERE o.base_procver_id=tno.base_procver_id \n"
+                           "  AND q3c_radial_query(p.ra, p.dec, tno.ra, tno.dec, %(rad)s)",
+                           { 'rad': self.object_match_radius/3600.,
+                             'bpv': self.object_position_base_processing_version } )
 
             # Create new root objects
-            cursor.execute( "CREATE TEMP TABLE temp_new_root_obj (id UUID)" )
-            cursor.execute( "INSERT INTO temp_new_root_obj "
-                            "( SELECT gen_random_uuid() FROM temp_new_diaobject "
-                            "  WHERE rootid IS NULL )" )
+            dbcon.execute( "CREATE TEMP TABLE temp_new_root_obj (id UUID)" )
+            dbcon.execute( "INSERT INTO temp_new_root_obj "
+                           "( SELECT gen_random_uuid() FROM temp_new_diaobject "
+                           "  WHERE rootid IS NULL )" )
             # This next one is byzantine.  I'm trying to say, "hey, there are n
-            # rows in tmp_new_diaobject that have NULL rootid, and I've just
-            # created tmp_new_root_obj with n rows, now just fill those n NULL rootids
-            # from the n rows in tmp_new_root_obj".  There must be a less byzantine
+            # rows in temp_new_diaobject that have NULL rootid, and I've just
+            # created temp_new_root_obj with n rows, now just fill those n NULL rootids
+            # from the n rows in temp_new_root_obj".  There must be a less byzantine
             # way to do this.
-            cursor.execute( "UPDATE temp_new_diaobject tno SET rootid=r.id "
-                            "FROM ( ( SELECT id, ROW_NUMBER() OVER () AS n FROM temp_new_root_obj ) tnro "
-                            "       INNER JOIN "
-                            "       ( SELECT diaobjectid, rootid, ROW_NUMBER() OVER () AS n FROM "
-                            "         ( SELECT diaobjectid, rootid FROM temp_new_diaobject WHERE rootid IS NULL ) subq "
-                            "       ) tnd "
-                            "       ON tnro.n=tnd.n ) r "
-                            "WHERE r.diaobjectid=tno.diaobjectid" )
+            dbcon.execute( "UPDATE temp_new_diaobject tno SET rootid=r.id "
+                           "FROM ( ( SELECT id, ROW_NUMBER() OVER () AS n FROM temp_new_root_obj ) tnro "
+                           "       INNER JOIN "
+                           "       ( SELECT diaobjectid, rootid, ROW_NUMBER() OVER () AS n FROM "
+                           "         ( SELECT diaobjectid, rootid FROM temp_new_diaobject WHERE rootid IS NULL ) subq "
+                           "       ) tnd "
+                           "       ON tnro.n=tnd.n ) r "
+                        "WHERE r.diaobjectid=tno.diaobjectid" )
 
             # Add the new root diaobjects
-            cursor.execute( "INSERT INTO root_diaobject ( SELECT * FROM temp_new_root_obj )" )
-            nroot = cursor.rowcount
+            dbcon.execute( "INSERT INTO root_diaobject ( SELECT * FROM temp_new_root_obj )" )
+            nroot = dbcon.cursor.rowcount
 
             # Add the new objects.
-            cursor.execute( "INSERT INTO diaobject ( SELECT * FROM temp_new_diaobject )" )
-            nobjs = cursor.rowcount
+            dbcon.execute( "INSERT INTO diaobject(diaobjectid, rootid, base_procver_id)\n"
+                           "( SELECT diaobjectid, rootid, base_procver_id FROM temp_new_diaobject )" )
+            nobjs = dbcon.cursor.rowcount
+
+            # For diaobject position, it's simpler, we can just do an import and ignore conflicts.
+
+            dbcon.execute( "INSERT INTO diaobject_position(diaobjectid, base_procver_id,\n"
+                           "                               ra, dec, raerr, decerr, ra_dec_cov)\n"
+                            "( SELECT diaobjectid, base_pos_procver_id, ra, dec, raerr, decerr, ra_dec_cov\n"
+                            "  FROM temp_new_diaobject\n"
+                            "  WHERE base_pos_procver_id IS NOT NULL )\n"
+                            "ON CONFLICT DO NOTHING" )
+            npos = dbcon.cursor.rowcount
 
             if commit:
-                pqconn.commit()
+                dbcon.commit()
 
-            return nobjs, nroot
+            return nobjs, nroot, npos
 
 
     def import_sources_from_collection( self, collection, t0=None, t1=None, batchsize=10000,
-                                        conn=None, commit=True ):
+                                        dbcon=None, commit=True ):
         """write docs
 
         Assumes all objects are already imported.
 
         """
-        with db.DB( conn ) as pqconn:
-            self.read_mongo_sources( pqconn, collection, t0=t0, t1=t1, batchsize=batchsize )
+        with db.DBCon( dbcon ) as dbcon:
+            dbcon.execute( "SET CONSTRAINTS fk_diasource_extra_diasource DEFERRED" )
 
-            cursor = pqconn.cursor()
-            cursor.execute( "INSERT INTO diasource ( SELECT * FROM temp_diasource_import ) ON CONFLICT DO NOTHING" )
+            self.read_mongo_sources( dbcon, collection, t0=t0, t1=t1, batchsize=batchsize )
+            self.read_mongo_prvsources( dbcon, collection, t0=t0, t1=t1, batchsize=batchsize )
+
+            nsrc = None
+            nprvsrc = None
+            for prv in [ "", "prv" ]:
+                q = ( sql.SQL( "INSERT INTO diasource( SELECT * FROM {table} ) ON CONFLICT DO NOTHING" )
+                      .format( table=sql.Identifier(f"temp_{prv}diasource_import") ) )
+                dbcon.execute( q )
+
+                # For diasource extra, we want to update fields that are null, just in case some broker
+                #   gave us information that a previous broker didn't.
+                q = ( sql.SQL( "INSERT INTO diasource_extra ( SELECT * FROM {table} )\n"
+                               "ON CONFLICT (diasourceid, base_procver_id) DO UPDATE SET (\n" )
+                      .format( table=sql.Identifier(f"temp_{prv}diasource_extra_import") ) )
+
+                first = True
+                for f in self.diasource_extra_fields:
+                    if first:
+                        first = False
+                    else:
+                        q += sql.SQL( "," )
+                    q += sql.Identifier( f )
+                q += sql.SQL( ") = (" )
+                first = True
+                for f in self.diasource_extra_fields:
+                    if first:
+                        first = False
+                        q += sql.SQL( "\n  " )
+                    else:
+                        q += sql.SQL( ",\n  " )
+                    q += sql.SQL( "COALESCE(diasource_extra.{f}, EXCLUDED.{f})" ).format( f=sql.Identifier(f) )
+                q += sql.SQL( "\n)" )
+
+                dbcon.execute( q )
+                if prv == "prv":
+                    nprvsrc = dbcon.cursor.rowcount
+                else:
+                    nsrc = dbcon.cursor.rowcount
+
             if commit:
-                pqconn.commit()
+                dbcon.commit()
 
-            return cursor.rowcount
+            return nsrc, nprvsrc
 
-
-    def import_prvsources_from_collection( self, collection, t0=None, t1=None, batchsize=10000,
-                                           conn=None, commit=True ):
+    def import_forcedsources_from_collection( self, collection, t0=None, t1=None, batchsize=10000,
+                                              dbcon=None, commit=True ):
         """Write docs.
 
         Do.
 
         """
-        with db.DB( conn ) as pqconn:
-            self.read_mongo_prvsources( pqconn, collection, t0=t0, t1=t1, batchsize=batchsize )
+        with db.DBCon( dbcon ) as dbcon:
+            dbcon.execute( "SET CONSTRAINTS fk_forcedsource_extra_diaforcedsource DEFERRED" )
 
-            cursor = pqconn.cursor()
-            cursor.execute( "INSERT INTO diasource ( SELECT * FROM temp_prvdiasource_import ) ON CONFLICT DO NOTHING" )
+            self.read_mongo_prvforcedsources( dbcon, collection, t0=t0, t1=t1, batchsize=batchsize )
+
+            dbcon.execute( "INSERT INTO diaforcedsource "
+                           "( SELECT * FROM temp_prvdiaforcedsource_import ) "
+                           "ON CONFLICT DO NOTHING" )
+
+            # As with sources, for the diaforcedsource_extra table we want to update in case a
+            #  broker gives us something that a previous broker didn't.
+            q = sql.SQL( "INSERT INTO diaforcedsource_extra ( SELECT * FROM temp_prvdiaforcedsoure_extra_import )\n"
+                          "ON CONFLICT (base_procver_id, diaobjectid, visit) DO UPDATE SET (\n" )
+            first = True
+            for f in self.diaforcedsource_extra_fields:
+                if first:
+                    first = False
+                else:
+                    q += sql.SQL( "," )
+                q += sql.Identifier( f )
+            q += sql.SQL( ") = (" )
+            first = True
+            for f in self.diaforcedsource_extra_fields:
+                if first:
+                    first = False
+                    q += sql.SQL( "\n  " )
+                else:
+                    q += sql.SQL( ",\n  " )
+                q += sql.SQL( "COALESCE(diaforcedsource_extra.{f}, EXCLUDED.{f})" ).format( f=sql.identifier(f) )
+            q += sql.SQL( "\n)" )
+
+            dbcon.execute( q )
+            nfrc = dbcon.cursor.rowcount()
+
             if commit:
-                pqconn.commit()
+                dbcon.commit()
 
-            return cursor.rowcount
+            return nfrc
 
 
-    def import_prvforcedsources_from_collection( self, collection, t0=None, t1=None, batchsize=10000,
-                                                 conn=None, commit=True ):
-        """Write docs.
+    def import_brokerinfo_from_collection( self, collection, t0=None, t1=None, batchsize=10000,
+                                           dbcon=None, commit=True ):
+        with db.DBCon( dbcon ) as dbcon:
+            dbcon.execute( "SET CONSTRAINTS fk_diasource_brokerinfo_diasource DEFERRED" )
 
-        Do.
+            self.read_mongo_brokerinfo( dbcon, collection, t0=t0, t1=t1, batchsize=batchsize )
 
-        """
-        with db.DB( conn ) as pqconn:
-            self.read_mongo_prvforcedsources( pqconn, collection, t0=t0, t1=t1, batchsize=batchsize )
+            dbcon.execute( "INSERT INTO diasource_brokerinfo "
+                           "( SELECT * FROM temp_diasource_brokerinfo_import ) "
+                           "ON CONFLICT DO NOTHING" )
+            ninfo = dbcon.cursor.rowcount
 
-            cursor = pqconn.cursor()
-            cursor.execute( "INSERT INTO diaforcedsource "
-                            "( SELECT * FROM temp_prvdiaforcedsource_import ) "
-                            "ON CONFLICT DO NOTHING" )
             if commit:
-                pqconn.commit()
+                dbcon.commit()
 
-            return cursor.rowcount
+            return ninfo
+
 
 
     # **********************************************************************
@@ -408,13 +528,11 @@ class SourceImporter:
 
         # Everything happens in one transaction, until the commit() at the end
         #   of this block.  Make sure that none of the functions called
-        #   end the transaction in pqconn.
-        with db.DB() as pqconn:
-            cursor = pqconn.cursor()
+        #   end the transaction in dbcon.
+        with db.DBCon() as dbcon:
             timestampexists = False
-            cursor.execute( "SELECT t FROM diasource_import_time WHERE collection=%(col)s",
-                            { 'col': collection.name } )
-            rows = cursor.fetchall()
+            rows, _cols = dbcon.execute( "SELECT t FROM diasource_import_time WHERE collection=%(col)s",
+                                         { 'col': collection.name } )
             if len(rows) == 0:
                 t0 = datetime.datetime( 1970, 1, 1, 0, 0, 0, tzinfo=datetime.UTC )
             else:
@@ -425,29 +543,29 @@ class SourceImporter:
 
             # Make sure foreign key constraints aren't goign to trip us up
             #   below, but that they're only checked at the end of the transaction.
-            cursor.execute( "SET CONSTRAINTS fk_diasource_diaobjectid DEFERRED" )
-            cursor.execute( "SET CONSTRAINTS fk_diaforcedsource_diaobjectid DEFERRED" )
+            dbcon.execute( "SET CONSTRAINTS fk_diasource_diaobjectid DEFERRED" )
+            dbcon.execute( "SET CONSTRAINTS fk_diaforcedsource_diaobjectid DEFERRED" )
 
-            nobj, nroot = self.import_objects_from_collection( collection, t0, t1, conn=pqconn, commit=False )
-            nsrc = self.import_sources_from_collection( collection, t0, t1, conn=pqconn, commit=False )
-            nprvsrc = self.import_prvsources_from_collection( collection, t0, t1, conn=pqconn, commit=False )
-            nprvfrc = self.import_prvforcedsources_from_collection( collection, t0, t1, conn=pqconn, commit=False )
+            nobj, nroot, npos = self.import_objects_from_collection( collection, t0, t1, dbcon=dbcon, commit=False )
+            nsrc, nprvsrc = self.import_sources_from_collection( collection, t0, t1, dbcon=dbcon, commit=False )
+            nfrc = self.import_forcedsources_from_collection( collection, t0, t1, dbcon=dbcon, commit=False )
+            ninfo = self.import_brokerinfo_from_collection( collection, t0, t1, dbcon=dbcon, commit=False )
 
             if timestampexists:
-                cursor.execute( "UPDATE diasource_import_time SET t=%(t)s WHERE collection=%(col)s",
-                                { 't': t1, 'col': collection.name } )
+                dbcon.execute( "UPDATE diasource_import_time SET t=%(t)s WHERE collection=%(col)s",
+                               { 't': t1, 'col': collection.name } )
             else:
-                cursor.execute( "INSERT INTO diasource_import_time(collection,t) "
-                                "VALUES(%(col)s,%(t)s)",
-                                { 't': t1, 'col': collection.name } )
+                dbcon.execute( "INSERT INTO diasource_import_time(collection,t) "
+                               "VALUES(%(col)s,%(t)s)",
+                               { 't': t1, 'col': collection.name } )
 
             # Only commit once at the end.  That way, if anything goes wrong,
             #   the database will be rolled back.  No objects or sources will
             #   have been saved, and the timestamp will not have been updated.
             # The timestamp will be updated if and only if everything imported.
-            pqconn.commit()
+            dbcon.commit()
 
-        return nobj, nroot, nsrc + nprvsrc, nprvfrc
+        return nobj, nroot, npos, nsrc, nprvsrc, nfrc, ninfo
 
 
 # ======================================================================
@@ -455,12 +573,14 @@ class SourceImporter:
 def main():
     parser = argparse.ArgumentParser( 'source_importer.py', description='Import sources from mongo to postgres',
                                       formatter_class=argparse.ArgumentDefaultsHelpFormatter )
+    parser.add_argument( "-o", "--object-base-processing-version", default=None,
+                         help="Base processing version (uuid or text) to tag imported objects with." )
+    parser.add_argument( "-p", "--object-position-base-processing-version", default=None,
+                         help="Base processing version (uuid or text) to tag imported object positions with." )
     parser.add_argument( "-s", "--source-base-processing-version", required=True,
                          help="Base processing version (uuid or text) to tag imported sources with." )
     parser.add_argument( "-f", "--forcedsource-base-processing-version", required=True,
                          help="Base processing version (uuid or text) to tag imported forced sources with." )
-    parser.add_argument( "-o", "--object-base-processing-version", default=None,
-                         help="Base processing version (uuid or text) to tag imported objects with.  " )
     parser.add_argument( "-h", "--host-base-processing-version", default=-None,
                          help=( "Base processing verson (uuid or text) to tag imported hosts with.  "
                                 "Not currently used." ) )
@@ -468,16 +588,18 @@ def main():
                          help="MongoDB collection to import from" )
     args = parser.parse_args()
 
-    objpv = ( args.base_processing_version
-              if args.object_base_processing_version is None
-              else args.object_base_processing_version )
-
-    si = SourceImporter( args.base_processing_version, objpv )
+    si = SourceImporter( args.object_base_processing_version,
+                         args.object_position_base_processing_version,
+                         args.source_base_processing_version,
+                         args.forcedsource_base_processing_version,
+                         args.host_base_processing_version )
     with db.MG() as mg:
         collection = db.get_mongo_collection( mg, args.collection )
-        nobj, nsrc, nfrc = si.import_from_mongo( collection )
+        nobj, nroot, npos, nsrc, nprvsrc, nfrc, ninfo = si.import_from_mongo( collection )
 
-    print( f"Imported {nobj} objects, {nsrc} sources, {nfrc} forced sources" )
+    print( f"Imported {nobj} objects, {nroot} root objects, {npos} object positions, "
+           f"{nsrc+nprvsrc} sources ({nsrc} main, {nprvsrc} previous), {nfrc} forced sources, "
+           f"{ninfo} broker infos" )
 
 
 # ======================================================================

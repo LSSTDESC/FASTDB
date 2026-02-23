@@ -308,15 +308,22 @@ CREATE TABLE diasource_extra(
   bboxsize             integer,
   timeprocessedmjdtai  double precision,
   timewithdrawnmjdtai  double precision,
-  parentdiasourceid    bigint,
-  info                 jsonb DEFAULT '{}'::JSONB
+  parentdiasourceid    bigint
 );
 COMMENT ON COLUMN diasource.diasourceid IS 'with base_procver_id, link to diasource table';
 COMMENT ON COLUMN diasource.base_procver_id IS 'with diasourceid, link to diasource table';
 CREATE INDEX diasource_extra_parentdiasourceid ON diasource_extra( parentdiasourceid );
 ALTER TABLE diasource_extra ADD PRIMARY KEY ( diasourceid, base_procver_id );
 ALTER TABLE diasource_extra ADD CONSTRAINT fk_diasource_extra_diasource
-  FOREIGN KEY ( diasourceid, base_procver_id ) REFERENCES diasource( diasourceid, base_procver_id );
+  FOREIGN KEY ( diasourceid, base_procver_id ) REFERENCES diasource( diasourceid, base_procver_id )
+  ON DELETE CASCADE
+  DEFERRABLE INITIALLY IMMEDIATE;
+
+INSERT INTO diasource(diasourceid, base_procver_id, diaobjectid, visit, band, midpointmjdtai,
+                      psfflux, psffluxerr, ra, dec, raerr, decerr, ra_dec_cov)
+  SELECT diasourceid, base_procver_id, diaobjectid, visit, band, midpointmjdtai,
+         psfflux, psffluxerr, ra, dec, raerr, decerr, ra_dec_cov
+  FROM diasource_old;
 
 INSERT INTO diasource_extra(diasourceid, base_procver_id, detector, x, y, xerr, yerr, x_y_cov,
                             psflnl, psfchi2, psfndata, snr,
@@ -333,6 +340,29 @@ INSERT INTO diasource_extra(diasourceid, base_procver_id, detector, x, y, xerr, 
   FROM diasource_old;
 
 DROP TABLE diasource_old;
+
+-- **********************************************************************
+-- Broker-specific information
+
+CREATE TABLE diasource_brokerinfo(
+  brokername        text NOT NULL,
+  diasourceid       bigint NOT NULL,
+  base_procver_id   uuid NOT NULL,
+  diaobjectid       bigint NOT NULL,
+  visit             bigint NOT NULL,
+  info              jsonb DEFAULT '{}'::JSONB
+);
+ALTER TABLE diasource_brokerinfo ADD CONSTRAINT pk_diasource_brokerinfo
+  PRIMARY KEY( brokername, diasourceid, base_procver_id );
+CREATE INDEX idx_diasource_brokerinfo_brokername ON diasource_brokerinfo(brokername);
+CREATE INDEX idx_diasource_brokerinfo_diasourceid ON diasource_brokerinfo(diasourceid);
+CREATE INDEX idx_diasource_brokerinfo_base_procver_id ON diasource_brokerinfo(base_procver_id);
+CREATE INDEX idx_diasource_brokerinfo_diaobjectid ON diasource_brokerinfo(diaobjectid);
+CREATE INDEX idx_diasource_brokerinfo_sourcespec ON diasource_brokerinfo(diaobjectid, visit, base_procver_id);
+ALTER TABLE diasource_brokerinfo ADD CONSTRAINT fk_diasource_brokerinfo_diasource
+  FOREIGN KEY (diaobjectid, visit, base_procver_id) REFERENCES diasource(diaobjectid, visit, base_procver_id)
+  ON DELETE CASCADE
+  DEFERRABLE INITIALLY IMMEDIATE;
 
 
 -- **********************************************************************
@@ -387,7 +417,9 @@ CREATE TABLE diaforcedsource_extra(
 ALTER TABLE diaforcedsource_extra ADD PRIMARY KEY (base_procver_id, diaobjectid, visit);
 ALTER TABLE diaforcedsource_extra ADD CONSTRAINT fk_diaforcedsource_extra_diaforcedsource
   FOREIGN KEY (base_procver_id, diaobjectid, visit)
-  REFERENCES diaforcedsource( base_procver_id, diaobjectid, visit );
+  REFERENCES diaforcedsource( base_procver_id, diaobjectid, visit )
+  ON DELETE CASCADE
+  DEFERRABLE INITIALLY IMMEDIATE;
 
 INSERT INTO diaforcedsource(diaforcedsourceid, base_procver_id, diaobjectid, visit, band,
                             midpointmjdtai, psfflux, psffluxerr)
