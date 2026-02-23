@@ -63,22 +63,37 @@ class SourceImporter:
         return mask
 
 
-    def __init__( self, base_processing_version, object_base_processing_version, object_match_radius=1. ):
+    def __init__( self, object_base_processing_version, source_base_processing_version,
+                  forcedsource_base_processing_version, host_base_processing_version, object_match_radius=1. ):
         """Create a SourceImporter.
 
         Parameters
         ----------
-          base_processing_version : UUID or str
-            The processing version.  This must be a valid entry (id or
+          object_base_processing_version : UUID or str
+            The processing version for diaobject.  This must be a valid entry (id or
             description) in the base_processing_version table.
 
+          source_base_processing_version : UUID or str
+            The processing version for diasource.  This must be a valid entry (id or
+            description) in the base_processing_version table.
+
+          forcedsource_base_processing_version : UUID or str
+            The processing version for diaforcedsource.  This must be a valid entry (id or
+            description) in the base_processing_version table.
+
+          host_base_processing_verson : UUID or str
+            The processing version for hsot_galaxy.  This must be a valid entry (id or
+            description) in the base_processing_version table.
+        
           object_match_radius : float, default 1.
             Objects within this many arcsec of an existing object will be considered
             the same root_diaobject.
 
         """
-        self.base_processing_version = util.base_procver_id( base_processing_version )
         self.object_base_processing_version = util.base_procver_id( object_base_processing_version )
+        self.source_base_processing_version = util.base_procver_id( source_base_processing_version )
+        self.forcedsource_base_processing_version = util.base_procver_id( forcedsource_base_processing_version )
+        self.host_base_processing_version = util.base_procver_id( host_base_processing_version )
         self.object_match_radius = float( object_match_radius )
 
 
@@ -440,11 +455,15 @@ class SourceImporter:
 def main():
     parser = argparse.ArgumentParser( 'source_importer.py', description='Import sources from mongo to postgres',
                                       formatter_class=argparse.ArgumentDefaultsHelpFormatter )
-    parser.add_argument( "-p", "--base-processing-version", required=True,
+    parser.add_argument( "-s", "--source-base-processing-version", required=True,
                          help="Base processing version (uuid or text) to tag imported sources with." )
+    parser.add_argument( "-f", "--forcedsource-base-processing-version", required=True,
+                         help="Base processing version (uuid or text) to tag imported forced sources with." )
     parser.add_argument( "-o", "--object-base-processing-version", default=None,
-                         help=( "Base processing version (uuid or text) to tag imported objects with.  "
-                                "Defaults to the same as --base-processing-version" ) )
+                         help="Base processing version (uuid or text) to tag imported objects with.  " )
+    parser.add_argument( "-h", "--host-base-processing-version", default=-None,
+                         help=( "Base processing verson (uuid or text) to tag imported hosts with.  "
+                                "Not currently used." ) )
     parser.add_argument( "-c", "--collection", required=True,
                          help="MongoDB collection to import from" )
     args = parser.parse_args()

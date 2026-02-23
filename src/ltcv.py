@@ -1535,18 +1535,18 @@ def get_hot_ltcvs( processing_version, position_processing_version=None,
         given, will use processing_version.  If the position from
         the desired processing version isn't found, then the position
         fields in the returned object info dataframe will be null, unless
-        use_weighted_source_positions is true, in which case 
-    
+        use_weighted_source_positions is true, in which case
+
       use_weighted_source_positions: bool, default False
         Normally, if a position is not found with the desired position
         processing version, the ra and dec fields are NULL or NA or
         something.  Set this to True to fill them in with a (S/N)^2
         weighted average of the positions from the detections.
-    
+
       always_use_weighted_source_positions: bool, default False
         Don't bother searching for object positions, just use weighted
         source positions.  Implies use_weighted_source_positions.
-    
+
       detected_since_mjd: float, default None
         If given, will search for all objects detected (i.e. with an
         entry in the diasource table) since this mjd.
@@ -1625,7 +1625,7 @@ def get_hot_ltcvs( processing_version, position_processing_version=None,
         raise NotImplementedError( "Error, host processing version is not currently supported." )
 
     use_weighted_source_positions = use_weighted_source_positions or always_use_weighted_source_positions
-    
+
     if detected_since_mjd is not None:
         if detected_in_last_days is not None:
             raise ValueError( "Only specify at most one of detected_since_mjd and detected_in_last_days" )

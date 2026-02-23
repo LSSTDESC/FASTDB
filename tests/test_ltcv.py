@@ -185,8 +185,8 @@ def test_object_ltcv( procver_collection, set_of_lightcurves ):
         assert not any( df[ df.isdet == True ][field].isna() )
         assert all( df[ df.isdet == False ][field].isna() )
 
-    
-    
+
+
 def test_many_object_ltcvs( procver_collection, set_of_lightcurves ):
     roots = set_of_lightcurves
     _bpvs, pvs = procver_collection
@@ -384,7 +384,7 @@ def test_many_object_ltcvs( procver_collection, set_of_lightcurves ):
     assert ( tmp == forced ).all().all()
 
     # Test include_source_positions
-    
+
     sources = ltcv.many_object_ltcvs( pvs['pv1'].id, [ roots[i]['root'].id for i in [0,1] ],
                                       return_format='pandas', which='detections',
                                       include_base_procver=True, include_source_positions=True )
@@ -400,7 +400,7 @@ def test_many_object_ltcvs( procver_collection, set_of_lightcurves ):
         assert all( forced[ forced.isdet == False ][field].isna() )
         assert not any( df[ df.isdet == True ][field].isna() )
         assert all( df[ df.isdet == False ][field].isna() )
-    
+
 
 # There is another test of ltcv_object_search that uses loaded SNANA data
 #   in test_ltcv_object_search.py
@@ -756,6 +756,6 @@ def test_get_hot_ltcvs( set_of_lightcurves ):
     assert objdf.loc[201, 'pos_base_procver_id'] == postime_procver_60060
     assert objdf.loc[202, 'pos_base_procver_id'] == postime_procver_60080
     assert objdf.loc[203, 'pos_base_procver_id'] == postime_procver_60060
-    
+
     # TODO : test the case where some objects have no positions, and make sure the patch position goes in there.
     #  (This will require changing the set of lightcurves fixtures....)
