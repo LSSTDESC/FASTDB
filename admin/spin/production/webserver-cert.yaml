@@ -1,0 +1,9 @@
+apiVersion: v1
+data:
+  tls.crt: PUT THE RIGHT THING HERE
+  tls.key: PUT THE RIGHT THING HERE
+kind: Secret
+metadata:
+  name: fastdb-cert
+  namespace: fastdb-rknop-dev
+type: kubernetes.io/tls
