@@ -1,4 +1,4 @@
-FROM mongo:8.0.15 AS BASE
+FROM mongo:8.0.15 AS base
 
 SHELL ["/bin/bash", "-c"]
 WORKDIR /usr/src
