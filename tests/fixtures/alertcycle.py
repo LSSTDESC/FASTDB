@@ -71,7 +71,7 @@ def fakebroker( barf ):
 
 @pytest.fixture( scope='module' )
 def alerts_30days_sent( snana_fits_ppdb_loaded, barf ):
-    sender = AlertSender( 'kafka-server', f"alerts-{barf}" )
+    sender = AlertSender( 'kafka-server', f"alerts-{barf}", make_cutouts=True )
     nsent = sender( addeddays=30, reallysend=True )
     assert nsent == 77
 
@@ -135,7 +135,7 @@ def alerts_30days_sent_and_brokermessage_consumed( barf, alerts_30days_sent_and_
 #   by a BrokerConsumer
 @pytest.fixture( scope='module' )
 def alerts_60moredays_sent( snana_fits_ppdb_loaded, alerts_30days_sent_and_brokermessage_consumed, barf ):
-    sender = AlertSender( 'kafka-server', f"alerts-{barf}" )
+    sender = AlertSender( 'kafka-server', f"alerts-{barf}", make_cutouts=True )
     nsent = sender( addeddays=60, reallysend=True )
     assert nsent == 104
 
@@ -219,6 +219,20 @@ def alerts_90days_sent_received_and_imported( procver_collection ):
             nfrc = cursor.fetchone()[0]
             cursor.execute( "SELECT COUNT(*) FROM diaforcedsource_extra" )
             assert cursor.fetchone()[0] == nfrc
+
+        # O.M.G.
+        # '--archive <filename>' didn't work
+        # '--archive=<filename>' does work
+        # so much facepalm
+        args = [ 'mongorestore', '-h', 'mongodb', '-u', 'admin', '-p', 'fragile',
+                 '--authenticationDatabase', 'admin', '-vvvv', '--gzip',
+                 '--archive=elasticc2_test_data/alerts_90days_sent_received_and_imported.mongodump' ]
+        res = subprocess.run( args, capture_output=True )
+        assert res.returncode == 0
+        with db.MG() as mongoclient:
+            collection = db.get_mongo_collection( mongoclient, 'source_thumbnails' )
+            assert collection.count_documents( {} ) == nsrc
+
         yield nobj, nroot, npos, nsrc, 0, nfrc, ninfo
     finally:
         with db.DB() as conn:
@@ -233,6 +247,9 @@ def alerts_90days_sent_received_and_imported( procver_collection ):
             cursor.execute( "DELETE FROM root_diaobject" )
             # cursor.execute( "DELETE FROM host_galaxy" )
             conn.commit()
+        with db.MG() as mongoclient:
+            collection = db.get_mongo_collection( mongoclient, "source_thumbnails" )
+            collection.delete_many( {} )
 
 
 # The fixture below should have (approximately!) the same result as the
@@ -254,7 +271,7 @@ def alerts_90days_sent_received_and_imported( procver_collection ):
 #   RUN_FULL90DAYS=1 pytest -v --trace services/test_sourceimporter.py::test_full90days
 #
 # When you get to the pdb prompt at the beginning of that test, in
-# another shell in the container, cd into the tests directory and run:
+# another shell in the container, cd into the tests directory and run both of:
 #
 #    PGPASSWORD=fragile pg_dump -h postgres -U postgres fastdb -F c -a  \
 #       -f elasticc2_test_data/alerts_90days_sent_received_and_imported.pgdump \
@@ -262,8 +279,13 @@ def alerts_90days_sent_received_and_imported( procver_collection ):
 #       -t diasource -t diasource_extra -t diasource_brokerinfo \
 #       -t diaforcedsource -t diaforcedsource_extra
 #
-# That will create the file
-#   elasticc2_test_data/alerts_90days_sent_receved_and_imported.pgdump
+#    mongodump -h mongodb -u admin -p fragile --authenticationDatabase=admin \
+#       --db=brokeralert --collection=source_thumbnails --gzip \
+#       --archive=elasticc2_test_data/alerts_90days_sent_received_and_imported.mongodump
+#
+# That will create two files:
+#   elasticc2_test_data/alerts_90days_sent_received_and_imported.pgdump
+#   elasticc2_test_data/alerts_90days_sent_received_and_imported.mongodump
 # underneath the tests directory.  If you do this, and the changes need
 # to be committed to git, you will also need to run:
 #
@@ -309,3 +331,6 @@ def fully_do_alerts_90days_sent_received_and_imported( barf, procver_collection,
             cursor.execute( "DELETE FROM diasource_import_time WHERE collection=%(col)s",
                             { 'col': collection_name } )
             conn.commit()
+        with db.MG() as mongoclient:
+            collection = db.get_mongo_collection( mongoclient, "source_thumbnails" )
+            collection.delete_many( {} )

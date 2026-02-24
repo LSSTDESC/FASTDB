@@ -6,6 +6,7 @@ import random
 import logging
 
 import fastavro
+from astropy.io import fits
 
 from kafka_consumer import KafkaConsumer
 import db
@@ -50,6 +51,8 @@ def test_reconstruct_alert( snana_fits_ppdb_loaded ):
     assert all( a['midpointMjdTai'] < alert['diaSource']['midpointMjdTai'] -1 for a in alert['prvDiaForcedSources'] )
     assert all( a['midpointMjdTai'] >= alert['diaSource']['midpointMjdTai'] -365 for a in alert['prvDiaForcedSources'] )
 
+    assert all( alert[f] is None for f in [ "cutoutDifference", "cutoutScience", "cutoutTemplate" ] )
+
     # Try reconstructing with a different lookback time
 
     recon = AlertReconstructor( prevsrc=10, prevfrced=17, prevfrced_gap=10 )
@@ -63,6 +66,17 @@ def test_reconstruct_alert( snana_fits_ppdb_loaded ):
     assert all( a['midpointMjdTai'] >= alert['diaSource']['midpointMjdTai'] -10 for a in alert['prvDiaSources'] )
     assert all( a['midpointMjdTai'] < alert['diaSource']['midpointMjdTai'] -10 for a in alert['prvDiaForcedSources'] )
     assert all( a['midpointMjdTai'] >= alert['diaSource']['midpointMjdTai'] -17 for a in alert['prvDiaForcedSources'] )
+
+    # Make sure fake cutouts get created
+
+    recon = AlertReconstructor( make_cutouts=True )
+    recon._reset_timings()
+    alert = recon.reconstruct( 1696949, 1207427456 )
+    for field in [ "cutoutDifference", "cutoutScience", "cutoutTemplate" ]:
+        bio = io.BytesIO( alert[field] )
+        with fits.open( bio ) as hdul:
+            assert len(hdul) == 1
+            assert hdul[0].data.shape == (41, 41)
 
 
 def test_alertsender_find_alerts( snana_fits_ppdb_loaded ):
@@ -221,10 +235,11 @@ def test_send_alerts( snana_fits_ppdb_loaded ):
             con.commit()
 
 
-# The purpose of this next test is to see timings when sending
+# The purpose of these next tests is to see timings when sending
 #   lots of alerts.  To *really* test this, we need a bigger
 #   test set....
-def test_send_all_alerts( snana_fits_ppdb_loaded ):
+
+def _send_all_alerts( **kwargs ):
     try:
         schema = util.get_alert_schema()
 
@@ -232,11 +247,11 @@ def test_send_all_alerts( snana_fits_ppdb_loaded ):
         barf = "".join( random.choices( 'abcdefghijklmnopqrstuvwxyz', k=6 ) )
         topic = f"test_send_alerts_{barf}"
 
+        sender = AlertSender( 'kafka-server', topic, **kwargs )
         consumer = KafkaConsumer( 'kafka-server', f'test_send_all_alerts_{barf}', schema['alert_schema_file'],
                                   consume_nmsgs=100, logger=_logger )
         assert topic not in consumer.topic_list()
 
-        sender = AlertSender( 'kafka-server', topic )
         nsent = sender( throughday=70000, reallysend=True )
         assert nsent == 1862
 
@@ -246,14 +261,15 @@ def test_send_all_alerts( snana_fits_ppdb_loaded ):
         consumer.poll_loop( handler=lambda m: msgs.extend( m ), stopafternsleeps=2 )
         assert len(msgs) == 1862
 
+        alerts = [ fastavro.schemaless_reader(io.BytesIO(m.value()), schema['alert']) for m in msgs ]
+        alertids = set( ( a['diaObject']['diaObjectId'], a['diaSource']['visit'] ) for a in alerts )
+
         # Make sure all diasourceids show up
         # See Issue #49
-        alertids = set( fastavro.schemaless_reader(io.BytesIO(m.value()), schema['alert'])['diaSource']['visit']
-                        for m in msgs )
         with db.DB() as con:
             cursor = con.cursor()
-            cursor.execute( "SELECT visit FROM ppdb_diasource" )
-            dbids = set( row[0] for row in cursor.fetchall() )
+            cursor.execute( "SELECT diaobjectid, visit FROM ppdb_diasource" )
+            dbids = set( ( row[0], row[1] ) for row in cursor.fetchall() )
         assert dbids == alertids
 
         # Make sure all alerts show up in the alerts_sent table
@@ -264,8 +280,22 @@ def test_send_all_alerts( snana_fits_ppdb_loaded ):
                             "WHERE a.diaobjectid IS NULL" )
             assert len( cursor.fetchall() ) == 0
 
+        yield alerts
+
     finally:
         with db.DB() as con:
             cursor = con.cursor()
             cursor.execute( "DELETE FROM ppdb_alerts_sent" )
             con.commit()
+
+
+def test_send_all_alerts( snana_fits_ppdb_loaded ):
+    alerts = next( _send_all_alerts() )
+    assert all( all( a[f] is None for f in [ 'cutoutDifference', 'cutoutScience', 'cutoutTemplate' ]
+                    ) for a in alerts )
+
+
+def test_send_all_alerts_with_cutouts( snana_fits_ppdb_loaded ):
+    alerts = next( _send_all_alerts( make_cutouts=True ) )
+    assert all( all( a[f] is not None for f in [ 'cutoutDifference', 'cutoutScience', 'cutoutTemplate' ]
+                     ) for a in alerts )

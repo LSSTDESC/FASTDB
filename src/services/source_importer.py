@@ -492,6 +492,48 @@ class SourceImporter:
             return ninfo
 
 
+    def import_cutouts_from_collection( self, collection, t0=None, t1=None, commit=True ):
+        client = collection.database.client
+        session = client.start_session()
+        session.start_transaction()
+
+        if t0 is not None:
+            if ( t1 is not None ):
+                pipeline = [ { "$match": { "$and": [ { "cutoutdifference": { "$ne": None } },
+                                                     { "savetime": { "$gt": t0 } },
+                                                     { "savetime": { "$lte": t1 } } ] } } ]
+            else:
+                pipeline = [ { "$match": { "$and": [ { "cutoutdifference": { "$ne": None } },
+                                                     { "savetime": { "$gt": t0 } } ] } } ]
+        elif t1 is not None:
+            pipeline = [ { "$match": { "$and": [ { "cutoutdifference": { "$ne": None } },
+                                                 { "savetime": { "$lte": t1 } } ] } } ]
+        else:
+            pipeline = [ { "$match": { "cutoutdifference": { "$ne": None } } } ]
+
+
+        # Going to use cutoutDifference as the canary
+        pipeline.extend( [ { "$group": { "_id": "$diasource.diasourceid",
+                                         "diasourceid": { "$first": "$diasource.diasourceid" },
+                                         "base_procver_id": { "$first": str( self.source_base_processing_version ) },
+                                         "cutoutdifference": { "$first": "$cutoutdifference" },
+                                         "cutoutscience": { "$first": "$cutoutscience" },
+                                         "cutouttemplate": { "$first": "$cutouttemplate" }
+                                        } },
+                           { "$merge": { "into": "source_thumbnails",
+                                         "on": [ "diasourceid", "base_procver_id" ],
+                                         "whenMatched": "keepExisting"
+                                        } }
+                          ] )
+        collection.aggregate( pipeline )
+
+        if commit:
+            session.commit_transaction()
+            session.end_session()
+            return None
+        else:
+            return session
+
 
     # **********************************************************************
     # This is the main method to call from outside
@@ -550,6 +592,7 @@ class SourceImporter:
             nsrc, nprvsrc = self.import_sources_from_collection( collection, t0, t1, dbcon=dbcon, commit=False )
             nfrc = self.import_forcedsources_from_collection( collection, t0, t1, dbcon=dbcon, commit=False )
             ninfo = self.import_brokerinfo_from_collection( collection, t0, t1, dbcon=dbcon, commit=False )
+            mongosession = self.import_cutouts_from_collection( collection, t0, t1, commit=False )
 
             if timestampexists:
                 dbcon.execute( "UPDATE diasource_import_time SET t=%(t)s WHERE collection=%(col)s",
@@ -563,6 +606,8 @@ class SourceImporter:
             #   the database will be rolled back.  No objects or sources will
             #   have been saved, and the timestamp will not have been updated.
             # The timestamp will be updated if and only if everything imported.
+            mongosession.commit_transaction()
+            mongosession.end_session()
             dbcon.commit()
 
         return nobj, nroot, npos, nsrc, nprvsrc, nfrc, ninfo

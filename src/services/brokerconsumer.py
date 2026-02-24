@@ -337,6 +337,9 @@ class BrokerConsumer:
                                 },
                                 'diasource': { k.lower(): msg['diaSource'][k] for k in diasource_fields },
                                 'diasource_extra': { k.lower(): msg['diaSource'][k] for k in diasource_extra_fields },
+                                'cutoutdifference': msg['cutoutDifference'],
+                                'cutoutscience': msg['cutoutScience'],
+                                'cutouttemplate': msg['cutoutTemplate'],
                                 'broker_info': {
                                     'brokerName': msg['brokerName'],
                                     'classifierName': msg['classifierName'],

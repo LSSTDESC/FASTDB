@@ -36,7 +36,7 @@ RUN ln -s /usr/bin/python3 /usr/bin/python
 ENV LESS=-XLRi
 
 
-# Install mongosh (which adds >250MB to the docker image :( )
+# Install mongosh (which adds >300MB to the docker image :( ) and mongodb-dbatabase-tools (another 150MB)
 
 RUN curl -fsSL https://www.mongodb.org/static/pgp/server-8.0.asc | \
    gpg -o /usr/share/keyrings/mongodb-server-8.0.gpg \
@@ -46,7 +46,7 @@ RUN echo "deb [ signed-by=/usr/share/keyrings/mongodb-server-8.0.gpg ] http://re
 
 RUN apt-get update \
   && DEBIAN_FRONTEND="noninteractive" TZ="UTC" apt-get -y install -y --no-install-recommends \
-          mongodb-mongosh \
+          mongodb-mongosh mongodb-database-tools \
   && apt-get clean \
   && rm -rf /var/lib/apt/lists/*
 

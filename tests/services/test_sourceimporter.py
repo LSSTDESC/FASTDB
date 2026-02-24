@@ -75,6 +75,7 @@ def import_first30days_sources( barf, import_first30days_objects, procver_collec
             collection = db.get_mongo_collection( mongoclient, collection_name )
             nsrc, nprvsrc = si.import_sources_from_collection( collection, t1=t1 )
             ninfo = si.import_brokerinfo_from_collection( collection, t1=t1 )
+            si.import_cutouts_from_collection( collection, t1=t1 )
 
         yield nsrc, nprvsrc, ninfo
     finally:
@@ -83,6 +84,9 @@ def import_first30days_sources( barf, import_first30days_objects, procver_collec
             conn.execute( "DELETE FROM diasource_extra" )
             conn.execute( "DELETE FROM diasource" )
             conn.commit()
+        with db.MG() as mongoclient:
+            collection = db.get_mongo_collection( mongoclient, "source_thumbnails" )
+            collection.delete_many( {} )
 
 
 @pytest.fixture
@@ -134,6 +138,7 @@ def import_next60days( barf, procver_collection,
             nsrc, nprvsrc = si.import_sources_from_collection( collection, t0=t0, t1=t1 )
             nfrc = si.import_forcedsources_from_collection( collection, t0=t0, t1=t1 )
             ninfo = si.import_brokerinfo_from_collection( collection, t0=t0, t1=t1 )
+            si.import_cutouts_from_collection( collection, t0=t0, t1=t1 )
 
         yield nobj, nroot, npos, nsrc, nprvsrc, nfrc, ninfo
     finally:
@@ -147,6 +152,9 @@ def import_next60days( barf, procver_collection,
             conn.execute( "DELETE FROM diaobject" )
             conn.execute( "DELETE FROM root_diaobject" )
             conn.commit()
+        with db.MG() as mongoclient:
+            collection = db.get_mongo_collection( mongoclient, "source_thumbnails" )
+            collection.delete_many( {} )
 
 
 # @pytest.fixture
@@ -183,6 +191,7 @@ def import_30days_60days( barf, procver_collection, import_first30days_sources, 
             nsrc, nprvsrc = si.import_sources_from_collection( collection, t0=t0, t1=t1 )
             nprvfrc = si.import_forcedsources_from_collection( collection, t0=t0, t1=t1 )
             ninfo = si.import_brokerinfo_from_collection( collection, t0=t0, t1=t1 )
+            si.import_cutouts_from_collection( collection, t0=t0, t1=t1 )
         # dri = DRImporter( bpv['realtime'].id )
         # nhosts = dri.import_host_info()
 
@@ -428,6 +437,10 @@ def test_import_sources( import_first30days_sources ):
     assert min( r[coldex['midpointmjdtai']] for r in rows ) == pytest.approx( 60278.029, abs=0.01 )
     assert max( r[coldex['midpointmjdtai']] for r in rows ) == pytest.approx( 60303.211, abs=0.01 )
 
+    with db.MG() as mongoclient:
+        collection = db.get_mongo_collection( mongoclient, "source_thumbnails" )
+        assert collection.count_documents( {} ) == nsrc
+
     # TODO :more?
 
 
@@ -499,6 +512,9 @@ class TestImport:
                 conn.execute( "DELETE FROM diaobject" )
                 conn.execute( "DELETE FROM root_diaobject" )
                 conn.commit()
+            with db.MG() as mongoclient:
+                collection = db.get_mongo_collection( mongoclient, "source_thumbnails" )
+                collection.delete_many( {} )
 
 
     def test_run_import_30days( self, barf, run_import_30days ):
@@ -532,6 +548,11 @@ class TestImport:
             assert t > tsent
             assert t < t30
             assert t30 < datetime.datetime.now( tz=datetime.UTC )
+
+        with db.MG() as mongoclient:
+            collection = db.get_mongo_collection( mongoclient, "source_thumbnails" )
+            assert collection.count_documents( {} ) == nsrc
+
 
 
     # Test that we can import the next 60 days.  Also make sure the
@@ -638,6 +659,10 @@ class TestImport:
             assert t1 > t60
             assert t60 < datetime.datetime.now( tz=datetime.UTC )
 
+            with db.MG() as mongoclient:
+                collection = db.get_mongo_collection( mongoclient, "source_thumbnails" )
+                assert collection.count_documents( {} ) == totsrc
+
         finally:
             # Necessary cleanup will be done by the run_import_30days
             #   test-scope fixture.
@@ -691,6 +716,11 @@ def test_import_next60days( import_next60days ):
     # The min mjd should be greater than the max mjd from test_import_sources
     assert min( r[sourcecoldex['midpointmjdtai']] for r in sources ) == pytest.approx( 60278.2469, abs=0.01 )
     assert max( r[sourcecoldex['midpointmjdtai']] for r in sources ) == pytest.approx( 60362.3266, abs=0.01 )
+
+    with db.MG() as mongoclient:
+        collection = db.get_mongo_collection( mongoclient, "source_thumbnails" )
+        # Only the sources imported directly will have thumbnails; previous sources will not
+        assert collection.count_documents( {} ) == nsrc
 
 
 @pytest.mark.skip( reason="Hosts aren't currently in the LSST schema" )
@@ -748,6 +778,9 @@ def test_import_30days_60days( import_30days_60days, test_user ):
     assert max( r['midpointmjdtai'] for r in sources ) == pytest.approx( 60362.3266, abs=0.01 )
     assert set( r['id'] for r in roots ) == set( o['rootid'] for o in objects )
 
+    with db.MG() as mongoclient:
+        collection = db.get_mongo_collection( mongoclient, "source_thumbnails" )
+        assert collection.count_documents( {} ) == len( sources )
 
 
 # **********************************************************************
@@ -766,6 +799,10 @@ def test_full90days_fast( alerts_90days_sent_received_and_imported ):
     assert nfrc == 855
     assert ninfo == 2 * nsrc
 
+    with db.MG() as mongoclient:
+        collection = db.get_mongo_collection( mongoclient, "source_thumbnails" )
+        assert collection.count_documents( {} ) == nsrc
+
 
 @pytest.mark.skipif( not env_as_bool('RUN_FULL90DAYS'), reason='RUN_FULL90DAYS is not set' )
 def test_full90days( fully_do_alerts_90days_sent_received_and_imported ):
@@ -777,3 +814,7 @@ def test_full90days( fully_do_alerts_90days_sent_received_and_imported ):
     assert nprvsrc == 0
     assert nfrc == 855
     assert ninfo == 2 * nsrc
+
+    with db.MG() as mongoclient:
+        collection = db.get_mongo_collection( mongoclient, "source_thumbnails" )
+        assert collection.count_documents( {} ) == nsrc

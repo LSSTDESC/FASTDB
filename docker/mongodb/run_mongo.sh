@@ -32,6 +32,24 @@ else
     echo
 fi
 
+# Make sure the source_thumbnails collection exists; create it and add an index if it doesn't
+if [ `mongosh --eval "use $MONGODB_DBNAME" --eval "db.getCollectionNames()" | grep -v Warning | perl -ne 's/\[\s*//g; s/\s*\]//g; @them=split(/,\s+/, $_); foreach $i (@them) { print "$i\n" }' | grep -c source_thumbnails` -eq 0 ]; then
+    echo
+    echo "*** Creating source_thumbnails collection ***"
+    echo
+    mongosh --eval "use $MONGODB_DBNAME" \
+            --eval 'db.createCollection( "source_thumbnails" )' \
+            --eval 'db.source_thumbnails.createIndex( { "diasourceid": 1, "base_procver_id": 1 }, { unique: true, name: "idx_source_thumbnails" } )'
+    echo
+    echo "*** Done creating source_thumbnails collection ***"
+    echo
+else
+    echo
+    echo "***Mongo collection source_thumbnails exists***"
+    echo
+fi
+
+
 # Kill the running mongodb
 # (This seems to leave behind a defunct process.  I'm not happy about that, but things seem to be working...?)
 # (...or not.  When I did it interactively, it left behind a zombie process, but when running for real it doesn't.)
