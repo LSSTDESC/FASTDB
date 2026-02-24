@@ -87,7 +87,7 @@ def import_first30days_sources( barf, import_first30days_objects, procver_collec
 
 @pytest.fixture
 def import_30days_prvforcedsources( barf, import_first30days_sources, procver_collection,
-                              alerts_30days_sent_and_brokermessage_consumed ):
+                                    alerts_30days_sent_and_brokermessage_consumed ):
     bpv, _pv = procver_collection
     collection_name = f'fastdb_{barf}'
     t1 = alerts_30days_sent_and_brokermessage_consumed
@@ -100,7 +100,7 @@ def import_30days_prvforcedsources( barf, import_first30days_sources, procver_co
                              None )
         with db.MG() as mongoclient:
             collection = db.get_mongo_collection( mongoclient, collection_name )
-            n = si.import_prvforcedsources_from_collection( collection, t1=t1 )
+            n = si.import_forcedsources_from_collection( collection, t1=t1 )
 
         yield n
     finally:
@@ -163,7 +163,7 @@ def import_next60days( barf, procver_collection,
 
 # Import days 30-90 after importing days 0-30
 @pytest.fixture
-def import_30days_60days( barf, procver_collection, import_30days_prvsources, import_30days_prvforcedsources,
+def import_30days_60days( barf, procver_collection, import_first30days_sources, import_30days_prvforcedsources,
                            alerts_30days_sent_and_brokermessage_consumed,
                            alerts_60moredays_sent_and_brokermessage_consumed ):
     bpv, _pv = procver_collection
@@ -181,7 +181,7 @@ def import_30days_60days( barf, procver_collection, import_30days_prvsources, im
             collection = db.get_mongo_collection( mongoclient, collection_name )
             nobj, nroot, npos = si.import_objects_from_collection( collection, t0=t0, t1=t1 )
             nsrc, nprvsrc = si.import_sources_from_collection( collection, t0=t0, t1=t1 )
-            nprvfrc = si.import_prvforcedsources_from_collection( collection, t0=t0, t1=t1 )
+            nprvfrc = si.import_forcedsources_from_collection( collection, t0=t0, t1=t1 )
             ninfo = si.import_brokerinfo_from_collection( collection, t0=t0, t1=t1 )
         # dri = DRImporter( bpv['realtime'].id )
         # nhosts = dri.import_host_info()
@@ -417,7 +417,7 @@ def test_import_hosts( import_first30days_hosts ):
 def test_import_sources( import_first30days_sources ):
     nsrc, nprvsrc, ninfo = import_first30days_sources
     assert nsrc == 77
-    assert nprvsrc == 65
+    assert nprvsrc == 0   # All sources will have already been imported directly
     assert ninfo == 154
     with db.DB() as conn:
         cursor = conn.cursor()
@@ -487,7 +487,7 @@ class TestImport:
 
             yield nobj, nroot, npos, nsrc, nprvsrc, nfrc, ninfo, tsent, datetime.datetime.now( tz=datetime.UTC )
         finally:
-            with db.DBcon() as conn:
+            with db.DBCon() as conn:
                 conn.execute( "DELETE FROM diaforcedsource_extra" )
                 conn.execute( "DELETE FROM diaforcedsource" )
                 conn.execute( "DELETE FROM diasource_brokerinfo" )
@@ -495,7 +495,7 @@ class TestImport:
                 conn.execute( "DELETE FROM diasource" )
                 conn.execute( "DELETE FROM diasource_import_time WHERE collection=%(col)s",
                              { 'col': collection_name} )
-                conn.execute( "DELETE FROM diaobject_postiion" )
+                conn.execute( "DELETE FROM diaobject_position" )
                 conn.execute( "DELETE FROM diaobject" )
                 conn.execute( "DELETE FROM root_diaobject" )
                 conn.commit()
@@ -509,7 +509,6 @@ class TestImport:
         assert nroot == 12
         assert npos == 12
         assert nsrc == 77
-        import pdb; pdb.set_trace()
         assert nfrc == 148
         assert ninfo == 154
         with db.DB() as conn:
@@ -527,7 +526,7 @@ class TestImport:
             cursor.execute( "SELECT COUNT(*) FROM diaforcedsource_extra" )
             assert cursor.fetchone()[0] == nfrc
             cursor.execute( "SELECT COUNT(*) FROM diasource_brokerinfo" )
-            assert cursor.fethcone()[0] == ninfo
+            assert cursor.fetchone()[0] == ninfo
             cursor.execute( "SELECT t FROM diasource_import_time WHERE collection=%(col)s", { 'col': collection_name } )
             t = cursor.fetchone()[0]
             assert t > tsent
@@ -581,14 +580,15 @@ class TestImport:
             assert nobj30 == 12
             assert nroot30 == 12
             assert npos30 == 12
-            import pdb; pdb.set_trace()
             assert nsrc30 == 77
+            assert nprvsrc30 == 0
             assert nfrc30 == 148
             assert ninfo30 == 154
             assert objrootids30 == rootids30
             assert nobj == 25
             assert nroot == 25
             assert nsrc == 104
+            assert nprvsrc == 0
             assert nfrc == 707
             assert objrootids == rootids
 
@@ -598,10 +598,18 @@ class TestImport:
                 totobj = cursor.fetchone()[0]
                 cursor.execute( "SELECT COUNT(*) FROM root_diaobject" )
                 totroot = cursor.fetchone()[0]
+                cursor.execute( "SELECT COUNT(*) FROM diaobject_position" )
+                totpos = cursor.fetchone()[0]
                 cursor.execute( "SELECT COUNT(*) FROM diasource" )
                 totsrc = cursor.fetchone()[0]
+                cursor.execute( "SELECT COUNT(*) FROM diasource_extra" )
+                totsrcextra = cursor.fetchone()[0]
+                cursor.execute( "SELECT COUNT(*) FROM diasource_brokerinfo" )
+                totinfo = cursor.fetchone()[0]
                 cursor.execute( "SELECT COUNT(*) FROM diaforcedsource" )
                 totfrc = cursor.fetchone()[0]
+                cursor.execute( "SELECT COUNT(*) FROM diaforcedsource_extra" )
+                totfrcextra = cursor.fetchone()[0]
                 cursor.execute( "SELECT t FROM diasource_import_time WHERE collection=%(col)s",
                                 { 'col': collection_name } )
                 t60 = cursor.fetchone()[0]
@@ -611,14 +619,15 @@ class TestImport:
                 cursor.execute( "SELECT id FROM root_diaobject" )
                 totrootids = set( r[0] for r in cursor.fetchall() )
 
-            assert totobj == 37
-            assert totroot == 37
-            assert totsrc == 181
-            assert totfrc == 855
+            assert totobj == nobj30 + nobj
+            assert totroot == totobj
+            assert totpos == totobj
+            assert totsrc == nsrc30 + nsrc
+            assert totsrcextra == totsrc
+            assert totinfo == 2 * totsrc
+            assert totfrc == nfrc30 + nfrc
+            assert totfrcextra == totfrc
             assert totobjrootids == totrootids
-            assert totobj == nobj + nobj30
-            assert totsrc == nsrc + nsrc30
-            assert totfrc == nfrc + nfrc30
 
             assert t30 > t30send
             assert t60send > t30
@@ -641,30 +650,46 @@ class TestImport:
 #   also test that previous sources pulls in things that didn't
 #   get pulled in with the direct source import.
 
-def test_import_next60days( import_next60days_noprv ):
-    nobj, nroot, nsrc = import_next60days_noprv
+def test_import_next60days( import_next60days ):
+    nobj, nroot, npos, nsrc, nprvsrc, nfrc, ninfo = import_next60days
     assert nobj == 29
     assert nroot == 29
+    assert npos == 29
     assert nsrc == 104
+    assert nprvsrc == 48
+    assert nfrc == 770
+    assert ninfo == 208
 
     with db.DB() as conn:
         cursor = conn.cursor()
-        cursor.execute( "SELECT * FROM diasource" )
-        sourcecoldex = { desc[0]: i for i, desc in enumerate(cursor.description) }
-        sources = cursor.fetchall()
         cursor.execute( "SELECT * FROM diaobject" )
         objects = cursor.fetchall()
         cursor.execute( "SELECT * FROM root_diaobject" )
         roots = cursor.fetchall()
+        cursor.execute( "SELECT * FROM diaobject_position" )
+        positions = cursor.fetchall()
+        cursor.execute( "SELECT * FROM diasource" )
+        sourcecoldex = { desc[0]: i for i, desc in enumerate(cursor.description) }
+        sources = cursor.fetchall()
+        cursor.execute( "SELECT * FROM diasource_extra" )
+        sources_extra = cursor.fetchall()
+        cursor.execute( "SELECT * FROM diasource_brokerinfo" )
+        infos = cursor.fetchall()
         cursor.execute( "SELECT * FROM diaforcedsource" )
         forced = cursor.fetchall()
+        cursor.execute( "SELECT * FROM diaforcedsource_extra" )
+        forced_extra = cursor.fetchall()
 
-    assert len(objects) == 29
-    assert len(roots) == 29
-    assert len(sources) == 104
-    assert len(forced) == 0
+    assert len(objects) == nobj
+    assert len(roots) == nroot
+    assert len(positions) == npos
+    assert len(sources) == nsrc + nprvsrc
+    assert len(sources_extra) == nsrc + nprvsrc
+    assert len(infos) == ninfo
+    assert len(forced) == nfrc
+    assert len(forced_extra) == nfrc
     # The min mjd should be greater than the max mjd from test_import_sources
-    assert min( r[sourcecoldex['midpointmjdtai']] for r in sources ) == pytest.approx( 60310.1535, abs=0.01 )
+    assert min( r[sourcecoldex['midpointmjdtai']] for r in sources ) == pytest.approx( 60278.2469, abs=0.01 )
     assert max( r[sourcecoldex['midpointmjdtai']] for r in sources ) == pytest.approx( 60362.3266, abs=0.01 )
 
 
@@ -677,78 +702,52 @@ def test_import_next60days_hosts( import_next60days_hosts ):
         assert cursor.fetchone()[0] == import_next60days_hosts
 
 
-def test_import_next60days_with_prev( import_next60days_prv ):
-    nprvsources, nprvforced = import_next60days_prv
-    assert nprvsources == 48
-    assert nprvforced == 770
-    with db.DB() as conn:
-        cursor = conn.cursor()
-        cursor.execute( "SELECT * FROM diasource" )
-        sourcecoldex = { desc[0]: i for i, desc in enumerate(cursor.description) }
-        sources = cursor.fetchall()
-        cursor.execute( "SELECT * FROM diaobject" )
-        objects = cursor.fetchall()
-        cursor.execute( "SELECT * FROM diaforcedsource" )
-        forced = cursor.fetchall()
-
-    assert len(objects) == 29
-    # len(sources) is not the same as nprvsources because nprvsources are only the sources added from
-    #   previousDiaSource in all the alerts.
-    assert len(sources) == 152
-    assert len(forced) == 770
-    # It seems that the first source from test_import_sources is not one of the previouses of this
-    #   new batch (meaning that object was not detected in days 60-90), because the lowest mjd here
-    #   is not the same as the lowest mjd in test_import_sources.  (assuming that that object was
-    #   detected again in days 30-90).
-    assert min( r[sourcecoldex['midpointmjdtai']] for r in sources ) == pytest.approx( 60278.2469, abs=0.01 )
-    assert max( r[sourcecoldex['midpointmjdtai']] for r in sources ) == pytest.approx( 60362.3266, abs=0.01 )
-
-
 # **********************************************************************
 # Now make sure that if we import 30 days, then import 60 days, we get what's expected
 
 def test_import_30days_60days( import_30days_60days, test_user ):
-    nobj, nroot, nsrc, nprvsrc, nprvfrc, nhosts = import_30days_60days
+    nobj, nroot, npos, nsrc, nprvsrc, nprvfrc, ninfo = import_30days_60days
     assert nobj == 25
     assert nroot == 25
+    assert npos == 25
     assert nsrc == 104
     assert nprvsrc == 0   # at this point, anything that could be imported has been
     assert nprvfrc == 707
-    # Hosts aren't currently in the LSST schema
-    # assert nhosts == 42
-    assert nhosts == 0
+    assert ninfo == 208
     with db.DB() as conn:
         cursor = conn.cursor( row_factory=psycopg.rows.dict_row )
-        cursor.execute( "SELECT * FROM diasource" )
-        sources = cursor.fetchall()
         cursor.execute( "SELECT * FROM diaobject" )
         objects = cursor.fetchall()
-        cursor.execute( "SELECT * FROM diaforcedsource" )
-        forced = cursor.fetchall()
-        cursor.execute( "SELECT * FROM host_galaxy" )
-        hosts = cursor.fetchall()
         cursor.execute( "SELECT * FROM root_diaobject" )
         roots = cursor.fetchall()
+        cursor.execute( "SELECT * FROM diaobject_position" )
+        positions = cursor.fetchall()
+        cursor.execute( "SELECT * FROM diasource" )
+        sources = cursor.fetchall()
+        cursor.execute( "SELECT * FROM diasource_extra" )
+        sources_extra = cursor.fetchall()
+        cursor.execute( "SELECT * FROM diasource_brokerinfo" )
+        brokerinfos = cursor.fetchall()
+        cursor.execute( "SELECT * FROM diaforcedsource" )
+        forced = cursor.fetchall()
+        cursor.execute( "SELECT * FROM diaforcedsource_extra" )
+        forced_extra = cursor.fetchall()
 
     # nobj, nrsc, nprvsrc, nprvfrc above are affected row counts returned
     #   from the import of days 60-90, so are lower than the total numbers
     #   in the tables below.
     assert len(objects) == 37
+    assert len(roots) ==len(objects)
+    assert len(positions) == len(objects)
     assert len(sources) == 181
+    assert len(sources_extra) == len(sources)
+    assert len(brokerinfos) == 2 * len(sources)
     assert len(forced) == 855
-    # Hosts aren't currently in the LSST schema
-    # assert len(hosts) == 42
-    assert len(hosts) == 0
+    assert len(forced_extra) == len(forced)
     assert min( r['midpointmjdtai'] for r in sources ) == pytest.approx( 60278.029, abs=0.01 )
     assert max( r['midpointmjdtai'] for r in sources ) == pytest.approx( 60362.3266, abs=0.01 )
     assert set( r['id'] for r in roots ) == set( o['rootid'] for o in objects )
 
-    # Make sure hosts loaded match the hosts we thought should be loaded
-    hostids = set( [ h['id'] for h in hosts ] )
-    objhostids = set( [ o['nearbyextobj1id'] for o in objects if o['nearbyextobj1id'] is not None ] )
-    objhostids.update( [ o['nearbyextobj2id'] for o in objects if o['nearbyextobj2id'] is not None ] )
-    objhostids.update( [ o['nearbyextobj3id'] for o in objects if o['nearbyextobj3id'] is not None ] )
-    assert hostids == objhostids
 
 
 # **********************************************************************
@@ -758,11 +757,23 @@ def test_import_30days_60days( import_30days_60days, test_user ):
 
 @pytest.mark.skipif( env_as_bool('RUN_FULL90DAYS'), reason='RUN_FULL90DAYS is set' )
 def test_full90days_fast( alerts_90days_sent_received_and_imported ):
-    # TODO -- actually check stuff?
-    pass
+    nobj, nroot, npos, nsrc, nprvsrc, nfrc, ninfo = alerts_90days_sent_received_and_imported
+    assert nobj == 37
+    assert nroot == nobj
+    assert npos == nobj
+    assert nsrc == 181
+    assert nprvsrc == 0
+    assert nfrc == 855
+    assert ninfo == 2 * nsrc
 
 
 @pytest.mark.skipif( not env_as_bool('RUN_FULL90DAYS'), reason='RUN_FULL90DAYS is not set' )
 def test_full90days( fully_do_alerts_90days_sent_received_and_imported ):
-    # TODO -- actually check stuff?
-    pass
+    nobj, nroot, npos, nsrc, nprvsrc, nfrc, ninfo = fully_do_alerts_90days_sent_received_and_imported
+    assert nobj == 37
+    assert nroot == nobj
+    assert npos == nobj
+    assert nsrc == 181
+    assert nprvsrc == 0
+    assert nfrc == 855
+    assert ninfo == 2 * nsrc

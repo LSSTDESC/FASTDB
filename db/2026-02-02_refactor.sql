@@ -132,7 +132,9 @@ CREATE INDEX idx_hostgalaxy_host_id ON host_galaxy( host_id );
 CREATE INDEX idx_hostgalaxy_base_procver_id ON host_galaxy( base_procver_id );
 CREATE INDEX idx_hostgalaxy_q3c ON host_galaxy( q3c_ang2ipix(ra, dec) );
 ALTER TABLE host_galaxy ADD CONSTRAINT fk_host_galaxy_base_procver
-  FOREIGN KEY (base_procver_id) REFERENCES base_processing_version(id);
+  FOREIGN KEY (base_procver_id) REFERENCES base_processing_version(id)
+  ON DELETE RESTRICT
+  DEFERRABLE INITIALLY IMMEDIATE;
 
 
 CREATE TABLE diaobject_host_match(
@@ -152,11 +154,17 @@ CREATE INDEX idx_diaobject_host_match_diaobjectid ON diaobject_host_match(diaobj
 CREATE INDEX idx_diaobject_host_match_host_galaxy_id ON diaobject_host_match(host_galaxy_id);
 CREATE INDEX idx_diaobject_host_match_base_procver_id ON diaobject_host_match(base_procver_id);
 ALTER TABLE diaobject_host_match ADD CONSTRAINT fk_diaobject_host_match_diaobject
-  FOREIGN KEY (diaobjectid) REFERENCES diaobject(diaobjectid);
+  FOREIGN KEY (diaobjectid) REFERENCES diaobject(diaobjectid)
+  ON DELETE CASCADE
+  DEFERRABLE INITIALLY IMMEDIATE;
 ALTER TABLE diaobject_host_match ADD CONSTRAINT fk_diaobject_host_match_host_galaxy
-  FOREIGN KEY (host_galaxy_id) REFERENCES host_galaxy(id);
+  FOREIGN KEY (host_galaxy_id) REFERENCES host_galaxy(id)
+  ON DELETE RESTRICT
+  DEFERRABLE INITIALLY IMMEDIATE;
 ALTER TABLE diaobject_host_match ADD CONSTRAINT fk_diaobject_host_match_procver
-  FOREIGN KEY (base_procver_id) REFERENCES base_processing_version(id);
+  FOREIGN KEY (base_procver_id) REFERENCES base_processing_version(id)
+  ON DELETE RESTRICT
+  DEFERRABLE INITIALLY IMMEDIATE;
 
 
 -- Move diaobject positions out to their own table so they can have their own processing version
@@ -183,9 +191,13 @@ ALTER TABLE diaobject_position ADD CONSTRAINT pk_diaobject_position
 CREATE INDEX idx_diaobject_position_diaobjectid ON diaobject_position( diaobjectid );
 CREATE INDEX idx_diaobject_base_procver_id ON diaobject_position( base_procver_id );
 ALTER TABLE diaobject_position ADD CONSTRAINT fk_diaobject_position_diaobject
-  FOREIGN KEY (diaobjectid) REFERENCES diaobject(diaobjectid);
+  FOREIGN KEY (diaobjectid) REFERENCES diaobject(diaobjectid)
+  ON DELETE CASCADE
+  DEFERRABLE INITIALLY IMMEDIATE;
 ALTER TABLE diaobject_position ADD CONSTRAINT fk_diaobject_position_procver
-  FOREIGN KEY (base_procver_id) REFERENCES base_processing_version(id);
+  FOREIGN KEY (base_procver_id) REFERENCES base_processing_version(id)
+  ON DELETE RESTRICT
+  DEFERRABLE INITIALLY IMMEDIATE;
 
 -- Create a new base processing version for positions, copy all positions out of the diaobject table
 
@@ -272,9 +284,13 @@ CREATE INDEX idx_diasource_base_procver_id ON diasource( base_procver_id );
 CREATE INDEX idx_diasource_mjd ON diasource( midpointmjdtai );
 CREATE INDEX idx_diasource_q3c ON diasource( q3c_ang2ipix( ra, dec ) );
 ALTER TABLE diasource ADD CONSTRAINT fk_diasource_diaobject
-  FOREIGN KEY (diaobjectid) REFERENCES diaobject( diaobjectid );
+  FOREIGN KEY (diaobjectid) REFERENCES diaobject( diaobjectid )
+  ON DELETE RESTRICT
+  DEFERRABLE INITIALLY IMMEDIATE;
 ALTER TABLE diasource ADD CONSTRAINT fk_diasource_base_procver
-  FOREIGN KEY (base_procver_id) REFERENCES base_processing_version( id );
+  FOREIGN KEY (base_procver_id) REFERENCES base_processing_version( id )
+  ON DELETE RESTRICT
+  DEFERRABLE INITIALLY IMMEDIATE;
 
 CREATE TABLE diasource_extra(
   diasourceid          bigint NOT NULL,
@@ -400,9 +416,13 @@ CREATE INDEX idx_diaforcedsource_base_procver_id ON diaforcedsource( base_procve
 CREATE INDEX idx_diaforcedsource_mjd ON diaforcedsource( midpointmjdtai );
 CREATE INDEX idx_diaforcedsource_q3c ON diaforcedsource( q3c_ang2ipix( ra, dec ) );
 ALTER TABLE diaforcedsource ADD CONSTRAINT fk_diaforcedsource_diaobject
-  FOREIGN KEY (diaobjectid) references diaobject( diaobjectid );
+  FOREIGN KEY (diaobjectid) references diaobject( diaobjectid )
+  ON DELETE RESTRICT
+  DEFERRABLE INITIALLY IMMEDIATE;
 ALTER TABLE diaforcedsource ADD CONSTRAINT fk_diaforcedsource_base_procver
-  FOREIGN KEY (base_procver_id) REFERENCES base_processing_version( id );
+  FOREIGN KEY (base_procver_id) REFERENCES base_processing_version( id )
+  ON DELETE RESTRICT
+  DEFERRABLE INITIALLY IMMEDIATE;
 
 CREATE TABLE diaforcedsource_extra(
   diaobjectid                 bigint NOT NULL,

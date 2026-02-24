@@ -187,11 +187,14 @@ def alerts_90days_sent_received_and_imported( procver_collection ):
         # We have to wipe out the database because we're about to restore it!
         with db.DB() as conn:
             cursor = conn.cursor()
+            cursor.execute( "DELETE FROM diaforcedsource_extra" )
             cursor.execute( "DELETE FROM diaforcedsource" )
+            cursor.execute( "DELETE FROM diasource_brokerinfo" )
             cursor.execute( "DELETE FROM diasource" )
+            cursor.execute( "DELETE FROM diaobject_position" )
             cursor.execute( "DELETE FROM diaobject" )
             cursor.execute( "DELETE FROM root_diaobject" )
-            cursor.execute( "DELETE FROM host_galaxy" )
+            # cursor.execute( "DELETE FROM host_galaxy" )
             conn.commit()
 
         args = [ 'pg_restore', '-h', 'postgres', '-U', 'postgres', '-d', 'fastdb', '-a',
@@ -204,19 +207,31 @@ def alerts_90days_sent_received_and_imported( procver_collection ):
             nobj = cursor.fetchone()[0]
             cursor.execute( "SELECT COUNT(*) FROM root_diaobject" )
             nroot = cursor.fetchone()[0]
+            cursor.execute( "SELECT COUNT(*) FROM diaobject_position" )
+            npos = cursor.fetchone()[0]
             cursor.execute( "SELECT COUNT(*) FROM diasource" )
             nsrc = cursor.fetchone()[0]
+            cursor.execute( "SELECT COUNT(*) FROM diasource_extra" )
+            assert cursor.fetchone()[0] == nsrc
+            cursor.execute( "SELECT COUNT(*) FROM diasource_brokerinfo" )
+            ninfo = cursor.fetchone()[0]
             cursor.execute( "SELECT COUNT(*) FROM diaforcedsource" )
             nfrc = cursor.fetchone()[0]
-        yield nobj, nroot, nsrc,nfrc
+            cursor.execute( "SELECT COUNT(*) FROM diaforcedsource_extra" )
+            assert cursor.fetchone()[0] == nfrc
+        yield nobj, nroot, npos, nsrc, 0, nfrc, ninfo
     finally:
         with db.DB() as conn:
             cursor = conn.cursor()
+            cursor.execute( "DELETE FROM diaforcedsource_extra" )
             cursor.execute( "DELETE FROM diaforcedsource" )
+            cursor.execute( "DELETE FROM diasource_brokerinfo" )
+            cursor.execute( "DELETE FROM diasource_extra" )
             cursor.execute( "DELETE FROM diasource" )
+            cursor.execute( "DELETE FROM diaobject_position" )
             cursor.execute( "DELETE FROM diaobject" )
             cursor.execute( "DELETE FROM root_diaobject" )
-            cursor.execute( "DELETE FROM host_galaxy" )
+            # cursor.execute( "DELETE FROM host_galaxy" )
             conn.commit()
 
 
@@ -227,7 +242,11 @@ def alerts_90days_sent_received_and_imported( procver_collection ):
 # way as the previous fixture.  However, wheras the previous one just
 # quickly restores a previously-generated result to the database, the
 # fixture below goes through all of the steps of generating alerts,
-# classifying alerts, loading the database, etc.
+# classifying alerts, loading the database, etc.  That takes time (like
+# a minute or so), not because the processing per se is slow, but
+# because they're run in asynchronous services that have built-in sleep
+# times, so the fixtures put in enough waits to be sure that all the
+# necessary sleep times have timed out.
 #
 # You can use the fixture below to generate the data file needed for the
 # fixture above.  To do this, run (in the tests directory):
@@ -239,7 +258,9 @@ def alerts_90days_sent_received_and_imported( procver_collection ):
 #
 #    PGPASSWORD=fragile pg_dump -h postgres -U postgres fastdb -F c -a  \
 #       -f elasticc2_test_data/alerts_90days_sent_received_and_imported.pgdump \
-#       -t root_diaobject -t diaobject -t host_galaxy -t diasource -t diaforcedsource
+#       -t root_diaobject -t diaobject -t diaobject_position  \
+#       -t diasource -t diasource_extra -t diasource_brokerinfo \
+#       -t diaforcedsource -t diaforcedsource_extra
 #
 # That will create the file
 #   elasticc2_test_data/alerts_90days_sent_receved_and_imported.pgdump
@@ -262,24 +283,29 @@ def fully_do_alerts_90days_sent_received_and_imported( barf, procver_collection,
                                                        alerts_60moredays_sent_and_brokermessage_consumed ):
     bpv, _pv = procver_collection
     from services.source_importer import SourceImporter
-    from services.dr_importer import DRImporter
     collection_name = f'fastdb_{barf}'
     try:
-        si = SourceImporter( bpv['realtime'].id, bpv['realtime'].id )
+        si = SourceImporter( bpv['realtime'].id,
+                             bpv['realtime_diaobject_position_60000'].id,
+                             bpv['realtime_diasource'].id,
+                             bpv['realtime_diaforcedsource'].id,
+                             None )
         with db.MG() as mongoclient:
             collection = db.get_mongo_collection( mongoclient, collection_name )
-            nobj, nroot, nsrc, nfrc = si.import_from_mongo( collection )
-        dri = DRImporter( bpv['realtime'].id )
-        dri.import_host_info()
-        yield nobj, nroot, nsrc, nfrc
+            nobj, nroot, npos, nsrc, nprvsrc, nfrc, ninfo = si.import_from_mongo( collection )
+        yield nobj, nroot, npos, nsrc, nprvsrc, nfrc, ninfo
     finally:
         with db.DB() as conn:
             cursor = conn.cursor()
+            cursor.execute( "DELETE FROM diaforcedsource_extra" )
             cursor.execute( "DELETE FROM diaforcedsource" )
+            cursor.execute( "DELETE FROM diasource_brokerinfo" )
+            cursor.execute( "DELETE FROM diasource_extra" )
             cursor.execute( "DELETE FROM diasource" )
+            cursor.execute( "DELETE FROM diaobject_position" )
             cursor.execute( "DELETE FROM diaobject" )
             cursor.execute( "DELETE FROM root_diaobject" )
-            cursor.execute( "DELETE FROM host_galaxy" )
+            # cursor.execute( "DELETE FROM host_galaxy" )
             cursor.execute( "DELETE FROM diasource_import_time WHERE collection=%(col)s",
                             { 'col': collection_name } )
             conn.commit()

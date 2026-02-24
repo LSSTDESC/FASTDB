@@ -162,7 +162,7 @@ class SourceImporter:
                             temptable, liketable, t0=None, t1=None, batchsize=10000,
                             base_procver_id=None ):
 
-        q = sql.SQL( "CREATE TEMP TABLE {temptable} (LIKE {liketable})"
+        q = sql.SQL( "CREATE TEMP TABLE IF NOT EXISTS {temptable} (LIKE {liketable})"
                     ).format( temptable=sql.Identifier(temptable), liketable=sql.Identifier(liketable) )
         dbcon.execute( q )
 
@@ -391,6 +391,10 @@ class SourceImporter:
                 q = ( sql.SQL( "INSERT INTO diasource( SELECT * FROM {table} ) ON CONFLICT DO NOTHING" )
                       .format( table=sql.Identifier(f"temp_{prv}diasource_import") ) )
                 dbcon.execute( q )
+                if prv == "prv":
+                    nprvsrc = dbcon.cursor.rowcount
+                else:
+                    nsrc = dbcon.cursor.rowcount
 
                 # For diasource extra, we want to update fields that are null, just in case some broker
                 #   gave us information that a previous broker didn't.
@@ -417,10 +421,6 @@ class SourceImporter:
                 q += sql.SQL( "\n)" )
 
                 dbcon.execute( q )
-                if prv == "prv":
-                    nprvsrc = dbcon.cursor.rowcount
-                else:
-                    nsrc = dbcon.cursor.rowcount
 
             if commit:
                 dbcon.commit()
@@ -435,17 +435,18 @@ class SourceImporter:
 
         """
         with db.DBCon( dbcon ) as dbcon:
-            dbcon.execute( "SET CONSTRAINTS fk_forcedsource_extra_diaforcedsource DEFERRED" )
+            dbcon.execute( "SET CONSTRAINTS fk_diaforcedsource_extra_diaforcedsource DEFERRED" )
 
             self.read_mongo_prvforcedsources( dbcon, collection, t0=t0, t1=t1, batchsize=batchsize )
 
             dbcon.execute( "INSERT INTO diaforcedsource "
                            "( SELECT * FROM temp_prvdiaforcedsource_import ) "
                            "ON CONFLICT DO NOTHING" )
+            nfrc = dbcon.cursor.rowcount
 
             # As with sources, for the diaforcedsource_extra table we want to update in case a
             #  broker gives us something that a previous broker didn't.
-            q = sql.SQL( "INSERT INTO diaforcedsource_extra ( SELECT * FROM temp_prvdiaforcedsoure_extra_import )\n"
+            q = sql.SQL( "INSERT INTO diaforcedsource_extra ( SELECT * FROM temp_prvdiaforcedsource_extra_import )\n"
                           "ON CONFLICT (base_procver_id, diaobjectid, visit) DO UPDATE SET (\n" )
             first = True
             for f in self.diaforcedsource_extra_fields:
@@ -462,11 +463,10 @@ class SourceImporter:
                     q += sql.SQL( "\n  " )
                 else:
                     q += sql.SQL( ",\n  " )
-                q += sql.SQL( "COALESCE(diaforcedsource_extra.{f}, EXCLUDED.{f})" ).format( f=sql.identifier(f) )
+                q += sql.SQL( "COALESCE(diaforcedsource_extra.{f}, EXCLUDED.{f})" ).format( f=sql.Identifier(f) )
             q += sql.SQL( "\n)" )
 
             dbcon.execute( q )
-            nfrc = dbcon.cursor.rowcount()
 
             if commit:
                 dbcon.commit()
@@ -543,8 +543,8 @@ class SourceImporter:
 
             # Make sure foreign key constraints aren't goign to trip us up
             #   below, but that they're only checked at the end of the transaction.
-            dbcon.execute( "SET CONSTRAINTS fk_diasource_diaobjectid DEFERRED" )
-            dbcon.execute( "SET CONSTRAINTS fk_diaforcedsource_diaobjectid DEFERRED" )
+            dbcon.execute( "SET CONSTRAINTS fk_diasource_diaobject DEFERRED" )
+            dbcon.execute( "SET CONSTRAINTS fk_diaforcedsource_diaobject DEFERRED" )
 
             nobj, nroot, npos = self.import_objects_from_collection( collection, t0, t1, dbcon=dbcon, commit=False )
             nsrc, nprvsrc = self.import_sources_from_collection( collection, t0, t1, dbcon=dbcon, commit=False )
