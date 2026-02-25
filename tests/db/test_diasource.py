@@ -1,4 +1,5 @@
 import pytest
+import datetime
 
 from db import DiaSource, DiaSourceExtra, DiaSourceBrokerInfo
 
@@ -180,29 +181,43 @@ class TestDiaSourceBrokerInfo( BaseTestDB ):
     @pytest.fixture
     def basetest_setup( self, obj1_src1 ):
         self.cls = DiaSourceBrokerInfo
-        self.columns = { 'brokername', 'diasourceid', 'base_procver_id', 'diaobjectid', 'visit', 'info' }
-        self.safe_to_modify = [ 'info' ]
+        self.columns = { 'brokername', 'topic', 'diasourceid', 'base_procver_id', 'diaobjectid', 'visit',
+                         'msgtime', 'created_at', 'info' }
+        self.safe_to_modify = [ 'info', 'msgtime', 'receivedtime', 'importtime' ]
         self.uniques = []
 
+        t0 = datetime.datetime.now( tz=datetime.UTC )
         self.obj1 = DiaSourceBrokerInfo( brokername='broker1',
+                                         topic='topic1',
                                          diasourceid=obj1_src1.diasourceid,
                                          base_procver_id=obj1_src1.base_procver_id,
                                          diaobjectid=obj1_src1.diaobjectid,
                                          visit=obj1_src1.visit,
+                                         msgtime=t0,
+                                         receivedtime=t0 + datetime.timedelta( minutes=1 ),
+                                         importtime=t0 + datetime.teimedeltah( hours=1, minuts=1 ),
                                          info={ 'foo': 'bar' }
                                         )
         self.dict1 = { k: getattr( self.obj1, k ) for k in self.columns }
         self.obj2 = DiaSourceBrokerInfo( brokername='broker2',
+                                         topic='topic2',
                                          diasourceid=obj1_src1.diasourceid,
                                          base_procver_id=obj1_src1.base_procver_id,
                                          diaobjectid=obj1_src1.diaobjectid,
                                          visit=obj1_src1.visit,
+                                         msgtime=t0 + datetime.timedelta( hours=1 ),
+                                         receivedtime=t0 + datetime.timedelta( hours=1, minutes=2 ),
+                                         importtime=t0 + datetime.timedelta( hours=1, minutes=3 ),
                                          info={ 'cat': 'fluffy' }
                                         )
         self.dict2 = { k: getattr( self.obj2, k ) for k in self.columns }
         self.dict3 = { 'brokername': 'broker3',
+                       'topic': 'topic3',
                        'diasourceid': obj1_src1.diasourceid,
                        'base_procver_id': obj1_src1.base_procver_id,
                        'diaobjectid': obj1_src1.diaobjectid,
                        'visit': obj1_src1.visit,
+                       'msgtime': t0 + datetime.timedelta( days=1 ),
+                       'receivedtime': t0 + datetime.timedelta( days=1, minutes=1 ),
+                       'importtime': t0 + datetime.timedelta( days=1, hours=1, minutes=1 ),
                        'info': { "xyzzy": "plugh" } }

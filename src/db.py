@@ -1443,7 +1443,7 @@ class DiaSourceExtra( DBBase ):
 class DiaSourceBrokerInfo( DBBase ):
     __tablename__ = "diasource_brokerinfo"
     _tablemeta = None
-    _pk = [ 'brokername', 'diasourceid', 'base_procver_id' ]
+    _pk = [ 'brokername', 'topic', 'diasourceid', 'base_procver_id' ]
 
 
 # ======================================================================

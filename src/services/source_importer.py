@@ -177,7 +177,7 @@ class SourceImporter:
                 # This is probably inefficient.  Generator to list to tuple.  python makes
                 #   writing this easy, but it's probably doing multiple gratuitous memory copies
                 data = [ None if row[f] is None
-                         else simplejson.dumps(row[f]) if isinstance( row[f], ( dict, list ) )
+                         else simplejson.dumps(row[f], ignore_nan=True) if isinstance( row[f], ( dict, list ) )
                          else str(row[f])
                          for f in fields ]
                 if base_procver_id is not None:
@@ -282,18 +282,25 @@ class SourceImporter:
 
 
     def read_mongo_brokerinfo( self, dbcon, collection, t0=None, t1=None, batchsize=1000 ):
-        group = { "_id": { "brokername": "$brokername", "diaobjectid": "$diaobjectid",
-                           "visit": "$diasource.visit" },
+        now = datetime.datetime.now( tz=datetime.UTC ).isoformat()
+        group = { "_id": { "brokername": "$brokername", "topic": "$topic",
+                           "diaobjectid": "$diaobjectid", "visit": "$diasource.visit" },
                   "brokername": { "$first": "$brokername" },
+                  "topic": { "$first": "$topic" },
                   "diasourceid": { "$first": "$diasource.diasourceid" },
                   "diaobjectid": { "$first": "$diaobjectid" },
                   "visit": { "$first": "$diasource.visit" },
+                  "msgtime": { "$first": "$timestamp" },
+                  "receivedtime": { "$first": "$savetime" },
+                  "importtime": { "$first": now },
                   "info": { "$first": "$broker_info" }
                  }
         pipeline = [ { "$match": { "broker_info": { "$ne": None } } },
                      { "$group": group } ]
-        self._read_mongo_fields( dbcon, collection, pipeline, [ "brokername", "diasourceid",
-                                                                "diaobjectid", "visit", "info" ],
+        self._read_mongo_fields( dbcon, collection, pipeline, [ "brokername", "topic",
+                                                                "diasourceid", "diaobjectid", "visit",
+                                                                "msgtime", "receivedtime", "importtime",
+                                                                "info" ],
                                  "temp_diasource_brokerinfo_import", "diasource_brokerinfo",
                                  t0=t0, t1=t1, batchsize=batchsize,
                                  base_procver_id=self.source_base_processing_version )

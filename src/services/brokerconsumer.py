@@ -12,6 +12,7 @@ import logging
 import argparse
 import multiprocessing
 import signal
+import simplejson
 
 import confluent_kafka
 import fastavro
@@ -36,14 +37,18 @@ class BrokerConsumer:
     It stuffs the alerts into the mongodb.  Previously, what went into
     the mongodb was what was in the fastdb*BrokerMessage.avsc schema.
     However, we can't expect that from every broker, so we will need to
-    write alert_wranger for each broker.
+    write alert_wrangler for each broker.  (*If* the broker returns
+    a LSST alert packet with additional fields, then the standard one
+    may work.  This is the case with FInk; see FinkBroker below.)
 
     What is expected in the mongodb now sorta matches our database tables:
 
        { 'topic': <from kafka header>,
          'msgoffset': <from kafka heeader>,
          'timestamp': <from kafka header>,
-         'now': datetime.datetme
+         'savetime': datetime.datetme,
+         'target_name': str,
+         'observation_reason': str,
          'diaobjectid': long long,
          'diaobjectposition': diaobject_position columns (omit: diaobjectid, base_procver_id, created_at)
          'diasource': diasource columns (omit: diaobjectid base_procver_id)
@@ -76,9 +81,16 @@ class BrokerConsumer:
 
     """
 
+    _standard_lsst_alert_fields = [ 'diaSourceId', 'observation_reason', 'target_name',
+                                    'diaSource', 'prvDiaSources', 'prvDiaForcedSources',
+                                    'diaObject', 'ssSource', 'mpc_orbits',
+                                    'cutoutDifference', 'cutoutScience', 'cutoutTemplate' ]
+
     def __init__( self, server, groupid, topics=None, updatetopics=False, extraconfig={},
-                  schemaless=False, schemafile=None, pipe=None, loggername="BROKER", loggername_prefix='',
-                  nomsg_sleeptime=5,
+                  schemaless=False, schema_in_key=False, schemafile=None,
+                  brokername_for_alerts=None, brokername_key=None,
+                  pipe=None, loggername="BROKER", loggername_prefix='',
+                  nomsg_sleeptime=5, batch_size=1000,
                   mongodb_host=None, mongodb_dbname=None, mongodb_collection=None,
                   mongodb_user=None, mongodb_password=None ):
         """Create a connection to a kafka server and consumer broker messages.
@@ -113,6 +125,12 @@ class BrokerConsumer:
             expecting embedded schema.  Ignored if you pass a handler to
             poll.
 
+          schema_in_key : bool, default False
+            Ignored if schemaless is True.  If schemaless is False, this
+            means that in the kafka messages, the schem is expected to
+            be embedded in the message key (which is the way Fink does
+            it, different from fakebroker).
+
           schemafile : Path or str
             The .avsc the that holds the schema of the messsages we'll
             be ingesting.  Required if schemaless is True.  The schema
@@ -121,6 +139,18 @@ class BrokerConsumer:
             must be in the same directory with the right names.  If not
             given, uses the location where it is find in the docker
             image we use.
+
+          brokername_for_alerts : str, default None
+            If given, then when the mongo database is populated, the
+            'brokername' field will have this value.  If neither this
+            nor brokername_key is given, then brokername will have the
+            class name.
+
+          brokername_key : str, default None
+            If given, then when the mongo database is populated, the
+            'brokername' field will have the value from this key of the
+            message.  If neither this nor brokername_for_alerts is given,
+            then brokername will have the class name.
 
           pipe : multiprocessing.Pipe or None
             If not None, a call to poll will regularly send hearbeats to
@@ -138,6 +168,9 @@ class BrokerConsumer:
             The KafkaConsumer (src/kafkaconsumer.py) will sleep this
             many seconds between not finding any new messages and
             polling again to ask for new messages.
+
+          batch_size : int, default 1000
+            Try to consume this many messages at once.
 
           mongodb_host : str, default $MONGODB_HOST
             The host where Mongo is running
@@ -195,8 +228,12 @@ class BrokerConsumer:
         self._updatetopics = updatetopics
         self.extraconfig = extraconfig
         self.nomsg_sleeptime = nomsg_sleeptime
+        self.batch_size = batch_size
+        self.brokername_for_alerts = brokername_for_alerts
+        self.brokername_key = brokername_key
 
         self.schemaless = schemaless
+        self.schema_in_key=schema_in_key
         if schemafile is None:
             self.schemafile = None
             self.schema = None
@@ -243,7 +280,7 @@ class BrokerConsumer:
                                                schema=self.schemafile, schemaless=self.schemaless,
                                                topics=self.topics, reset=reset,
                                                extraconsumerconfig=self.extraconfig,
-                                               consume_nmsgs=1000, consume_timeout=1,
+                                               consume_nmsgs=self.batch_size, consume_timeout=1,
                                                nomsg_sleeptime=self.nomsg_sleeptime,
                                                logger=self.logger )
                 countdown = -1
@@ -287,12 +324,81 @@ class BrokerConsumer:
         return mask
 
 
+
+    #   things here that the postgres importer uses to uniquely identify rows
+    _diasource_fields = [ 'diaSourceId', 'diaObjectId', 'visit', 'band', 'midpointMjdTai',
+                          'psfFlux', 'psfFluxErr', 'ra', 'dec', 'raErr', 'decErr', 'ra_dec_Cov' ]
+    _diasource_extra_fields = [ 'diaObjectId', 'visit',
+                                'diaSourceId', 'detector', 'x', 'y', 'xErr', 'yErr',
+                                'psfLnL', 'psfChi2', 'psfNdata', 'snr', 'scienceFlux', 'scienceFluxErr',
+                                'templateFlux', 'templateFluxErr', 'extendedness', 'reliability',
+                                'ixx', 'iyy', 'ixy', 'ixxPSF', 'iyyPSF', 'ixyPSF',
+                                'apFlux', 'apFluxErr', 'bboxSize',
+                                'timeProcessedMjdTai', 'timeWithdrawnMjdTai',
+                                'parentDiaSourceId' ]
+    _diaforcedsource_fields = [ 'diaObjectId', 'visit', 'band', 'midpointMjdTai',
+                                'psfFlux', 'psfFluxErr', 'ra', 'dec' ]
+    _diaforcedsource_extra_fields = [ 'diaObjectId', 'visit', 'detector', 'scienceFlux', 'scienceFluxErr',
+                                      'timeProcessedMjdTai', 'timeWithdrawnMjdTai' ]
+
+
+    @classmethod
+    def _wrangle_all_standard_lsst_fields( cls, metamsg, msg ):
+        alert = { 'topic': metamsg['topic'],
+                  'msgoffset': metamsg['msgoffset'],
+                  'timestamp': metamsg['timestamp'],
+                  'savetime': metamsg['savetime'],
+                  'target_name': msg['target_name'],
+                  'observation_reason': msg['observation_reason'],
+                  'diaobjectid': msg['diaObject']['diaObjectId'],
+                  'diaobjectposition': {
+                      'ra': msg['diaObject']['ra'],
+                      'dec': msg['diaObject']['dec'],
+                      'raerr': msg['diaObject']['raErr'],
+                      'decerr': msg['diaObject']['decErr'],
+                      'ra_dec_cov': msg['diaObject']['ra_dec_Cov']
+                  },
+                  'diasource': { k.lower(): msg['diaSource'][k] for k in cls._diasource_fields },
+                  'diasource_extra': { k.lower(): msg['diaSource'][k] for k in cls._diasource_extra_fields },
+                  'cutoutdifference': msg['cutoutDifference'],
+                  'cutoutscience': msg['cutoutScience'],
+                  'cutouttemplate': msg['cutoutTemplate'],
+                 }
+        alert['diasource_extra']['flags'] = cls.build_flags( db.DiaSourceExtra._flags_bits,
+                                                             msg['diaSource'] )
+        alert['diasource_extra']['pixelflags'] = cls.build_flags( db.DiaSourceExtra._pixelflags_bits,
+                                                                  msg['diaSource'] )
+        if msg['prvDiaSources'] is None:
+            alert['prvdiasources']  = None
+            alert['prvdiasources_extra'] = None
+        else:
+            alert['prvdiasources'] =  [ { k.lower(): p[k] for k in cls._diasource_fields }
+                                        for p in msg['prvDiaSources'] ]
+            alert['prvdiasources_extra'] = [ { k.lower(): p[k] for k in cls._diasource_extra_fields }
+                                             for p in msg['prvDiaSources'] ]
+            for src, dest in zip( msg['prvDiaSources'], alert['prvdiasources_extra'] ):
+                dest['flags'] = cls.build_flags( db.DiaSourceExtra._flags_bits, src )
+                dest['pixelflags'] = cls.build_flags( db.DiaSourceExtra._pixelflags_bits, src )
+
+        if msg['prvDiaForcedSources'] is None:
+            alert['prvdiaforcedsources'] = None
+            alert['prvdiaforcedsources_extra'] = None
+        else:
+            alert['prvdiaforcedsources'] =  [ { k.lower(): p[k] for k in cls._diaforcedsource_fields }
+                                              for p in msg['prvDiaForcedSources'] ]
+            alert['prvdiaforcedsources_extra'] = [ { k.lower(): p[k]
+                                                     for k in cls._diaforcedsource_extra_fields }
+                                                             for p in msg['prvDiaForcedSources'] ]
+
+        return alert
+
+
     def alert_wrangler( self, messagebatch ):
         """Convert the alert structure from what we get to what we want to stuff in the mongo db.
 
         Subclasses should override this to customize the behavior for
         each broker.  This default assumes the message came in following
-        hte fastdb*brokerMessage schema.
+        the fastdb*brokerMessage schema.
 
         The list is expected to be modified in place, so make sure to use indexes
         if you're totally replacing an element of the list.  If you're just editing
@@ -301,77 +407,23 @@ class BrokerConsumer:
         """
 
         # These fields don't exactly match what's in the table, because there are some additional
-        #   things here that the postgres importer uses to uniquely identify rows
-
-        diasource_fields = [ 'diaSourceId', 'diaObjectId', 'visit', 'band', 'midpointMjdTai',
-                             'psfFlux', 'psfFluxErr', 'ra', 'dec', 'raErr', 'decErr', 'ra_dec_Cov' ]
-        diasource_extra_fields = [ 'diaObjectId', 'visit',
-                                   'diaSourceId', 'detector', 'x', 'y', 'xErr', 'yErr',
-                                   'psfLnL', 'psfChi2', 'psfNdata', 'snr', 'scienceFlux', 'scienceFluxErr',
-                                   'templateFlux', 'templateFluxErr', 'extendedness', 'reliability',
-                                   'ixx', 'iyy', 'ixy', 'ixxPSF', 'iyyPSF', 'ixyPSF',
-                                   'apFlux', 'apFluxErr', 'bboxSize',
-                                   'timeProcessedMjdTai', 'timeWithdrawnMjdTai',
-                                   'parentDiaSourceId' ]
-        diaforcedsource_fields = [ 'diaObjectId', 'visit', 'band', 'midpointMjdTai',
-                                   'psfFlux', 'psfFluxErr', 'ra', 'dec' ]
-        diaforcedsource_extra_fields = [ 'diaObjectId', 'visit', 'detector', 'scienceFlux', 'scienceFluxErr',
-                                         'timeProcessedMjdTai', 'timeWithdrawnMjdTai' ]
-
-
         for i in range( len(messagebatch) ):
             metamsg = messagebatch[i]
             msg = metamsg['msg']
-            messagebatch[i] = { 'brokername': msg['brokerName'],
-                                'topic': metamsg['topic'],
-                                'msgoffset': metamsg['msgoffset'],
-                                'timestamp': metamsg['timestamp'],
-                                'savetime': metamsg['savetime'],
-                                'diaobjectid': msg['diaObject']['diaObjectId'],
-                                'diaobjectposition': {
-                                    'ra': msg['diaObject']['ra'],
-                                    'dec': msg['diaObject']['dec'],
-                                    'raerr': msg['diaObject']['raErr'],
-                                    'decerr': msg['diaObject']['decErr'],
-                                    'ra_dec_cov': msg['diaObject']['ra_dec_Cov']
-                                },
-                                'diasource': { k.lower(): msg['diaSource'][k] for k in diasource_fields },
-                                'diasource_extra': { k.lower(): msg['diaSource'][k] for k in diasource_extra_fields },
-                                'cutoutdifference': msg['cutoutDifference'],
-                                'cutoutscience': msg['cutoutScience'],
-                                'cutouttemplate': msg['cutoutTemplate'],
-                                'broker_info': {
-                                    'brokerName': msg['brokerName'],
-                                    'classifierName': msg['classifierName'],
-                                    'classifierVersion': msg['classifierVersion'],
-                                    'classifications': msg['classifications']
-                                }
-                               }
-            messagebatch[i]['diasource_extra']['flags'] = self.build_flags( db.DiaSourceExtra._flags_bits,
-                                                                            msg['diaSource'] )
-            messagebatch[i]['diasource_extra']['pixelflags'] = self.build_flags( db.DiaSourceExtra._pixelflags_bits,
-                                                                                 msg['diaSource'] )
-            if msg['prvDiaSources'] is None:
-                messagebatch[i]['prvdiasources']  = None
-                messagebatch[i]['prvdiasources_extra'] = None
+            messagebatch[i] = self._wrangle_all_standard_lsst_fields( metamsg, msg )
+            if self.brokername_for_alerts is not None:
+                messagebatch[i]['brokername'] = self.brokername_for_alerts
+            elif self.brokername_key is not None:
+                messagebatch[i]['brokername'] = msg[ self.brokername_key ]
             else:
-                messagebatch[i]['prvdiasources'] =  [ { k.lower(): p[k] for k in diasource_fields }
-                                                      for p in msg['prvDiaSources'] ]
-                messagebatch[i]['prvdiasources_extra'] = [ { k.lower(): p[k] for k in diasource_extra_fields }
-                                                           for p in msg['prvDiaSources'] ]
-                for src, dest in zip( msg['prvDiaSources'], messagebatch[i]['prvdiasources_extra'] ):
-                    dest['flags'] = self.build_flags( db.DiaSourceExtra._flags_bits, src )
-                    dest['pixelflags'] = self.build_flags( db.DiaSourceExtra._pixelflags_bits, src )
-
-            if msg['prvDiaForcedSources'] is None:
-                messagebatch[i]['prvdiaforcedsources'] = None
-                messagebatch[i]['prvdiaforcedsources_extra'] = None
-            else:
-                messagebatch[i]['prvdiaforcedsources'] =  [ { k.lower(): p[k] for k in diaforcedsource_fields }
-                                                            for p in msg['prvDiaForcedSources'] ]
-                messagebatch[i]['prvdiaforcedsources_extra'] = [ { k.lower(): p[k]
-                                                                   for k in diaforcedsource_extra_fields }
-                                                                 for p in msg['prvDiaForcedSources'] ]
+                messagebatch[i]['brokername'] = self.__class__.__name__
+            messagebatch[i]['broker_info'] = {}
+            for key, val in msg.items():
+                if key not in self._standard_lsst_alert_fields:
+                    if isinstance( val, ( dict, list ) ):
+                        # ...is this really necessary?  Probably not.
+                        val = val.copy()
+                    messagebatch[i]['broker_info'][key] = val
 
 
     def handle_message_batch( self, msgs ):
@@ -387,17 +439,24 @@ class BrokerConsumer:
             else:
                 timestamp = datetime.datetime.fromtimestamp( timestamp / 1000, tz=datetime.UTC )
 
+            key = msg.key()
             payload = msg.value()
             if self.schemaless:
                 alert = fastavro.schemaless_reader( io.BytesIO( payload ), self.schema )
             else:
-                # ...there may be a better way than instantiating a new reader for every
-                #   message.  Figure it out.
-                reader = fastavro.read.reader( io.BytesIO( payload ) )
-                alertlist = [ m for m in reader ]
-                if len(alertlist) != 1:
-                    raise RuntimeError( "This should never happen." )
-                alert = alertlist[0]
+                if self.schema_in_key:
+                    if isinstance( key, bytes ):
+                        key = key.decode( "utf-8" )
+                    parsed_schema = fastavro.schema.parse_schema( simplejson.loads( key ) )
+                    alert = fastavro.schemaless_reader( io.BytesIO( payload ), parsed_schema )
+                else:
+                    # ...there may be a better way than instantiating a new reader for every
+                    #   message.  Figure it out.
+                    reader = fastavro.read.reader( io.BytesIO( payload ) )
+                    alertlist = [ m for m in reader ]
+                    if len(alertlist) != 1:
+                        raise RuntimeError( "This should never happen." )
+                    alert = alertlist[0]
 
             messagebatch.append( { 'topic': msg.topic(),
                                    'msgoffset': msg.offset(),
@@ -425,7 +484,7 @@ class BrokerConsumer:
 
 
     def poll( self, reset=False, restart_time=datetime.timedelta(minutes=30),
-              notopic_sleeptime=300, max_restarts=None ):
+              notopic_sleeptime=300, max_restarts=None, max_msgs=None ):
         """Poll the server, saving consumed messages to the Mongo DB.
 
         Parameters
@@ -454,6 +513,9 @@ class BrokerConsumer:
             poll loop runs indefinitely (or until a "die" message is sent
             over the pipe).
 
+          max_msgs: int, default None
+            If given, exit after ingesting this many messages
+
         TODO : separate max_restarts from polling from max_restarts from
         topic not existing, because the timeouts for the two are likely very
         different.
@@ -476,9 +538,10 @@ class BrokerConsumer:
                 try:
                     happy = self.consumer.poll_loop( handler=self.handle_message_batch, pipe=self.pipe,
                                                      stopafter=restart_time,
-                                                     stopafternmessages=None, stopafternsleeps=None )
+                                                     stopafternmessages=max_msgs,
+                                                     stopafternsleeps=None )
                     if happy:
-                        strio.write( f"Reached poll timeout for {self.server}; "
+                        strio.write( f"Reached poll timeout and/or message limit for {self.server}; "
                                      f"handled {self.consumer.tot_handled} messages. " )
                     else:
                         strio.write( f"Poll loop received die command after handling "
@@ -561,21 +624,21 @@ class AntaresConsumer(BrokerConsumer):
         self.logger.info( f"Antares group id is {groupid}" )
 
 
+
 # ======================================================================
-# THIS IS VESTIGAL FROM ELASTICC2.  Needs to be updated!
 
 class FinkConsumer(BrokerConsumer):
     _brokername = 'fink'
 
-    def __init__( self, grouptag=None, loggername="FINK", fink_topic='fink_elasticc-2022fall', **kwargs ):
-        raise RuntimeError( "Left over from ELAsTiCC2; needs to be updated." )
-        server = "134.158.74.95:24499"
-        groupid = "elasticc-lbnl" + ( "" if grouptag is None else "-" + grouptag )
+    def __init__( self, grouptag=None, loggername="FINK", fink_topic='fink_sn_near_galaxy_candidate_lsst', **kwargs ):
+        server = "kafka-lsst.fink-broker.org:24499"
+        groupid = "rknop-desc-fastdb" + ( "" if grouptag is None else "-" + grouptag )
         topics = [ fink_topic ]
         updatetopics = False
-        super().__init__( server, groupid, topics=topics, updatetopics=updatetopics,
-                          loggername=loggername, **kwargs )
+        super().__init__( server, groupid, topics=topics, schemaless=False, schema_in_key=True,
+                          brokername_for_alerts='Fink', updatetopics=updatetopics, loggername=loggername, **kwargs )
         self.logger.info( f"Fink group id is {groupid}" )
+
 
 
 # ======================================================================
@@ -820,6 +883,8 @@ class BrokerConsumerLauncher:
                                   updatetopics=brokerinfo['updatetopics'],
                                   extraconfig=brokerinfo['extraconfig'],
                                   schemafile=brokerinfo['schemafile'],
+                                  brokername_for_alerts=brokerinfo['brokername'],
+                                  brokername_key=brokerinfo['brokername_key'],
                                   pipe=brokerinfo['childpipe'],
                                   mongodb_collection=brokerinfo['collection'],
                                   loggername=brokerinfo['loggername'],
@@ -868,6 +933,8 @@ class BrokerConsumerLauncher:
         for broker in config[ 'brokers' ]:
             cls = clsmap[ broker['class'] ]
             name = broker['name']
+            brokername = broker['brokername'] if 'brokername' in broker else None
+            brokername_key = broker['brokername_key'] if 'brokername_key' in broker else None
             server = broker['server'].replace( "{barf}", self.barf )
             topics = [ t.replace("{barf}", self.barf) for t in broker['topics'] ]
             groupid = broker['groupid'].replace( "{barf}", self.barf )
@@ -883,6 +950,8 @@ class BrokerConsumerLauncher:
             extraconfig = {} if 'extraconfig' not in broker else broker['extraconfig']
             brokerinfo = { 'class': cls,
                            'name': name,
+                           'brokername': brokername,
+                           'brokername_key': brokername_key,
                            'server': server,
                            'topics': topics,
                            'groupid': groupid,

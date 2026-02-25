@@ -113,7 +113,7 @@ def alerts_30days_sent_and_brokermessage_consumed( barf, alerts_30days_sent_and_
         mongodb_dbname = os.getenv( 'MONGODB_DBNAME' )
         mongodb_collection = f'fastdb_{barf}'
 
-        bc = BrokerConsumer( 'kafka-server', f'BrokerConsumer-{barf}', topics=brokertopic,
+        bc = BrokerConsumer( 'kafka-server', f'BrokerConsumer-{barf}', topics=brokertopic, brokername_key='brokerName',
                              mongodb_collection=mongodb_collection, nomsg_sleeptime=1 )
         bc.poll( restart_time=datetime.timedelta(seconds=3), max_restarts=1, notopic_sleeptime=2 )
 
@@ -155,7 +155,7 @@ def alerts_60moredays_sent_and_brokermessage_consumed( barf, alerts_60moredays_s
         # Using the same group_id as the last BrokerConsumer, so it should
         #   pick up messages where the last one left off... if kafka
         #   works as I understand.
-        bc = BrokerConsumer( 'kafka-server', f'BrokerConsumer-{barf}', topics=brokertopic,
+        bc = BrokerConsumer( 'kafka-server', f'BrokerConsumer-{barf}', topics=brokertopic, brokername_key='brokerName',
                              mongodb_collection=mongodb_collection, nomsg_sleeptime=1 )
         bc.poll( restart_time=datetime.timedelta(seconds=3), max_restarts=1, notopic_sleeptime=2 )
 

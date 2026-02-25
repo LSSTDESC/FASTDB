@@ -67,7 +67,7 @@ RUN source /venv/bin/activate && \
        apscheduler==3.11.0 \
        astropy==7.0.1 \
        confluent_kafka==2.8.2 \
-       fastavro==1.10.0 \
+       "fastavro>=1.10.0,<2.0.0" \
        flask==3.1.0 \
        flask-session==0.8.0 \
        flask-sock==0.7.0 \
@@ -92,6 +92,19 @@ RUN source /venv/bin/activate && \
 # Our own customization of pubsub
 COPY pubsub.patch /tmp/pubsub.patch
 RUN patch /venv/lib/python3.11/site-packages/pittgoogle/pubsub.py /tmp/pubsub.patch
+
+# We have to install fink-client manually because right now it pins its
+#  requirement to fastavro 1.9.4, but I have failed to pip install
+#  fastavro 1.9.4 (is it a python 3.13 thing?)
+
+WORKDIR /usr/src
+RUN git clone https://github.com/astrolabsoftware/fink-client.git
+RUN cat fink-client/requirements.txt | perl -pe 's/fastavro==1.9.4/fastavro>=1.9.4/' > fink-client/requirements-new.txt
+RUN mv fink-client/requirements-new.txt fink-client/requirements.txt
+RUN cd fink-client \
+    && source /venv/bin/activate \
+    && pip install .
+
 
 # ======================================================================
 # This is for the test webserver.  It installs crappy keys so you

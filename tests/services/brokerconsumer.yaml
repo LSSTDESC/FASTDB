@@ -1,8 +1,10 @@
-schemafile: /code/share/avsc/fastdb_9_0_2.BrokerMessage.avsc
+schemafile: null
 
 brokers:
   - name: "test broker"
     class: BrokerConsumer
+    brokername: null
+    brokername_key: brokerName
     server: kafka-server
     topics: [ "classifications-{barf}" ]
     groupid: test-{barf}

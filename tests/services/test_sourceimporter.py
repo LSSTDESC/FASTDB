@@ -2,13 +2,16 @@
 # Except that has been temporarily deprecated
 
 import pytest
+import os
 import datetime
-
+import time
+import random
 import psycopg
 
 import db
-from util import env_as_bool
+from util import env_as_bool, FDBLogger
 from services.source_importer import SourceImporter
+from services.brokerconsumer import FinkConsumer
 # from services.dr_importer import DRImporter
 
 # Ordering of these tests matters, because they use module scope fixtures.
@@ -16,6 +19,68 @@ from services.source_importer import SourceImporter
 
 # NOTE : there is currently no test that checks when object_processing_version
 #   and processing_version are different
+
+
+# ======================================================================
+# Specific broker tests are at the beginning because if we run them, we want to run them
+#   before the module-level fixtures that load up the database are run.
+
+@pytest.mark.skipif( not env_as_bool('RUN_FINK_TESTS'), reason='RUN_FINK_TESTS is not set' )
+def test_fink( mongoclient_rw, procver_collection ):
+    mongoclient = mongoclient_rw
+    bpv, _pv = procver_collection
+    barf = "".join( random.choices( 'abcdefghijklmnopqrstuvwxyz', k=6 ) )
+    brokertopic = 'fink_sn_near_galaxy_candidate_lsst'
+    dbname = os.getenv( 'MONGODB_DBNAME' )
+    assert dbname is not None
+    collection_name = f'fastdb_{barf}'
+
+    try:
+        t0 = time.perf_counter()
+        fc = FinkConsumer( grouptag=barf, fink_topic=brokertopic, mongodb_collection=collection_name,
+                           nomsg_sleeptime=1, batch_size=10 )
+        fc.poll( restart_time=datetime.timedelta(seconds=10), max_restarts=0, notopic_sleeptime=2, max_msgs=10 )
+        t1 = time.perf_counter()
+        FDBLogger.info( f"Fink poll finished in {t1-t0} seconds." )
+
+        collection = db.get_mongo_collection( mongoclient, collection_name )
+        si = SourceImporter( bpv['realtime'].id,
+                             bpv['realtime_diaobject_position_60000'].id,
+                             bpv['realtime_diasource'].id,
+                             bpv['realtime_diaforcedsource'].id,
+                             None )
+        si.import_from_mongo( collection )
+
+        allmongo = list( collection.find( {} ) )
+
+        with db.DBCon( dictcursor=True ) as pqcon:
+            # allobjects = pqcon.execute( "SELECT * FROM diaobject" )
+            allsources = pqcon.execute( "SELECT * FROM diasource" )
+            allbrokerinfo = pqcon.execute( "SELECT * FROM diasource_brokerinfo" )
+
+        assert len( allsources ) >= 10
+        assert len( allbrokerinfo ) == len( allmongo )
+        import pdb; pdb.set_trace()
+        pass
+        # MORE
+
+    finally:
+        with db.DBCon() as pqcon:
+            pqcon.execute( "DELETE FROM diaforcedsource_extra" )
+            pqcon.execute( "DELETE FROM diaforcedsource" )
+            pqcon.execute( "DELETE FROM diasource_brokerinfo" )
+            pqcon.execute( "DELETE FROM diasource_extra" )
+            pqcon.execute( "DELETE FROM diasource" )
+            pqcon.execute( "DELETE FROM diaobject_position" )
+            pqcon.execute( "DELETE FROM diaobject" )
+            pqcon.execute( "DELETE FROM root_diaobject" )
+            pqcon.execute( "DELETE FROM diasource_import_time" )
+            pqcon.commit()
+
+        collection = db.get_mongo_collection( mongoclient, collection_name )
+        collection.delete_many( {} )
+        collection = db.get_mongo_collection( mongoclient, "source_thumbnails" )
+        collection.delete_many( {} )
 
 
 # **********************************************************************
@@ -371,12 +436,14 @@ def test_read_mongo_brokerinfo( barf, alerts_30days_sent_and_brokermessage_consu
 
         assert len(rows) == 154
 
-        pulledids = set( f"{row[coldex['brokername']]}_{row[coldex['diaobjectid']]}_{row[coldex['visit']]}"
+        pulledids = set( f"{row[coldex['brokername']]}_{row[coldex['topic']]}_"
+                         f"{row[coldex['diaobjectid']]}_{row[coldex['visit']]}"
                          for row in rows )
         assert len( pulledids ) == len( rows )
-        msgids = [ f"{c['brokername']}_{c['diaobjectid']}_{c['diasource']['visit']}"
+        msgids = [ f"{c['brokername']}_{c['topic']}_{c['diaobjectid']}_{c['diasource']['visit']}"
                    for c in collection.find( {},
                                              projection={ 'diaobjectid': 1,
+                                                          'topic': 1,
                                                           'diasource.visit': 1,
                                                           'brokername': 1 } ) ]
         assert len( msgids ) == len( pulledids )

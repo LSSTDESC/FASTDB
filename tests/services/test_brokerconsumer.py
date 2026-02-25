@@ -1,10 +1,12 @@
+import pytest
 import os
 import time
 import datetime
+import random
 import multiprocessing
 
-from services.brokerconsumer import BrokerConsumer, BrokerConsumerLauncher
-from util import logger
+from services.brokerconsumer import BrokerConsumer, BrokerConsumerLauncher, FinkConsumer
+from util import logger, env_as_bool
 import db
 
 
@@ -57,12 +59,16 @@ def check_mongodb( mongoclient, dbname, collection ):
     prvfrcedextraids = set( prvfrcedextraids )
     assert prvfrcedextraids == prvfrcedids
 
-    msgcursor = coll.find( { "brokername": "FakeBroker-Nugent" }, projection={ 'diasource.diasourceid': 1 } )
+    msgcursor = list( coll.find( { "brokername": "FakeBroker-Nugent" },
+                                 projection={ 'diasource.diasourceid': 1, 'brokername': 1 } ) )
+    assert all( c['brokername'] == 'FakeBroker-Nugent' for c in msgcursor )
     nugentsrces = [ c['diasource']['diasourceid'] for c in msgcursor ]
     assert len(nugentsrces) == 77
     nugentsrces = set( nugentsrces )
     assert len(nugentsrces) == 77
-    msgcursor = coll.find( { "brokername": "FakeBroker-Random" }, projection={ 'diasource.diasourceid': 1 } )
+    msgcursor = list( coll.find( { "brokername": "FakeBroker-Random" },
+                                 projection={ 'diasource.diasourceid': 1, 'brokername': 1 } ) )
+    assert all( c['brokername'] == 'FakeBroker-Random' for c in msgcursor )
     randomsrces = [ c['diasource']['diasourceid'] for c in msgcursor ]
     assert len(randomsrces) == 77
     randomsrces = set( randomsrces )
@@ -120,14 +126,14 @@ def test_BrokerConsumer( barf, alerts_30days_sent_and_classified, mongoclient, m
         # First, make sure it times out properly if it never sees a topic
         t0 = time.perf_counter()
         bc = BrokerConsumer( 'kafka-server', f'test_BrokerConsumer_{barf}-0', topics='this_topic_does_not_exist',
-                             mongodb_collection=collection, nomsg_sleeptime=1 )
+                             brokername_key='brokerName', mongodb_collection=collection, nomsg_sleeptime=1 )
         bc.poll( restart_time=datetime.timedelta(seconds=3), max_restarts=2, notopic_sleeptime=2 )
         assert time.perf_counter() - t0 < 10
 
         # Now make sure it can really poll
         t0 = time.perf_counter()
         bc = BrokerConsumer( 'kafka-server', f'test_BrokerConsumer_{barf}-1', topics=brokertopic,
-                             mongodb_collection=collection, nomsg_sleeptime=1 )
+                             brokername_key='brokerName', mongodb_collection=collection, nomsg_sleeptime=1 )
         bc.poll( restart_time=datetime.timedelta(seconds=10), max_restarts=0, notopic_sleeptime=2 )
         assert time.perf_counter() - t0 < 20
 
@@ -178,3 +184,41 @@ def test_BrokerConsumerLauncher( barf, alerts_30days_sent_and_classified, mongoc
 
 
 # TODO : write tests that use the "60days" fixtures?
+
+
+# ======================================================================
+# ======================================================================
+# Tests of individual brokers
+#
+# Disabled by default because these depend on external servbers with
+#  topics that have alerts in them
+
+@pytest.mark.skipif( not env_as_bool('RUN_FINK_TESTS'), reason='RUN_FINK_TESTS is not set' )
+def test_fink( mongoclient, mongoclient_rw ):
+    barf = "".join( random.choices( 'abcdefghijklmnopqrstuvwxyz', k=6 ) )
+    brokertopic = 'fink_sn_near_galaxy_candidate_lsst'
+    dbname = os.getenv( 'MONGODB_DBNAME' )
+    assert dbname is not None
+    collection = f'fastdb_{barf}'
+
+    try:
+        t0 = time.perf_counter()
+        fc = FinkConsumer( grouptag=barf, fink_topic=brokertopic, mongodb_collection=collection,
+                           nomsg_sleeptime=1, batch_size=10 )
+        fc.poll( restart_time=datetime.timedelta(seconds=10), max_restarts=0, notopic_sleeptime=2, max_msgs=10 )
+        t1 = time.perf_counter()
+        logger.info( f"Fink poll finished in {t1-t0} seconds." )
+
+        mdb = getattr( mongoclient, dbname )
+        assert collection in mdb.list_collection_names()
+        coll = getattr( mdb, collection )
+
+        assert coll.count_documents({}) >= 10
+        for doc in coll.find( {} ):
+            assert doc['brokername']== 'Fink'
+            # Check other stuff?
+
+    finally:
+        mdb = getattr( mongoclient_rw, dbname )
+        coll = getattr( mdb, collection )
+        coll.delete_many( {} )

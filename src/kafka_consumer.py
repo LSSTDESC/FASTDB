@@ -337,7 +337,7 @@ class KafkaConsumer:
                 self.handle_time += tperf2 - tperf1
 
             runtime = datetime.datetime.now() - t0
-            if ( ( ( stopafternmessages is not None ) and ( nconsumed > stopafternmessages ) )
+            if ( ( ( stopafternmessages is not None ) and ( nconsumed >= stopafternmessages ) )
                  or
                  ( ( stopafter is not None ) and ( runtime > stopafter ) )
                 ):
