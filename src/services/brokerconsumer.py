@@ -926,6 +926,7 @@ class BrokerConsumerLauncher:
 
         brokers = []
         clsmap = { 'BrokerConsumer': BrokerConsumer,
+                   'FinkBroker': FinkBroker,
                    'PittGoogleBroker': PittGoogleBroker }
 
         # Parse the config for all brokers before launching anything, so that if we get an exception
