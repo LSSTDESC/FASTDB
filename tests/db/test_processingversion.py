@@ -42,11 +42,17 @@ class TestBaseProcessingVersion( BaseTestDB ):
         assert BaseProcessingVersion.base_procver_id( gratuitous ) == gratuitous
         assert BaseProcessingVersion.base_procver_id( str(gratuitous) ) == gratuitous
 
-        assert BaseProcessingVersion.base_procver_id( 'testprocver_bpv1' ) == self.obj1.id
-        assert BaseProcessingVersion.base_procver_id( 'testprocver_bpv2' ) == self.obj2.id
+        assert BaseProcessingVersion.base_procver_id( 'testprocver_bpv1', 'table1' ) == self.obj1.id
+        assert BaseProcessingVersion.base_procver_id( 'testprocver_bpv2', 'table2' ) == self.obj2.id
 
-        with pytest.raises( ValueError, match="Unknown base processing version foo" ):
-            BaseProcessingVersion.base_procver_id( 'foo' )
+        with pytest.raises( ValueError, match="Unknown base processing version foo for table table1" ):
+            BaseProcessingVersion.base_procver_id( 'foo', 'table1' )
+
+        with pytest.raises( ValueError, match="Unknown base processing version testprocver_bpv1 for table table2" ):
+            BaseProcessingVersion.base_procver_id( 'testprocver_bpv1', 'table2' )
+
+        with pytest.raises( ValueError, match="Unknown base processing version testprocver_bpv2 for table table1" ):
+            BaseProcessingVersion.base_procver_id( 'testprocver_bpv2', 'table1' )
 
 
 class TestProcessingVersion( BaseTestDB ):
