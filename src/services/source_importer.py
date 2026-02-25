@@ -77,10 +77,12 @@ class SourceImporter:
             the same root_diaobject.
 
         """
-        self.object_base_processing_version = util.base_procver_id( object_base_processing_version )
-        self.object_position_base_processing_version = util.base_procver_id( object_position_base_processing_version )
-        self.source_base_processing_version = util.base_procver_id( source_base_processing_version )
-        self.forcedsource_base_processing_version = util.base_procver_id( forcedsource_base_processing_version )
+        self.object_base_processing_version = util.base_procver_id( object_base_processing_version, 'diaobject' )
+        self.object_position_base_processing_version = util.base_procver_id( object_position_base_processing_version,
+                                                                             'diaobject_position' )
+        self.source_base_processing_version = util.base_procver_id( source_base_processing_version, 'diasource' )
+        self.forcedsource_base_processing_version = util.base_procver_id( forcedsource_base_processing_version,
+                                                                          'diaforcedsource' )
         # self.host_base_processing_version = util.base_procver_id( host_base_processing_version )
         self.object_match_radius = float( object_match_radius )
 
@@ -633,11 +635,11 @@ def main():
                          help="Base processing version (uuid or text) to tag imported sources with." )
     parser.add_argument( "-f", "--forcedsource-base-processing-version", required=True,
                          help="Base processing version (uuid or text) to tag imported forced sources with." )
-    parser.add_argument( "-h", "--host-base-processing-version", default=-None,
+    parser.add_argument( "-H", "--host-base-processing-version", default=None,
                          help=( "Base processing verson (uuid or text) to tag imported hosts with.  "
                                 "Not currently used." ) )
-    parser.add_argument( "-c", "--collection", required=True,
-                         help="MongoDB collection to import from" )
+    parser.add_argument( "-c", "--collection", required=True, nargs='+',
+                         help="MongoDB collections to import from" )
     args = parser.parse_args()
 
     si = SourceImporter( args.object_base_processing_version,
@@ -645,13 +647,36 @@ def main():
                          args.source_base_processing_version,
                          args.forcedsource_base_processing_version,
                          args.host_base_processing_version )
-    with db.MG() as mg:
-        collection = db.get_mongo_collection( mg, args.collection )
-        nobj, nroot, npos, nsrc, nprvsrc, nfrc, ninfo = si.import_from_mongo( collection )
 
-    print( f"Imported {nobj} objects, {nroot} root objects, {npos} object positions, "
-           f"{nsrc+nprvsrc} sources ({nsrc} main, {nprvsrc} previous), {nfrc} forced sources, "
-           f"{ninfo} broker infos" )
+    totnobj = 0
+    totnroot = 0
+    totnpos = 0
+    totnsrc = 0
+    totnprvsrc = 0
+    totnfrc = 0
+    totninfo = 0
+    with db.MG() as mg:
+        for collection_name in args.collection:
+
+            util.FDBLogger.info( f"Importing from {collection_name}..." )
+
+            collection = db.get_mongo_collection( mg, collection_name )
+            nobj, nroot, npos, nsrc, nprvsrc, nfrc, ninfo = si.import_from_mongo( collection )
+
+            util.FDBLogger.info( f"...imported {nobj} objects, {nroot} root objects, {npos} object positions, "
+                                 f"{nsrc+nprvsrc} sources ({nsrc} main, {nprvsrc} previous), {nfrc} forced sources, "
+                                 f"{ninfo} broker infos from {collection_name}" )
+            totnobj += nobj
+            totnroot += nroot
+            totnpos += npos
+            totnsrc += nsrc
+            totnprvsrc += nprvsrc
+            totnfrc += nfrc
+            totninfo += ninfo
+
+    util.FDBLogger.info( f"Overall, imported {totnobj} objects, {totnroot} root objects, {totnpos} object positions, "
+                         f"{totnsrc+totnprvsrc} sources ({totnsrc} main, {totnprvsrc} previous), "
+                         f"{totnfrc} forced sources, {totninfo} broker infos from {collection_name}" )
 
 
 # ======================================================================

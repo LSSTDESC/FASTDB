@@ -2,7 +2,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: shell
+  name: brokerconsumer
   namespace: desc-fastdb
 spec:
   progressDeadlineSeconds: 600
@@ -10,7 +10,7 @@ spec:
   revisionHistoryLimit: 10
   selector:
     matchLabels:
-      workload.user.cattle.io/workloadselector: deployment-desc-fastdb-shell
+      workload.user.cattle.io/workloadselector: deployment-desc-fastdb-brokerconsumer
   strategy:
     rollingUpdate:
       maxSurge: 1
@@ -28,11 +28,11 @@ spec:
         nersc.gov/username: raknop
       creationTimestamp: null
       labels:
-        workload.user.cattle.io/workloadselector: deployment-desc-fastdb-shell
+        workload.user.cattle.io/workloadselector: deployment-desc-fastdb-brokerconsumer
     spec:
       affinity: {}
       containers:
-      - name: shell
+      - name: brokerconsumer
         image: registry.nersc.gov/m1727/raknop/fastdb-shell:20260225b
         env:
         - name: MONGODB_HOST
@@ -94,17 +94,26 @@ spec:
         terminationMessagePath: /dev/termination-log
         terminationMessagePolicy: File
         tty: true
+        workingDir: /brokerconsumer
+        command: [ "python" ]
+        args:
+          - /fastdb/services/brokerconsumer.py
+          - /brokerconsumer/brokerconsumer_config.yaml
         volumeMounts:
         - mountPath: /secrets
           name: secrets
         - mountPath: /fastdb
           name: fastdb-install
-        - mountPath: /query_results
-          name: fastdb-query-results
-        - mountPath: /sessions
-          name: fastdb-sessions
-        - mountPath: /code
-          name: fastdb-checkout
+        - mountPath: /logs
+          name: fastdb-brokerconsumer-logs
+        - mountPath: /brokerconsumer
+          name: fastdb-brokerconsumer-rundir
+        # - mountPath: /query_results
+        #   name: fastdb-query-results
+        # - mountPath: /sessions
+        #   name: fastdb-sessions
+        # - mountPath: /code
+        #   name: fastdb-checkout
         # - mountPath: /mongodata
         #   name: mongodb-datadir
       dnsConfig: {}
@@ -127,17 +136,25 @@ spec:
           type: Directory
         name: fastdb-install
       - hostPath:
-          path: /global/cfs/cdirs/desc-td/SOFTWARE/fastdb_deployment/production/FASTDB
+          path: /global/cfs/cdirs/desc-td/SOFTWARE/fastdb_deployment/production/brokerconsumer_logs
           type: Directory
-        name: fastdb-checkout
+        name: fastdb-brokerconsumer-logs
       - hostPath:
-          path: /global/cfs/cdirs/desc-td/SOFTWARE/fastdb_deployment/production/query_results
+          path: /global/cfs/cdirs/desc-td/SOFTWARE/fastdb_deployment/production/brokerconsumer_rundir
           type: Directory
-        name: fastdb-query-results
-      - hostPath:
-          path: /global/cfs/cdirs/desc-td/SOFTWARE/fastdb_deployment/production/sessions
-          type: Directory
-        name: fastdb-sessions
+        name: fastdb-brokerconsumer-rundir
+      # - hostPath:
+      #     path: /global/cfs/cdirs/desc-td/SOFTWARE/fastdb_deployment/production/FASTDB
+      #     type: Directory
+      #   name: fastdb-checkout
+      # - hostPath:
+      #     path: /global/cfs/cdirs/desc-td/SOFTWARE/fastdb_deployment/production/query_results
+      #     type: Directory
+      #   name: fastdb-query-results
+      # - hostPath:
+      #     path: /global/cfs/cdirs/desc-td/SOFTWARE/fastdb_deployment/production/sessions
+      #     type: Directory
+      #   name: fastdb-sessions
       # - name: mongodb-datadir
       #   persistentVolumeClaim:
       #     claimName: desc-fastdb-mongodb-pvc-20260224
@@ -145,7 +162,7 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: shell
+  name: brokerconsumer
   namespace: desc-fastdb
 spec:
   clusterIP: None
@@ -157,7 +174,7 @@ spec:
     protocol: TCP
     targetPort: 42
   selector:
-    workload.user.cattle.io/workloadselector: deployment-desc-fastdb-shell
+    workload.user.cattle.io/workloadselector: deployment-desc-fastdb-brokerconsumer
   sessionAffinity: None
   type: ClusterIP
 status:

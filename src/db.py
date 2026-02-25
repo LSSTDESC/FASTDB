@@ -1204,7 +1204,7 @@ class BaseProcessingVersion( DBBase ):
     _pk = [ 'id' ]
 
     @classmethod
-    def base_procver_id( cls, base_processing_version, dbcon=None ):
+    def base_procver_id( cls, base_processing_version, table=None, dbcon=None ):
         """Return the uuid of base_processing_version.
 
         Parameters
@@ -1214,6 +1214,10 @@ class BaseProcessingVersion( DBBase ):
             version of a UUID, UUIDifies it and returns it.  Otherwise,
             queries the database for the base processing version and returns
             the UUID.
+
+          table: str, default None
+            Required if base_processing_version is not a UUID.  Ignored
+            if base_processing_version is a UUID.
 
          dbcon: db.DBCon or psycopg2.connection or NOne
            Databse connection to use.  If None, and one is needed, will
@@ -1232,11 +1236,15 @@ class BaseProcessingVersion( DBBase ):
             return bpv
         except Exception:
             pass
+        if table is None:
+            raise ValueError( "table is required when base_processing_version is not a uuid" )
         with DBCon( dbcon ) as con:
-            rows, _cols = con.execute( "SELECT id FROM base_processing_version WHERE description=%(pv)s",
-                                       { 'pv': base_processing_version } )
+            rows, _cols = con.execute( "SELECT id FROM base_processing_version "
+                                       "WHERE description=%(pv)s AND _table=%(table)s",
+                                       { 'pv': base_processing_version, 'table': table } )
             if len(rows) == 0:
-                raise ValueError( f"Unknown base processing version {base_processing_version}" )
+                raise ValueError( f"Unknown base processing version {base_processing_version}"
+                                  f"for table {table}" )
             return rows[0][0]
 
 

@@ -178,7 +178,7 @@ class BrokerConsumer:
           mongodb_dbname : str, default $MONGODB_DBNAME
             The database name
 
-          mongodb_collection : str, default $MONGODB_DEFAULT_COLLECTION
+          mongodb_collection : str, default $MONGODB_COLLECTION
             The collection
 
           mongodb_user : str, default $MONGODB_ALERT_WRITER_USER
@@ -201,8 +201,8 @@ class BrokerConsumer:
                                          f'%(levelname)s] - %(message)s' ),
                                        datefmt='%Y-%m-%d %H:%M:%S' )
         logout.setFormatter( formatter )
-        # self.logger.setLevel( logging.INFO )
-        self.logger.setLevel( logging.DEBUG )
+        self.logger.setLevel( logging.INFO )
+        # self.logger.setLevel( logging.DEBUG )
 
         self.countlogger = logging.getLogger( f"countlogger_{loggername_prefix}{loggername}" )
         self.countlogger.propagate = False
@@ -245,7 +245,7 @@ class BrokerConsumer:
 
         mongoconfigs = [ ( 'mongodb_host', mongodb_host, 'MONGODB_HOST' ),
                          ( 'mongodb_dbname', mongodb_dbname, 'MONGODB_DBNAME' ),
-                         ( 'mongodb_collection', mongodb_collection, 'MONGODB_DEFAULT_COLLECTION' ),
+                         ( 'mongodb_collection', mongodb_collection, 'MONGODB_COLLECTION' ),
                          ( 'mongodb_user', mongodb_user, 'MONGODB_ALERT_WRITER_USER' ),
                          ( 'mongodb_password', mongodb_password, 'MONGODB_ALERT_WRITER_PASSWD' ) ]
         missing = []
@@ -630,13 +630,8 @@ class AntaresConsumer(BrokerConsumer):
 class FinkConsumer(BrokerConsumer):
     _brokername = 'fink'
 
-    def __init__( self, grouptag=None, loggername="FINK", fink_topic='fink_sn_near_galaxy_candidate_lsst', **kwargs ):
-        server = "kafka-lsst.fink-broker.org:24499"
-        groupid = "rknop-desc-fastdb" + ( "" if grouptag is None else "-" + grouptag )
-        topics = [ fink_topic ]
-        updatetopics = False
-        super().__init__( server, groupid, topics=topics, schemaless=False, schema_in_key=True,
-                          brokername_for_alerts='Fink', updatetopics=updatetopics, loggername=loggername, **kwargs )
+    def __init__( self, server, groupid, **kwargs ):
+        super().__init__( server, groupid, schemaless=False, schema_in_key=True, **kwargs )
         self.logger.info( f"Fink group id is {groupid}" )
 
 
@@ -922,11 +917,11 @@ class BrokerConsumerLauncher:
         # logger.debug( f"Loaded config: {config}" )
         # ****
 
-        schemafile = config[ 'schemafile' ]
+        schemafile = config[ 'schemafile' ] if 'schemafile' in config else _default_brokermessage_schemafile
 
         brokers = []
         clsmap = { 'BrokerConsumer': BrokerConsumer,
-                   'FinkBroker': FinkBroker,
+                   'FinkConsumer': FinkConsumer,
                    'PittGoogleBroker': PittGoogleBroker }
 
         # Parse the config for all brokers before launching anything, so that if we get an exception
@@ -1065,7 +1060,7 @@ def main():
                                       formatter_class=argparse.ArgumentDefaultsHelpFormatter )
     parser.add_argument( 'config', help='YAML file with config of brokers to listen to' )
     parser.add_argument( '-c', '--collection', default=None,
-                         help="Collection in mongo database to store alerts; defaults to $MONGODB_DEFAULT_COLLECTION" )
+                         help="Collection in mongo database to store alerts; defaults to $MONGODB_COLLECTION" )
     parser.add_argument( '-b', '--barf', default='abcdef',
                          help=( "String of random characters for group and topic names.  (Used in tests.)"
                                 "Will have no effect if you never put {barf} in your config file." ) )
@@ -1075,13 +1070,13 @@ def main():
 
     mongodb_host = os.getenv( "MONGODB_HOST" )
     mongodb_dbname = os.getenv( "MONGODB_DBNAME" )
-    mongodb_collection = args.collection if args.collection is not None else os.getenv( "MONGODB_DEFAULT_COLLECTION" )
+    mongodb_collection = args.collection if args.collection is not None else os.getenv( "MONGODB_COLLECTION" )
     mongodb_user = os.getenv( "MONGODB_ALERT_WRITER_USER" )
     mongodb_password = os.getenv( "MONGODB_ALERT_WRITER_PASSWD" )
     if any ( [ i is None for i in [ mongodb_host, mongodb_dbname, mongodb_collection,
                                     mongodb_user, mongodb_password ] ] ):
         raise ValueError( "Must set all the following env vars: MONGODB_HOST, MONGODB_DBNAME, "
-                          "MONGODB_DEFAULT_COLLECTION, MONGODB_ALERT_WRITER_USER, MONGODB_ALERT_WRITER_PASSWD" )
+                          "MONGODB_COLLECTION, MONGODB_ALERT_WRITER_USER, MONGODB_ALERT_WRITER_PASSWD" )
 
     bcl = BrokerConsumerLauncher( args.config, barf=args.barf, verbose=args.verbose )
     bcl()
