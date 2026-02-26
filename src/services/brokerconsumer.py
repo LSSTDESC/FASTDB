@@ -869,11 +869,18 @@ class BrokerConsumerLauncher:
         signal.signal( signal.SIGTERM, lambda sig, stack: True )
         signal.signal( signal.SIGINT, lambda sig, stack: True )
 
+        if 'extraconfig' in brokerinfo and brokerinfo['extraconfig'] is not None:
+            extraconfig = brokerinfo['extraconifg']
+        elif 'extraconfigjson' in brokerinfo and brokerinfo['extraconfigjson'] is not None:
+            extraconfig = simplejson.loads( brokerinfo['extraconfigjson'] )
+        else:
+            extraconfig = {}
+
         bc = brokerinfo['class']( brokerinfo['server'],
                                   brokerinfo['groupid'],
                                   topics=brokerinfo['topics'],
                                   updatetopics=brokerinfo['updatetopics'],
-                                  extraconfig=brokerinfo['extraconfig'],
+                                  extraconfig=extraconfig,
                                   schemafile=brokerinfo['schemafile'],
                                   brokername_for_alerts=brokerinfo['brokername'],
                                   brokername_key=brokerinfo['brokername_key'],
@@ -940,7 +947,8 @@ class BrokerConsumerLauncher:
                                                         else 30 ) )
             max_restarts = broker['max_restarts'] if 'max_restarts' in broker else None
             notopic_sleeptime = broker['notopic_sleeptime_sec'] if 'notopic_sleeptime_sec' in broker else 10
-            extraconfig = {} if 'extraconfig' not in broker else broker['extraconfig']
+            extraconfig = None if 'extraconfig' not in broker else broker['extraconfig']
+            extraconfigjson = None if 'extraconfigjson' not in broker else broker['extraconfigjson']
             brokerinfo = { 'class': cls,
                            'name': name,
                            'brokername': brokername,
@@ -954,6 +962,7 @@ class BrokerConsumerLauncher:
                            'max_restarts': max_restarts,
                            'notopic_sleeptime': notopic_sleeptime,
                            'extraconfig': extraconfig,
+                           'extraconfigjson': extraconfigjson,
                            'collection': collection,
                            'loggername': loggername,
                            'loggername_prefix': loggername_prefix }
