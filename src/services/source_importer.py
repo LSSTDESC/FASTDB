@@ -179,7 +179,7 @@ class SourceImporter:
                 # This is probably inefficient.  Generator to list to tuple.  python makes
                 #   writing this easy, but it's probably doing multiple gratuitous memory copies
                 data = [ None if row[f] is None
-                         else simplejson.dumps(row[f], ignore_nan=True) if isinstance( row[f], ( dict, list ) )
+                         else simplejson.dumps(row[f], allow_nan=True) if isinstance( row[f], ( dict, list ) )
                          else str(row[f])
                          for f in fields ]
                 if base_procver_id is not None:

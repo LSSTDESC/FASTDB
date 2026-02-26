@@ -119,6 +119,6 @@ spec:
               path: /global/cfs/cdirs/desc-td/SOFTWARE/fastdb_deployment/production/brokerconsumer_logs
               type: Directory
             name: fastdb-brokerconsumer-logs
-  schedule: "7 * * * *"
+  schedule: "35 * * * *"
   successfulJobsHistoryLimit: 3
   suspend: false
