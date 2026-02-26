@@ -14,6 +14,7 @@ import multiprocessing
 import signal
 import simplejson
 
+import numpy as np
 import confluent_kafka
 import fastavro
 from pymongo import MongoClient
@@ -323,24 +324,28 @@ class BrokerConsumer:
                 val |= mask
         return mask
 
+    @classmethod
+    def _filter_dict_to_table( cls, alertdict, tablemeta ):
+        outdict = {}
+        for field, value in alertdict.items():
+            colname = field.lower()
+            if colname in tablemeta.keys():
+                colinfo = tablemeta[colname]
+                if not colinfo.is_nullable:
+                    value = colinfo.null_to_nan_if_necessary( value )
+                outdict[colname] = value
+        return outdict
 
-
-    #   things here that the postgres importer uses to uniquely identify rows
-    _diasource_fields = [ 'diaSourceId', 'diaObjectId', 'visit', 'band', 'midpointMjdTai',
-                          'psfFlux', 'psfFluxErr', 'ra', 'dec', 'raErr', 'decErr', 'ra_dec_Cov' ]
-    _diasource_extra_fields = [ 'diaObjectId', 'visit',
-                                'diaSourceId', 'detector', 'x', 'y', 'xErr', 'yErr',
-                                'psfLnL', 'psfChi2', 'psfNdata', 'snr', 'scienceFlux', 'scienceFluxErr',
-                                'templateFlux', 'templateFluxErr', 'extendedness', 'reliability',
-                                'ixx', 'iyy', 'ixy', 'ixxPSF', 'iyyPSF', 'ixyPSF',
-                                'apFlux', 'apFluxErr', 'bboxSize',
-                                'timeProcessedMjdTai', 'timeWithdrawnMjdTai',
-                                'parentDiaSourceId' ]
-    _diaforcedsource_fields = [ 'diaObjectId', 'visit', 'band', 'midpointMjdTai',
-                                'psfFlux', 'psfFluxErr', 'ra', 'dec' ]
-    _diaforcedsource_extra_fields = [ 'diaObjectId', 'visit', 'detector', 'scienceFlux', 'scienceFluxErr',
-                                      'timeProcessedMjdTai', 'timeWithdrawnMjdTai' ]
-
+    @classmethod
+    def _wrangle_diasource_extra( cls, submsg ):
+        out = cls._filter_dict_to_table(submsg, db.DiaSourceExtra.tablemeta() )
+        # a couple fields that are composed from mutiple fileds from the alert
+        out['flags'] = cls.build_flags( db.DiaSourceExtra._flags_bits, submsg )
+        out['pixelflags'] = cls.build_flags( db.DiaSourceExtra._pixelflags_bits, submsg )
+        # a couple of fields that aren't in the postgres table but that the source importer usees
+        out['diaobjectid'] = submsg['diaObjectId']
+        out['visit'] = submsg['visit']
+        return out
 
     @classmethod
     def _wrangle_all_standard_lsst_fields( cls, metamsg, msg ):
@@ -352,43 +357,35 @@ class BrokerConsumer:
                   'observation_reason': msg['observation_reason'],
                   'diaobjectid': msg['diaObject']['diaObjectId'],
                   'diaobjectposition': {
-                      'ra': msg['diaObject']['ra'],
-                      'dec': msg['diaObject']['dec'],
+                      'ra': np.nan if msg['diaObject']['ra'] is None else msg['diaObject']['ra'],
+                      'dec': np.nan if msg['diaObject']['ra'] is None else msg['diaObject']['dec'],
                       'raerr': msg['diaObject']['raErr'],
                       'decerr': msg['diaObject']['decErr'],
                       'ra_dec_cov': msg['diaObject']['ra_dec_Cov']
                   },
-                  'diasource': { k.lower(): msg['diaSource'][k] for k in cls._diasource_fields },
-                  'diasource_extra': { k.lower(): msg['diaSource'][k] for k in cls._diasource_extra_fields },
                   'cutoutdifference': msg['cutoutDifference'],
                   'cutoutscience': msg['cutoutScience'],
                   'cutouttemplate': msg['cutoutTemplate'],
                  }
-        alert['diasource_extra']['flags'] = cls.build_flags( db.DiaSourceExtra._flags_bits,
-                                                             msg['diaSource'] )
-        alert['diasource_extra']['pixelflags'] = cls.build_flags( db.DiaSourceExtra._pixelflags_bits,
-                                                                  msg['diaSource'] )
+        alert['diasource'] = cls._filter_dict_to_table( msg['diaSource'], db.DiaSource.tablemeta() )
+        alert['diasource_extra'] = cls._wrangle_diasource_extra( msg['diaSource'] )
+
         if msg['prvDiaSources'] is None:
             alert['prvdiasources']  = None
             alert['prvdiasources_extra'] = None
         else:
-            alert['prvdiasources'] =  [ { k.lower(): p[k] for k in cls._diasource_fields }
+            alert['prvdiasources'] =  [ cls._filter_dict_to_table( p, db.DiaSource.tablemeta() )
                                         for p in msg['prvDiaSources'] ]
-            alert['prvdiasources_extra'] = [ { k.lower(): p[k] for k in cls._diasource_extra_fields }
-                                             for p in msg['prvDiaSources'] ]
-            for src, dest in zip( msg['prvDiaSources'], alert['prvdiasources_extra'] ):
-                dest['flags'] = cls.build_flags( db.DiaSourceExtra._flags_bits, src )
-                dest['pixelflags'] = cls.build_flags( db.DiaSourceExtra._pixelflags_bits, src )
+            alert['prvdiasources_extra'] = [ cls._wrangle_diasource_extra(p) for p in msg['prvDiaSources'] ]
 
         if msg['prvDiaForcedSources'] is None:
             alert['prvdiaforcedsources'] = None
             alert['prvdiaforcedsources_extra'] = None
         else:
-            alert['prvdiaforcedsources'] =  [ { k.lower(): p[k] for k in cls._diaforcedsource_fields }
-                                              for p in msg['prvDiaForcedSources'] ]
-            alert['prvdiaforcedsources_extra'] = [ { k.lower(): p[k]
-                                                     for k in cls._diaforcedsource_extra_fields }
-                                                             for p in msg['prvDiaForcedSources'] ]
+            alert['prvdiaforcedsources'] = [ cls._filter_dict_to_table( p, db.DiaForcedSource.tablemeta() )
+                                             for p in msg['prvDiaForcedSources'] ]
+            alert['prvdiaforcedsources_extra'] = [ cls._filter_dict_to_table( p, db.DiaForcedSourceExtra.tablemeta() )
+                                                   for p in msg['prvDiaForcedSources'] ]
 
         return alert
 

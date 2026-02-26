@@ -57,9 +57,9 @@ class BaseTestDB:
         obj1 = self.cls()
         obj2 = self.cls()
 
-        assert set( obj1.tablemeta.keys() ) == self.columns
+        assert set( obj1.tablemeta().keys() ) == self.columns
         assert obj2._tablemeta is not None
-        assert obj2._tablemeta == obj1.tablemeta
+        assert obj2._tablemeta == obj1.tablemeta()
 
     def test_instantiate( self, basetest_setup ):
         # Test basic instantiation
@@ -221,7 +221,7 @@ class BaseTestDB:
             'real': -666.,
             'dobule precision': -666.
         }
-        missing = [ bs[ self.obj1.tablemeta[k]['data_type'] ] for k in self.obj1._pk ]
+        missing = [ bs[ self.obj1.tablemeta()[k]['data_type'] ] for k in self.obj1._pk ]
         them = self.cls.get_batch( [ self.obj1.pks, missing ] )
         assert len(them) == 1
         assert them[0].pks == self.obj1.pks

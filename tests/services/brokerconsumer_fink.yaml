@@ -1,0 +1,14 @@
+brokers:
+  - name: "fink"
+    class: FinkConsumer
+    server: kafka-lsst.fink-broker.org:24499
+    topics: [ 'fink_sn_near_galaxy_candidate_lsst' ]
+    groupid: rknop-fastdb-test-{barf}
+    collection: fink_{barf}
+    loggername: FINK
+    loggername_prefix: ""
+    updatetopics: false
+    restart_time_min: 0.1
+    max_restarts: null
+    notopic_sleeptime_sec: 5
+    extraconfig: {}

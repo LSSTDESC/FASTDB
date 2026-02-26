@@ -182,7 +182,7 @@ class TestDiaSourceBrokerInfo( BaseTestDB ):
     def basetest_setup( self, obj1_src1 ):
         self.cls = DiaSourceBrokerInfo
         self.columns = { 'brokername', 'topic', 'diasourceid', 'base_procver_id', 'diaobjectid', 'visit',
-                         'msgtime', 'created_at', 'info' }
+                         'msgtime', 'receivedtime', 'importtime', 'info' }
         self.safe_to_modify = [ 'info', 'msgtime', 'receivedtime', 'importtime' ]
         self.uniques = []
 
@@ -195,7 +195,7 @@ class TestDiaSourceBrokerInfo( BaseTestDB ):
                                          visit=obj1_src1.visit,
                                          msgtime=t0,
                                          receivedtime=t0 + datetime.timedelta( minutes=1 ),
-                                         importtime=t0 + datetime.teimedeltah( hours=1, minuts=1 ),
+                                         importtime=t0 + datetime.timedelta( hours=1, minutes=1 ),
                                          info={ 'foo': 'bar' }
                                         )
         self.dict1 = { k: getattr( self.obj1, k ) for k in self.columns }

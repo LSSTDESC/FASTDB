@@ -167,7 +167,7 @@ class SourceImporter:
                     data.append( str(self.object_position_base_processing_version) ),
                     for f in [ 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ]:
                         data.append( None if row['diaobjectposition'][f] is None
-                                     else str(row['diaobjectposition'][f]) )
+                                     else row['diaobjectposition'][f] )
                 pgcopy.write_row( tuple( data ) )
                 n += 1
 
@@ -208,7 +208,7 @@ class SourceImporter:
                 # ****
                 data = [ None if row[f] is None
                          else simplejson.dumps(row[f], allow_nan=True) if isinstance( row[f], ( dict, list ) )
-                         else str(row[f])
+                         else row[f]
                          for f in fields ]
                 if base_procver_id is not None:
                     data.append( base_procver_id )

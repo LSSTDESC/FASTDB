@@ -464,6 +464,21 @@ class ColumnMeta:
         return self.typedict[ self.data_type ]
 
 
+    def null_to_nan_if_necessary( self, pyobj, exception_on_non_float=False ):
+        if ( self.is_nullable ) or ( pyobj is not None ):
+            return pyobj
+
+        if self.data_type in { 'real', 'double_precision' }:
+            return np.nan
+
+        if exception_on_non_float:
+            raise ValueError( f"I don't know how to make a NaN for postgres data type {self.data_type}" )
+        else:
+            return pyobj
+
+        raise RuntimeError( "This should never happen." )
+
+
     def py_to_pg( self, pyobj ):
         """Convert a python object to the corresponding postgres object for this column.
 
@@ -548,12 +563,12 @@ class DBBase:
     # Often this can be left as is, but subclasses might want to override it.
     colconverters = {}
 
-    @property
-    def tablemeta( self ):
+    @classmethod
+    def tablemeta( cls ):
         """A dictionary of colum_name : ColumMeta."""
-        if self._tablemeta is None:
-            self.load_table_meta()
-        return self._tablemeta
+        if cls._tablemeta is None:
+            cls.load_table_meta()
+        return cls._tablemeta
 
     @property
     def pks( self ):
@@ -730,10 +745,10 @@ class DBBase:
 
         subdict = {}
         if columns is not None:
-            if any( c not in self.tablemeta for c in columns ):
+            if any( c not in self.tablemeta() for c in columns ):
                 raise ValueError( f"Not all of the columns in {columns} are in the table" )
         else:
-            columns = self.tablemeta.keys()
+            columns = self.tablemeta().keys()
 
         for col in columns:
             if hasattr( self, col ):
@@ -747,10 +762,10 @@ class DBBase:
                     #     get the default value.
                     # How to know which is the case?  Assume that if the column_default is None,
                     # then we're in case (1), but if it's not None, we're in case (2).
-                    if self.tablemeta[col]['column_default'] is None:
+                    if self.tablemeta()[col]['column_default'] is None:
                         subdict[ col ] = None
                 else:
-                    subdict[ col ] = self.tablemeta[ col ].py_to_pg( val )
+                    subdict[ col ] = self.tablemeta()[ col ].py_to_pg( val )
 
         return subdict
 
