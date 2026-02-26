@@ -1243,7 +1243,7 @@ class BaseProcessingVersion( DBBase ):
                                        "WHERE description=%(pv)s AND _table=%(table)s",
                                        { 'pv': base_processing_version, 'table': table } )
             if len(rows) == 0:
-                raise ValueError( f"Unknown base processing version {base_processing_version}"
+                raise ValueError( f"Unknown base processing version {base_processing_version} "
                                   f"for table {table}" )
             return rows[0][0]
 
