@@ -1,8 +1,11 @@
+import io
+import sys
 import datetime
 import argparse
 import simplejson
 import textwrap
 import logging
+import traceback
 
 import psycopg.sql as sql
 import db
@@ -664,9 +667,11 @@ class SourceImporter:
                 FDBLogger.debug( "Done." )
 
             return nobj, nroot, npos, nsrc, nprvsrc, nfrc, ninfo
-        except Exception:
+        except Exception as exc;
+            strio = io.StringIO()
+            traceback.print_exc( exc, file=strio ) 
             # This is just so we get the timestamp in the log
-            FDBLogger.error( "Exception." )
+            FDBLogger.error( f"Exception:\n{strio.getvalue()}" )
             raise
 
 
@@ -717,7 +722,12 @@ def main():
             FDBLogger.info( f"Importing from {collection_name}..." )
 
             collection = db.get_mongo_collection( mg, collection_name )
-            nobj, nroot, npos, nsrc, nprvsrc, nfrc, ninfo = si.import_from_mongo( collection )
+            try:
+                nobj, nroot, npos, nsrc, nprvsrc, nfrc, ninfo = si.import_from_mongo( collection )
+            except Exception:
+                # The traceback will have been printed in import_from_collection
+                FDBLogger.error( "Fail." )
+                sys.exit( 1 )
 
             FDBLogger.info( f"...imported {nobj} objects, {nroot} root objects, {npos} object positions, "
                             f"{nsrc+nprvsrc} sources ({nsrc} main, {nprvsrc} previous), {nfrc} forced sources, "
