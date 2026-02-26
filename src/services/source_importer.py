@@ -207,7 +207,7 @@ class SourceImporter:
                         strio.write( f"simplejson: {jsondump}" )
                 # ****
                 data = [ None if row[f] is None
-                         else simplejson.dumps(row[f], allow_nan=True) if isinstance( row[f], ( dict, list ) )
+                         else simplejson.dumps(row[f], ignore_nan=True) if isinstance( row[f], ( dict, list ) )
                          else row[f]
                          for f in fields ]
                 if base_procver_id is not None:
