@@ -452,8 +452,15 @@ class ColumnMeta:
         self.column_name = column_name
         self.data_type = data_type
         self.column_default = column_default
-        self.is_nullable = is_nullable
         self.element_type = element_type
+        if not isinstance( is_nullable, bool ):
+            # Try to convert is_nullable to a bool
+            if is_nullable == 'YES':
+                self.is_nullable = True
+            elif is_nullable == 'NO':
+                self.is_nullable = False
+            else:
+                raise RuntimeError( "Postgres must have changed their information_schema spec." )
 
 
     def __getitem__( self, key ):

@@ -1,6 +1,7 @@
 import pytest
 import os
 import time
+import math
 import datetime
 import random
 import multiprocessing
@@ -73,6 +74,17 @@ def check_mongodb( mongoclient, dbname, collection ):
     assert len(randomsrces) == 77
     randomsrces = set( randomsrces )
     assert randomsrces == nugentsrces
+
+    # Make sure that the prvdiasource whose flux we set to null in the fakebroker is now NaN
+    thing = list( coll.aggregate( [ { '$match': { 'diasource.diasourceid': 155218500003 } },
+                                    { '$project': { 'prvdiasources': 1 } } ] ) )
+    assert len(thing) == 2 # One for each fakebroker classifier
+    prv = thing[0]['prvdiasources']
+    assert len(prv) > 1
+    assert math.isnan( prv[0]['psfflux'] )
+    assert math.isnan( prv[0]['psffluxerr'] )
+    assert not any( math.isnan( prv[i]['psfflux'] ) for i in range( 1, len(prv) ) )
+    assert not any( math.isnan( prv[i]['psffluxerr'] ) for i in range( 1, len(prv) ) )
 
     # Make sure sources and previous sources match what's expected
     #  (Sadly, because of how this test works, there won't be any

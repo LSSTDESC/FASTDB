@@ -95,6 +95,14 @@ class Classifier:
             # remote_pdb.RemotePdb( '127.0.0.1', random.randint(4000,60000) ).set_trace()
             ####
             alert = fastavro.schemaless_reader( io.BytesIO(msg), self.alertschema )
+            # FOR TESTING PURPOSES
+            # Pick out a source whose prvDiaSoruces flux will be set to null
+            #   can make sure the rest of the code's null handing
+            if alert['diaSourceId'] == 155218500003:
+                alert['prvDiaSources'][0]['psfFlux'] = None
+                alert['prvDiaSources'][0]['psfFluxErr'] = None
+                self.logger.warning( f"Set first prvDiaSource flux to null for diasource {alert['diaSourceId']}" )
+
             alert['brokerName'] = self.brokername
             alert['classifierName'] = self.classifiername
             alert['classifierVersion'] = self.classifierparams
