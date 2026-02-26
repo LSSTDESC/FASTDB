@@ -229,7 +229,7 @@ class SourceImporter:
 
         """
 
-        group = { "_id": { "diaobjectid": "$diaobjectid", "visit": "$diasource.visit" } }
+        group = { "_id": { "diasource.diasourceid" } }
         group.update( { k: { "$first": f"$diasource.{k}" } for k in self.diasource_fields } )
         pipeline = [ { "$group": group } ]
         n = self._read_mongo_fields( dbcon, collection, pipeline, self.diasource_fields,
@@ -238,7 +238,7 @@ class SourceImporter:
                                      base_procver_id=self.source_base_processing_version )
         FDBLogger.debug( f"      ...wrote {n} rows to tmp_diasource_import" )
 
-        group = { "_id": { "diaobjectid": "$diaobjectid", "visit": "$diasource_extra.visit" } }
+        group = { "_id": { "diasource.diasourceid" } }
         group.update( { k: { "$first": f"$diasource_extra.{k}" } for k in self.diasource_extra_fields } )
         pipeline = [ { "$match": { "diasource_extra": { "$ne": None } } },
                      { "$group": group } ]
@@ -261,7 +261,7 @@ class SourceImporter:
 
         """
 
-        group = { "_id": { "diaobjectid": "$diaobjectid", "visit": "$prvdiasources.visit" } }
+        group = { "_id": { "prvdiasources.diasourceid" } }
         group.update( { k: { "$first": f"$prvdiasources.{k}" } for k in self.diasource_fields } )
         pipeline = [ { "$match": { "prvdiasources": { "$ne": None } } },
                      { "$unwind": "$prvdiasources" },
@@ -272,7 +272,7 @@ class SourceImporter:
                                      base_procver_id=self.source_base_processing_version )
         FDBLogger.debug( f"       ...wrote {n} rows to tmp_prvdiasource_import" )
 
-        group = { "_id": { "diaobjectid": "$diaobjectid", "visit": "$prvdiasources_extra.visit" } }
+        group = { "_id": { "prvdiasources_extra.diasourceid" } }
         group.update( { k: { "$first": f"$prvdiasources_extra.{k}" } for k in self.diasource_extra_fields } )
         pipeline = [ { "$match": { "prvdiasources_extra": { "$ne": None } } },
                      { "$unwind": "$prvdiasources_extra" },
