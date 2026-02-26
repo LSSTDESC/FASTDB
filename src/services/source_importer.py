@@ -511,7 +511,7 @@ class SourceImporter:
                            "( SELECT * FROM temp_prvdiaforcedsource_import ) "
                            "ON CONFLICT DO NOTHING" )
             nfrc = dbcon.cursor.rowcount
-            FDBLogger.debug( "      ...inserted {nfrc} rows" )
+            FDBLogger.debug( f"      ...inserted {nfrc} rows" )
 
             # As with sources, for the diaforcedsource_extra table we want to update in case a
             #  broker gives us something that a previous broker didn't.
