@@ -1,3 +1,14 @@
+# FEAR AND LOATHING
+#
+# You really need the native timezone of your postgres server to be UTC.
+#
+# mongodb just stores everything UTC
+#
+# We try to convert for this.  However, there are some cases where the conversion
+#   doesn't happen.  Our postgres tables are all timezone-aware, but they will
+#   be getting imports from timezoneless mongodb.  This means that if the native
+#   timezone of the postgres server is not UTC, chaos will rule.
+
 import io
 import sys
 import datetime
@@ -99,14 +110,27 @@ class SourceImporter:
 
     @classmethod
     def _add_mongo_time_limits_to_pipeline( cls, pipeline, t0, t1 ):
-        if ( t0 is not None ) or ( t1 is not None ):
-            if ( t0 is not None ) and ( t1 is not None ):
+        # mongodb doesn't seem to know about timezones and stores everythning
+        #    UTC.  Just strip the time zones from t0 and t1 because everywhere
+        #    we get times in this module we get UTC ones.
+        if t0 is not None:
+            if not isinstance( t0, datetime.datetime ):
+                raise TypeError( f"t0 needs to be a datetime, not a {type(t0)}" )
+            t0 = t0.replace( tzinfo=None )
+            if t1 is not None:
+                if not isinstance( t1, datetime.datetime ):
+                    raise TypeError( f"t1 needs to be a datetime, not a {type(t1)}" )
+                t1 = t1.replace( tzinfo=None )
                 pipeline.insert( 0, { "$match": { "$and": [ { "savetime": { "$gt": t0 } },
                                                             { "savetime": { "$lte": t1 } } ] } } )
-            elif t0 is not None:
-                pipeline.insert( 0, { "$match": { "savetime": { "$gt": t0 } } } )
             else:
-                pipeline.insert( 0, { "$match": { "savetime": { "$lte": t1 } } } )
+                pipeline.insert( 0, { "$match": { "savetime": { "$gt": t0 } } } )
+        elif t1 is not None:
+            if not isinstance( t1, datetime.datetime ):
+                raise TypeError( f"t1 needs to be a datetime, not a {type(t1)}" )
+            t1 = t1.replace( tzinfo=None )
+            pipeline.insert( 0, { "$match": { "savetime": { "$lte": t1 } } } )
+
 
     def read_mongo_objects( self, dbcon, collection, t0=None, t1=None, batchsize=10000 ):
         """Read all diaobject records from a mongo collection and stick them a temp table.

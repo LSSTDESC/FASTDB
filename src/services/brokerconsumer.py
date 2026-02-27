@@ -424,14 +424,14 @@ class BrokerConsumer:
         messagebatch = []
         self.countlogger.info( f"Handling {len(msgs)} messages; consumer has received "
                                f"{self.consumer.tot_handled} messages." )
-        now = datetime.datetime.now( tz=datetime.UTC )
+        now = datetime.datetime.utcnow()
         for msg in msgs:
             timestamptype, timestamp = msg.timestamp()
 
             if timestamptype == confluent_kafka.TIMESTAMP_NOT_AVAILABLE:
                 timestamp = None
             else:
-                timestamp = datetime.datetime.fromtimestamp( timestamp / 1000, tz=datetime.UTC )
+                timestamp = datetime.datetime.fromtimestamp( timestamp / 1000 )
 
             key = msg.key()
             payload = msg.value()
@@ -666,7 +666,7 @@ class AlerceConsumer(BrokerConsumer):
         self.badtopics = [ 'lc_classifier_balto_20230807' ]
 
     def update_topics( self, *args, **kwargs ):
-        now = datetime.datetime.now()
+        now = datetime.datetime.utcnow()
         datestrs = []
         for ddays in range(self.early_offset, 3):
             then = now + datetime.timedelta( days=ddays )
@@ -767,7 +767,7 @@ class PittGoogleBroker(BrokerConsumer):
             # there is no offset in pubsub
             # if this cannot be null, perhaps the message id would work?
             "msgoffset": alert.msg.message_id,
-            "savetime": datetime.datetime.now(tz=datetime.UTC)
+            "savetime": datetime.datetime.utcnow()
         }
 
         return pittgoogle.pubsub.Response(result=message, ack=True)

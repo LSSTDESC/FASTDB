@@ -1,4 +1,5 @@
 import argparse
+import datetime
 
 import db
 from util import FDBLogger
@@ -10,13 +11,14 @@ class MongoCleaner:
 
     def clean( self, collection ):
         with db.DBCon() as conn:
-            rows = conn.execute( "SELECT t FROM diasource_import_time WHERE collection=%(col)s",
-                                 { 'col': collection } )
+            rows, _cols = conn.execute( "SELECT t FROM diasource_import_time WHERE collection=%(col)s",
+                                        { 'col': collection } )
             if len(rows) == 0:
                 FDBLogger.warning( f"Not cleaning anything out, there's no row for {collection} in "
                                    f"diasource_import_time." )
                 return
-            tmax = rows[0][0]
+            # mongodb just stores everything UTC.  Postgres has timezone-aware timestamps.
+            tmax = rows[0][0].astimezone( datetime.UTC ).replace( tzinfo=None )
 
         import pdb; pdb.set_trace()
         with db.MG() as mongoconn:
