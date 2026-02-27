@@ -359,7 +359,7 @@ class DBCon:
 # ======================================================================
 
 @contextmanager
-def MG( client=None ):
+def MG( client=None, readonly=False ):
     """Get a mongo client in a context manager.
 
     It has read/write access to the broker message database (which is
@@ -379,12 +379,17 @@ def MG( client=None ):
     try:
         host = os.getenv( "MONGODB_HOST" )
         dbname = os.getenv( "MONGODB_DBNAME" )
-        user = os.getenv( "MONGODB_ALERT_WRITER_USER" )
-        password = os.getenv( "MONGODB_ALERT_WRITER_PASSWD" )
+        if readonly:
+            user = os.getenv( "MONGODB_ALERT_READER_USER" )
+            password = os.getenv( "MONGODB_ALERT_READER_PASSWD" )
+            errtext = "MONGODB_ALERT_READER_USER, MONGODB_ALERT_READER_PASSWD"
+        else:
+            user = os.getenv( "MONGODB_ALERT_WRITER_USER" )
+            password = os.getenv( "MONGODB_ALERT_WRITER_PASSWD" )
+            errtext = "MONGODB_ALERT_WRITER_USER, MONGODB_ALERT_WRITER_PASSWD"
         if any( i is None for i in [ host, dbname, user, password ] ):
-            raise RuntimeError( "Failed to make mongo client; make sure all env vars are set: "
-                                "MONGODB_HOST, MONGODB_DBNAME, MONGODB_ALERT_WRITER_USER, "
-                                "MONGODB_ALERT_WRITER_PASSWD" )
+            raise RuntimeError( f"Failed to make mongo client; make sure all env vars are set: "
+                                f"MONGODB_HOST, MONGODB_DBNAME, {errtext} " )
         client = pymongo.MongoClient( f"mongodb://{user}:{password}@{host}:27017/"
                                       f"{dbname}?authSource={dbname}" )
         yield client

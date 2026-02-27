@@ -35,7 +35,7 @@ class KafkaConsumer:
     def __init__( self, server, groupid, schemaless=False, schema=None, topics=None, reset=False,
                   extraconsumerconfig={},
                   consume_nmsgs=100, consume_timeout=1, nomsg_sleeptime=1,
-                  logger=_logger ):
+                  logger=_logger, countlogger=None ):
         """Constructor.
 
         Parameters
@@ -82,6 +82,8 @@ class KafkaConsumer:
 
           logger: logging.Logger (optional)
 
+          countlogger: logging.Logger (optional and really in the weeds)
+
         """
 
         self.logger = logger
@@ -110,6 +112,9 @@ class KafkaConsumer:
         consumerconfig.update( extraconsumerconfig )
         self.logger.debug( f"Initializing Kafka consumer with\n{json.dumps(consumerconfig, indent=4)}" )
         self.logger.debug( f"Topics given at KafkaConsumer init: {self.topics}" )
+        if countlogger is not None:
+            countlogger.info( f"Initializing Kafka consumer with\n{json.dumps(consumerconfig, indent=4)}" )
+            countlogger.info( f"Topics given at KafkaConsumer init: {self.topics}" )
         self.consumer = confluent_kafka.Consumer( consumerconfig )
         atexit.register( _close_kafka_consumer, self )
 

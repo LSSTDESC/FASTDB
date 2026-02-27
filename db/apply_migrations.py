@@ -10,7 +10,8 @@ import psycopg
 
 
 def main():
-    parser = argparse.ArgumentParser( 'apply_migrations', description='Apply .sql migration files' )
+    parser = argparse.ArgumentParser( 'apply_migrations', description='Apply .sql migration files',
+                                      formatter_class=argparse.ArgumentDefaultsHelpFormatter )
     parser.add_argument( '-H', '--host', default='postgres', help="Postgres host" )
     parser.add_argument( '-P', '--port', type=int, default=5432, help="Postgres port" )
     parser.add_argument( '-d', '--db', default="fastdb", help="Postgres database" )

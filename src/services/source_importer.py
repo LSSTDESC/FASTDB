@@ -675,7 +675,7 @@ class SourceImporter:
                 nfrc = self.import_forcedsources_from_collection( collection, t0, t1, dbcon=dbcon, commit=False )
                 FDBLogger.debug( "Importing brokerinfos..." )
                 ninfo = self.import_brokerinfo_from_collection( collection, t0, t1, dbcon=dbcon, commit=False )
-                FDBLogger.debug( "Importing ocutouts..." )
+                FDBLogger.debug( "Importing cutouts..." )
                 mongosession = self.import_cutouts_from_collection( collection, t0, t1, commit=False )
 
                 FDBLogger.debug( "Updating diasource_import_time..." )
@@ -775,7 +775,7 @@ def main():
 
     FDBLogger.info( f"Overall, imported {totnobj} objects, {totnroot} root objects, {totnpos} object positions, "
                     f"{totnsrc+totnprvsrc} sources ({totnsrc} main, {totnprvsrc} previous), "
-                    f"{totnfrc} forced sources, {totninfo} broker infos from {collection_name}" )
+                    f"{totnfrc} forced sources, {totninfo} broker infos." )
 
 
 # ======================================================================

@@ -283,7 +283,7 @@ class BrokerConsumer:
                                                extraconsumerconfig=self.extraconfig,
                                                consume_nmsgs=self.batch_size, consume_timeout=1,
                                                nomsg_sleeptime=self.nomsg_sleeptime,
-                                               logger=self.logger )
+                                               logger=self.logger, countlogger=self.countlogger )
                 countdown = -1
             except Exception as e:
                 countdown -= 1
