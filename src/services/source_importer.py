@@ -8,10 +8,13 @@
 #   doesn't happen.  Our postgres tables are all timezone-aware, but they will
 #   be getting imports from timezoneless mongodb.  This means that if the native
 #   timezone of the postgres server is not UTC, chaos will rule.
+#
+# See function SourceImporter.omg_tz
 
 import io
 import sys
 import datetime
+import pytz
 import argparse
 import simplejson
 import textwrap
@@ -107,28 +110,45 @@ class SourceImporter:
         # self.host_base_processing_version = util.base_procver_id( host_base_processing_version )
         self.object_match_radius = float( object_match_radius )
 
+    @classmethod
+    def omg_tz( cls, t, with_tz=False, now_on_none=False ):
+        # mongodb doesn't seem to know about timezones and stores everythning UTC.
+        # Try to adapt.  If we get a timezone unaware datetime, assume it's already UTC.
+        # https://xkcd.com/1883/
+
+        if t is None:
+            if not now_on_none:
+                return None
+
+            t = datetime.datetime.now( tz=datetime.UTC )
+
+        else:
+            if not isinstance( t, datetime.datetime ):
+                raise TypeError( f"Must pass time parameters as datetime; got a {type(t)}" )
+
+            if t.tzinfo is not None:
+                t = t.astimezone( datetime.UTC )
+            else:
+                t= pytz.timezone( 'UTC' ).localize( t )
+
+        if not with_tz:
+            t.replace( tzinfo=None )
+
+        return t
+
 
     @classmethod
     def _add_mongo_time_limits_to_pipeline( cls, pipeline, t0, t1 ):
-        # mongodb doesn't seem to know about timezones and stores everythning
-        #    UTC.  Just strip the time zones from t0 and t1 because everywhere
-        #    we get times in this module we get UTC ones.
+        t0 = cls.omg_tz( t0, with_tz=False, now_on_none=False )
+        t1 = cls.omg_tz( t1, with_tz=False, now_on_none=False )
+
         if t0 is not None:
-            if not isinstance( t0, datetime.datetime ):
-                raise TypeError( f"t0 needs to be a datetime, not a {type(t0)}" )
-            t0 = t0.replace( tzinfo=None )
             if t1 is not None:
-                if not isinstance( t1, datetime.datetime ):
-                    raise TypeError( f"t1 needs to be a datetime, not a {type(t1)}" )
-                t1 = t1.replace( tzinfo=None )
                 pipeline.insert( 0, { "$match": { "$and": [ { "savetime": { "$gt": t0 } },
                                                             { "savetime": { "$lte": t1 } } ] } } )
             else:
                 pipeline.insert( 0, { "$match": { "savetime": { "$gt": t0 } } } )
         elif t1 is not None:
-            if not isinstance( t1, datetime.datetime ):
-                raise TypeError( f"t1 needs to be a datetime, not a {type(t1)}" )
-            t1 = t1.replace( tzinfo=None )
             pipeline.insert( 0, { "$match": { "savetime": { "$lte": t1 } } } )
 
 
@@ -642,7 +662,7 @@ class SourceImporter:
     #
     # It seems that python won't let you name a method "import"
 
-    def import_from_mongo( self, collection ):
+    def import_from_mongo( self, collection, t1=None ):
         """Import data from the mongodb database to PostgreSQL tables.
 
         Will look at the desired collection.  Will find all broker
@@ -662,6 +682,10 @@ class SourceImporter:
             sure to call the SoruceImporter object's .import method within the
             same "with db.MG()" block.
 
+          t1 : datetime.datetime, default None
+            Only import alerts that were saved to the mongo database
+            through this time.  If None, will use now.
+
         Returns
         -------
           nobj, nsrc, nfrc
@@ -676,15 +700,14 @@ class SourceImporter:
             #   end the transaction in dbcon.
             with db.DBCon() as dbcon:
                 timestampexists = False
+                t0 = None
                 rows, _cols = dbcon.execute( "SELECT t FROM diasource_import_time WHERE collection=%(col)s",
                                              { 'col': collection.name } )
-                if len(rows) == 0:
-                    t0 = datetime.datetime( 1970, 1, 1, 0, 0, 0, tzinfo=datetime.UTC )
-                else:
+                if len(rows) > 0:
                     timestampexists = True
-                    t0 = rows[0][0]
+                    t0 = self.omg_tz( rows[0][0], with_tz=True, now_on_none=False )
 
-                t1 = datetime.datetime.now( tz=datetime.UTC )
+                t1 = self.omg_tz( t1, with_tz=True, now_on_none=True )
 
                 # Make sure foreign key constraints aren't goign to trip us up
                 #   below, but that they're only checked at the end of the transaction.
