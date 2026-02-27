@@ -79,8 +79,6 @@ class TestDiaForcedSourceExtra( BaseTestDB ):
         self.cls = DiaForcedSourceExtra
         self.columns = {
             'base_procver_id',
-            'diaobjectid',
-            'visit',
             'detector',
             'scienceflux',
             'sciencefluxerr',
@@ -107,8 +105,6 @@ class TestDiaForcedSourceExtra( BaseTestDB ):
         t3 = util.mjd_from_mjd_or_datetime_or_timestring( t3 )
         t4 = util.mjd_from_mjd_or_datetime_or_timestring( t4 )
         self.obj1 = DiaForcedSourceExtra( base_procver_id=obj1_frced1.base_procver_id,
-                                          diaobjectid=obj1_frced1.diaobjectid,
-                                          visit=obj1_frced1.visit,
                                           detector=1,
                                           scienceflux=234.5,
                                           sciencefluxerr=7.8,
@@ -117,8 +113,6 @@ class TestDiaForcedSourceExtra( BaseTestDB ):
                                          )
         self.dict1 = { k: getattr( self.obj1, k ) for k in self.columns }
         self.obj2 = DiaForcedSourceExtra( base_procver_id=obj1_frced2.base_procver_id,
-                                          diaobjectid=obj1_frced2.diaobjectid,
-                                          visit=obj1_frced2.visit,
                                           detector=2,
                                           scienceflux=235.5,
                                           sciencefluxerr=7.9,
@@ -127,8 +121,6 @@ class TestDiaForcedSourceExtra( BaseTestDB ):
                                          )
         self.dict2 = { k: getattr( self.obj2, k ) for k in self.columns }
         self.dict3 = { 'base_procver_id': obj1_frced3.base_procver_id,
-                       'diaobjectid': obj1_frced3.diaobjectid,
-                       'visit': obj1_frced3.visit,
                        'detector': 3,
                        'scienceflux': 233.4,
                        'sciencefluxerr': 5.6,

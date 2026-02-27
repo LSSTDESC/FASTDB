@@ -22,8 +22,8 @@ def check_mongodb( mongoclient, dbname, collection ):
     assert coll.count_documents({}) == 154
 
     # Pull out the diaSourceId from all the messages, make sure we got the right amount
-    mgcursor = coll.find( {}, projection={ 'diaobjectid': 1, 'diasource.visit': 1 } )
-    srcids = [ f"{c['diaobjectid']}_{c['diasource']['visit']}" for c in mgcursor ]
+    msgcursor = coll.find( {}, projection={ 'diasource.diasourceid': 1 } )
+    srcids = [ c['diasource']['diasourceid'] for c in msgcursor ]
     assert len(srcids) == 154
     srcids = set( srcids )
     assert len(srcids) == 77
@@ -31,15 +31,14 @@ def check_mongodb( mongoclient, dbname, collection ):
     # Pull out the previous diasources
 
     msgcursor = coll.aggregate( [ { "$unwind": "$prvdiasources" } ] )
-    prvsrcids = [ f"{c['prvdiasources']['diaobjectid']}_{c['prvdiasources']['visit']}" for c in msgcursor ]
+    prvsrcids = [ c['prvdiasources']['diasourceid'] for c in msgcursor ]
     assert len(prvsrcids) == 770
     # But they're mostly redundant
     prvsrcids = set( prvsrcids )
     assert len(prvsrcids) == 65
 
     msgcursor = coll.aggregate( [ { "$unwind": "$prvdiasources_extra" } ] )
-    prvsrcextraids = [ f"{c['prvdiasources_extra']['diaobjectid']}_{c['prvdiasources_extra']['visit']}"
-                       for c in msgcursor ]
+    prvsrcextraids = [ c['prvdiasources_extra']['diasourceid'] for c in msgcursor ]
     assert len(prvsrcextraids) == 770
     prvsrcextraids = set( prvsrcextraids )
     assert prvsrcextraids == prvsrcids
@@ -47,15 +46,13 @@ def check_mongodb( mongoclient, dbname, collection ):
     # Pull out the previous diaforcedsources
 
     msgcursor = coll.aggregate( [ { "$unwind": "$prvdiaforcedsources" } ] )
-    prvfrcedids = [ f"{c['prvdiaforcedsources']['diaobjectid']}_{c['prvdiaforcedsources']['visit']}"
-                    for c in msgcursor ]
+    prvfrcedids = [ c['prvdiaforcedsources']['diaforcedsourceid'] for c in msgcursor ]
     assert len(prvfrcedids) == 1382
     prvfrcedids = set( prvfrcedids )
     assert len(prvfrcedids) == 148
 
     msgcursor = coll.aggregate( [ { "$unwind": "$prvdiaforcedsources_extra" } ] )
-    prvfrcedextraids = [ f"{c['prvdiaforcedsources_extra']['diaobjectid']}_{c['prvdiaforcedsources_extra']['visit']}"
-                         for c in msgcursor ]
+    prvfrcedextraids = [ c['prvdiaforcedsources_extra']['diaforcedsourceid'] for c in msgcursor ]
     assert len(prvfrcedextraids) == 1382
     prvfrcedextraids = set( prvfrcedextraids )
     assert prvfrcedextraids == prvfrcedids
@@ -93,28 +90,35 @@ def check_mongodb( mongoclient, dbname, collection ):
 
     with db.DB() as conn:
         cursor = conn.cursor()
-        cursor.execute( "SELECT diaobjectid, visit FROM ppdb_alerts_sent" )
-        alertssent = set( f"{row[0]}_{row[1]}" for row in cursor.fetchall() )
+        cursor.execute( "SELECT s.diasourceid FROM ppdb_alerts_sent p\n"
+                        "INNER JOIN ppdb_diasource s ON p.diaobjectid=s.diaobjectid AND p.visit=s.visit" )
+        alertssent = set( row[0] for row in cursor.fetchall() )
         assert alertssent == srcids
 
-        cursor.execute( "SELECT DISTINCT ON(s.diaobjectid, s.visit) s.diaobjectid, s.visit\n"
+        # For LSST, diaobjectid is not reliable and cannot be used this way.
+        # But, its OK for the sample data set we have. And, since when I
+        #   wrote this all, I as assuming that we had to use
+        #   (diaobjectid, visit), because DP1 was missing either
+        #   diasourceid or diaforcesdourceid (I forget which), I used
+        #   that.  Sigh.
+        cursor.execute( "SELECT DISTINCT ON(s.diaobjectid, s.visit) s.diasourceid\n"
                         "FROM ppdb_alerts_sent a\n"
                         "INNER JOIN ppdb_diasource sprime ON a.diaobjectid=sprime.diaobjectid\n"
                         "                                AND a.visit=sprime.visit\n"
                         "INNER JOIN ppdb_diasource s ON s.diaobjectid=sprime.diaobjectid\n"
                         "                           AND s.midpointmjdtai<sprime.midpointmjdtai\n"
                         "GROUP BY s.diaobjectid, s.visit\n" )
-        prvsrcexpected = set( f"{row[0]}_{row[1]}" for row in cursor.fetchall() )
+        prvsrcexpected = set( row[0] for row in cursor.fetchall() )
         assert prvsrcexpected == prvsrcids
 
-        cursor.execute( "SELECT DISTINCT ON(f.diaobjectid, f.visit) f.diaobjectid, f.visit\n"
+        cursor.execute( "SELECT DISTINCT ON(f.diaobjectid, f.visit) f.diaforcedsourceid\n"
                         "FROM ppdb_alerts_sent a\n"
                         "INNER JOIN ppdb_diasource s ON a.diaobjectid=s.diaobjectid\n"
                         "                           AND a.visit=s.visit\n"
                         "INNER JOIN ppdb_diaforcedsource f ON f.diaobjectid=s.diaobjectid\n"
                         "                                 AND f.midpointmjdtai<=s.midpointmjdtai-1\n"
                         "GROUP BY f.diaobjectid, f.visit\n" )
-        prvfrcedexpected = set( f"{row[0]}_{row[1]}" for row in cursor.fetchall() )
+        prvfrcedexpected = set( row[0] for row in cursor.fetchall() )
         assert prvfrcedexpected == prvfrcedids
 
     # TODO : more checks?

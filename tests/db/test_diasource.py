@@ -181,7 +181,7 @@ class TestDiaSourceBrokerInfo( BaseTestDB ):
     @pytest.fixture
     def basetest_setup( self, obj1_src1 ):
         self.cls = DiaSourceBrokerInfo
-        self.columns = { 'brokername', 'topic', 'diasourceid', 'base_procver_id', 'diaobjectid', 'visit',
+        self.columns = { 'brokername', 'topic', 'diasourceid', 'base_procver_id',
                          'msgtime', 'receivedtime', 'importtime', 'info' }
         self.safe_to_modify = [ 'info', 'msgtime', 'receivedtime', 'importtime' ]
         self.uniques = []
@@ -191,8 +191,6 @@ class TestDiaSourceBrokerInfo( BaseTestDB ):
                                          topic='topic1',
                                          diasourceid=obj1_src1.diasourceid,
                                          base_procver_id=obj1_src1.base_procver_id,
-                                         diaobjectid=obj1_src1.diaobjectid,
-                                         visit=obj1_src1.visit,
                                          msgtime=t0,
                                          receivedtime=t0 + datetime.timedelta( minutes=1 ),
                                          importtime=t0 + datetime.timedelta( hours=1, minutes=1 ),
@@ -203,8 +201,6 @@ class TestDiaSourceBrokerInfo( BaseTestDB ):
                                          topic='topic2',
                                          diasourceid=obj1_src1.diasourceid,
                                          base_procver_id=obj1_src1.base_procver_id,
-                                         diaobjectid=obj1_src1.diaobjectid,
-                                         visit=obj1_src1.visit,
                                          msgtime=t0 + datetime.timedelta( hours=1 ),
                                          receivedtime=t0 + datetime.timedelta( hours=1, minutes=2 ),
                                          importtime=t0 + datetime.timedelta( hours=1, minutes=3 ),
@@ -215,8 +211,6 @@ class TestDiaSourceBrokerInfo( BaseTestDB ):
                        'topic': 'topic3',
                        'diasourceid': obj1_src1.diasourceid,
                        'base_procver_id': obj1_src1.base_procver_id,
-                       'diaobjectid': obj1_src1.diaobjectid,
-                       'visit': obj1_src1.visit,
                        'msgtime': t0 + datetime.timedelta( days=1 ),
                        'receivedtime': t0 + datetime.timedelta( days=1, minutes=1 ),
                        'importtime': t0 + datetime.timedelta( days=1, hours=1, minutes=1 ),

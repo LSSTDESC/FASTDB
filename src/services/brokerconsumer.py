@@ -342,9 +342,6 @@ class BrokerConsumer:
         # a couple fields that are composed from mutiple fileds from the alert
         out['flags'] = cls.build_flags( db.DiaSourceExtra._flags_bits, submsg )
         out['pixelflags'] = cls.build_flags( db.DiaSourceExtra._pixelflags_bits, submsg )
-        # a couple of fields that aren't in the postgres table but that the source importer usees
-        out['diaobjectid'] = submsg['diaObjectId']
-        out['visit'] = submsg['visit']
         return out
 
     @classmethod
@@ -870,7 +867,7 @@ class BrokerConsumerLauncher:
         signal.signal( signal.SIGINT, lambda sig, stack: True )
 
         if 'extraconfig' in brokerinfo and brokerinfo['extraconfig'] is not None:
-            extraconfig = brokerinfo['extraconifg']
+            extraconfig = brokerinfo['extraconfig']
         elif 'extraconfigjson' in brokerinfo and brokerinfo['extraconfigjson'] is not None:
             extraconfig = simplejson.loads( brokerinfo['extraconfigjson'] )
         else:

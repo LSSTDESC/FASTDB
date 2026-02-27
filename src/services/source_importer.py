@@ -41,7 +41,7 @@ class SourceImporter:
     diaforcedsource_fields = [ 'diaforcedsourceid', 'diaobjectid', 'visit', 'band', 'midpointmjdtai',
                                'psfflux', 'psffluxerr', 'ra', 'dec' ]
 
-    diaforcedsource_extra_fields = [ 'diaobjectid', 'visit', 'detector', 'scienceflux', 'sciencefluxerr',
+    diaforcedsource_extra_fields = [ 'diaforcedsourceid', 'detector', 'scienceflux', 'sciencefluxerr',
                                      'timeprocessedmjdtai', 'timewithdrawnmjdtai' ]
 
 
@@ -229,7 +229,7 @@ class SourceImporter:
 
         """
 
-        group = { "_id": "diasource.diasourceid" }
+        group = { "_id": "$diasource.diasourceid" }
         group.update( { k: { "$first": f"$diasource.{k}" } for k in self.diasource_fields } )
         pipeline = [ { "$group": group } ]
         n = self._read_mongo_fields( dbcon, collection, pipeline, self.diasource_fields,
@@ -238,7 +238,7 @@ class SourceImporter:
                                      base_procver_id=self.source_base_processing_version )
         FDBLogger.debug( f"      ...wrote {n} rows to tmp_diasource_import" )
 
-        group = { "_id": "diasource.diasourceid" }
+        group = { "_id": "$diasource.diasourceid" }
         group.update( { k: { "$first": f"$diasource_extra.{k}" } for k in self.diasource_extra_fields } )
         pipeline = [ { "$match": { "diasource_extra": { "$ne": None } } },
                      { "$group": group } ]
@@ -261,7 +261,7 @@ class SourceImporter:
 
         """
 
-        group = { "_id": "prvdiasources.diasourceid" }
+        group = { "_id": "$prvdiasources.diasourceid" }
         group.update( { k: { "$first": f"$prvdiasources.{k}" } for k in self.diasource_fields } )
         pipeline = [ { "$match": { "prvdiasources": { "$ne": None } } },
                      { "$unwind": "$prvdiasources" },
@@ -272,7 +272,7 @@ class SourceImporter:
                                      base_procver_id=self.source_base_processing_version )
         FDBLogger.debug( f"       ...wrote {n} rows to tmp_prvdiasource_import" )
 
-        group = { "_id": "prvdiasources_extra.diasourceid" }
+        group = { "_id": "$prvdiasources_extra.diasourceid" }
         group.update( { k: { "$first": f"$prvdiasources_extra.{k}" } for k in self.diasource_extra_fields } )
         pipeline = [ { "$match": { "prvdiasources_extra": { "$ne": None } } },
                      { "$unwind": "$prvdiasources_extra" },
@@ -296,7 +296,7 @@ class SourceImporter:
 
         """
 
-        group = { "_id": "prvdiaforcedsources.diaforcedsourceid",
+        group = { "_id": "$prvdiaforcedsources.diaforcedsourceid" }
         group.update( { k: { "$first": f"$prvdiaforcedsources.{k}" } for k in self.diaforcedsource_fields } )
         pipeline = [ { "$match": { "prvdiaforcedsources": { "$ne": None } } },
                      { "$unwind": "$prvdiaforcedsources" },
@@ -307,7 +307,7 @@ class SourceImporter:
                                      base_procver_id=self.forcedsource_base_processing_version )
         FDBLogger.debug( f"      ...wrote {n} rows to temp_prvdiaforcedsource_import" )
 
-        group = { "_id": "prvdiaforcedsources_extra.diaforcedsourceid",
+        group = { "_id": "$prvdiaforcedsources_extra.diaforcedsourceid" }
         group.update( { k: { "$first": f"$prvdiaforcedsources_extra.{k}" }
                         for k in self.diaforcedsource_extra_fields } )
         pipeline = [ { "$match": { "prvdiaforcedsources_extra": { "$ne": None } } },
@@ -336,8 +336,7 @@ class SourceImporter:
                  }
         pipeline = [ { "$match": { "broker_info": { "$ne": None } } },
                      { "$group": group } ]
-        n  = self._read_mongo_fields( dbcon, collection, pipeline, [ "brokername", "topic",
-                                                                     "diasourceid", "diaobjectid", "visit",
+        n  = self._read_mongo_fields( dbcon, collection, pipeline, [ "brokername", "topic", "diasourceid",
                                                                      "msgtime", "receivedtime", "importtime",
                                                                      "info" ],
                                       "temp_diasource_brokerinfo_import", "diasource_brokerinfo",
@@ -517,7 +516,7 @@ class SourceImporter:
             #  broker gives us something that a previous broker didn't.
             FDBLogger.debug( "   ...upserting into diaforcedsource_extra" )
             q = sql.SQL( "INSERT INTO diaforcedsource_extra ( SELECT * FROM temp_prvdiaforcedsource_extra_import )\n"
-                          "ON CONFLICT (base_procver_id, diaobjectid, visit) DO UPDATE SET (\n" )
+                          "ON CONFLICT (diaforcedsourceid, base_procver_id) DO UPDATE SET (\n" )
             first = True
             for f in self.diaforcedsource_extra_fields:
                 if first:

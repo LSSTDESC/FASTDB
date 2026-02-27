@@ -12,7 +12,8 @@ services_DATA = services/__init__.py \
 	services/dr_importer.py \
 	services/long_query_runner.py \
 	services/projectsim.py \
-	services/source_importer.py
+	services/source_importer.py \
+	services/mongo_cleaner.py
 
 admin_DATA = admin/csv_to_avsc.py \
 	admin/dump_to_parquet.py \

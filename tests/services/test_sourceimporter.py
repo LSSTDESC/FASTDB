@@ -355,7 +355,6 @@ def test_read_mongo_previous_sources( barf, alerts_30days_sent_and_brokermessage
         with db.DBCon() as conn:
             si.read_mongo_prvsources( conn, collection )
             rows, cols = conn.execute( "SELECT * FROM temp_prvdiasource_import" )
-            coldex = { c: i for i, c in enumerate(cols) }
             assert len(rows) == 65
             exrows, _excols = conn.execute( "SELECT * FROM temp_prvdiasource_extra_import" )
             assert len(exrows) == 65
@@ -364,16 +363,15 @@ def test_read_mongo_previous_sources( barf, alerts_30days_sent_and_brokermessage
         # Check that the mongo aggregation stuff in read_mongo_provsources is
         #   right by doing it long-form in python
 
-        pulledsourceids = set( f"{row[coldex['diaobjectid']]}_{row[coldex['visit']]}" for row in rows )
+        pulledsourceids = set( row[0] for row in rows )
         assert len( pulledsourceids ) == len(rows)
         prvsources = {}
 
         for src in collection.find( {} ):
             if src['prvdiasources'] is not None:
                 for prvsrc in src['prvdiasources']:
-                    prvsrcid = f"{prvsrc['diaobjectid']}_{prvsrc['visit']}"
-                    if prvsrcid not in prvsources:
-                        prvsources[ prvsrcid ] = prvsrc
+                    if prvsrc['diasourceid'] not in prvsources:
+                        prvsources[ prvsrc['diasourceid'] ] = prvsrc
 
         assert set( prvsources.keys() ) == pulledsourceids
 
@@ -436,15 +434,13 @@ def test_read_mongo_brokerinfo( barf, alerts_30days_sent_and_brokermessage_consu
 
         assert len(rows) == 154
 
-        pulledids = set( f"{row[coldex['brokername']]}_{row[coldex['topic']]}_"
-                         f"{row[coldex['diaobjectid']]}_{row[coldex['visit']]}"
+        pulledids = set( f"{row[coldex['brokername']]}_{row[coldex['topic']]}_{row[coldex['diasourceid']]}"
                          for row in rows )
         assert len( pulledids ) == len( rows )
-        msgids = [ f"{c['brokername']}_{c['topic']}_{c['diaobjectid']}_{c['diasource']['visit']}"
+        msgids = [ f"{c['brokername']}_{c['topic']}_{c['diasource']['diasourceid']}"
                    for c in collection.find( {},
-                                             projection={ 'diaobjectid': 1,
-                                                          'topic': 1,
-                                                          'diasource.visit': 1,
+                                             projection={ 'topic': 1,
+                                                          'diasource.diasourceid': 1,
                                                           'brokername': 1 } ) ]
         assert len( msgids ) == len( pulledids )
         assert set( msgids ) == pulledids
