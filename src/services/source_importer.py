@@ -308,17 +308,19 @@ class SourceImporter:
 
         pipeline = [ { "$project": { "diasource": 1, "savetime": 1 } } ]
         self._add_mongo_time_limits_to_pipeline( pipeline, t0, t1 )
-        pipeline.append( { "$group": { "$_id": "$diasource.diasourceid"} } )
+        group = { "_id": "$diasource.diasourceid"}
+        group.update( { k: { "$first": f"$diasource.{k}" } for k in self.diasource_fields } )
+        pipeline.append( { "$group": group } )
         self._read_mongo_fields( dbcon, collection, pipeline, self.diasource_fields,
                                  "temp_diasource_import", "diasource",
                                  batchsize=batchsize, base_procver_id=self.source_base_processing_version )
 
         pipeline = [ { "$project": { "diasource_extra": 1, "savetime": 1 } } ]
         self._add_mongo_time_limits_to_pipeline( pipeline, t0, t1 )
-        pipeline.append( { "$match": { "diasource_extra": { "$ne": None } } } ]
-        group = { "_id": "$diasource.diasourceid" }
+        pipeline.append( { "$match": { "diasource_extra": { "$ne": None } } } )
+        group = { "_id": "$diasource_extra.diasourceid" }
         group.update( { k: { "$first": f"$diasource_extra.{k}" } for k in self.diasource_extra_fields } )
-        pipeline.append( group )
+        pipeline.append( { "$group": group } )
         self._read_mongo_fields( dbcon, collection, pipeline, self.diasource_extra_fields,
                                  "temp_diasource_extra_import", "diasource_extra",
                                  batchsize=batchsize, base_procver_id=self.source_base_processing_version )
@@ -338,11 +340,11 @@ class SourceImporter:
 
         pipeline = [ { "$project": { "prvdiasources": 1, "savetime": 1 } } ]
         self._add_mongo_time_limits_to_pipeline( pipeline, t0, t1 )
-        pipeline.extend( [ { "$match": { "prvdiasorces": { "$ne": None } } },
-                           { "$unwind": $prvdiasources } ] )
+        pipeline.extend( [ { "$match": { "prvdiasources": { "$ne": None } } },
+                           { "$unwind": "$prvdiasources" } ] )
         group = { "_id": "$prvdiasources.diasourceid" }
         group.update( { k: { "$first": f"$prvdiasources.{k}" } for k in self.diasource_fields } )
-        pipeline.append( group )
+        pipeline.append( { "$group": group } )
         self._read_mongo_fields( dbcon, collection, pipeline, self.diasource_fields,
                                  "temp_prvdiasource_import", "diasource",
                                  batchsize=batchsize, base_procver_id=self.source_base_processing_version )
@@ -353,7 +355,7 @@ class SourceImporter:
                            { "$unwind": "$prvdiasources_extra" } ] )
         group = { "_id": "$prvdiasources_extra.diasourceid" }
         group.update( { k: { "$first": f"$prvdiasources_extra.{k}" } for k in self.diasource_extra_fields } )
-        pipeline.append( group )
+        pipeline.append( { "$group":  group } )
         self._read_mongo_fields( dbcon, collection, pipeline, self.diasource_extra_fields,
                                  "temp_prvdiasource_extra_import", "diasource_extra",
                                  batchsize=batchsize, base_procver_id=self.source_base_processing_version )
@@ -372,24 +374,24 @@ class SourceImporter:
         """
 
         pipeline = [ { "$project": { "prvdiaforcedsources": 1, "savetime": 1 } } ]
-        self._add_mongo_time_limts_to_pipeline( pipeline, t0, t1 )
-        pipeline.extend( [ { "$match": { "prvdiaforcedsoruces": { "$ne": None } } },
-                           { "$unwind": "$prvdiaforcedsources" } } ]
+        self._add_mongo_time_limits_to_pipeline( pipeline, t0, t1 )
+        pipeline.extend( [ { "$match": { "prvdiaforcedsources": { "$ne": None } } },
+                           { "$unwind": "$prvdiaforcedsources" } ] )
         group = { "_id": "$prvdiaforcedsources.diaforcedsourceid" }
         group.update( { k: { "$first": f"$prvdiaforcedsources.{k}" } for k in self.diaforcedsource_fields } )
-        pipeline.append( group )
+        pipeline.append( { "$group": group } )
         self._read_mongo_fields( dbcon, collection, pipeline, self.diaforcedsource_fields,
                                  "temp_prvdiaforcedsource_import", "diaforcedsource",
                                  batchsize=batchsize, base_procver_id=self.forcedsource_base_processing_version )
 
         pipeline = [ { "$project": { "prvdiaforcedsources_extra": 1, "savetime": 1 } } ]
         self._add_mongo_time_limits_to_pipeline( pipeline, t0, t1 )
-        pipeline.extend( [ { "$match": { "$prvdiaforcedsources_extra": { "$ne": None } } },
-                           { "$unwind": "$prvdiaforcedsoruces_extra" } ] )
+        pipeline.extend( [ { "$match": { "prvdiaforcedsources_extra": { "$ne": None } } },
+                           { "$unwind": "$prvdiaforcedsources_extra" } ] )
         group = { "_id": "$prvdiaforcedsources_extra.diaforcedsourceid" }
         group.update( { k: { "$first": f"$prvdiaforcedsources_extra.{k}" }
                         for k in self.diaforcedsource_extra_fields } )
-        pipeline.append( group )
+        pipeline.append( { "$group": group } )
         self._read_mongo_fields( dbcon, collection, pipeline, self.diaforcedsource_extra_fields,
                                  "temp_prvdiaforcedsource_extra_import", "diaforcedsource_extra",
                                  batchsize=batchsize, base_procver_id=self.forcedsource_base_processing_version )
@@ -406,13 +408,14 @@ class SourceImporter:
                   "visit": { "$first": "$diasource.visit" },
                   "msgtime": { "$first": "$timestamp" },
                   "receivedtime": { "$first": "$savetime" },
+                  "savetime": { "$first": "$savetime" },
                   "importtime": { "$first": now },
                   "info": { "$first": "$broker_info" }
                  }
         pipeline = []
         self._add_mongo_time_limits_to_pipeline( pipeline, t0, t1 )
         pipeline.extend( [ { "$match": { "broker_info": { "$ne": None } } },
-                           { "$group": group } ]
+                           { "$group": group } ] )
         self._read_mongo_fields( dbcon, collection, pipeline, [ "brokername", "topic", "diasourceid",
                                                                 "msgtime", "receivedtime", "importtime",
                                                                 "info" ],
@@ -727,7 +730,7 @@ class SourceImporter:
                 with db.MG() as mgc:
                     collection = db.get_mongo_collection( mgc, collection_name )
             where collection_name is the name of the collection you want.  Make
-            sure to call the SoruceImporter object's .import method within the
+            sure to call the SorcreImporter object's .import method within the
             same "with db.MG()" block.
 
           t1 : datetime.datetime, default None
