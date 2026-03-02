@@ -105,6 +105,8 @@ spec:
           name: fastdb-sessions
         - mountPath: /code
           name: fastdb-checkout
+        - mountPath: /logs
+          name: fastdb-brokerconsumer-logs
         # - mountPath: /mongodata
         #   name: mongodb-datadir
       dnsConfig: {}
@@ -138,6 +140,10 @@ spec:
           path: /global/cfs/cdirs/desc-td/SOFTWARE/fastdb_deployment/production/sessions
           type: Directory
         name: fastdb-sessions
+      - hostPath:
+          path: /global/cfs/cdirs/desc-td/SOFTWARE/fastdb_deployment/production/brokerconsumer_logs
+          type: Directory
+        name: fastdb-brokerconsumer-logs
       # - name: mongodb-datadir
       #   persistentVolumeClaim:
       #     claimName: desc-fastdb-mongodb-pvc-20260224

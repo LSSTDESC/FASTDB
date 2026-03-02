@@ -131,8 +131,11 @@ class SourceImporter:
             t = datetime.datetime.now( tz=datetime.UTC )
 
         else:
-            if not isinstance( t, datetime.datetime ):
-                raise TypeError( f"Must pass time parameters as datetime; got a {type(t)}" )
+            if isinstance( t, str ):
+                t = datetime.datetime.fromisoformat( t )
+            elif not isinstance( t, datetime.datetime ):
+                raise TypeError( f"Must pass time parameters as datetime or a ISO string that can be "
+                                 f"parsed to a datetime; got a {type(t)}" )
 
             if t.tzinfo is not None:
                 t = t.astimezone( datetime.UTC )
@@ -849,7 +852,7 @@ def main():
     else:
         FDBLogger.setLevel( logging.INFO )
 
-    t1 = SourceImporter.omg_tz( datetime.datetime.fromisoformat( args.t1 ), with_tz=True, now_on_none=False )
+    t1 = SourceImporter.omg_tz( args.t1, with_tz=True, now_on_none=False )
 
     si = SourceImporter( args.object_base_processing_version,
                          args.object_position_base_processing_version,
