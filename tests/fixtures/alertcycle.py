@@ -108,8 +108,9 @@ def alerts_30days_sent_and_brokermessage_consumed( barf, alerts_30days_sent_and_
         brokertopic = f'classifications-{barf}'
         mongodb_collection_base = 'fastdb_alertcycle_test'
 
-        bc = BrokerConsumer( 'kafka-server', f'BrokerConsumer-{barf}', topics=brokertopic, brokername_key='brokerName',
-                             mongodb_collection=mongodb_collection_base, nomsg_sleeptime=1 )
+        bc = BrokerConsumer( 'kafka-server', f'BrokerConsumer-{barf}',
+                             topics=brokertopic, brokername_key='brokerName',
+                             mongodb_collection_base=mongodb_collection_base, nomsg_sleeptime=1 )
         bc.poll( restart_time=datetime.timedelta(seconds=3), max_restarts=1, notopic_sleeptime=2 )
 
         yield datetime.datetime.now( tz=datetime.UTC )
@@ -122,7 +123,7 @@ def alerts_30days_sent_and_brokermessage_consumed( barf, alerts_30days_sent_and_
                             'diaforcedsource', 'diaforcedsource_extra',
                             'thumbnails', 'brokerinfo' ]:
                 if f'{mongodb_collection_base}_{suffix}' in knowncollections:
-                    col = mg.get_collection( f'{mongodb_collection_base}_{suffix}' )
+                    col = mg.collection( f'{mongodb_collection_base}_{suffix}' )
                     col.drop()
             knowncollections = list( mg.db.list_collection_names() )
             for suffix in [ 'diaobject', 'diasource', 'diasource_extra',
@@ -234,7 +235,7 @@ def alerts_90days_sent_received_and_imported( procver_collection ):
             collection = db.get_mongo_collection( mongoclient, 'source_thumbnails' )
             assert collection.count_documents( {} ) == nsrc
 
-        yield nobj, nroot, npos, nsrc, 0, nfrc, ninfo
+        yield nobj, nroot, npos, nsrc, nfrc, ninfo
     finally:
         with db.DB() as conn:
             cursor = conn.cursor()
@@ -312,8 +313,8 @@ def fully_do_alerts_90days_sent_received_and_imported( barf, procver_collection,
                              source_base_processing_version=bpv['realtime_diasource'].id,
                              forcedsource_base_processing_version=bpv['realtime_diaforcedsource'].id,
                              collection_base_name=mongodb_collection_base )
-        nobj, nroot, npos, nsrc, nprvsrc, nfrc, ninfo = si.import_from_mongo()
-        yield nobj, nroot, npos, nsrc, nprvsrc, nfrc, ninfo
+        nobj, nroot, npos, nsrc, nfrc, ninfo = si.import_from_mongo()
+        yield nobj, nroot, npos, nsrc, nfrc, ninfo
     finally:
         with db.DB() as conn:
             cursor = conn.cursor()

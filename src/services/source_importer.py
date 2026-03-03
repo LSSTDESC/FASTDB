@@ -371,7 +371,7 @@ class SourceImporter:
                                      batchsize=batchsize, base_procver_id=self.forcedsource_base_processing_version )
 
 
-    def read_mongo_brokerinfo( self, dbcon, collection, t0=None, t1=None, batchsize=1000 ):
+    def read_mongo_brokerinfo( self, dbcon, t0=None, t1=None, batchsize=1000 ):
         now = datetime.datetime.now( tz=datetime.UTC ).isoformat()
 
         with db.MGCon() as mg:
@@ -382,7 +382,7 @@ class SourceImporter:
                                "diasourceid": "$diasourceid" },
                       "brokername": { "$first": "$brokername" },
                       "topic": { "$first": "$topic" },
-                      "diasourceid": { "$first": "$diasource.diasourceid" },
+                      "diasourceid": { "$first": "$diasourceid" },
                       "msgtime": { "$first": "$timestamp" },
                       "receivedtime": { "$first": "$savetime" },
                       "importtime": { "$first": now },
@@ -498,54 +498,43 @@ class SourceImporter:
             if self.debug_just_read_mongo:
                 return 0, 0
 
-            nsrc = None
-            nprvsrc = None
-            for prv in [ "", "prv" ]:
-                FDBLogger.debug( f"   ...inserting new {prv} sources" )
-                q = ( sql.SQL( "INSERT INTO diasource( SELECT * FROM {table} ) ON CONFLICT DO NOTHING" )
-                      .format( table=sql.Identifier(f"temp_{prv}diasource_import") ) )
-                dbcon.execute( q )
-                if prv == "prv":
-                    nprvsrc = dbcon.cursor.rowcount
-                    FDBLogger.debug( f"      ...inserted {nprvsrc} sources from previous sources" )
+            FDBLogger.debug( f"   ...inserting new sources to temp table from {t0} to {t1}" )
+            dbcon.execute( "INSERT INTO diasource( SELECT * FROM temp_diasource_import ) ON CONFLICT DO NOTHING" )
+            nsrc = dbcon.cursor.rowcount
+            FDBLogger.debug( f"      ...inserted {nsrc} sources" )
+
+            # For diasource extra, we want to update fields that are null, just in case some broker
+            #   gave us information that a previous broker didn't.
+            FDBLogger.debug( "   ...upserting into diasource_extra" )
+            q = sql.SQL( "INSERT INTO diasource_extra ( SELECT * FROM temp_diasource_extra_import )\n"
+                         "ON CONFLICT (diasourceid, base_procver_id) DO UPDATE SET (\n" )
+            first = True
+            for f in self.diasource_extra_fields:
+                if first:
+                    first = False
                 else:
-                    nsrc = dbcon.cursor.rowcount
-                    FDBLogger.debug( f"      ...inserted {nsrc} sources" )
+                    q += sql.SQL( "," )
+                q += sql.Identifier( f )
+            q += sql.SQL( ") = (" )
+            first = True
+            for f in self.diasource_extra_fields:
+                if first:
+                    first = False
+                    q += sql.SQL( "\n  " )
+                else:
+                    q += sql.SQL( ",\n  " )
+                q += sql.SQL( "COALESCE(diasource_extra.{f}, EXCLUDED.{f})" ).format( f=sql.Identifier(f) )
+            q += sql.SQL( "\n)" )
 
-                # For diasource extra, we want to update fields that are null, just in case some broker
-                #   gave us information that a previous broker didn't.
-                FDBLogger.debug( "   ...upserting into diasource_extra" )
-                q = ( sql.SQL( "INSERT INTO diasource_extra ( SELECT * FROM {table} )\n"
-                               "ON CONFLICT (diasourceid, base_procver_id) DO UPDATE SET (\n" )
-                      .format( table=sql.Identifier(f"temp_{prv}diasource_extra_import") ) )
-
-                first = True
-                for f in self.diasource_extra_fields:
-                    if first:
-                        first = False
-                    else:
-                        q += sql.SQL( "," )
-                    q += sql.Identifier( f )
-                q += sql.SQL( ") = (" )
-                first = True
-                for f in self.diasource_extra_fields:
-                    if first:
-                        first = False
-                        q += sql.SQL( "\n  " )
-                    else:
-                        q += sql.SQL( ",\n  " )
-                    q += sql.SQL( "COALESCE(diasource_extra.{f}, EXCLUDED.{f})" ).format( f=sql.Identifier(f) )
-                q += sql.SQL( "\n)" )
-
-                dbcon.execute( q )
-                nextra = dbcon.cursor.rowcount
-                FDBLogger.debug( f"      ...hit {nextra} rows, but I'm not 100% sure what that means" )
+            dbcon.execute( q )
+            nextra = dbcon.cursor.rowcount
+            FDBLogger.debug( f"      ...hit {nextra} rows, but I'm not 100% sure what that means" )
 
             if commit:
                 FDBLogger.debug( "   ...comitting sources" )
                 dbcon.commit()
 
-            return nsrc, nprvsrc
+            return nsrc
 
     def import_forcedsources( self, t0=None, t1=None, batchsize=10000, dbcon=None, commit=True ):
         """Write docs.
@@ -652,8 +641,8 @@ class SourceImporter:
 
 
         # Going to use cutoutDifference as the canary
-        pipeline.extend( [ { "$group": { "_id": "$diasource.diasourceid",
-                                         "diasourceid": { "$first": "$diasource.diasourceid" },
+        pipeline.extend( [ { "$group": { "_id": "$diasourceid",
+                                         "diasourceid": { "$first": "$diasourceid" },
                                          "base_procver_id": { "$first": str( self.source_base_processing_version ) },
                                          "cutoutdifference": { "$first": "$cutoutdifference" },
                                          "cutoutscience": { "$first": "$cutoutscience" },
@@ -727,14 +716,14 @@ class SourceImporter:
                 FDBLogger.debug( "Importing objects..." )
                 nobj, nroot, npos = self.import_objects( t0, t1, dbcon=dbcon, commit=False )
                 FDBLogger.debug( "Importing sources..." )
-                nsrc, nprvsrc = self.import_sources( t0, t1, dbcon=dbcon, commit=False )
+                nsrc = self.import_sources( t0, t1, dbcon=dbcon, commit=False )
                 FDBLogger.debug( "Importing forcedsources..." )
                 nfrc = self.import_forcedsources( t0, t1, dbcon=dbcon, commit=False )
                 FDBLogger.debug( "Importing brokerinfos..." )
                 ninfo = self.import_brokerinfo( t0, t1, dbcon=dbcon, commit=False )
 
 
-                with db.MG() as mg:
+                with db.MGCon() as mg:
                     FDBLogger.debug( "Importing cutouts..." )
                     mongosession = self.import_cutouts( mg, t0, t1, commit=False )
 
@@ -761,7 +750,7 @@ class SourceImporter:
 
                 FDBLogger.debug( "Done." )
 
-            return nobj, nroot, npos, nsrc, nprvsrc, nfrc, ninfo
+            return nobj, nroot, npos, nsrc, nfrc, ninfo
         except Exception:
             strio = io.StringIO()
             traceback.print_exc( file=strio )

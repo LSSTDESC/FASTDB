@@ -348,7 +348,10 @@ class DBCon:
         """
         self.execute_nofetch( q, subdict, echo=echo, explain=explain, analyze=False )
         if self.curcursorisdict:
-            return self.cursor.fetchall()
+            if self.cursor.description is None:
+                return None
+            else:
+                return self.cursor.fetchall()
         else:
             if self.cursor.description is None:
                 return None, None
