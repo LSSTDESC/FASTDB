@@ -218,6 +218,32 @@ def test_send_alerts( snana_fits_ppdb_loaded ):
         consumer.poll_loop( handler=lambda m: msgs.extend( m ), stopafternsleeps=2 )
         assert len(msgs) == 77
 
+        # 77 total object records, 12 of which are unique
+        objids = [ fastavro.schemaless_reader(io.BytesIO(m.value()), schema['alert'])['diaObject']['diaObjectId']
+                   for m in msgs ]
+        assert len( objids ) == 77
+        assert len( set( objids ) ) == 12
+
+        # 77 total source records, all of which are unique
+        srcids = [ fastavro.schemaless_reader(io.BytesIO(m.value()), schema['alert'])['diaSourceId']
+                   for m in msgs ]
+        assert len( srcids ) == 77
+        assert len( set( srcids ) ) == 77
+
+        # 385 total previous sources (65 unique), 691 total previous forced sources (148 unique)
+        prvsrcids = []
+        prvfrcedids = []
+        for m in msgs:
+            parsed = fastavro.schemaless_reader(io.BytesIO(m.value()), schema['alert'])
+            if parsed['prvDiaSources'] is not None:
+                prvsrcids.extend( [ p['diaSourceId'] for p in parsed['prvDiaSources'] ] )
+            if parsed['prvDiaForcedSources'] is not None:
+                prvfrcedids.extend( [ p['diaForcedSourceId'] for p in parsed['prvDiaForcedSources' ] ] )
+        assert len( prvsrcids ) == 385
+        assert len( set( prvsrcids ) ) == 65
+        assert len( prvfrcedids ) == 691
+        assert len( set( prvfrcedids ) ) == 148
+
         # Make sure that the "alerts sent" table matches what's in the messages
         # see Issue #49
         alertids = [ fastavro.schemaless_reader(io.BytesIO(m.value()), schema['alert'])['diaSource']['visit']

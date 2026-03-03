@@ -1,6 +1,7 @@
 __all__ = [ "FDBLogger", "parse_bool", "env_as_bool", "asUUID", "isSequence",
             "float_or_none_from_dict", "int_or_none_from_dict",
             "datetime_or_none_from_dict_mjd_or_timestring", "mjd_or_none_from_dict_mjd_or_timestring",
+            "datetime_to_utc",
             "parse_sexigesimal", "float_or_none_from_dict_float_or_dms", "float_or_none_from_dict_float_or_hms",
              "mjd_from_mjd_or_datetime_or_timestring", "get_alert_schema", "procver_id" ]
 
@@ -8,6 +9,7 @@ import sys
 import os
 import re
 import datetime
+import pytz
 import pathlib
 import logging
 import numbers
@@ -344,6 +346,35 @@ def mjd_from_mjd_or_datetime_or_timestring( d ):
         return d
     else:
         return astropy.time.Time( rkwebutil.asDateTime( d ), format='datetime' ).mjd
+
+
+def datetime_to_utc( t, with_tz=False, now_on_none=False ):
+    # mongodb doesn't seem to know about timezones and stores everythning UTC.
+    # Try to adapt.  If we get a timezone unaware datetime, assume it's already UTC.
+    # https://xkcd.com/1883/
+
+    if t is None:
+        if not now_on_none:
+            return None
+
+        t = datetime.datetime.now( tz=datetime.UTC )
+
+    else:
+        if isinstance( t, str ):
+            t = datetime.datetime.fromisoformat( t )
+        elif not isinstance( t, datetime.datetime ):
+            raise TypeError( f"Must pass time parameters as datetime or a ISO string that can be "
+                             f"parsed to a datetime; got a {type(t)}" )
+
+        if t.tzinfo is not None:
+            t = t.astimezone( datetime.UTC )
+        else:
+            t= pytz.timezone( 'UTC' ).localize( t )
+
+    if not with_tz:
+        t.replace( tzinfo=None )
+
+    return t
 
 
 def get_alert_schema( schemadir=None ):

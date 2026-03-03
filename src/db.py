@@ -40,6 +40,7 @@ from util import FDBLogger
 #
 # We should replace them with configurable options.
 _echoqueries = False
+_dumpmongopipeline = False
 _alwaysexplain = False
 _alwaysanalyze = False
 
@@ -404,6 +405,54 @@ def get_mongo_collection( mongoclient, collection_name ):
     mongodb = getattr( mongoclient, os.getenv( "MONGODB_DBNAME" ) )
     collection = getattr( mongodb, collection_name )
     return collection
+
+
+class MGCon:
+    def __init__( self, mg=None, readonly=False ):
+        global _dumpmongopipeline
+
+        if mg is not None:
+            if isinstance( mg, MGCon ):
+                self.client = mg.client
+            elif isinstance( mg, pymongo.MongClient ):
+                self.client = mg
+            else:
+                raise TypeError( f"mg must be None, a MGCon, or a pymongo.MongoClient, not a {type(mg)}" )
+            self._client_is_mine = False
+        else:
+            host = os.getenv( "MONGODB_HOST" )
+            dbname = os.getenv( "MONGODB_DBNAME" )
+            if readonly:
+                user = os.getenv( "MONGODB_ALERT_READER_USER" )
+                password = os.getenv( "MONGODB_ALERT_READER_PASSWD" )
+                errtext = "MONGODB_ALERT_READER_USER, MONGODB_ALERT_READER_PASSWD"
+            else:
+                user = os.getenv( "MONGODB_ALERT_WRITER_USER" )
+                password = os.getenv( "MONGODB_ALERT_WRITER_PASSWD" )
+                errtext = "MONGODB_ALERT_WRITER_USER, MONGODB_ALERT_WRITER_PASSWD"
+            if any( i is None for i in [ host, dbname, user, password ] ):
+                raise RuntimeError( f"Failed to make mongo client; make sure all env vars are set: "
+                                    f"MONGODB_HOST, MONGODB_DBNAME, {errtext} " )
+            self.client = pymongo.MongoClient( f"mongodb://{user}:{password}@{host}:27017/"
+                                               f"{dbname}?authSource={dbname}" )
+            self._client_is_mine = True
+
+        self._dumpmongopipeline = _dumpmongopipeline
+        self.db = getattr( self.client, os.getenv( "MONGODB_DBNAME" ) )
+
+    def __enter__( self ):
+        return self
+
+    def __exit__( self, type, value, traceback ):
+        self.close()
+
+    def close( self ):
+        if self._client_is_mine:
+            self.client.close()
+
+    def collection( self, collection_name ):
+        return getattr( self.db, collection_name )
+
 
 
 # ======================================================================
@@ -1430,6 +1479,8 @@ class DiaSourceExtra( DBBase ):
     _tablemeta = None
     _pk = [ 'diasourceid', 'base_procver_id' ]
 
+    # This is a mapping of the bit in the flags field
+    #   to the boolean in the lsst v10 alert
     _flags_bits = { 0x00000001: 'centroid_flag',
                     0x00000002: 'apFlux_flag',
                     0x00000004: 'apFlux_flag_apertureTruncated',
@@ -1450,6 +1501,8 @@ class DiaSourceExtra( DBBase ):
                     0x00020000: 'glint_trail',
                    }
 
+    # This is a mapping of the bit in the pixelflags field
+    #   to the boolean in the lsst v10 alert
     _pixelflags_bits = { 0x00000001: 'pixelFlags',
                          0x00000002: 'pixelFlags_bad',
                          0x00000004: 'pixelFlags_cr',

@@ -8,7 +8,7 @@ brokers:
     server: kafka-server
     topics: [ "classifications-{barf}" ]
     groupid: test-{barf}
-    collection: fastdb_{barf}
+    collection: fastdb_test
     loggername: TEST
     loggername_prefix: ""
     updatetopics: false

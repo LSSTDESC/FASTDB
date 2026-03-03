@@ -1,5 +1,4 @@
 import pytest
-import os
 import time
 import math
 import datetime
@@ -11,77 +10,66 @@ from util import logger, env_as_bool
 import db
 
 
-def check_mongodb( mongoclient, dbname, collection ):
-    brokermessages = getattr( mongoclient, dbname )
+def check_mongodb( collection_base_name ):
+    base = collection_base_name
+    with db.MGCon( readonly=True ) as mg:
+        expectedcollections = [ f'{base}_{s}' for s in
+                                [ 'diaobject', 'diasource', 'diasource_extra',
+                                  'diaforcedsource', 'diaforcedsource_extra',
+                                  'thumbnails', 'brokerinfo' ] ]
+        assert all( i in mg.db.list_collection_names() for i in expectedcollections )
 
-    assert collection in brokermessages.list_collection_names()
+        # 154 sources + 770 previous sources, only 77 unique.  (154 = 2*77... two broker classifiers)
+        #   (Sadly, we're not really testing previous source import here, becasue of how
+        #   the fixtures are put together, the only previous sources we had were in earlier alerts.)
+        msgcursor = mg.collection( f'{base}_diasource' ).find( {}, projection={'diasourceid': 1 } )
+        srcids = [ c['diasourceid'] for c in msgcursor ]
+        assert len( srcids ) == 154 + 770
+        msgcursor = mg.collection( f'{base}_diasource_extra' ).find( {}, projection={'diasourceid': 1 } )
+        extsrcids = [ c['diasourceid'] for c in msgcursor ]
+        assert len( extsrcids ) == len( srcids )
+        srcids = set( srcids )
+        extsrcids = set( extsrcids )
+        assert len( srcids ) == 77
+        assert extsrcids == srcids
 
-    coll = getattr( brokermessages, collection )
+        # 1382 previous forced sources, only 148 unique
+        msgcursor = mg.collection( f'{base}_diaforcedsource' ).find( {}, projection={'diaforcedsourceid': 1} )
+        frcedids = [ c['diaforcedsourceid'] for c in msgcursor ]
+        assert len( frcedids ) == 1382
+        msgcursor = mg.collection( f'{base}_diaforcedsource_extra' ).find( {}, projection={'diaforcedsourceid': 1} )
+        extfrcedids = [ c['diaforcedsourceid'] for c in msgcursor ]
+        assert len( extfrcedids ) == len( frcedids )
+        frcedids = set( frcedids )
+        extfrcedids = set( extfrcedids )
+        assert len( frcedids ) == 148
+        assert extfrcedids == frcedids
 
-    # 77 diasources in the database, two classifiers per alert = 154 broker messages
-    assert coll.count_documents({}) == 154
+        for broker in [ "FakeBroker-Nugent", "FakeBroker-Random" ]:
+            msgcursor = mg.collection( f'{base}_brokerinfo' ).find( { "brokername": broker },
+                                                                    projection={'diasourceid': 1} )
+            bksrcids = [ c['diasourceid'] for c in msgcursor ]
+            assert len( bksrcids ) == len( srcids )
+            bksrcids = set( bksrcids)
+            assert len( bksrcids ) == len( srcids )
+            # This next one would not be true if we had actually imported anything from previous sources
+            assert bksrcids == srcids
 
-    # Pull out the diaSourceId from all the messages, make sure we got the right amount
-    msgcursor = coll.find( {}, projection={ 'diasource.diasourceid': 1 } )
-    srcids = [ c['diasource']['diasourceid'] for c in msgcursor ]
-    assert len(srcids) == 154
-    srcids = set( srcids )
-    assert len(srcids) == 77
-
-    # Pull out the previous diasources
-
-    msgcursor = coll.aggregate( [ { "$unwind": "$prvdiasources" } ] )
-    prvsrcids = [ c['prvdiasources']['diasourceid'] for c in msgcursor ]
-    assert len(prvsrcids) == 770
-    # But they're mostly redundant
-    prvsrcids = set( prvsrcids )
-    assert len(prvsrcids) == 65
-
-    msgcursor = coll.aggregate( [ { "$unwind": "$prvdiasources_extra" } ] )
-    prvsrcextraids = [ c['prvdiasources_extra']['diasourceid'] for c in msgcursor ]
-    assert len(prvsrcextraids) == 770
-    prvsrcextraids = set( prvsrcextraids )
-    assert prvsrcextraids == prvsrcids
-
-    # Pull out the previous diaforcedsources
-
-    msgcursor = coll.aggregate( [ { "$unwind": "$prvdiaforcedsources" } ] )
-    prvfrcedids = [ c['prvdiaforcedsources']['diaforcedsourceid'] for c in msgcursor ]
-    assert len(prvfrcedids) == 1382
-    prvfrcedids = set( prvfrcedids )
-    assert len(prvfrcedids) == 148
-
-    msgcursor = coll.aggregate( [ { "$unwind": "$prvdiaforcedsources_extra" } ] )
-    prvfrcedextraids = [ c['prvdiaforcedsources_extra']['diaforcedsourceid'] for c in msgcursor ]
-    assert len(prvfrcedextraids) == 1382
-    prvfrcedextraids = set( prvfrcedextraids )
-    assert prvfrcedextraids == prvfrcedids
-
-    msgcursor = list( coll.find( { "brokername": "FakeBroker-Nugent" },
-                                 projection={ 'diasource.diasourceid': 1, 'brokername': 1 } ) )
-    assert all( c['brokername'] == 'FakeBroker-Nugent' for c in msgcursor )
-    nugentsrces = [ c['diasource']['diasourceid'] for c in msgcursor ]
-    assert len(nugentsrces) == 77
-    nugentsrces = set( nugentsrces )
-    assert len(nugentsrces) == 77
-    msgcursor = list( coll.find( { "brokername": "FakeBroker-Random" },
-                                 projection={ 'diasource.diasourceid': 1, 'brokername': 1 } ) )
-    assert all( c['brokername'] == 'FakeBroker-Random' for c in msgcursor )
-    randomsrces = [ c['diasource']['diasourceid'] for c in msgcursor ]
-    assert len(randomsrces) == 77
-    randomsrces = set( randomsrces )
-    assert randomsrces == nugentsrces
-
-    # Make sure that the prvdiasource whose flux we set to null in the fakebroker is now NaN
-    thing = list( coll.aggregate( [ { '$match': { 'diasource.diasourceid': 155218500003 } },
-                                    { '$project': { 'prvdiasources': 1 } } ] ) )
-    assert len(thing) == 2 # One for each fakebroker classifier
-    prv = thing[0]['prvdiasources']
-    assert len(prv) > 1
-    assert math.isnan( prv[0]['psfflux'] )
-    assert math.isnan( prv[0]['psffluxerr'] )
-    assert not any( math.isnan( prv[i]['psfflux'] ) for i in range( 1, len(prv) ) )
-    assert not any( math.isnan( prv[i]['psffluxerr'] ) for i in range( 1, len(prv) ) )
+        # Make sure that the artifical NULLs that fakebroker inserted got properly converted to NaN
+        # (This is really here to make sure that we'll be putting the JSON importer through its workout
+        # when we test sourceimporter.)
+        coll = mg.collection( f'{base}_diaforcedsource' )
+        msgcursor = coll.find( { 'msg_diasourceid': 155218500013 } )
+        num_nans = 0
+        num_nones = 0
+        for c in msgcursor:
+            if math.isnan( c['psfflux'] ) and math.isnan( c['psffluxerr'] ):
+                num_nans += 1
+            if ( c['psfflux'] is None ) and ( c['psffluxerr'] is None ):
+                num_nones = 0
+        # Two instances, one for each fakebroker classifier
+        assert num_nans == 2
+        assert num_nones == 0
 
     # Make sure sources and previous sources match what's expected
     #  (Sadly, because of how this test works, there won't be any
@@ -92,8 +80,7 @@ def check_mongodb( mongoclient, dbname, collection ):
         cursor = conn.cursor()
         cursor.execute( "SELECT s.diasourceid FROM ppdb_alerts_sent p\n"
                         "INNER JOIN ppdb_diasource s ON p.diaobjectid=s.diaobjectid AND p.visit=s.visit" )
-        alertssent = set( row[0] for row in cursor.fetchall() )
-        assert alertssent == srcids
+        srcexpected = set( row[0] for row in cursor.fetchall() )
 
         # For LSST, diaobjectid is not reliable and cannot be used this way.
         # But, its OK for the sample data set we have. And, since when I
@@ -108,8 +95,8 @@ def check_mongodb( mongoclient, dbname, collection ):
                         "INNER JOIN ppdb_diasource s ON s.diaobjectid=sprime.diaobjectid\n"
                         "                           AND s.midpointmjdtai<sprime.midpointmjdtai\n"
                         "GROUP BY s.diaobjectid, s.visit\n" )
-        prvsrcexpected = set( row[0] for row in cursor.fetchall() )
-        assert prvsrcexpected == prvsrcids
+        srcexpected = srcexpected.union( row[0] for row in cursor.fetchall() )
+        assert srcexpected == srcids
 
         cursor.execute( "SELECT DISTINCT ON(f.diaobjectid, f.visit) f.diaforcedsourceid\n"
                         "FROM ppdb_alerts_sent a\n"
@@ -119,45 +106,54 @@ def check_mongodb( mongoclient, dbname, collection ):
                         "                                 AND f.midpointmjdtai<=s.midpointmjdtai-1\n"
                         "GROUP BY f.diaobjectid, f.visit\n" )
         prvfrcedexpected = set( row[0] for row in cursor.fetchall() )
-        assert prvfrcedexpected == prvfrcedids
+        assert prvfrcedexpected == frcedids
 
     # TODO : more checks?
 
 
-def cleanup_mongodb( mongoclient_rw, dbname, collection ):
-    brokermessages = getattr( mongoclient_rw, dbname )
-    if collection in brokermessages.list_collection_names():
-        coll = getattr( brokermessages, collection )
-        coll.drop()
-    assert collection not in brokermessages.list_collection_names()
+def cleanup_mongodb( collection_base_name ):
+    with db.MGCon() as mg:
+        colnames = [ f'{collection_base_name}_{s}' for s in
+                     [ 'diaobject', 'diasource', 'diasource_extra',
+                       'diaforcedsource', 'diaforcedsource_extra',
+                       'thumbnails', 'brokerinfo' ] ]
+        for c in colnames:
+            if c in mg.db.list_collection_names():
+                mg.collection( c ).drop()
+        assert not any( c in mg.db.list_collection_names() for c in colnames )
 
 
-def test_BrokerConsumer( barf, alerts_30days_sent_and_classified, mongoclient, mongoclient_rw ):
+def test_BrokerConsumer( barf, alerts_30days_sent_and_classified ):
     brokertopic = f'classifications-{barf}'
-    dbname = os.getenv( 'MONGODB_DBNAME' )
-    assert dbname is not None
-    collection = f'fastdb_{barf}'
 
     try:
         # First, make sure it times out properly if it never sees a topic
         t0 = time.perf_counter()
         bc = BrokerConsumer( 'kafka-server', f'test_BrokerConsumer_{barf}-0', topics='this_topic_does_not_exist',
-                             brokername_key='brokerName', mongodb_collection=collection, nomsg_sleeptime=1 )
+                             brokername_key='brokerName', nomsg_sleeptime=1, mongodb_collection_base='fastdb_test' )
         bc.poll( restart_time=datetime.timedelta(seconds=3), max_restarts=2, notopic_sleeptime=2 )
         assert time.perf_counter() - t0 < 10
+
+        # (Make sure nothing got saved in mongo.)
+        with db.MGCon() as mg:
+            colnames = [ f'fastdb_test_{s}' for s in
+                         [ 'diaobject', 'diasource', 'diasource_extra',
+                           'diaforcedsource', 'diaforcedsource_extra',
+                           'thumbnails', 'brokerinfo' ] ]
+            assert all( mg.collection(c).count_documents({}) == 0 for c in colnames )
 
         # Now make sure it can really poll
         t0 = time.perf_counter()
         bc = BrokerConsumer( 'kafka-server', f'test_BrokerConsumer_{barf}-1', topics=brokertopic,
-                             brokername_key='brokerName', mongodb_collection=collection, nomsg_sleeptime=1 )
+                             brokername_key='brokerName', nomsg_sleeptime=1, mongodb_collection_base='fastdb_test' )
         bc.poll( restart_time=datetime.timedelta(seconds=10), max_restarts=0, notopic_sleeptime=2 )
         assert time.perf_counter() - t0 < 20
 
         # Check that the mongo database got populated
-        check_mongodb( mongoclient, dbname, collection )
+        check_mongodb( 'fastdb_test' )
 
     finally:
-        cleanup_mongodb( mongoclient_rw, dbname, collection )
+        cleanup_mongodb( 'fastdb_test' )
 
 
 # This next test depends on the file brokerconsumer.yaml in this
@@ -165,11 +161,7 @@ def test_BrokerConsumer( barf, alerts_30days_sent_and_classified, mongoclient, m
 #   dockerfile created by docker-compose.yaml at the root of the
 #   git checkout.
 #   (i.e., it looks for file /code/tests/services/brokerconsumer.yaml).
-def test_BrokerConsumerLauncher( barf, alerts_30days_sent_and_classified, mongoclient, mongoclient_rw ):
-    dbname = os.getenv( 'MONGODB_DBNAME' )
-    assert dbname is not None
-    collection = f'fastdb_{barf}'
-
+def test_BrokerConsumerLauncher( barf, alerts_30days_sent_and_classified ):
     proc = None
     try:
         def launch_launcher():
@@ -191,12 +183,12 @@ def test_BrokerConsumerLauncher( barf, alerts_30days_sent_and_classified, mongoc
         proc = None
 
         # Check that the mongo database got populated
-        check_mongodb( mongoclient, dbname, collection )
+        check_mongodb( 'fastdb_test' )
 
     finally:
         if proc is not None:
             proc.kill()
-        cleanup_mongodb( mongoclient_rw, dbname, collection )
+        cleanup_mongodb( 'fastdb_test' )
 
 
 # TODO : write tests that use the "60days" fixtures?
@@ -210,31 +202,37 @@ def test_BrokerConsumerLauncher( barf, alerts_30days_sent_and_classified, mongoc
 #  topics that have alerts in them
 
 @pytest.mark.skipif( not env_as_bool('RUN_FINK_TESTS'), reason='RUN_FINK_TESTS is not set' )
-def test_fink( mongoclient, mongoclient_rw ):
+def test_fink():
     barf = "".join( random.choices( 'abcdefghijklmnopqrstuvwxyz', k=6 ) )
     brokertopic = 'fink_sn_near_galaxy_candidate_lsst'
-    dbname = os.getenv( 'MONGODB_DBNAME' )
-    assert dbname is not None
-    collection = f'fastdb_{barf}'
 
     try:
         t0 = time.perf_counter()
-        fc = FinkConsumer( grouptag=barf, fink_topic=brokertopic, mongodb_collection=collection,
+        fc = FinkConsumer( grouptag=barf, fink_topic=brokertopic, mongodb_collection_base='fastdb_fink_test',
                            nomsg_sleeptime=1, batch_size=10 )
         fc.poll( restart_time=datetime.timedelta(seconds=10), max_restarts=0, notopic_sleeptime=2, max_msgs=10 )
         t1 = time.perf_counter()
         logger.info( f"Fink poll finished in {t1-t0} seconds." )
 
-        mdb = getattr( mongoclient, dbname )
-        assert collection in mdb.list_collection_names()
-        coll = getattr( mdb, collection )
+        with db.MGCon() as mg:
+            expectedcollections = [ f'fastdb_fink_test_{s}' for s in
+                                    [ 'diaobject', 'diasource', 'diasource_extra',
+                                      'diaforcedsource', 'diaforcedsource_extra',
+                                      'thumbnails', 'brokerinfo' ] ]
+            assert all( i in mg.db.list_collection_names() for i in expectedcollections )
+            col = mg.collection( 'fastdb_fink_test_brokerinfo' )
+            assert col.count_documents({}) >= 10
+            srcids = set()
+            for doc in col.find( {} ):
+                assert doc['brokername'] == 'Fink'
+                assert doc['topic'] == brokertopic
+                srcids.add( doc['diasourceid'] )
 
-        assert coll.count_documents({}) >= 10
-        for doc in coll.find( {} ):
-            assert doc['brokername']== 'Fink'
+            col = mg.collection( 'fastdb_fink_test_diasource' )
+            assert set( c['diasourceid'] for c in col.find({}) ) == srcids
+
             # Check other stuff?
 
     finally:
-        mdb = getattr( mongoclient_rw, dbname )
-        coll = getattr( mdb, collection )
-        coll.delete_many( {} )
+        with db.MGCon() as mg:
+            db.collection( 'fastdb_fink_test' ).drop()

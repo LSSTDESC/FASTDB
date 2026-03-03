@@ -1,6 +1,5 @@
 import pytest
 import sys
-import os
 import pathlib
 import random
 import time
@@ -105,29 +104,31 @@ def alerts_30days_sent_and_classified( alerts_30days_sent, fakebroker ):
 # This one is slow because it includes the previous one, and has its own sleeps
 @pytest.fixture( scope='module' )
 def alerts_30days_sent_and_brokermessage_consumed( barf, alerts_30days_sent_and_classified ):
-    mongodb_dbname = None
-    mongodb_collection = None
-
     try:
         brokertopic = f'classifications-{barf}'
-        mongodb_dbname = os.getenv( 'MONGODB_DBNAME' )
-        mongodb_collection = f'fastdb_{barf}'
+        mongodb_collection_base = 'fastdb_alertcycle_test'
 
         bc = BrokerConsumer( 'kafka-server', f'BrokerConsumer-{barf}', topics=brokertopic, brokername_key='brokerName',
-                             mongodb_collection=mongodb_collection, nomsg_sleeptime=1 )
+                             mongodb_collection=mongodb_collection_base, nomsg_sleeptime=1 )
         bc.poll( restart_time=datetime.timedelta(seconds=3), max_restarts=1, notopic_sleeptime=2 )
 
         yield datetime.datetime.now( tz=datetime.UTC )
 
     finally:
         # Clear out the mongodb collection that BrokerConsumer will have filled
-        if ( mongodb_dbname is not None ) and ( mongodb_collection is not None ):
-            with db.MG() as mongoclient:
-                brokermessages = getattr( mongoclient, mongodb_dbname )
-                if mongodb_collection in brokermessages.list_collection_names():
-                    coll = getattr( brokermessages, mongodb_collection )
-                    coll.drop()
-                assert mongodb_collection not in brokermessages.list_collection_names()
+        with db.MGCon() as mg:
+            knowncollections = list( mg.db.list_collection_names() )
+            for suffix in [ 'diaobject', 'diasource', 'diasource_extra',
+                            'diaforcedsource', 'diaforcedsource_extra',
+                            'thumbnails', 'brokerinfo' ]:
+                if f'{mongodb_collection_base}_{suffix}' in knowncollections:
+                    col = mg.get_collection( f'{mongodb_collection_base}_{suffix}' )
+                    col.drop()
+            knowncollections = list( mg.db.list_collection_names() )
+            for suffix in [ 'diaobject', 'diasource', 'diasource_extra',
+                            'diaforcedsource', 'diaforcedsource_extra',
+                            'thumbnails', 'brokerinfo' ]:
+                assert f'{mongodb_collection_base}_{suffix}' not in knowncollections
 
 
 # The purpose of this fixture is to send out more alerts after
@@ -150,19 +151,19 @@ def alerts_60moredays_sent_and_brokermessage_consumed( barf, alerts_60moredays_s
 
     try:
         brokertopic = f'classifications-{barf}'
-        mongodb_collection = f'fastdb_{barf}'
+        mongodb_collection_base= 'fastdb_alertcycle_test'
 
         # Using the same group_id as the last BrokerConsumer, so it should
         #   pick up messages where the last one left off... if kafka
         #   works as I understand.
         bc = BrokerConsumer( 'kafka-server', f'BrokerConsumer-{barf}', topics=brokertopic, brokername_key='brokerName',
-                             mongodb_collection=mongodb_collection, nomsg_sleeptime=1 )
+                             mongodb_collection_base=mongodb_collection_base, nomsg_sleeptime=1 )
         bc.poll( restart_time=datetime.timedelta(seconds=3), max_restarts=1, notopic_sleeptime=2 )
 
         yield datetime.datetime.now( tz=datetime.UTC )
 
     finally:
-        # Don't clear out the mongodb collection, because the
+        # Don't clear out the mongodb collections, because the
         # alerts_30days_sent_and_brokermessage_consumed fixture
         # (which is required by the alerts_60moredays_sent fixture
         # that this fixtured rquire) will do that cleanup.
@@ -247,9 +248,8 @@ def alerts_90days_sent_received_and_imported( procver_collection ):
             cursor.execute( "DELETE FROM root_diaobject" )
             # cursor.execute( "DELETE FROM host_galaxy" )
             conn.commit()
-        with db.MG() as mongoclient:
-            collection = db.get_mongo_collection( mongoclient, "source_thumbnails" )
-            collection.delete_many( {} )
+        with db.MGCon() as mg:
+            mg.collection( "source_thumbnails" ).delete_many( {} )
 
 
 # The fixture below should have (approximately!) the same result as the
@@ -305,16 +305,14 @@ def fully_do_alerts_90days_sent_received_and_imported( barf, procver_collection,
                                                        alerts_60moredays_sent_and_brokermessage_consumed ):
     bpv, _pv = procver_collection
     from services.source_importer import SourceImporter
-    collection_name = f'fastdb_{barf}'
+    mongodb_collection_base = 'fastdb_alertcycle_test'
     try:
-        si = SourceImporter( bpv['realtime'].id,
-                             bpv['realtime_diaobject_position_60000'].id,
-                             bpv['realtime_diasource'].id,
-                             bpv['realtime_diaforcedsource'].id,
-                             None )
-        with db.MG() as mongoclient:
-            collection = db.get_mongo_collection( mongoclient, collection_name )
-            nobj, nroot, npos, nsrc, nprvsrc, nfrc, ninfo = si.import_from_mongo( collection )
+        si = SourceImporter( object_base_processing_version=bpv['realtime'].id,
+                             object_position_base_processing_version=bpv['realtime_diaobject_position_60000'].id,
+                             source_base_processing_version=bpv['realtime_diasource'].id,
+                             forcedsource_base_processing_version=bpv['realtime_diaforcedsource'].id,
+                             collection_base_name=mongodb_collection_base )
+        nobj, nroot, npos, nsrc, nprvsrc, nfrc, ninfo = si.import_from_mongo()
         yield nobj, nroot, npos, nsrc, nprvsrc, nfrc, ninfo
     finally:
         with db.DB() as conn:
@@ -329,8 +327,9 @@ def fully_do_alerts_90days_sent_received_and_imported( barf, procver_collection,
             cursor.execute( "DELETE FROM root_diaobject" )
             # cursor.execute( "DELETE FROM host_galaxy" )
             cursor.execute( "DELETE FROM diasource_import_time WHERE collection=%(col)s",
-                            { 'col': collection_name } )
+                            { 'col': mongodb_collection_base } )
             conn.commit()
         with db.MG() as mongoclient:
             collection = db.get_mongo_collection( mongoclient, "source_thumbnails" )
             collection.delete_many( {} )
+        # Other fixtures will remove the mongodb collections that brokerconsumer made

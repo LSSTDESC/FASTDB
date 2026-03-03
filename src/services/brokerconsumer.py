@@ -14,10 +14,9 @@ import multiprocessing
 import signal
 import simplejson
 
-import numpy as np
 import confluent_kafka
 import fastavro
-from pymongo import MongoClient
+import pymongo
 
 import db
 from kafka_consumer import KafkaConsumer
@@ -35,32 +34,57 @@ _logdir = pathlib.Path( os.getenv( 'LOGDIR', '/logs' ) )
 class BrokerConsumer:
     """A class for consuming broker messages from brokers.
 
-    It stuffs the alerts into the mongodb.  Previously, what went into
-    the mongodb was what was in the fastdb*BrokerMessage.avsc schema.
-    However, we can't expect that from every broker, so we will need to
-    write alert_wrangler for each broker.  (*If* the broker returns
-    a LSST alert packet with additional fields, then the standard one
-    may work.  This is the case with FInk; see FinkBroker below.)
+    It populates the following collections in mongo, whose schema are
+    based on the postgres tables.  These are caches; source_importer.py
+    merges them into their permanent storage.  All of these collections
 
-    What is expected in the mongodb now sorta matches our database tables:
+       {mongodb_collection_base}_diaobject
+          { 'diaobjectid': long long [INDEX],
+            'savetime': datetime [INDEX],
+            'diaobjectposition: diaobject_position columns (omit: diaobjectid, base_procver_id, created_at)
+          }
 
-       { 'topic': <from kafka header>,
-         'msgoffset': <from kafka heeader>,
-         'timestamp': <from kafka header>,
-         'savetime': datetime.datetme,
-         'target_name': str,
-         'observation_reason': str,
-         'diaobjectid': long long,
-         'diaobjectposition': diaobject_position columns (omit: diaobjectid, base_procver_id, created_at)
-         'diasource': diasource columns (omit: diaobjectid base_procver_id)
-         'diasource_extra': None or diasource_extra columns (omit: base_procver_id)
-         'prvdiasources': array of same format as 'diasource'
-         'prvdiasources_extra': None or array of same format as diasource_extra
-         'prvdiaforcedsources': array of diaforcedsource columns (omit: base_procver_id, diaobjectid)
-         'prvdiaforcedsources_extra': None or array of (None or diaforcedsource_extra columns,
-                                                        omit diaobjectdid an dbase_procver_id)
-         'broker_info': dict
-       }
+       {mongodb_collection_base}_diasource
+          { 'diasourceid': long long [INDEX],
+            'savetime': datetime [INDEX]
+            [ diasource columns (omit: base_procver_id) ]
+          }
+
+       {mongodb_collection_base}_diasource_extra,
+          { 'diasourceid': long long [INDEX],
+            'savetime': datetime [INDEX]
+            [ diasource_extra columns (omit: base_procver_id) ]
+          }
+
+       {mongodb_collection_base}_diaforcedsource
+          { 'diaforcedsourceid': long long [INDEX],
+            'savetime': datetime [INDEX],
+            [ diaforcedsource columns (omit: base_procver_id) ]
+          }
+
+       {mongodb_collection_base}_diaforcedsource_extra
+          { 'diaforcedsourceid': long long [INDEX],
+            'savetime': datetime [INDEX],
+            [ diaforcedsource_extra columns (omit: base_procver_id) ]
+          }
+
+       {mongodb_collection_base}_thumbnails
+          { 'diasourceid': long long [INDEX],
+            'savetime': datetime [INDEX],
+            'cutoutdifference': bytes,
+            'cutoutscience': bytes,
+            'cutouttemplate': bytes
+          }
+
+       {mongodb_collection_base}_brokerinfo
+          { 'diasourceid': long long [INDEX],
+            'savetime': datetime [INDEX],
+            'brokername': str,
+            'topic': str,
+            'msgtime': str,
+            'info': dict
+          }
+
 
     This class will work as-is only if the broker is a kafka server
     requiring no authentication (though you may be able to get it to
@@ -91,9 +115,7 @@ class BrokerConsumer:
                   schemaless=False, schema_in_key=False, schemafile=None,
                   brokername_for_alerts=None, brokername_key=None,
                   pipe=None, loggername="BROKER", loggername_prefix='',
-                  nomsg_sleeptime=5, batch_size=1000,
-                  mongodb_host=None, mongodb_dbname=None, mongodb_collection=None,
-                  mongodb_user=None, mongodb_password=None ):
+                  nomsg_sleeptime=5, batch_size=1000,  mongodb_collection_base=None ):
         """Create a connection to a kafka server and consumer broker messages.
 
         Note that you often (but not always) want to instantiate a subclass.
@@ -173,20 +195,8 @@ class BrokerConsumer:
           batch_size : int, default 1000
             Try to consume this many messages at once.
 
-          mongodb_host : str, default $MONGODB_HOST
-            The host where Mongo is running
-
-          mongodb_dbname : str, default $MONGODB_DBNAME
-            The database name
-
-          mongodb_collection : str, default $MONGODB_COLLECTION
-            The collection
-
-          mongodb_user : str, default $MONGODB_ALERT_WRITER_USER
-            Username that can write alerts to mongodb_collection
-
-          mongodb_password : str, default $MONGODB_ALERT_WRITER_PASSWD
-            Password for mongodb_user.
+          mongodb_collection_base : str, required
+            The base name of the collections to save to
 
         """
 
@@ -244,30 +254,29 @@ class BrokerConsumer:
 
         self.nmessagesconsumed = 0
 
-        mongoconfigs = [ ( 'mongodb_host', mongodb_host, 'MONGODB_HOST' ),
-                         ( 'mongodb_dbname', mongodb_dbname, 'MONGODB_DBNAME' ),
-                         ( 'mongodb_collection', mongodb_collection, 'MONGODB_COLLECTION' ),
-                         ( 'mongodb_user', mongodb_user, 'MONGODB_ALERT_WRITER_USER' ),
-                         ( 'mongodb_password', mongodb_password, 'MONGODB_ALERT_WRITER_PASSWD' ) ]
-        missing = []
-        for mc in mongoconfigs:
-            setattr( self, mc[0], mc[1] if mc[1] is not None else os.getenv( mc[2] ) )
-            if getattr( self, mc[0] ) is None:
-                missing.append( mc )
-            else:
-                setattr( self, mc[0], urllib.parse.quote_plus( getattr( self, mc[0] ) ) )
-        if len( missing ) > 0:
-            strio = io.StringIO()
-            strio.write( "Must provide all of:\n" )
-            for mc in mongoconfigs:
-                strio.write( f"    * {mc[0]}, or set env var {mc[2]}\n" )
-            strio.write( f"Missing: {','.join( [ mc[0] for mc in missing ] ) }" )
-            self.logger.error( strio.getvalue () )
-            raise ValueError( "Incomplete mongo config" )
+        if ( not isinstance( mongodb_collection_base, str ) ) or ( len(mongodb_collection_base) == 0 ):
+            raise ValueError( "Must pass a non-0 length string as mongdb_collection_base" )
+        self.mongodb_collection_base = urllib.parse.quote_plus( mongodb_collection_base )
+        self.ensure_collections()
 
-        self.logger.info( f"Writing broker messages to monogdb {self.mongodb_dbname} "
-                          f"collection {self.mongodb_collection}" )
+        self.logger.info( f"Writing broker messages to monogdb collections {self.mongodb_collection_base}*" )
 
+
+    def ensure_collections( self ):
+        with db.MGCon() as mg:
+            suffixes = { 'diaobject': [ ['diaobjectid'], ['savetime'] ],
+                         'diasource': [ ['diasourceid'], ['savetime'] ],
+                         'diasource_extra': [ ['diasourceid'], ['savetime'] ],
+                         'diaforcedsource': [ ['diaforcedsourceid'], ['savetime'] ],
+                         'diaforcedsource_extra': [ ['diaforcedsourceid'], ['savetime'] ],
+                         'thumbnails': [ ['diasourceid'], ['savetime'] ],
+                         'brokerinfo': [ ['brokername', 'topic', 'diasourceid'], ['savetime'] ]
+                        }
+            for suffix, wantedindexes in suffixes.items():
+                col = mg.collection( f"{self.mongodb_collection_base}_{suffix}" )
+                for wantedindex in wantedindexes:
+                    if wantedindex not in [ list( i['key'].keys() ) for i in col.list_indexes() ]:
+                        col.create_index( [ (i, pymongo.ASCENDING) for i in wantedindex ] )
 
     def create_connection( self, reset=False ):
         countdown = 5
@@ -317,12 +326,14 @@ class BrokerConsumer:
             self.consumer.reset_to_start( topic )
 
     @classmethod
-    def build_flags( cls, flagmap, row ):
+    def add_flags( cls, dictobj, key, flagmap, row ):
+        if not any( field in row for field in flagmap.values() ):
+            return
         val = 0
         for mask, field in flagmap.items():
             if ( field in row ) and ( row[field] ):
                 val |= mask
-        return mask
+        dictobj[ key ] = val
 
     @classmethod
     def _filter_dict_to_table( cls, alertdict, tablemeta ):
@@ -337,54 +348,93 @@ class BrokerConsumer:
         return outdict
 
     @classmethod
-    def _wrangle_diasource_extra( cls, submsg ):
+    def _wrangle_object( cls, msg, metamsg ):
+        obj = { 'diaobjectid': msg['diaObject']['diaObjectId'],
+                'savetime': metamsg['savetime'],
+                'diaobjectposition': None }
+        if all( ( i in msg['diaObject'] ) and ( i is not None ) for i in ['ra', 'dec'] ):
+            obj['diaobjectposition'] = {
+                'ra': msg['diaObject']['ra'],
+                'dec': msg['diaObject']['dec'],
+                'raerr': msg['diaObject']['raErr'] if 'raErr' in msg['diaObject'] else None,
+                'decerr': msg['diaObject']['decErr'] if 'decErr' in msg['diaObject'] else None,
+                'ra_dec_cov': msg['diaObject']['ra_dec_Cov'] if 'ra_dec_Cov' in msg['diaObject'] else None
+            }
+        return obj
+
+    @classmethod
+    def _wrangle_diasource( cls, submsg, metamsg, msg ):
+        out = cls._filter_dict_to_table( submsg, db.DiaSource.tablemeta() )
+        out['msg_diasourceid'] = msg['diaSourceId']
+        out['savetime'] = metamsg['savetime']
+        return out
+
+    @classmethod
+    def _wrangle_diasource_extra( cls, submsg, metamsg, msg ):
         out = cls._filter_dict_to_table(submsg, db.DiaSourceExtra.tablemeta() )
+        if ( ( len(out) == 0 )
+             and ( not any( i in submsg for i in [ db.DiaSourceExtra._flags_bits.values() ] ) )
+             and ( not any( i in submsg for i in [ db.DiaSoruceExtra._pixelflags_bits.values() ] ) )
+            ):
+            return None
+        out['msg_diasourceid'] = msg['diaSourceId']
+        out['savetime'] = metamsg['savetime']
         # a couple fields that are composed from mutiple fileds from the alert
-        out['flags'] = cls.build_flags( db.DiaSourceExtra._flags_bits, submsg )
-        out['pixelflags'] = cls.build_flags( db.DiaSourceExtra._pixelflags_bits, submsg )
+        cls.add_flags( out, 'flags', db.DiaSourceExtra._flags_bits, submsg )
+        cls.add_flags( out, 'pixelflags', db.DiaSourceExtra._pixelflags_bits, submsg )
+        return out
+
+    @classmethod
+    def _wrangle_diaforcedsource( cls, submsg, metamsg, msg ):
+        out = cls._filter_dict_to_table( submsg, db.DiaForcedSource.tablemeta() )
+        out['msg_diasourceid'] = msg['diaSourceId']
+        out['savetime'] = metamsg['savetime']
+        return out
+
+    @classmethod
+    def _wrangle_diaforcedsource_extra( cls, submsg, metamsg, msg ):
+        out = cls._filter_dict_to_table( submsg, db.DiaForcedSourceExtra.tablemeta() )
+        if len( out ) == 0:
+            return None
+        out['msg_diasourceid'] = msg['diaSourceId']
+        out['savetime'] = metamsg['savetime']
         return out
 
     @classmethod
     def _wrangle_all_standard_lsst_fields( cls, metamsg, msg ):
-        alert = { 'topic': metamsg['topic'],
-                  'msgoffset': metamsg['msgoffset'],
-                  'timestamp': metamsg['timestamp'],
-                  'savetime': metamsg['savetime'],
-                  'target_name': msg['target_name'],
-                  'observation_reason': msg['observation_reason'],
-                  'diaobjectid': msg['diaObject']['diaObjectId'],
-                  'diaobjectposition': {
-                      'ra': np.nan if msg['diaObject']['ra'] is None else msg['diaObject']['ra'],
-                      'dec': np.nan if msg['diaObject']['ra'] is None else msg['diaObject']['dec'],
-                      'raerr': msg['diaObject']['raErr'],
-                      'decerr': msg['diaObject']['decErr'],
-                      'ra_dec_cov': msg['diaObject']['ra_dec_Cov']
-                  },
-                  'cutoutdifference': msg['cutoutDifference'],
-                  'cutoutscience': msg['cutoutScience'],
-                  'cutouttemplate': msg['cutoutTemplate'],
-                 }
-        alert['diasource'] = cls._filter_dict_to_table( msg['diaSource'], db.DiaSource.tablemeta() )
-        alert['diasource_extra'] = cls._wrangle_diasource_extra( msg['diaSource'] )
+        obj = cls._wrangle_object( msg, metamsg )
 
-        if msg['prvDiaSources'] is None:
-            alert['prvdiasources']  = None
-            alert['prvdiasources_extra'] = None
+        sources = [ cls._wrangle_diasource( msg['diaSource'], metamsg, msg ) ]
+        ext = cls._wrangle_diasource_extra( msg['diaSource'], metamsg, msg )
+        sources_extra = [] if ext is None else [ ext ]
+
+        if ( 'prvDiaSources' in msg ) and ( msg['prvDiaSources'] is not None ):
+            sources.extend( [ cls._wrangle_diasource( p, metamsg, msg ) for p in msg['prvDiaSources'] ] )
+            sources_extra.extend( [ cls._wrangle_diasource_extra( p, metamsg, msg )
+                                    for p in msg['prvDiaSources'] if p is not None ] )
+
+        forcedsources = []
+        forcedsources_extra = []
+        if ( 'prvDiaForcedSources' in msg ) and ( msg['prvDiaForcedSources'] is not None ):
+            forcedsources.extend( [ cls._wrangle_diaforcedsource( p, metamsg, msg )
+                                    for p in msg['prvDiaForcedSources'] ] )
+            forcedsources_extra.extend( [ cls._wrangle_diaforcedsource_extra( p, metamsg, msg )
+                                          for p in msg['prvDiaForcedSources'] if p is not None ] )
+
+        if any( ( f in msg and f is not None ) for f in [ 'cutoutDifference', 'cutoutScience', 'cutoutTemplate' ] ):
+            thumbnails = { 'diasourceid': msg['diaSource']['diaSourceId'],
+                           'savetime': metamsg['savetime'] }
+            thumbnails.update( { f.lower(): msg[f] if f in msg else None
+                                 for f in ['cutoutDifference', 'cutoutScience', 'cutoutTemplate' ] } )
         else:
-            alert['prvdiasources'] =  [ cls._filter_dict_to_table( p, db.DiaSource.tablemeta() )
-                                        for p in msg['prvDiaSources'] ]
-            alert['prvdiasources_extra'] = [ cls._wrangle_diasource_extra(p) for p in msg['prvDiaSources'] ]
+            thumbnails = None
 
-        if msg['prvDiaForcedSources'] is None:
-            alert['prvdiaforcedsources'] = None
-            alert['prvdiaforcedsources_extra'] = None
-        else:
-            alert['prvdiaforcedsources'] = [ cls._filter_dict_to_table( p, db.DiaForcedSource.tablemeta() )
-                                             for p in msg['prvDiaForcedSources'] ]
-            alert['prvdiaforcedsources_extra'] = [ cls._filter_dict_to_table( p, db.DiaForcedSourceExtra.tablemeta() )
-                                                   for p in msg['prvDiaForcedSources'] ]
-
-        return alert
+        return { 'object': obj,
+                 'sources': sources,
+                 'sources_extra': sources_extra,
+                 'forcedsources': forcedsources,
+                 'forcedsources_extra': forcedsources_extra,
+                 'thumbnails': thumbnails }
 
 
     def alert_wrangler( self, messagebatch ):
@@ -394,31 +444,66 @@ class BrokerConsumer:
         each broker.  This default assumes the message came in following
         the fastdb*brokerMessage schema.
 
-        The list is expected to be modified in place, so make sure to use indexes
-        if you're totally replacing an element of the list.  If you're just editing
-        the dictionary, then you shouldn't need to use indexes.  (Do it right.)
+        Parmameters
+        -----------
+          messagebatch: list of... something
+            A list of whatever it is that the broker sends.  Nomrmally
+            this is going to be a sequence of avro messages, and that's
+            what this class expects.  Subclasses may potentially do
+            something very different.
+
+        Returns
+        -------
+         dictionary of lists: objects, sources_extra, forcedsources, forcedsources_extra, thumbnailses, brokerinfos
+
+           These are suitable for stuffing into the respedctive mongo collections
 
         """
 
-        # These fields don't exactly match what's in the table, because there are some additional
+        objects = []
+        sources = []
+        sources_extra = []
+        forcedsources = []
+        forcedsources_extra = []
+        thumbnailses = []
+        brokerinfos = []
         for i in range( len(messagebatch) ):
             metamsg = messagebatch[i]
             msg = metamsg['msg']
-            messagebatch[i] = self._wrangle_all_standard_lsst_fields( metamsg, msg )
-            if self.brokername_for_alerts is not None:
-                messagebatch[i]['brokername'] = self.brokername_for_alerts
-            elif self.brokername_key is not None:
-                messagebatch[i]['brokername'] = msg[ self.brokername_key ]
-            else:
-                messagebatch[i]['brokername'] = self.__class__.__name__
-            messagebatch[i]['broker_info'] = {}
-            for key, val in msg.items():
-                if key not in self._standard_lsst_alert_fields:
-                    if isinstance( val, ( dict, list ) ):
-                        # ...is this really necessary?  Probably not.
-                        val = val.copy()
-                    messagebatch[i]['broker_info'][key] = val
+            stuff = self._wrangle_all_standard_lsst_fields( metamsg, msg )
+            if stuff['object'] is not None:
+                objects.append( stuff['object'] )
+            sources.extend( stuff['sources'] )
+            sources_extra.extend( stuff['sources_extra'] )
+            forcedsources.extend( stuff['forcedsources'] )
+            forcedsources_extra.extend( stuff['forcedsources_extra'] )
+            if stuff['thumbnails'] is not None:
+                thumbnailses.append( stuff['thumbnails'] )
 
+            if self.brokername_for_alerts is not None:
+                bname = self.brokername_for_alerts
+            elif self.brokername_key is not None:
+                bname = msg[ self.brokername_key ]
+            else:
+                bname = self.__class__.__name__
+
+            brokerinfos.append(
+                { 'diasourceid': msg['diaSourceId'],
+                  'savetime': metamsg['savetime'],
+                  'brokername': bname,
+                  'topic': metamsg['topic'],
+                  'msgtime': metamsg['timestamp'],
+                  'info': { k:v for k, v in msg.items() if k not in self._standard_lsst_alert_fields }
+                 }
+            )
+
+        return { 'objects': objects,
+                 'sources': sources,
+                 'sources_extra': sources_extra,
+                 'forcedsources': forcedsources,
+                 'forcedsources_extra': forcedsources_extra,
+                 'thumbnailses': thumbnailses,
+                 'brokerinfos': brokerinfos }
 
     def handle_message_batch( self, msgs ):
         messagebatch = []
@@ -458,23 +543,33 @@ class BrokerConsumer:
                                    'savetime': now,
                                    'msg': alert } )
 
-        self.alert_wrangler( messagebatch )
-        nadded = self.mongodb_store( messagebatch )
-        self.countlogger.info( f"...added {nadded} messages to mongodb {self.mongodb_dbname} "
-                               f"collection {self.mongodb_collection}" )
+        wrangled = self.alert_wrangler( messagebatch )
+        nadded = self.mongodb_store( **wrangled )
+        self.countlogger.info( f"...added to mongodb:\n"
+                               f"              {nadded['diaobject']} diaobject\n"
+                               f"              {nadded['diasource']} diasource\n"
+                               f"              {nadded['diasource_extra']} diasource_extra\n"
+                               f"              {nadded['diaforcedsource']} diaforcedsource\n"
+                               f"              {nadded['diaforcedsource_extra']} diaforcedsource_extra\n"
+                               f"              {nadded['thumbnails']} thumbnails\n"
+                               f"              {nadded['brokerinfo']} brokerinfo"
+                              )
 
-
-    def mongodb_store(self, messagebatch=None):
-        if messagebatch is None:
-            return 0
-        connstr = ( f"mongodb://{self.mongodb_user}:{self.mongodb_password}@{self.mongodb_host}:27017/"
-                    f"?authSource={self.mongodb_dbname}" )
-        self.logger.debug( f"mongodb connection string {connstr}" )
-        client = MongoClient( connstr )
-        db = getattr( client, self.mongodb_dbname )
-        collection = db[ self.mongodb_collection ]
-        results = collection.insert_many( messagebatch )
-        return len( results.inserted_ids )
+    def mongodb_store( self, objects=[], sources=[], sources_extra=[],
+                       forcedsources=[], forcedsources_extra=[],
+                       thumbnailses=[], brokerinfos=[] ):
+        inserted = {}
+        with db.MGCon() as mg:
+            for arr, suffix in zip( [ objects, sources, sources_extra,
+                                      forcedsources, forcedsources_extra,
+                                      thumbnailses, brokerinfos ],
+                                    [ 'diaobject', 'diasource', 'diasource_extra',
+                                      'diaforcedsource', 'diaforcedsource_extra',
+                                      'thumbnails', 'brokerinfo' ] ):
+                col = mg.collection( f'{self.mongodb_collection_base}_{suffix}' )
+                results = col.insert_many( arr, ordered=False )
+                inserted[suffix] = len( results.inserted_ids )
+        return inserted
 
 
     def poll( self, reset=False, restart_time=datetime.timedelta(minutes=30),
@@ -882,9 +977,9 @@ class BrokerConsumerLauncher:
                                   brokername_for_alerts=brokerinfo['brokername'],
                                   brokername_key=brokerinfo['brokername_key'],
                                   pipe=brokerinfo['childpipe'],
-                                  mongodb_collection=brokerinfo['collection'],
                                   loggername=brokerinfo['loggername'],
-                                  loggername_prefix=brokerinfo['loggername_prefix']
+                                  loggername_prefix=brokerinfo['loggername_prefix'],
+                                  mongodb_collection_base=brokerinfo['collection']
                                  )
         bc.poll( restart_time=brokerinfo['restart_time'],
                  max_restarts=brokerinfo['max_restarts'],
@@ -969,7 +1064,7 @@ class BrokerConsumerLauncher:
             logger.info( f"Launching a {broker['class']} looking at server {broker['server']} "
                          f"with group id {broker['groupid']} listening to topics {broker['topics']}"
                          f"{' (will be updated)' if updatetopics else ''}, "
-                         f"saving to collection {broker['collection']}" )
+                         f"saving to collections {broker['collection']}*" )
             parentconn, childconn = multiprocessing.Pipe()
             broker['pipe'] = parentconn
             broker['childpipe'] = childconn
@@ -1062,8 +1157,6 @@ def main():
                                       description="Listen to broker streams and save broker messages",
                                       formatter_class=argparse.ArgumentDefaultsHelpFormatter )
     parser.add_argument( 'config', help='YAML file with config of brokers to listen to' )
-    parser.add_argument( '-c', '--collection', default=None,
-                         help="Collection in mongo database to store alerts; defaults to $MONGODB_COLLECTION" )
     parser.add_argument( '-b', '--barf', default='abcdef',
                          help=( "String of random characters for group and topic names.  (Used in tests.)"
                                 "Will have no effect if you never put {barf} in your config file." ) )
@@ -1073,13 +1166,11 @@ def main():
 
     mongodb_host = os.getenv( "MONGODB_HOST" )
     mongodb_dbname = os.getenv( "MONGODB_DBNAME" )
-    mongodb_collection = args.collection if args.collection is not None else os.getenv( "MONGODB_COLLECTION" )
     mongodb_user = os.getenv( "MONGODB_ALERT_WRITER_USER" )
     mongodb_password = os.getenv( "MONGODB_ALERT_WRITER_PASSWD" )
-    if any ( [ i is None for i in [ mongodb_host, mongodb_dbname, mongodb_collection,
-                                    mongodb_user, mongodb_password ] ] ):
+    if any ( i is None for i in [ mongodb_host, mongodb_dbname, mongodb_user, mongodb_password ] ):
         raise ValueError( "Must set all the following env vars: MONGODB_HOST, MONGODB_DBNAME, "
-                          "MONGODB_COLLECTION, MONGODB_ALERT_WRITER_USER, MONGODB_ALERT_WRITER_PASSWD" )
+                          "MONGODB_ALERT_WRITER_USER, MONGODB_ALERT_WRITER_PASSWD" )
 
     bcl = BrokerConsumerLauncher( args.config, barf=args.barf, verbose=args.verbose )
     bcl()

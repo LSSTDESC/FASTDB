@@ -9,12 +9,11 @@
 #   be getting imports from timezoneless mongodb.  This means that if the native
 #   timezone of the postgres server is not UTC, chaos will rule.
 #
-# See function SourceImporter.omg_tz
+# See function util.datetime_to_utc
 
 import io
 import sys
 import datetime
-import pytz
 import argparse
 import simplejson
 import textwrap
@@ -68,9 +67,14 @@ class SourceImporter:
         return mask
 
 
-    def __init__( self, object_base_processing_version, object_position_base_processing_version,
-                  source_base_processing_version, forcedsource_base_processing_version,
-                  host_base_processing_version, object_match_radius=1., debug_just_read_mongo=False ):
+    def __init__( self, object_base_processing_version=None,
+                  object_position_base_processing_version=None,
+                  source_base_processing_version=None,
+                  forcedsource_base_processing_version=None,
+                  host_base_processing_version=None,
+                  collection_base_name=None,
+                  object_match_radius=1.,
+                  debug_just_read_mongo=False ):
         """Create a SourceImporter.
 
         Parameters
@@ -96,6 +100,9 @@ class SourceImporter:
             The processing version for hsot_galaxy.  This must be a valid entry (id or
             description) in the base_processing_version table.
 
+          collection_base_name: str
+            Mongo collections are this plus suffixes.
+
           object_match_radius : float, default 1.
             Objects within this many arcsec of an existing object will be considered
             the same root_diaobject.
@@ -107,6 +114,14 @@ class SourceImporter:
 
 
         """
+        if any( i is None for i in [ object_base_processing_version, object_position_base_processing_version,
+                                     source_base_processing_version, forcedsource_base_processing_version ] ):
+            raise ValueError( "base processing versions are required" )
+
+        if ( not isinstance( collection_base_name, str ) ) or ( len( collection_base_name ) == 0 ):
+            raise ValueError( "collection_base_name must be a non-empty string" )
+        self.collection_base_name = collection_base_name
+
         self.object_base_processing_version = util.base_procver_id( object_base_processing_version, 'diaobject' )
         self.object_position_base_processing_version = util.base_procver_id( object_position_base_processing_version,
                                                                              'diaobject_position' )
@@ -118,40 +133,11 @@ class SourceImporter:
 
         self.debug_just_read_mongo = bool( debug_just_read_mongo )
 
-    @classmethod
-    def omg_tz( cls, t, with_tz=False, now_on_none=False ):
-        # mongodb doesn't seem to know about timezones and stores everythning UTC.
-        # Try to adapt.  If we get a timezone unaware datetime, assume it's already UTC.
-        # https://xkcd.com/1883/
-
-        if t is None:
-            if not now_on_none:
-                return None
-
-            t = datetime.datetime.now( tz=datetime.UTC )
-
-        else:
-            if isinstance( t, str ):
-                t = datetime.datetime.fromisoformat( t )
-            elif not isinstance( t, datetime.datetime ):
-                raise TypeError( f"Must pass time parameters as datetime or a ISO string that can be "
-                                 f"parsed to a datetime; got a {type(t)}" )
-
-            if t.tzinfo is not None:
-                t = t.astimezone( datetime.UTC )
-            else:
-                t= pytz.timezone( 'UTC' ).localize( t )
-
-        if not with_tz:
-            t.replace( tzinfo=None )
-
-        return t
-
 
     @classmethod
     def _add_mongo_time_limits_to_pipeline( cls, pipeline, t0, t1 ):
-        t0 = cls.omg_tz( t0, with_tz=False, now_on_none=False )
-        t1 = cls.omg_tz( t1, with_tz=False, now_on_none=False )
+        t0 = util.datetime_to_utc( t0, with_tz=False, now_on_none=False )
+        t1 = util.datetime_to_utc( t1, with_tz=False, now_on_none=False )
 
         if t0 is not None:
             if t1 is not None:
@@ -163,7 +149,7 @@ class SourceImporter:
             pipeline.append( { "$match": { "savetime": { "$lte": t1 } } } )
 
 
-    def read_mongo_objects( self, dbcon, collection, t0=None, t1=None, batchsize=10000 ):
+    def read_mongo_objects( self, dbcon, t0=None, t1=None, batchsize=10000 ):
         """Read all diaobject records from a mongo collection and stick them a temp table.
 
         Populates temp tables temp_diaobject_import.  It will only live
@@ -172,9 +158,6 @@ class SourceImporter:
         Parameters
         ----------
           dbcon : db.DBCon
-
-          collection : pymongo.collection
-            The PyMongo collection we're pulling from.
 
           t0, t1 : datetime.datetime or None
             Time limits.  Will import all objects with t0 < savetime ≤ t1
@@ -193,7 +176,7 @@ class SourceImporter:
                 CREATE TEMP TABLE temp_diaobject_import (
                   diaobjectid bigint NOT NULL,
                   rootid uuid,
-                  base_procver_id uuid NOT NULL,
+                  base_procver_id uuid,
                   base_pos_procver_id uuid,
                   ra double precision,
                   dec double precision,
@@ -205,40 +188,62 @@ class SourceImporter:
 
         pipeline = []
         self._add_mongo_time_limits_to_pipeline( pipeline, t0, t1 )
-        pipeline.extend( [ { "$project": { "diaobjectid": 1, "diaobjectposition": 1 } },
+        # OK... scary.  Going to first sort on diaobject id, so that we
+        #   can use that index, then project to add a field that says if
+        #   position is null or not, then sort *again* on diaobjectid
+        #   and posisnull to make sure non-null positions come first.
+        #   If I understand mongodb correctly, if I project first, then
+        #   the sort won't be able ot use the index for sorting
+        #   diaobjectid.
+        # (ASIDE: I'm not really clear on mongodb and what's the right
+        #   thing to do with sorting and grouping.)
+        pipeline.extend( [ { "$sort": { 'diaobjectid': 1 } },
+                           { "$project": { "diaobjectid": 1,
+                                           "diaobjectposition": 1,
+                                           "posisnull": {
+                                                "$cond": {
+                                                    "if": { "$eq": [ 'diaobjectposition', None ] },
+                                                    "then": 1,
+                                                    "else": 0
+                                                }
+                                           }
+                                          }
+                            },
+                           { "$sort": { 'diaobjectid': 1, 'posisnull': 1 } },
                            { "$group": { "_id": "$diaobjectid",
                                          "diaobjectid": { "$first": "$diaobjectid" },
                                          "diaobjectposition": { "$first": "$diaobjectposition" }
                                         }
                             } ] )
-        mongocursor = collection.aggregate( pipeline )
-        n = 0
+        with db.MGCon() as mg:
+            collection = mg.collection( f"{self.collection_base_name}_diaobject" )
+            mongocursor = collection.aggregate( pipeline )
+            n = 0
 
-        if self.debug_just_read_mongo:
-            gratuitous = 0
-            for row in mongocursor:
-                # Just to make sure some optimizer doesn't decide it doesn't even have to read
-                gratuitous += 1 if 'diaobjectid' in row else 0
-            FDBLogger.debug( f"      ...read {n} rows from mongo" )
-
-        else:
-            with ( dbcon.cursor.copy( "COPY temp_diaobject_import(diaobjectid, rootid, base_procver_id,\n"
-                                      "                           base_pos_procver_id, ra, dec, raerr,\n"
-                                      "                           decerr, ra_dec_cov) FROM STDIN" )
-                   as pgcopy ):
+            if self.debug_just_read_mongo:
                 for row in mongocursor:
-                    data = [ str(row['diaobjectid']), None, str(self.object_base_processing_version) ]
-                    if row['diaobjectposition'] is None:
-                        data.extend( [ None, None, None, None, None, None ] )
-                    else:
-                        data.append( str(self.object_position_base_processing_version) ),
-                        for f in [ 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ]:
-                            data.append( None if row['diaobjectposition'][f] is None
-                                         else row['diaobjectposition'][f] )
-                    pgcopy.write_row( tuple( data ) )
-                    n += 1
+                    # Just to make sure some optimizer doesn't decide it doesn't even have to read
+                    n += 1 if 'diaobjectid' in row else 0
+                FDBLogger.debug( f"      ...read {n} rows from mongo" )
 
-            FDBLogger.debug( f"      ...wrote {n} rows to temp_diaobject_import" )
+            else:
+                with ( dbcon.cursor.copy( "COPY temp_diaobject_import(diaobjectid, rootid, base_procver_id,\n"
+                                          "                           base_pos_procver_id, ra, dec, raerr,\n"
+                                          "                           decerr, ra_dec_cov) FROM STDIN" )
+                       as pgcopy ):
+                    for row in mongocursor:
+                        data = [ str(row['diaobjectid']), None, str(self.object_base_processing_version) ]
+                        if row['diaobjectposition'] is None:
+                            data.extend( [ None, None, None, None, None, None ] )
+                        else:
+                            data.append( str(self.object_position_base_processing_version) ),
+                            for f in [ 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ]:
+                                data.append( None if row['diaobjectposition'][f] is None
+                                             else row['diaobjectposition'][f] )
+                        pgcopy.write_row( tuple( data ) )
+                        n += 1
+
+                FDBLogger.debug( f"      ...wrote {n} rows to temp_diaobject_import" )
 
 
     def _read_mongo_fields( self, dbcon, collection, pipeline, fields,
@@ -299,7 +304,7 @@ class SourceImporter:
             FDBLogger.debug( f"      ...wrote {n} rows to {temptable}" )
 
 
-    def read_mongo_sources( self, dbcon, collection, t0=None, t1=None, batchsize=10000 ):
+    def read_mongo_sources( self, dbcon, t0=None, t1=None, batchsize=10000 ):
         """Read all top-level diaSource records from a mongo collection and stick them in temp tables.
 
         Populates temp tables temp_diasource_import and
@@ -310,66 +315,29 @@ class SourceImporter:
 
         """
 
-        group = { "_id": "$diasource.diasourceid"}
-        group.update( { k: { "$first": f"$diasource.{k}" } for k in self.diasource_fields } )
-        pipeline = []
-        self._add_mongo_time_limits_to_pipeline( pipeline, t0, t1 )
-        pipeline.extend( [ { "$project": { "diasource": 1 } },
-                           { "$group": group } ] )
-        self._read_mongo_fields( dbcon, collection, pipeline, self.diasource_fields,
-                                 "temp_diasource_import", "diasource",
-                                 batchsize=batchsize, base_procver_id=self.source_base_processing_version )
+        with db.MGCon() as mg:
+            group = { "_id": "$diasourceid"}
+            group.update( { k: { "$first": f"${k}" } for k in self.diasource_fields } )
+            pipeline = []
+            self._add_mongo_time_limits_to_pipeline( pipeline, t0, t1 )
+            pipeline.append( { "$group": group } )
+            collection = mg.collection( f"{self.collection_base_name}_diasource" )
+            self._read_mongo_fields( dbcon, collection, pipeline, self.diasource_fields,
+                                     "temp_diasource_import", "diasource",
+                                     batchsize=batchsize, base_procver_id=self.source_base_processing_version )
 
-        group = { "_id": "$diasource_extra.diasourceid" }
-        group.update( { k: { "$first": f"$diasource_extra.{k}" } for k in self.diasource_extra_fields } )
-        pipeline = []
-        self._add_mongo_time_limits_to_pipeline( pipeline, t0, t1 )
-        pipeline.extend( [ { "$match": { "diasource_extra": { "$ne": None } } },
-                           { "$project": { "diasource_extra": 1 } },
-                           { "$group": group } ] )
-        self._read_mongo_fields( dbcon, collection, pipeline, self.diasource_extra_fields,
-                                 "temp_diasource_extra_import", "diasource_extra",
-                                 batchsize=batchsize, base_procver_id=self.source_base_processing_version )
-
-
-    def read_mongo_prvsources( self, dbcon, collection, t0=None, t1=None, batchsize=10000 ):
-        """Read all prvDiaSource records from a mongo collection and stick them in a temp table.
-
-        Gets all prvDiaSources from all sources in the time range.
-        Deduplicates.  Populates temp_prvdiasource_import and
-        tmp_prvdiasource_extra_import, which will only live as long as
-        the dbcon session is open.
-
-        Parameters are the same as read_mongo_objects.
-
-        """
-
-        pipeline = []
-        self._add_mongo_time_limits_to_pipeline( pipeline, t0, t1 )
-        group = { "_id": "$prvdiasources.diasourceid" }
-        group.update( { k: { "$first": f"$prvdiasources.{k}" } for k in self.diasource_fields } )
-        pipeline.extend( [ { "$project": { "prvdiasources": 1 } },
-                           { "$match": { "prvdiasources": { "$ne": None } } },
-                           { "$unwind": "$prvdiasources" },
-                           { "$group": group } ] )
-        self._read_mongo_fields( dbcon, collection, pipeline, self.diasource_fields,
-                                 "temp_prvdiasource_import", "diasource",
-                                 batchsize=batchsize, base_procver_id=self.source_base_processing_version )
-
-        pipeline = []
-        self._add_mongo_time_limits_to_pipeline( pipeline, t0, t1 )
-        group = { "_id": "$prvdiasources_extra.diasourceid" }
-        group.update( { k: { "$first": f"$prvdiasources_extra.{k}" } for k in self.diasource_extra_fields } )
-        pipeline.extend( [ { "$project": { "prvdiasources_extra": 1 } },
-                           { "$match": { "prvdiasources_extra": { "$ne": None } } },
-                           { "$unwind": "$prvdiasources_extra" },
-                           { "$group":  group } ] )
-        self._read_mongo_fields( dbcon, collection, pipeline, self.diasource_extra_fields,
-                                 "temp_prvdiasource_extra_import", "diasource_extra",
-                                 batchsize=batchsize, base_procver_id=self.source_base_processing_version )
+            group = { "_id": "$diasourceid" }
+            group.update( { k: { "$first": f"${k}" } for k in self.diasource_extra_fields } )
+            pipeline = []
+            self._add_mongo_time_limits_to_pipeline( pipeline, t0, t1 )
+            pipeline.append( { "$group": group } )
+            collection = mg.collection( f"{self.collection_base_name}_diasource_extra" )
+            self._read_mongo_fields( dbcon, collection, pipeline, self.diasource_extra_fields,
+                                     "temp_diasource_extra_import", "diasource_extra",
+                                     batchsize=batchsize, base_procver_id=self.source_base_processing_version )
 
 
-    def read_mongo_prvforcedsources( self, dbcon, collection, t0=None, t1=None, batchsize=10000 ):
+    def read_mongo_prvforcedsources( self, dbcon, t0=None, t1=None, batchsize=10000 ):
         """Read all prvForcedDiaSource records from a mongo collection and stick them in temp tables.
 
         Gets all prvForcedDiaSources from all sources in the time range.
@@ -381,69 +349,62 @@ class SourceImporter:
 
         """
 
-        pipeline = []
-        self._add_mongo_time_limits_to_pipeline( pipeline, t0, t1 )
-        group = { "_id": "$prvdiaforcedsources.diaforcedsourceid" }
-        group.update( { k: { "$first": f"$prvdiaforcedsources.{k}" } for k in self.diaforcedsource_fields } )
-        pipeline.extend( [ { "$project": { "prvdiaforcedsources": 1 } },
-                           { "$match": { "prvdiaforcedsources": { "$ne": None } } },
-                           { "$unwind": "$prvdiaforcedsources" },
-                           { "$group": group } ] )
-        self._read_mongo_fields( dbcon, collection, pipeline, self.diaforcedsource_fields,
-                                 "temp_prvdiaforcedsource_import", "diaforcedsource",
-                                 batchsize=batchsize, base_procver_id=self.forcedsource_base_processing_version )
+        with db.MGCon() as mg:
+            pipeline = []
+            self._add_mongo_time_limits_to_pipeline( pipeline, t0, t1 )
+            group = { "_id": "$diaforcedsourceid" }
+            group.update( { k: { "$first": f"${k}" } for k in self.diaforcedsource_fields } )
+            pipeline.append( { "$group": group } )
+            collection = mg.collection( f"{self.collection_base_name}_diaforcedsource" )
+            self._read_mongo_fields( dbcon, collection, pipeline, self.diaforcedsource_fields,
+                                     "temp_prvdiaforcedsource_import", "diaforcedsource",
+                                     batchsize=batchsize, base_procver_id=self.forcedsource_base_processing_version )
 
-        pipeline = []
-        self._add_mongo_time_limits_to_pipeline( pipeline, t0, t1 )
-        group = { "_id": "$prvdiaforcedsources_extra.diaforcedsourceid" }
-        group.update( { k: { "$first": f"$prvdiaforcedsources_extra.{k}" }
-                        for k in self.diaforcedsource_extra_fields } )
-        pipeline.extend( [ { "$project": { "prvdiaforcedsources_extra": 1 } },
-                           { "$match": { "prvdiaforcedsources_extra": { "$ne": None } } },
-                           { "$unwind": "$prvdiaforcedsources_extra" },
-                           { "$group": group } ] )
-        self._read_mongo_fields( dbcon, collection, pipeline, self.diaforcedsource_extra_fields,
-                                 "temp_prvdiaforcedsource_extra_import", "diaforcedsource_extra",
-                                 batchsize=batchsize, base_procver_id=self.forcedsource_base_processing_version )
+            pipeline = []
+            self._add_mongo_time_limits_to_pipeline( pipeline, t0, t1 )
+            group = { "_id": "$diaforcedsourceid" }
+            group.update( { k: { "$first": f"${k}" } for k in self.diaforcedsource_extra_fields } )
+            pipeline.append( { "$group": group } )
+            collection = mg.collection( f"{self.collection_base_name}_diaforcedsource_extra" )
+            self._read_mongo_fields( dbcon, collection, pipeline, self.diaforcedsource_extra_fields,
+                                     "temp_prvdiaforcedsource_extra_import", "diaforcedsource_extra",
+                                     batchsize=batchsize, base_procver_id=self.forcedsource_base_processing_version )
 
 
     def read_mongo_brokerinfo( self, dbcon, collection, t0=None, t1=None, batchsize=1000 ):
         now = datetime.datetime.now( tz=datetime.UTC ).isoformat()
 
-        pipeline = []
-        self._add_mongo_time_limits_to_pipeline( pipeline, t0, t1 )
+        with db.MGCon() as mg:
+            pipeline = []
+            self._add_mongo_time_limits_to_pipeline( pipeline, t0, t1 )
 
-        group = { "_id": { "brokername": "$brokername", "topic": "$topic",
-                           "diaobjectid": "$diaobjectid", "visit": "$diasource.visit" },
-                  "brokername": { "$first": "$brokername" },
-                  "topic": { "$first": "$topic" },
-                  "diasourceid": { "$first": "$diasource.diasourceid" },
-                  "diaobjectid": { "$first": "$diaobjectid" },
-                  "visit": { "$first": "$diasource.visit" },
-                  "msgtime": { "$first": "$timestamp" },
-                  "receivedtime": { "$first": "$savetime" },
-                  "importtime": { "$first": now },
-                  "info": { "$first": "$broker_info" }
-                 }
-
-        pipeline.extend( [ { "$match": { "broker_info": { "$ne": None } } },
-                           { "$group": group } ] )
-        self._read_mongo_fields( dbcon, collection, pipeline, [ "brokername", "topic", "diasourceid",
-                                                                "msgtime", "receivedtime", "importtime",
-                                                                "info" ],
-                                 "temp_diasource_brokerinfo_import", "diasource_brokerinfo",
-                                 batchsize=batchsize, base_procver_id=self.source_base_processing_version )
+            group = { "_id": { "brokername": "$brokername", "topic": "$topic",
+                               "diasourceid": "$diasourceid" },
+                      "brokername": { "$first": "$brokername" },
+                      "topic": { "$first": "$topic" },
+                      "diasourceid": { "$first": "$diasource.diasourceid" },
+                      "msgtime": { "$first": "$timestamp" },
+                      "receivedtime": { "$first": "$savetime" },
+                      "importtime": { "$first": now },
+                      "info": { "$first": "$info" }
+                     }
+            pipeline.append( { "$group": group } )
+            collection = mg.collection( f"{self.collection_base_name}_brokerinfo" )
+            self._read_mongo_fields( dbcon, collection, pipeline, [ "brokername", "topic", "diasourceid",
+                                                                    "msgtime", "receivedtime", "importtime",
+                                                                    "info" ],
+                                     "temp_diasource_brokerinfo_import", "diasource_brokerinfo",
+                                     batchsize=batchsize, base_procver_id=self.source_base_processing_version )
 
 
-    def import_objects_from_collection( self, collection, t0=None, t1=None, batchsize=10000,
-                                        dbcon=None, commit=True ):
+    def import_objects( self, t0=None, t1=None, batchsize=10000, dbcon=None, commit=True ):
         """Write docs.
 
         Do.
         """
         with db.DBCon( dbcon ) as dbcon:
             FDBLogger.debug( f"  ...reading mongo to temp table from {t0} to {t1}..." )
-            self.read_mongo_objects( dbcon, collection, t0=t0, t1=t1, batchsize=batchsize )
+            self.read_mongo_objects( dbcon, t0=t0, t1=t1, batchsize=batchsize )
 
             if self.debug_just_read_mongo:
                 return 0, 0, 0
@@ -521,8 +482,7 @@ class SourceImporter:
             return nobjs, nroot, npos
 
 
-    def import_sources_from_collection( self, collection, t0=None, t1=None, batchsize=10000,
-                                        dbcon=None, commit=True ):
+    def import_sources( self, t0=None, t1=None, batchsize=10000, dbcon=None, commit=True ):
         """write docs
 
         Assumes all objects are already imported.
@@ -533,9 +493,7 @@ class SourceImporter:
             # dbcon.execute( "SET CONSTRAINTS fk_diasource_extra_diasource DEFERRED" )
 
             FDBLogger.debug( f"   ...reading mongo sources to temp table from {t0} to {t1}" )
-            self.read_mongo_sources( dbcon, collection, t0=t0, t1=t1, batchsize=batchsize )
-            FDBLogger.debug( f"   ...reading mongo previous sources to temp table from {t0} to {t1}" )
-            self.read_mongo_prvsources( dbcon, collection, t0=t0, t1=t1, batchsize=batchsize )
+            self.read_mongo_sources( dbcon, t0=t0, t1=t1, batchsize=batchsize )
 
             if self.debug_just_read_mongo:
                 return 0, 0
@@ -589,8 +547,7 @@ class SourceImporter:
 
             return nsrc, nprvsrc
 
-    def import_forcedsources_from_collection( self, collection, t0=None, t1=None, batchsize=10000,
-                                              dbcon=None, commit=True ):
+    def import_forcedsources( self, t0=None, t1=None, batchsize=10000, dbcon=None, commit=True ):
         """Write docs.
 
         Do.
@@ -601,7 +558,7 @@ class SourceImporter:
             # dbcon.execute( "SET CONSTRAINTS fk_diaforcedsource_extra_diaforcedsource DEFERRED" )
 
             FDBLogger.debug( f"   ....reading mongo to temp table from {t0} to {t1}" )
-            self.read_mongo_prvforcedsources( dbcon, collection, t0=t0, t1=t1, batchsize=batchsize )
+            self.read_mongo_prvforcedsources( dbcon, t0=t0, t1=t1, batchsize=batchsize )
 
             if self.debug_just_read_mongo:
                 return 0
@@ -647,13 +604,12 @@ class SourceImporter:
             return nfrc
 
 
-    def import_brokerinfo_from_collection( self, collection, t0=None, t1=None, batchsize=10000,
-                                           dbcon=None, commit=True ):
+    def import_brokerinfo( self, t0=None, t1=None, batchsize=10000, dbcon=None, commit=True ):
         with db.DBCon( dbcon ) as dbcon:
             # dbcon.execute( "SET CONSTRAINTS fk_diasource_brokerinfo_diasource DEFERRED" )
 
             FDBLogger.debug( f"   ...reading mongo to temp table from {t0} to {t1}" )
-            self.read_mongo_brokerinfo( dbcon, collection, t0=t0, t1=t1, batchsize=batchsize )
+            self.read_mongo_brokerinfo( dbcon, t0=t0, t1=t1, batchsize=batchsize )
 
             if self.debug_just_read_mongo:
                 return 0
@@ -672,12 +628,12 @@ class SourceImporter:
             return ninfo
 
 
-    def import_cutouts_from_collection( self, collection, t0=None, t1=None, commit=True ):
+    def import_cutouts( self, mg, t0=None, t1=None, commit=True ):
         if self.debug_just_read_mongo:
             return None
 
-        client = collection.database.client
-        session = client.start_session()
+        collection = mg.collection( f'{self.collection_base_name}_thumbnails' )
+        session = mg.client.start_session()
         session.start_transaction()
 
         if t0 is not None:
@@ -725,26 +681,16 @@ class SourceImporter:
     #
     # It seems that python won't let you name a method "import"
 
-    def import_from_mongo( self, collection, t1=None ):
+    def import_from_mongo( self, t1=None ):
         """Import data from the mongodb database to PostgreSQL tables.
 
-        Will look at the desired collection.  Will find all broker
-        alerts saved to the collection between when the last time this
-        function ran and the current time.  Will impport all diaobject,
-        diasource, and diaforcedsource rows that are in the mongodb
-        collection but not yet in PostgreSQL.
+        Will find all broker alerts saved to the collections between
+        when the last time this function ran and the current time.  Will
+        impport all diaobject, diasource, and diaforcedsource rows that
+        are in the mongodb collection but not yet in PostgreSQL.
 
         Parameters
         ----------
-          collection : pymongo.collection
-            You can get this with:
-                import db
-                with db.MG() as mgc:
-                    collection = db.get_mongo_collection( mgc, collection_name )
-            where collection_name is the name of the collection you want.  Make
-            sure to call the SorcreImporter object's .import method within the
-            same "with db.MG()" block.
-
           t1 : datetime.datetime, default None
             Only import alerts that were saved to the mongo database
             through this time.  If None, will use now.
@@ -765,12 +711,12 @@ class SourceImporter:
                 timestampexists = False
                 t0 = None
                 rows, _cols = dbcon.execute( "SELECT t FROM diasource_import_time WHERE collection=%(col)s",
-                                             { 'col': collection.name } )
+                                             { 'col': self.collection_base_name } )
                 if len(rows) > 0:
                     timestampexists = True
-                    t0 = self.omg_tz( rows[0][0], with_tz=True, now_on_none=False )
+                    t0 = util.datetime_to_utc( rows[0][0], with_tz=True, now_on_none=False )
 
-                t1 = self.omg_tz( t1, with_tz=True, now_on_none=True )
+                t1 = util.datetime_to_utc( t1, with_tz=True, now_on_none=True )
 
                 # Make sure foreign key constraints aren't goign to trip us up
                 #   below, but that they're only checked at the end of the transaction.
@@ -779,36 +725,39 @@ class SourceImporter:
                     dbcon.execute( "SET CONSTRAINTS fk_diaforcedsource_diaobject DEFERRED" )
 
                 FDBLogger.debug( "Importing objects..." )
-                nobj, nroot, npos = self.import_objects_from_collection( collection, t0, t1, dbcon=dbcon, commit=False )
+                nobj, nroot, npos = self.import_objects( t0, t1, dbcon=dbcon, commit=False )
                 FDBLogger.debug( "Importing sources..." )
-                nsrc, nprvsrc = self.import_sources_from_collection( collection, t0, t1, dbcon=dbcon, commit=False )
+                nsrc, nprvsrc = self.import_sources( t0, t1, dbcon=dbcon, commit=False )
                 FDBLogger.debug( "Importing forcedsources..." )
-                nfrc = self.import_forcedsources_from_collection( collection, t0, t1, dbcon=dbcon, commit=False )
+                nfrc = self.import_forcedsources( t0, t1, dbcon=dbcon, commit=False )
                 FDBLogger.debug( "Importing brokerinfos..." )
-                ninfo = self.import_brokerinfo_from_collection( collection, t0, t1, dbcon=dbcon, commit=False )
-                FDBLogger.debug( "Importing cutouts..." )
-                mongosession = self.import_cutouts_from_collection( collection, t0, t1, commit=False )
+                ninfo = self.import_brokerinfo( t0, t1, dbcon=dbcon, commit=False )
 
-                if not self.debug_just_read_mongo:
-                    FDBLogger.debug( "Updating diasource_import_time..." )
-                    if timestampexists:
-                        dbcon.execute( "UPDATE diasource_import_time SET t=%(t)s WHERE collection=%(col)s",
-                                       { 't': t1, 'col': collection.name } )
-                    else:
-                        dbcon.execute( "INSERT INTO diasource_import_time(collection,t) "
-                                       "VALUES(%(col)s,%(t)s)",
-                                       { 't': t1, 'col': collection.name } )
 
-                # Only commit once at the end.  That way, if anything goes wrong,
-                #   the database will be rolled back.  No objects or sources will
-                #   have been saved, and the timestamp will not have been updated.
-                # The timestamp will be updated if and only if everything imported.
-                if not self.debug_just_read_mongo:
-                    FDBLogger.debug( "Committing postgres..." )
-                    dbcon.commit()
-                    FDBLogger.debug( "Committing mongo..." )
-                    mongosession.commit_transaction()
-                    mongosession.end_session()
+                with db.MG() as mg:
+                    FDBLogger.debug( "Importing cutouts..." )
+                    mongosession = self.import_cutouts( mg, t0, t1, commit=False )
+
+                    if not self.debug_just_read_mongo:
+                        FDBLogger.debug( "Updating diasource_import_time..." )
+                        if timestampexists:
+                            dbcon.execute( "UPDATE diasource_import_time SET t=%(t)s WHERE collection=%(col)s",
+                                           { 't': t1, 'col': self.collection_base_name } )
+                        else:
+                            dbcon.execute( "INSERT INTO diasource_import_time(collection,t) "
+                                           "VALUES(%(col)s,%(t)s)",
+                                           { 't': t1, 'col': self.collection_base_name } )
+
+                    # Only commit once at the end.  That way, if anything goes wrong,
+                    #   the database will be rolled back.  No objects or sources will
+                    #   have been saved, and the timestamp will not have been updated.
+                    # The timestamp will be updated if and only if everything imported.
+                    if not self.debug_just_read_mongo:
+                        FDBLogger.debug( "Committing postgres..." )
+                        dbcon.commit()
+                        FDBLogger.debug( "Committing mongo..." )
+                        mongosession.commit_transaction()
+                        mongosession.end_session()
 
                 FDBLogger.debug( "Done." )
 
@@ -852,14 +801,7 @@ def main():
     else:
         FDBLogger.setLevel( logging.INFO )
 
-    t1 = SourceImporter.omg_tz( args.t1, with_tz=True, now_on_none=False )
-
-    si = SourceImporter( args.object_base_processing_version,
-                         args.object_position_base_processing_version,
-                         args.source_base_processing_version,
-                         args.forcedsource_base_processing_version,
-                         args.host_base_processing_version,
-                         debug_just_read_mongo=args.debug_just_read_mongo )
+    t1 = SourceImporter.util.datetime_to_utc( args.t1, with_tz=True, now_on_none=False )
 
     totnobj = 0
     totnroot = 0
@@ -868,29 +810,36 @@ def main():
     totnprvsrc = 0
     totnfrc = 0
     totninfo = 0
-    with db.MG() as mg:
-        for collection_name in args.collection:
 
-            FDBLogger.info( f"Importing from {collection_name}..." )
+    for collection_name in args.collection:
 
-            collection = db.get_mongo_collection( mg, collection_name )
-            try:
-                nobj, nroot, npos, nsrc, nprvsrc, nfrc, ninfo = si.import_from_mongo( collection, t1=t1 )
-            except Exception:
-                # The traceback will have been printed in import_from_collection
-                FDBLogger.error( "Fail." )
-                sys.exit( 1 )
+        FDBLogger.info( f"Importing from {collection_name}*..." )
 
-            FDBLogger.info( f"...imported {nobj} objects, {nroot} root objects, {npos} object positions, "
-                            f"{nsrc+nprvsrc} sources ({nsrc} main, {nprvsrc} previous), {nfrc} forced sources, "
-                            f"{ninfo} broker infos from {collection_name}" )
-            totnobj += nobj
-            totnroot += nroot
-            totnpos += npos
-            totnsrc += nsrc
-            totnprvsrc += nprvsrc
-            totnfrc += nfrc
-            totninfo += ninfo
+        si = SourceImporter( object_base_processing_version=args.object_base_processing_version,
+                             object_position_base_processing_version=args.object_position_base_processing_version,
+                             source_base_processing_version=args.source_base_processing_version,
+                             forcedsource_base_processing_version=args.forcedsource_base_processing_version,
+                             host_base_processing_version=args.host_base_processing_version,
+                             collection_base_name=collection_name,
+                             debug_just_read_mongo=args.debug_just_read_mongo )
+
+        try:
+            nobj, nroot, npos, nsrc, nprvsrc, nfrc, ninfo = si.import_from_mongo( t1=t1 )
+        except Exception:
+            # The traceback will have been printed in import_from_collection
+            FDBLogger.error( "Fail." )
+            sys.exit( 1 )
+
+        FDBLogger.info( f"...imported {nobj} objects, {nroot} root objects, {npos} object positions, "
+                        f"{nsrc+nprvsrc} sources ({nsrc} main, {nprvsrc} previous), {nfrc} forced sources, "
+                        f"{ninfo} broker infos from {collection_name}" )
+        totnobj += nobj
+        totnroot += nroot
+        totnpos += npos
+        totnsrc += nsrc
+        totnprvsrc += nprvsrc
+        totnfrc += nfrc
+        totninfo += ninfo
 
     FDBLogger.info( f"Overall, imported {totnobj} objects, {totnroot} root objects, {totnpos} object positions, "
                     f"{totnsrc+totnprvsrc} sources ({totnsrc} main, {totnprvsrc} previous), "
