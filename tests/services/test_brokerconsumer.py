@@ -10,14 +10,29 @@ from util import logger, env_as_bool
 import db
 
 
-def check_mongodb( collection_base_name ):
+def check_mongodb( collection_base_name, cached_alerts=False ):
     base = collection_base_name
     with db.MGCon( readonly=True ) as mg:
-        expectedcollections = [ f'{base}_{s}' for s in
-                                [ 'diaobject', 'diasource', 'diasource_extra',
-                                  'diaforcedsource', 'diaforcedsource_extra',
-                                  'thumbnails', 'brokerinfo' ] ]
-        assert all( i in mg.db.list_collection_names() for i in expectedcollections )
+        expectedcollections = set( [ f'{base}_{s}' for s in
+                                     [ 'diaobject', 'diasource', 'diasource_extra',
+                                       'diaforcedsource', 'diaforcedsource_extra',
+                                       'thumbnails', 'brokerinfo' ] ] )
+        knowncollections = set( mg.db.list_collection_names() )
+        assert expectedcollections.issubset( knowncollections )
+        if cached_alerts:
+            # Because it has no index, it won't actually get created unless
+            #   something is written to it.
+            assert f'{base}_alertcache' in knowncollections
+
+        # 154 objects, only 12 unique
+        msgcursor = mg.collection( f"{base}_diaobject" ).find( {}, projection={'diaobjectid': 1 } )
+        objids = [ c['diaobjectid'] for c in msgcursor ]
+        assert len( objids ) == 154
+        assert len( set(objids) ) == 12
+
+        # Same number of cached alerts if we cached alerts
+        nalerts = mg.collection( f'{base}_alertcache' ).count_documents( {} )
+        assert nalerts == ( len( objids ) if cached_alerts else 0 )
 
         # 154 sources + 770 previous sources, only 77 unique.  (154 = 2*77... two broker classifiers)
         #   (Sadly, we're not really testing previous source import here, becasue of how
@@ -116,7 +131,7 @@ def cleanup_mongodb( collection_base_name ):
         colnames = [ f'{collection_base_name}_{s}' for s in
                      [ 'diaobject', 'diasource', 'diasource_extra',
                        'diaforcedsource', 'diaforcedsource_extra',
-                       'thumbnails', 'brokerinfo' ] ]
+                       'thumbnails', 'brokerinfo', 'alertcache' ] ]
         for c in colnames:
             if c in mg.db.list_collection_names():
                 mg.collection( c ).drop()
@@ -139,7 +154,7 @@ def test_BrokerConsumer( barf, alerts_30days_sent_and_classified ):
             colnames = [ f'fastdb_test_{s}' for s in
                          [ 'diaobject', 'diasource', 'diasource_extra',
                            'diaforcedsource', 'diaforcedsource_extra',
-                           'thumbnails', 'brokerinfo' ] ]
+                           'thumbnails', 'brokerinfo', 'alertcache' ] ]
             assert all( mg.collection(c).count_documents({}) == 0 for c in colnames )
 
         # Now make sure it can really poll
@@ -151,6 +166,17 @@ def test_BrokerConsumer( barf, alerts_30days_sent_and_classified ):
 
         # Check that the mongo database got populated
         check_mongodb( 'fastdb_test' )
+
+        cleanup_mongodb( 'fastdb_test' )
+
+        # Make sure stuff gets saved if we try to cache alerts
+        t0 = time.perf_counter()
+        bc = BrokerConsumer( 'kafka-server', f'test_BrokerConsumer_{barf}-2', topics=brokertopic,
+                             brokername_key='brokerName', nomsg_sleeptime=1, mongodb_collection_base='fastdb_test',
+                             cache_alerts=True )
+        bc.poll( restart_time=datetime.timedelta(seconds=10), max_restarts=0, notopic_sleeptime=2 )
+        assert time.perf_counter() - t0 < 20
+        check_mongodb( 'fastdb_test', cached_alerts=True )
 
     finally:
         cleanup_mongodb( 'fastdb_test' )

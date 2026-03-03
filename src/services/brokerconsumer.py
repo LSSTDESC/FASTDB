@@ -86,6 +86,16 @@ class BrokerConsumer:
           }
 
 
+    Optionally, there's also {mongodb_collection_base}_alertcache that has:
+      { 'topic': str
+        'msgoffset': int?
+        'timestamp': datetime,
+        'savetime': datetime,
+        'msg': dict
+      }
+    (If this is included it doubles the amount of stuff saved in mongo!
+    This is really here only for debugging purposes.)
+
     This class will work as-is only if the broker is a kafka server
     requiring no authentication (though you may be able to get it to
     work using extraconfig).  Often you will instantiate a subclass
@@ -114,8 +124,9 @@ class BrokerConsumer:
     def __init__( self, server, groupid, topics=None, updatetopics=False, extraconfig={},
                   schemaless=False, schema_in_key=False, schemafile=None,
                   brokername_for_alerts=None, brokername_key=None,
+                  mongodb_collection_base=None, cache_alerts=False,
                   pipe=None, loggername="BROKER", loggername_prefix='',
-                  nomsg_sleeptime=5, batch_size=1000,  mongodb_collection_base=None ):
+                  nomsg_sleeptime=5, batch_size=1000 ):
         """Create a connection to a kafka server and consumer broker messages.
 
         Note that you often (but not always) want to instantiate a subclass.
@@ -175,6 +186,23 @@ class BrokerConsumer:
             message.  If neither this nor brokername_for_alerts is given,
             then brokername will have the class name.
 
+          mongodb_collection_base : str, required
+            Will create several collections in the mongo database and write to them:
+              {mongodb_collection_base}_diaobject
+              {mongodb_collection_base}_diasource
+              {mongodb_collection_base}_diasource_extra
+              {mongodb_collection_base}_diaforcedsource
+              {mongodb_collection_base}_diaforcedsource_extra
+              {mongodb_collection_base}_thumbnails
+              {mongodb_collection_base}_brokerinfo
+              {mongodb_collection_base}_alertcache  [ empty unless cache_alerts is True ]
+
+          cache_alerts : bool, default False
+             If True, make almost-raw copies of the alerts into
+             {mongodb_collection_base}_alertcache, for debugging
+             purposes.  Only set this to True when you're debugging, as
+             it doubles the amount of stuff saved to the mongodb.
+
           pipe : multiprocessing.Pipe or None
             If not None, a call to poll will regularly send hearbeats to
             this Pipe.  It will also poll the pipe for messages.
@@ -194,9 +222,6 @@ class BrokerConsumer:
 
           batch_size : int, default 1000
             Try to consume this many messages at once.
-
-          mongodb_collection_base : str, required
-            The base name of the collections to save to
 
         """
 
@@ -257,6 +282,7 @@ class BrokerConsumer:
         if ( not isinstance( mongodb_collection_base, str ) ) or ( len(mongodb_collection_base) == 0 ):
             raise ValueError( "Must pass a non-0 length string as mongdb_collection_base" )
         self.mongodb_collection_base = urllib.parse.quote_plus( mongodb_collection_base )
+        self.cache_alerts = cache_alerts
         self.ensure_collections()
 
         self.logger.info( f"Writing broker messages to monogdb collections {self.mongodb_collection_base}*" )
@@ -270,7 +296,8 @@ class BrokerConsumer:
                          'diaforcedsource': [ ['diaforcedsourceid'], ['savetime'] ],
                          'diaforcedsource_extra': [ ['diaforcedsourceid'], ['savetime'] ],
                          'thumbnails': [ ['diasourceid'], ['savetime'] ],
-                         'brokerinfo': [ ['brokername', 'topic', 'diasourceid'], ['savetime'] ]
+                         'brokerinfo': [ ['brokername', 'topic', 'diasourceid'], ['savetime'] ],
+                         'alertcache': []
                         }
             for suffix, wantedindexes in suffixes.items():
                 col = mg.collection( f"{self.mongodb_collection_base}_{suffix}" )
@@ -544,20 +571,26 @@ class BrokerConsumer:
                                    'msg': alert } )
 
         wrangled = self.alert_wrangler( messagebatch )
-        nadded = self.mongodb_store( **wrangled )
-        self.countlogger.info( f"...added to mongodb:\n"
-                               f"              {nadded['diaobject']} diaobject\n"
-                               f"              {nadded['diasource']} diasource\n"
-                               f"              {nadded['diasource_extra']} diasource_extra\n"
-                               f"              {nadded['diaforcedsource']} diaforcedsource\n"
-                               f"              {nadded['diaforcedsource_extra']} diaforcedsource_extra\n"
-                               f"              {nadded['thumbnails']} thumbnails\n"
-                               f"              {nadded['brokerinfo']} brokerinfo"
-                              )
+        nadded = self.mongodb_store( messagebatch=messagebatch, **wrangled )
+
+        strio = io.StringIO()
+        strio.write( f"...added to mongodb:\n"
+                     f"              {nadded['diaobject']} diaobject\n"
+                     f"              {nadded['diasource']} diasource\n"
+                     f"              {nadded['diasource_extra']} diasource_extra\n"
+                     f"              {nadded['diaforcedsource']} diaforcedsource\n"
+                     f"              {nadded['diaforcedsource_extra']} diaforcedsource_extra\n"
+                     f"              {nadded['thumbnails']} thumbnails\n"
+                     f"              {nadded['brokerinfo']} brokerinfo"
+                    )
+        if self.cache_alerts:
+            strio.write( f"\n              {nadded['alertcache']} cached alerts" )
+        self.countlogger.info( strio.getvalue() )
+
 
     def mongodb_store( self, objects=[], sources=[], sources_extra=[],
                        forcedsources=[], forcedsources_extra=[],
-                       thumbnailses=[], brokerinfos=[] ):
+                       thumbnailses=[], brokerinfos=[], messagebatch=[] ):
         inserted = {}
         with db.MGCon() as mg:
             for arr, suffix in zip( [ objects, sources, sources_extra,
@@ -569,6 +602,10 @@ class BrokerConsumer:
                 col = mg.collection( f'{self.mongodb_collection_base}_{suffix}' )
                 results = col.insert_many( arr, ordered=False )
                 inserted[suffix] = len( results.inserted_ids )
+            if self.cache_alerts:
+                col = mg.collection( f'{self.mongodb_collection_base}_alertcache' )
+                results = col.insert_many( messagebatch, ordered=False )
+                inserted['alertcache'] = len( results.inserted_ids )
         return inserted
 
 
