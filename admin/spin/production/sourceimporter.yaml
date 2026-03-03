@@ -25,7 +25,7 @@ spec:
           - command: [ '/bin/bash' ]
             args:
               - -c
-              - "python /fastdb/services/source_importer.py -o realtime_0 -p realtime_0 -s realtime_0 -f realtime_0 -v --t1 2026-02-07T16:00 -c fink_alerts > /logs/sourceimporter_`date -Isec`.log 2>&1"
+              - "python /fastdb/services/source_importer.py -o realtime_0 -p realtime_0 -s realtime_0 -f realtime_0 -v -c fink_alerts > /logs/sourceimporter_`date -Isec`.log 2>&1"
             workingDir: /brokerconsumer
             env:
             - name: MONGODB_HOST

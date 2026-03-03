@@ -126,7 +126,7 @@ class BrokerConsumer:
                   brokername_for_alerts=None, brokername_key=None,
                   mongodb_collection_base=None, cache_alerts=False,
                   pipe=None, loggername="BROKER", loggername_prefix='',
-                  nomsg_sleeptime=5, batch_size=1000 ):
+                  consume_timeout=1, nomsg_sleeptime=5, batch_size=1000 ):
         """Create a connection to a kafka server and consumer broker messages.
 
         Note that you often (but not always) want to instantiate a subclass.
@@ -215,6 +215,10 @@ class BrokerConsumer:
           loggername_prefix : str, default ""
             Used in headers of log messages
 
+          consume_timeout : int (float?), default 1
+            Number of seconds the kafka consumer should wait to see if it
+            can fill it's batch size of messages.
+
           nomsg_sleeptime : int, default 5
             The KafkaConsumer (src/kafkaconsumer.py) will sleep this
             many seconds between not finding any new messages and
@@ -265,6 +269,7 @@ class BrokerConsumer:
         self.extraconfig = extraconfig
         self.nomsg_sleeptime = nomsg_sleeptime
         self.batch_size = batch_size
+        self.consume_timeout = consume_timeout
         self.brokername_for_alerts = brokername_for_alerts
         self.brokername_key = brokername_key
 
@@ -317,7 +322,7 @@ class BrokerConsumer:
                                                schema=self.schemafile, schemaless=self.schemaless,
                                                topics=self.topics, reset=reset,
                                                extraconsumerconfig=self.extraconfig,
-                                               consume_nmsgs=self.batch_size, consume_timeout=1,
+                                               consume_nmsgs=self.batch_size, consume_timeout=self.consume_timeout,
                                                nomsg_sleeptime=self.nomsg_sleeptime,
                                                logger=self.logger, countlogger=self.countlogger )
                 countdown = -1
@@ -537,6 +542,7 @@ class BrokerConsumer:
         self.countlogger.info( f"Handling {len(msgs)} messages; consumer has received "
                                f"{self.consumer.tot_handled} messages." )
         now = datetime.datetime.utcnow()
+        t0 = time.perf_counter()
         for msg in msgs:
             timestamptype, timestamp = msg.timestamp()
 
@@ -570,8 +576,11 @@ class BrokerConsumer:
                                    'savetime': now,
                                    'msg': alert } )
 
+        t1 = time.perf_counter()
         wrangled = self.alert_wrangler( messagebatch )
+        t2 = time.perf_counter()
         nadded = self.mongodb_store( messagebatch=messagebatch, **wrangled )
+        t3 = time.perf_counter()
 
         strio = io.StringIO()
         strio.write( f"...added to mongodb:\n"
@@ -585,6 +594,9 @@ class BrokerConsumer:
                     )
         if self.cache_alerts:
             strio.write( f"\n              {nadded['alertcache']} cached alerts" )
+        strio.write( f"\n   ...parse time: {t1-t0:.3f}\n" )
+        strio.write( f"   ...wrangle time: {t2-t1:.3f}\n" )
+        strio.write( f"   ...store time: {t3-t2:.3f}" )
         self.countlogger.info( strio.getvalue() )
 
 
@@ -1072,6 +1084,8 @@ class BrokerConsumerLauncher:
             loggername_prefix = broker['loggername_prefix'].replace( "{barf}", self.barf )
             schm = schemafile if 'schemafile' not in broker else broker['schemafile']
             updatetopics = False if 'updatetopics' not in broker else broker['updatetopics']
+            batch_size = 1000 if 'batch_size' not in broker else broker['batch_size']
+            consume_timeout = 1 if 'consume_timeout' not in broker else broker['consume_timeout']
             restart_time = datetime.timedelta( minutes=(broker['restart_time_min'] if 'restart_time_min' in broker
                                                         else 30 ) )
             max_restarts = broker['max_restarts'] if 'max_restarts' in broker else None
@@ -1088,6 +1102,8 @@ class BrokerConsumerLauncher:
                            'schemafile': schm,
                            'updatetopics': updatetopics,
                            'restart_time': restart_time,
+                           'batch_size': batch_size,
+                           'consume_timeout': consume_timeout,
                            'max_restarts': max_restarts,
                            'notopic_sleeptime': notopic_sleeptime,
                            'extraconfig': extraconfig,

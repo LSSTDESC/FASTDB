@@ -256,10 +256,10 @@ class SourceImporter:
             dbcon.execute( q )
 
         # ****
-        strio = io.StringIO()
-        strio.write( "mongo pipeline is:\n" )
-        pprint.pp( pipeline, strio )
-        FDBLogger.debug( strio.getvalue() )
+        # strio = io.StringIO()
+        # strio.write( "mongo pipeline is:\n" )
+        # pprint.pp( pipeline, strio )
+        # FDBLogger.debug( strio.getvalue() )
         # ****
 
         mongocursor = collection.aggregate( pipeline )
@@ -271,7 +271,7 @@ class SourceImporter:
         if self.debug_just_read_mongo:
             gratuitous = 0
             for row in mongocursor:
-                gratuitous += 1 if row in mongocursor else 0
+                gratuitous += 1
             FDBLogger.debug( f"      ...read {gratuitous} rows from mongo" )
 
         else:
@@ -496,7 +496,7 @@ class SourceImporter:
             self.read_mongo_sources( dbcon, t0=t0, t1=t1, batchsize=batchsize )
 
             if self.debug_just_read_mongo:
-                return 0, 0
+                return 0
 
             FDBLogger.debug( f"   ...inserting new sources to temp table from {t0} to {t1}" )
             dbcon.execute( "INSERT INTO diasource( SELECT * FROM temp_diasource_import ) ON CONFLICT DO NOTHING" )
@@ -780,7 +780,7 @@ def main():
                                 "Not currently used." ) )
     parser.add_argument( "--t1", default=None, help="Only load alerts received through this time (UTC) (ISO format)" )
     parser.add_argument( "-d", "--debug-just-read-mongo", default=False, action='store_true',
-                         help="DOn't write to postgres (even temporary tables), just read mongo for timing." )
+                         help="Don't write to postgres (even temporary tables), just read mongo for timing." )
     parser.add_argument( "-v", "--verbose", action='store_true', default=False,
                          help="Show debug log messages" )
     args = parser.parse_args()
@@ -790,13 +790,12 @@ def main():
     else:
         FDBLogger.setLevel( logging.INFO )
 
-    t1 = SourceImporter.util.datetime_to_utc( args.t1, with_tz=True, now_on_none=False )
+    t1 = util.datetime_to_utc( args.t1, with_tz=True, now_on_none=False )
 
     totnobj = 0
     totnroot = 0
     totnpos = 0
     totnsrc = 0
-    totnprvsrc = 0
     totnfrc = 0
     totninfo = 0
 
@@ -813,26 +812,23 @@ def main():
                              debug_just_read_mongo=args.debug_just_read_mongo )
 
         try:
-            nobj, nroot, npos, nsrc, nprvsrc, nfrc, ninfo = si.import_from_mongo( t1=t1 )
+            nobj, nroot, npos, nsrc, nfrc, ninfo = si.import_from_mongo( t1=t1 )
         except Exception:
             # The traceback will have been printed in import_from_collection
             FDBLogger.error( "Fail." )
             sys.exit( 1 )
 
         FDBLogger.info( f"...imported {nobj} objects, {nroot} root objects, {npos} object positions, "
-                        f"{nsrc+nprvsrc} sources ({nsrc} main, {nprvsrc} previous), {nfrc} forced sources, "
-                        f"{ninfo} broker infos from {collection_name}" )
+                        f"{nsrc} sources, {nfrc} forced sources, {ninfo} broker infos from {collection_name}" )
         totnobj += nobj
         totnroot += nroot
         totnpos += npos
         totnsrc += nsrc
-        totnprvsrc += nprvsrc
         totnfrc += nfrc
         totninfo += ninfo
 
     FDBLogger.info( f"Overall, imported {totnobj} objects, {totnroot} root objects, {totnpos} object positions, "
-                    f"{totnsrc+totnprvsrc} sources ({totnsrc} main, {totnprvsrc} previous), "
-                    f"{totnfrc} forced sources, {totninfo} broker infos." )
+                    f"{totnsrc} sources, {totnfrc} forced sources, {totninfo} broker infos." )
 
 
 # ======================================================================
