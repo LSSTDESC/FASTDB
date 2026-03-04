@@ -1,4 +1,5 @@
 import pytest
+improt os
 import time
 import math
 import datetime
@@ -287,7 +288,7 @@ def test_ampel_justpull():
     #   username: <username>
     #   password: <password>
     # with Scimma credentials
-    scimmacredfilename = None
+    scimmacredfilename = os.getenv( 'SCIMMACREDS', None )
     if scimmacredfilename is None:
         raise RuntimeError( "You need a file with SCiMMA credentials; see test source" )
     creds = yaml.safe_load( open(scimmacredfilename) )
@@ -329,7 +330,7 @@ def test_antares():
     #   username: <username>
     #   password: <password>
     # with antares
-    antarescredfilename = None
+    antarescredfilename = os.getenv( 'ANTARESCREDS', None )
     if antarescredfilename is None:
         raise RuntimeError( "You need a file with ANTARES cedentials; see test source" )
     creds = yaml.safe_load( open(antarescredfilename) )
