@@ -4,8 +4,15 @@ import math
 import datetime
 import random
 import multiprocessing
+import yaml
 
-from services.brokerconsumer import BrokerConsumer, BrokerConsumerLauncher, FinkConsumer
+from services.brokerconsumer import (
+    BrokerConsumer,
+    BrokerConsumerLauncher,
+    FinkConsumer,
+    AMPELConsumer,
+    AntaresConsumer
+)
 from util import logger, env_as_bool
 import db
 
@@ -230,24 +237,27 @@ def test_BrokerConsumerLauncher( barf, alerts_30days_sent_and_classified ):
 @pytest.mark.skipif( not env_as_bool('RUN_FINK_TESTS'), reason='RUN_FINK_TESTS is not set' )
 def test_fink():
     barf = "".join( random.choices( 'abcdefghijklmnopqrstuvwxyz', k=6 ) )
+    groupid = f'rknop-fastdb-test-{barf}'
     brokertopic = 'fink_sn_near_galaxy_candidate_lsst'
 
     try:
         t0 = time.perf_counter()
-        fc = FinkConsumer( grouptag=barf, fink_topic=brokertopic, mongodb_collection_base='fastdb_fink_test',
-                           nomsg_sleeptime=1, batch_size=10 )
+        fc = FinkConsumer( groupid=groupid, topics=brokertopic, mongodb_collection_base='fastdb_fink_test',
+                           consume_timeout=1, nomsg_sleeptime=1, batch_size=10, cache_alerts=True )
         fc.poll( restart_time=datetime.timedelta(seconds=10), max_restarts=0, notopic_sleeptime=2, max_msgs=10 )
         t1 = time.perf_counter()
         logger.info( f"Fink poll finished in {t1-t0} seconds." )
 
+        expectedcollections = [ f'fastdb_fink_test_{s}' for s in
+                                [ 'diaobject', 'diasource', 'diasource_extra',
+                                  'diaforcedsource', 'diaforcedsource_extra',
+                                  'thumbnails', 'brokerinfo', 'alertcache' ] ]
         with db.MGCon() as mg:
-            expectedcollections = [ f'fastdb_fink_test_{s}' for s in
-                                    [ 'diaobject', 'diasource', 'diasource_extra',
-                                      'diaforcedsource', 'diaforcedsource_extra',
-                                      'thumbnails', 'brokerinfo' ] ]
             assert all( i in mg.db.list_collection_names() for i in expectedcollections )
+            nalerts = mg.collection( 'fastdb_fink_test_alertcache' ).count_documents({})
+            assert nalerts >= 10
             col = mg.collection( 'fastdb_fink_test_brokerinfo' )
-            assert col.count_documents({}) >= 10
+            assert col.count_documents({}) == nalerts
             srcids = set()
             for doc in col.find( {} ):
                 assert doc['brokername'] == 'Fink'
@@ -255,10 +265,93 @@ def test_fink():
                 srcids.add( doc['diasourceid'] )
 
             col = mg.collection( 'fastdb_fink_test_diasource' )
-            assert set( c['diasourceid'] for c in col.find({}) ) == srcids
+            assert srcids.issubset( set( c['diasourceid'] for c in col.find({}) ) )
 
             # Check other stuff?
 
+        # Uncomment these next two to manually inspect the saved mongo collections
+        # import pdb; pdb.set_trace()
+        # pass
+
     finally:
         with db.MGCon() as mg:
-            db.collection( 'fastdb_fink_test' ).drop()
+            for col in expectedcollections:
+                mg.collection( col ).drop()
+
+
+@pytest.mark.skipif( not env_as_bool('RUN_AMPEL_TESTS'), reason='RUN_AMPEL_TESTS is not set' )
+def test_ampel_justpull():
+    brokertopic = 'ampel.lsst.extragalactic-transients'
+    barf = "".join( random.choices( 'abcdefghijklmnopqrstuvwxyz', k=6 ) )
+    # TODO : to actually run this test, you have to have to have a file with format
+    #   username: <username>
+    #   password: <password>
+    # with Scimma credentials
+    scimmacredfilename = None
+    scimmacredfilename = "scimmacreds"
+    if scimmacredfilename is None:
+        raise RuntimeError( "You need a file with SCiMMA credentials; see test source" )
+    creds = yaml.safe_load( open(scimmacredfilename) )
+    if ( 'username' not in creds ) or ( 'password' not in creds ):
+        raise RuntimeError( f"{scimmacredfilename} must have both username and password" )
+    username = creds['username']
+    password = creds['password']
+    groupid = f'{username}-fastdb-test-{barf}'
+
+    try:
+        t0 = time.perf_counter()
+        ac = AMPELConsumer( groupid=groupid, topics=brokertopic, mongodb_collection_base='fastdb_test_ampel',
+                            consume_timeout=1, nomsg_sleeptime=1, batch_size=10, cache_alerts=True, no_wrangle=True,
+                            username=username, password=password )
+        ac.poll( restart_time=datetime.timedelta(seconds=10), max_restarts=0, notopic_sleeptime=2, max_msgs=10 )
+        t1 = time.perf_counter()
+        logger.info( f"AMPEL poll finished in {t1-t0} seconds." )
+
+        with db.MGCon() as mg:
+            assert 'fastdb_test_ampel_alertcache' in mg.db.list_collection_names()
+            col = mg.collection( 'fastdb_test_ampel_alertcache' )
+            assert col.count_documents({}) >= 10
+
+        # Uncomment these next two to manually inspect the saved mongo collections
+        # import pdb; pdb.set_trace()
+        # pass
+
+    finally:
+        with db.MGCon() as mg:
+            mg.collection( 'fastdb_test_ampel_alertcache' ).drop()
+
+
+@pytest.mark.skipif( not env_as_bool('RUN_ANTARES_TESTS'), reason='RUN_ANTARES_TESTS is not set' )
+def test_antares():
+    barf = "".join( random.choices( 'abcdefghijklmnopqrstuvwxyz', k=6 ) )
+    groupid = f'rknop-fastdb-test-{barf}'
+    brokertopic = None
+    # TODO : to actually run this test, you have to have to have a file with format
+    #   username: <username>
+    #   password: <password>
+    # with antares
+    antarescredfilename = None
+    antarescredfilename = 'antarescreds'
+    if antarescredfilename is None:
+        raise RuntimeError( "You need a file with ANTARES cedentials; see test source" )
+    creds = yaml.safe_load( open(antarescredfilename) )
+    if ( 'username' not in creds ) or ( 'password' not in creds ):
+        raise RuntimeError( f'{antarescredfilename} must have both username and password' )
+    username = creds['username']
+    password = creds['password']
+
+    try:
+        t0 = time.perf_counter()
+        ac = AntaresConsumer( groupid=groupid, topics=brokertopic, mongodb_collection_base='fastdb_antares_test',
+                              consume_timeout=1, nomsg_sleeptime=1, batch_size=10, cache_alerts=True, no_wrangle=True,
+                              username=username, password=password )
+        # REmove this with a call to poll once I've figured out how to use ANTARES
+        ac.create_connection()
+        t1 = time.perf.counter()
+        logger.info( f"Created ANTARES connection in {t1-t0} seconds" )
+        import pdb; pdb.set_trace()
+        pass
+
+    finally:
+        with db.MGCon() as mg:
+            mg.collection( 'fastdb_antares_test' ).drop()

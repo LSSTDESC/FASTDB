@@ -2,6 +2,7 @@ import sys
 import os
 import io
 import re
+import collections
 import time
 import yaml
 import datetime
@@ -124,7 +125,7 @@ class BrokerConsumer:
     def __init__( self, server, groupid, topics=None, updatetopics=False, extraconfig={},
                   schemaless=False, schema_in_key=False, schemafile=None,
                   brokername_for_alerts=None, brokername_key=None,
-                  mongodb_collection_base=None, cache_alerts=False,
+                  mongodb_collection_base=None, cache_alerts=False, no_wrangle=False,
                   pipe=None, loggername="BROKER", loggername_prefix='',
                   consume_timeout=1, nomsg_sleeptime=5, batch_size=1000 ):
         """Create a connection to a kafka server and consumer broker messages.
@@ -177,8 +178,8 @@ class BrokerConsumer:
           brokername_for_alerts : str, default None
             If given, then when the mongo database is populated, the
             'brokername' field will have this value.  If neither this
-            nor brokername_key is given, then brokername will have the
-            class name.
+            nor brokername_key is given, then brokername will be
+            cls._brokername.
 
           brokername_key : str, default None
             If given, then when the mongo database is populated, the
@@ -202,6 +203,13 @@ class BrokerConsumer:
              {mongodb_collection_base}_alertcache, for debugging
              purposes.  Only set this to True when you're debugging, as
              it doubles the amount of stuff saved to the mongodb.
+
+          no_wrangle : bool, default False
+             Requires cache_alerts.  If true, the only the
+             {mongdb_collection_base}_alertcache collection will be
+             written, not the wrangled ones with parsed information.
+             Mostly useful for debugging purposes.  May not be
+             implemented in all subclasses.
 
           pipe : multiprocessing.Pipe or None
             If not None, a call to poll will regularly send hearbeats to
@@ -241,8 +249,8 @@ class BrokerConsumer:
                                          f'%(levelname)s] - %(message)s' ),
                                        datefmt='%Y-%m-%d %H:%M:%S' )
         logout.setFormatter( formatter )
-        self.logger.setLevel( logging.INFO )
-        # self.logger.setLevel( logging.DEBUG )
+        # self.logger.setLevel( logging.INFO )
+        self.logger.setLevel( logging.DEBUG )
 
         self.countlogger = logging.getLogger( f"countlogger_{loggername_prefix}{loggername}" )
         self.countlogger.propagate = False
@@ -264,6 +272,14 @@ class BrokerConsumer:
         self.pipe = pipe
         self.server = server
         self.groupid = groupid
+        if self.groupid is None:
+            raise ValueError( "groupid is required" )
+        if isinstance( topics, str ):
+            self.topics = [ topics ]
+        elif isinstance( topics, collections.abc.Sequence ):
+            self.topics = list( topics )
+        elif topics is not None:
+            raise TypeError( f"topics must be a str or a list of str, got a {type(topics)}" )
         self.topics = topics
         self._updatetopics = updatetopics
         self.extraconfig = extraconfig
@@ -288,6 +304,9 @@ class BrokerConsumer:
             raise ValueError( "Must pass a non-0 length string as mongdb_collection_base" )
         self.mongodb_collection_base = urllib.parse.quote_plus( mongodb_collection_base )
         self.cache_alerts = cache_alerts
+        self.no_wrangle = no_wrangle
+        if self.no_wrangle and ( not self.cache_alerts ):
+            raise ValueError( "no_wrangle requires cache_alerts" )
         self.ensure_collections()
 
         self.logger.info( f"Writing broker messages to monogdb collections {self.mongodb_collection_base}*" )
@@ -305,6 +324,8 @@ class BrokerConsumer:
                          'alertcache': []
                         }
             for suffix, wantedindexes in suffixes.items():
+                if self.no_wrangle and ( suffix != 'alertcache' ):
+                    continue
                 col = mg.collection( f"{self.mongodb_collection_base}_{suffix}" )
                 for wantedindex in wantedindexes:
                     if wantedindex not in [ list( i['key'].keys() ) for i in col.list_indexes() ]:
@@ -512,17 +533,10 @@ class BrokerConsumer:
             if stuff['thumbnails'] is not None:
                 thumbnailses.append( stuff['thumbnails'] )
 
-            if self.brokername_for_alerts is not None:
-                bname = self.brokername_for_alerts
-            elif self.brokername_key is not None:
-                bname = msg[ self.brokername_key ]
-            else:
-                bname = self.__class__.__name__
-
             brokerinfos.append(
                 { 'diasourceid': msg['diaSourceId'],
                   'savetime': metamsg['savetime'],
-                  'brokername': bname,
+                  'brokername': metamsg['brokername'],
                   'topic': metamsg['topic'],
                   'msgtime': metamsg['timestamp'],
                   'info': { k:v for k, v in msg.items() if k not in self._standard_lsst_alert_fields }
@@ -570,14 +584,25 @@ class BrokerConsumer:
                         raise RuntimeError( "This should never happen." )
                     alert = alertlist[0]
 
-            messagebatch.append( { 'topic': msg.topic(),
+            if self.brokername_for_alerts is not None:
+                bname = self.brokername_for_alerts
+            elif self.brokername_key is not None:
+                bname = alert[ self.brokername_key ]
+            else:
+                bname = self._brokername
+
+            messagebatch.append( { 'brokername': bname,
+                                   'topic': msg.topic(),
                                    'msgoffset': msg.offset(),
                                    'timestamp': timestamp,
                                    'savetime': now,
                                    'msg': alert } )
 
         t1 = time.perf_counter()
-        wrangled = self.alert_wrangler( messagebatch )
+        if self.no_wrangle:
+            wrangled = {}
+        else:
+            wrangled = self.alert_wrangler( messagebatch )
         t2 = time.perf_counter()
         nadded = self.mongodb_store( messagebatch=messagebatch, **wrangled )
         t3 = time.perf_counter()
@@ -611,9 +636,12 @@ class BrokerConsumer:
                                     [ 'diaobject', 'diasource', 'diasource_extra',
                                       'diaforcedsource', 'diaforcedsource_extra',
                                       'thumbnails', 'brokerinfo' ] ):
-                col = mg.collection( f'{self.mongodb_collection_base}_{suffix}' )
-                results = col.insert_many( arr, ordered=False )
-                inserted[suffix] = len( results.inserted_ids )
+                if self.no_wrangle:
+                    inserted[suffix] = 0
+                else:
+                    col = mg.collection( f'{self.mongodb_collection_base}_{suffix}' )
+                    results = col.insert_many( arr, ordered=False )
+                    inserted[suffix] = len( results.inserted_ids )
             if self.cache_alerts:
                 col = mg.collection( f'{self.mongodb_collection_base}_alertcache' )
                 results = col.insert_many( messagebatch, ordered=False )
@@ -728,50 +756,91 @@ class BrokerConsumer:
 
 
 # ======================================================================
-# THIS IS VESTIGAL FROM ELASTICC2.  Needs to be updated!
 
-class AntaresConsumer(BrokerConsumer):
-    _brokername = 'antares'
+class FinkConsumer(BrokerConsumer):
+    _brokername = 'Fink'
 
-    def __init__( self, grouptag=None,
-                  usernamefile='/secrets/antares_username', passwdfile='/secrets/antares_passwd',
-                  loggername="ANTARES", antares_topic='elasticc2-st1-ddf-full', **kwargs ):
-        raise RuntimeError( "Left over from ELAsTiCC2; needs to be updated." )
-        server = "kafka.antares.noirlab.edu:9092"
-        groupid = "elasticc-lbnl" + ( "" if grouptag is None else "-" + grouptag )
-        topics = [ antares_topic ]
-        updatetopics = False
-        with open( usernamefile ) as ifp:
-            username = ifp.readline().strip()
-        with open( passwdfile ) as ifp:
-            passwd = ifp.readline().strip()
-        extraconfig = {
-            "api.version.request": True,
-            "broker.version.fallback": "0.10.0.0",
-            "api.version.fallback.ms": "0",
-            "enable.auto.commit": True,
-            "security.protocol": "SASL_SSL",
-            "sasl.mechanism": "PLAIN",
-            "sasl.username": username,
-            "sasl.password": passwd,
-            "ssl.ca.location": str( _rundir / "antares-ca.pem" ),
-            "auto.offset.reset": "earliest",
-        }
-        super().__init__( server, groupid, topics=topics, updatetopics=updatetopics,
-                          extraconfig=extraconfig, loggername=loggername, **kwargs )
-        self.logger.info( f"Antares group id is {groupid}" )
-
+    def __init__( self, server='kafka-lsst.fink-broker.org:24499', groupid=None, **kwargs ):
+        super().__init__( server, groupid, schemaless=False, schema_in_key=True, **kwargs )
+        self.logger.info( f"Fink group id is {groupid}" )
 
 
 # ======================================================================
 
-class FinkConsumer(BrokerConsumer):
-    _brokername = 'fink'
+class AMPELConsumer(BrokerConsumer):
+    _brokername = "AMPEL"
 
-    def __init__( self, server, groupid, **kwargs ):
-        super().__init__( server, groupid, schemaless=False, schema_in_key=True, **kwargs )
-        self.logger.info( f"Fink group id is {groupid}" )
+    def __init__( self, server='kafka.scimma.org', groupid=None,
+                  username=None, password=None,
+                  usernamefile="/secrets/scimma_username", passwordfile="/screts/scimma_password",
+                  **kwargs ):
 
+        extraconfig = {}
+        if 'extraconfig' in kwargs:
+            extraconfig = kwargs[ 'extraconfig' ]
+            del kwargs[ 'extraconfig' ]
+
+        if username is None:
+            with open( usernamefile ) as ifp:
+                username = ifp.readline().strip()
+        if password is None:
+            with open( passwordfile ) as ifp:
+                password = ifp.readline().strip()
+
+        if ( not isinstance( groupid, str ) ) or ( groupid[0:len(username)] != username ):
+            raise ValueError( f"groupid must start with {username}" )
+
+        extraconfig.update( { 'sasl.mechanism': 'SCRAM-SHA-512',
+                              'security.protocol': 'SASL_SSL',
+                              'sasl.username': username,
+                              'sasl.password': password } )
+
+        super().__init__( server, groupid, schemaless=False, extraconfig=extraconfig, **kwargs )
+        self.logger.info( f"AMPEL group id is {groupid}" )
+
+
+# ======================================================================
+# THIS IS VESTIGAL FROM ELASTICC2.  Needs to be updated!
+
+class AntaresConsumer(BrokerConsumer):
+    _brokername = 'ANTARES'
+
+    def __init__( self, server='kafka.antares.noirlab.edu:9092', groupid=None,
+                  username=None, password=None,
+                  usernamefile='/secrets/antares_username', passwordfile='/secrets/antares_passwd',
+                  cafile='/fastdb/share/antares-ca.pem',
+                  **kwargs ):
+        extraconfig = {}
+        if 'extraconfig' in kwargs:
+            extraconfig = kwargs[ 'extraconfig' ]
+            del kwargs[ 'extgraconfig' ]
+
+        if username is None:
+            with open( usernamefile ) as ifp:
+                username = ifp.readline().strip()
+        if password is None:
+            with open( passwordfile ) as ifp:
+                password = ifp.readline().strip()
+
+        # Reference for the config:
+        #   https://api.antares.noirlab.edu/v1/client/config/streaming/default
+        #   https://gitlab.com/nsf-noirlab/csdc/antares/client/-/blob/master/antares_client/stream.py
+
+        extraconfig = {
+            # "api.version.request": True,
+            # "broker.version.fallback": "0.10.0.0",
+            # "api.version.fallback.ms": "0",
+            "enable.auto.commit": True,
+            "security.protocol": "SASL_SSL",
+            "sasl.mechanisms": "PLAIN",
+            "sasl.username": username,
+            "sasl.password": password,
+            "ssl.endpoint.identification.algorithm": "none",
+            "ssl.ca.location": cafile,
+            "auto.offset.reset": "earliest",
+        }
+        super().__init__( server, groupid, schemaless=False, extraconfig=extraconfig, **kwargs )
+        self.logger.info( f"Antares group id is {groupid}" )
 
 
 # ======================================================================

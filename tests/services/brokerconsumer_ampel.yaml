@@ -1,0 +1,19 @@
+brokers:
+  - name: "AMPEL"
+    class: AMPELConsumer
+    server: kafka.scimma.org
+    topics: [ 'ampel.lsst.extragalactic-transients' ]
+    groupid: rknop-fastdb-test-{barf}
+    collection: ampel_{barf}
+    loggername: AMPEL
+    loggername_prefix: ""
+    updatetopics: false
+    batch_size: 10
+    consume_timeout: 1
+    restart_time_min: 0.1
+    max_restarts: null
+    notopic_sleeptime_sec: 5
+    extraconfig: null
+    extraconfigjson: null
+    
+    

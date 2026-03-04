@@ -142,8 +142,8 @@ am__uninstall_files_from_dir = { \
   || { echo " ( cd '$$dir' && rm -f" $$files ")"; \
        $(am__cd) "$$dir" && echo $$files | $(am__xargs_n) 40 $(am__rm_f); }; \
   }
-am__installdirs = "$(DESTDIR)$(avscdir)"
-DATA = $(avsc_DATA)
+am__installdirs = "$(DESTDIR)$(avscdir)" "$(DESTDIR)$(sharedir)"
+DATA = $(avsc_DATA) $(share_DATA)
 am__tagged_files = $(HEADERS) $(SOURCES) $(TAGS_FILES) $(LISP)
 am__DIST_COMMON = $(srcdir)/Makefile.in
 DISTFILES = $(DIST_COMMON) $(DIST_SOURCES) $(TEXINFOS) $(EXTRA_DIST)
@@ -243,6 +243,7 @@ top_srcdir = @top_srcdir@
 AUTOMAKE_OPTION = subdir-objects
 sharedir = @installdir@/share
 avscdir = @installdir@/share/avsc
+share_DATA = antares-ca.pem
 avsc_DATA = avsc/fastdb.v10_0_0.BrokerMessage.avsc \
 	avsc/lsst.v10_0.alert.avsc \
 	avsc/lsst.v10_0.diaObject.avsc \
@@ -305,6 +306,27 @@ uninstall-avscDATA:
 	@list='$(avsc_DATA)'; test -n "$(avscdir)" || list=; \
 	files=`for p in $$list; do echo $$p; done | sed -e 's|^.*/||'`; \
 	dir='$(DESTDIR)$(avscdir)'; $(am__uninstall_files_from_dir)
+install-shareDATA: $(share_DATA)
+	@$(NORMAL_INSTALL)
+	@list='$(share_DATA)'; test -n "$(sharedir)" || list=; \
+	if test -n "$$list"; then \
+	  echo " $(MKDIR_P) '$(DESTDIR)$(sharedir)'"; \
+	  $(MKDIR_P) "$(DESTDIR)$(sharedir)" || exit 1; \
+	fi; \
+	for p in $$list; do \
+	  if test -f "$$p"; then d=; else d="$(srcdir)/"; fi; \
+	  echo "$$d$$p"; \
+	done | $(am__base_list) | \
+	while read files; do \
+	  echo " $(INSTALL_DATA) $$files '$(DESTDIR)$(sharedir)'"; \
+	  $(INSTALL_DATA) $$files "$(DESTDIR)$(sharedir)" || exit $$?; \
+	done
+
+uninstall-shareDATA:
+	@$(NORMAL_UNINSTALL)
+	@list='$(share_DATA)'; test -n "$(sharedir)" || list=; \
+	files=`for p in $$list; do echo $$p; done | sed -e 's|^.*/||'`; \
+	dir='$(DESTDIR)$(sharedir)'; $(am__uninstall_files_from_dir)
 tags TAGS:
 
 ctags CTAGS:
@@ -348,7 +370,7 @@ check-am: all-am
 check: check-am
 all-am: Makefile $(DATA)
 installdirs:
-	for dir in "$(DESTDIR)$(avscdir)"; do \
+	for dir in "$(DESTDIR)$(avscdir)" "$(DESTDIR)$(sharedir)"; do \
 	  test -z "$$dir" || $(MKDIR_P) "$$dir"; \
 	done
 install: install-am
@@ -401,7 +423,7 @@ info: info-am
 
 info-am:
 
-install-data-am: install-avscDATA
+install-data-am: install-avscDATA install-shareDATA
 
 install-dvi: install-dvi-am
 
@@ -445,7 +467,7 @@ ps: ps-am
 
 ps-am:
 
-uninstall-am: uninstall-avscDATA
+uninstall-am: uninstall-avscDATA uninstall-shareDATA
 
 .MAKE: install-am install-strip
 
@@ -455,11 +477,11 @@ uninstall-am: uninstall-avscDATA
 	install-data install-data-am install-dvi install-dvi-am \
 	install-exec install-exec-am install-html install-html-am \
 	install-info install-info-am install-man install-pdf \
-	install-pdf-am install-ps install-ps-am install-strip \
-	installcheck installcheck-am installdirs maintainer-clean \
-	maintainer-clean-generic mostlyclean mostlyclean-generic pdf \
-	pdf-am ps ps-am tags-am uninstall uninstall-am \
-	uninstall-avscDATA
+	install-pdf-am install-ps install-ps-am install-shareDATA \
+	install-strip installcheck installcheck-am installdirs \
+	maintainer-clean maintainer-clean-generic mostlyclean \
+	mostlyclean-generic pdf pdf-am ps ps-am tags-am uninstall \
+	uninstall-am uninstall-avscDATA uninstall-shareDATA
 
 .PRECIOUS: Makefile
 
