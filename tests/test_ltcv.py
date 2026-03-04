@@ -204,16 +204,16 @@ def test_many_object_ltcvs( procver_collection, set_of_lightcurves ):
     df = ltcv.many_object_ltcvs( pvs['pv1'].id, [ roots[i]['root'].id for i in [0,1] ],
                                  return_format='pandas', which='patch', include_base_procver=True )
 
-    assert sources.index.get_level_values( 'diaobjectid' ).unique().values == np.array( [100] )
-    assert forced.index.get_level_values( 'diaobjectid' ).unique().values == np.array( [100] )
-    assert df.index.get_level_values( 'diaobjectid' ).unique().values == np.array( [100] )
+    assert set( sources.index.get_level_values( 'rootid' ).unique().values ) == { roots[0]['root'].id }
+    assert set( forced.index.get_level_values( 'rootid' ).unique().values ) == { roots[0]['root'].id }
+    assert set( df.index.get_level_values( 'rootid' ).unique().values ) == { roots[0]['root'].id }
 
     sources.reset_index( inplace=True )
-    sources.drop( 'diaobjectid', axis='columns', inplace=True )
+    sources.drop( 'rootid', axis='columns', inplace=True )
     forced.reset_index( inplace=True )
-    forced.drop( 'diaobjectid', axis='columns', inplace=True )
+    forced.drop( 'rootid', axis='columns', inplace=True )
     df.reset_index( inplace=True )
-    df.drop( 'diaobjectid', axis='columns', inplace=True )
+    df.drop( 'rootid', axis='columns', inplace=True )
 
     # These checks are (sorta) copied from test_object_ltcv
     assert len(sources) == 13
@@ -246,19 +246,21 @@ def test_many_object_ltcvs( procver_collection, set_of_lightcurves ):
                                      return_format='pandas', which='forced', include_base_procver=True )
     df = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['root'].id for i in [0,2] ],
                                  return_format='pandas', which='patch', include_base_procver=True )
-    # We know we're going to be sorted by diaobjectid
-    assert ( sources.index.get_level_values( 'diaobjectid' ).unique().values == np.array( [200, 202] ) ).all()
-    assert ( forced.index.get_level_values( 'diaobjectid' ).unique().values == np.array( [200, 202] ) ).all()
-    assert ( df.index.get_level_values( 'diaobjectid' ).unique().values == np.array( [200, 202] ) ).all()
+    assert ( set( sources.index.get_level_values( 'rootid' ).unique().values )
+             == { roots[0]['root'].id, roots[2]['root'].id } )
+    assert ( set( forced.index.get_level_values( 'rootid' ).unique().values )
+             == { roots[0]['root'].id, roots[2]['root'].id } )
+    assert ( set( df.index.get_level_values( 'rootid' ).unique().values )
+             == { roots[0]['root'].id, roots[2]['root'].id } )
     assert len( sources ) == 30
-    assert len( sources.xs( 200, level='diaobjectid' ) ) == 13
-    assert len( sources.xs( 202, level='diaobjectid' ) ) == 17
+    assert len( sources.xs( roots[0]['root'].id, level='rootid' ) ) == 13
+    assert len( sources.xs( roots[2]['root'].id, level='rootid' ) ) == 17
     assert len( forced ) == 54
-    assert len( forced.xs( 200, level='diaobjectid' ) ) == 25
-    assert len( forced.xs( 202, level='diaobjectid' ) ) == 29
+    assert len( forced.xs( roots[0]['root'].id, level='rootid' ) ) == 25
+    assert len( forced.xs( roots[2]['root'].id, level='rootid' ) ) == 29
     assert len( df ) == 54
-    assert len( df.xs( 200, level='diaobjectid' ) ) == 25
-    assert len( df.xs( 202, level='diaobjectid' ) ) == 29
+    assert len( df.xs( roots[0]['root'].id, level='rootid' ) ) == 25
+    assert len( df.xs( roots[2]['root'].id, level='rootid' ) ) == 29
     tmp = df.drop( 'ispatch', axis='columns' )
     assert ( tmp == forced ).all().all()
 
@@ -269,22 +271,21 @@ def test_many_object_ltcvs( procver_collection, set_of_lightcurves ):
                                        return_format='json', which='forced', include_base_procver=True )
     dfjs = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['root'].id for i in [0,2] ],
                                    return_format='json', which='patch', include_base_procver=True )
-    assert list( sourcesjs.keys() ) == [ 200, 202 ]
-    assert list( forcedjs.keys() ) == [ 200, 202 ]
-    assert list( dfjs.keys() ) == [ 200, 202 ]
+    assert set( [ r['rootid'] for r in sourcesjs ] ) == { roots[0]['root'].id, roots[2]['root'].id }
+    assert set( [ r['rootid'] for r in forcedjs ] ) == { roots[0]['root'].id, roots[2]['root'].id }
+    assert set( [ r['rootid'] for r in dfjs ] ) == { roots[0]['root'].id, roots[2]['root'].id }
     for js, pd in zip( [ sourcesjs, forcedjs, dfjs ], [ sources, forced, df ] ):
-        for objid in [ 200, 202 ]:
-            subpd = pd.xs( objid, level='diaobjectid' ).reset_index()
-            subjs = js[ objid ]
+        for subjs in js:
+            subpd = pd.xs( subjs['rootid'], level='rootid' ).reset_index()
             for col in subpd.columns:
                 assert ( subpd[col] == np.array( subjs[col] ) ).all()
 
     # Make sure the lightcurves are actually right
-    for diaobjectid in df.index.get_level_values( 'diaobjectid' ).unique():
-        rdex = [ roots[i]['objs'][1]['obj'].diaobjectid for i in range(len(roots)) ].index( diaobjectid )
-        tmpsources = sources.xs( diaobjectid, level='diaobjectid' ).reset_index()
-        tmpforced = forced.xs( diaobjectid, level='diaobjectid' ).reset_index()
-        tmpdf = df.xs( diaobjectid, level='diaobjectid' ).reset_index()
+    for rootid in df.index.get_level_values( 'rootid' ).unique():
+        rdex = [ roots[i]['root'].id for i in range(len(roots)) ].index( rootid )
+        tmpsources = sources.xs( rootid, level='rootid' ).reset_index()
+        tmpforced = forced.xs( rootid, level='rootid' ).reset_index()
+        tmpdf = df.xs( rootid, level='rootid' ).reset_index()
 
         assert all( s.mjd == pytest.approx( roots[rdex]['objs'][1]['src']['bpv2'][j].midpointmjdtai, abs=1./3600./24. )
                     for j, s in enumerate( tmpsources.itertuples() ) )

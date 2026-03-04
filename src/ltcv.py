@@ -606,7 +606,7 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
         retval = []
         for objid in retframe.rootid.unique():
             subf = retframe[ retframe.rootid==objid  ]
-            thisretval = { 'rootid': subf.loc[ 0, 'rootid' ],
+            thisretval = { 'rootid': subf.rootid.iloc[0],
                            'diaobjectid': list( subf.diaobjectid.values ),
                            'visit': list( subf.visit.values ),
                            'diasourceid': list( subf.diasourceid.values )
