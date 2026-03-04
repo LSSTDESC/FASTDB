@@ -332,7 +332,7 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
 
         visit = 0
         for i, rootobj in enumerate(rootobjinfo):
-            robj = RootDiaObject( id=uuid.uuid4() )
+            robj = RootDiaObject( id=uuid.uuid4(), ra=rootobjinfo[i]['ra'], dec=rootobjinfo[i]['dec'] )
             rootobjs.append( robj )
             rootra = rootobjinfo[i]['ra']
             rootdec = rootobjinfo[i]['dec']

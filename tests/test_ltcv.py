@@ -409,44 +409,47 @@ def test_many_object_ltcvs( procver_collection, set_of_lightcurves ):
 # There is another test of ltcv_object_search that uses loaded SNANA data
 #   in test_ltcv_object_search.py
 def test_object_search( set_of_lightcurves ):
+    roots = set_of_lightcurves
     with pytest.raises( ValueError, match="Unknown search keywords: {'foo'}" ):
         _ = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas', foo='bar' )
+
+    # TODO -- tests without ignore_object_processing_version
 
     # Search on ra/dec
 
     # A 17" search around (42,13) should find diaobjectids 200 and 201
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
-                             ra=42., dec=13., radius=17. )
+                             ra=42., dec=13., radius=17., ignore_object_processing_version=True )
     assert len(df) == 2
-    assert set( df.diaobjectid ) == { 200, 201 }
-    assert df[ df.diaobjectid==200 ].ra.values[0] == pytest.approx( 42., abs=0.2/3600. )
-    assert df[ df.diaobjectid==200 ].dec.values[0] == pytest.approx( 13., abs=0.2/3600. )
-    assert df[ df.diaobjectid==200 ].numdet.values[0] == 13
-    assert df[ df.diaobjectid==200 ].firstdetmjd.values[0] == 60000.
-    assert df[ df.diaobjectid==200 ].firstdetband.values[0] == 'i'
-    assert df[ df.diaobjectid==200 ].lastdetmjd.values[0] == 60030.
-    assert df[ df.diaobjectid==200 ].lastdetband.values[0] == 'i'
-    assert df[ df.diaobjectid==200 ].maxdetmjd.values[0] == 60010.
-    assert df[ df.diaobjectid==200 ].maxdetband.values[0] == 'i'
-    assert df[ df.diaobjectid==200 ].lastforcedmjd.values[0] == 60050.
-    assert df[ df.diaobjectid==200 ].lastforcedband.values[0] == 'i'
-    assert df[ df.diaobjectid==200 ].numdetinwindow.values[0] is None
-    assert df[ df.diaobjectid==201 ].ra.values[0] == pytest.approx( 42., abs=0.2/3600. )
-    assert df[ df.diaobjectid==201 ].dec.values[0] == pytest.approx( 13.0036, abs=0.2/3600. )
-    assert df[ df.diaobjectid==201 ].numdet.values[0] == 17
-    assert df[ df.diaobjectid==201 ].firstdetmjd.values[0] == 60020.
-    assert df[ df.diaobjectid==201 ].firstdetband.values[0] == 'r'
-    assert df[ df.diaobjectid==201 ].lastdetmjd.values[0] == 60060.
-    assert df[ df.diaobjectid==201 ].lastdetband.values[0] == 'r'
-    assert df[ df.diaobjectid==201 ].maxdetmjd.values[0] == 60035.
-    assert df[ df.diaobjectid==201 ].maxdetband.values[0] == 'r'
-    assert df[ df.diaobjectid==201 ].lastforcedmjd.values[0] == 60080.
-    assert df[ df.diaobjectid==201 ].lastforcedband.values[0] == 'r'
-    assert df[ df.diaobjectid==201 ].numdetinwindow.values[0] is None
+    assert set( df.rootid ) == { roots[0]['root'].id, roots[1]['root'].id }
+    assert df[ df.rootid==roots[0]['root'].id ].ra.values[0] == pytest.approx( 42., abs=0.2/3600. )
+    assert df[ df.rootid==roots[0]['root'].id ].dec.values[0] == pytest.approx( 13., abs=0.2/3600. )
+    assert df[ df.rootid==roots[0]['root'].id ].numdet.values[0] == 13
+    assert df[ df.rootid==roots[0]['root'].id ].firstdetmjd.values[0] == 60000.
+    assert df[ df.rootid==roots[0]['root'].id ].firstdetband.values[0] == 'i'
+    assert df[ df.rootid==roots[0]['root'].id ].lastdetmjd.values[0] == 60030.
+    assert df[ df.rootid==roots[0]['root'].id ].lastdetband.values[0] == 'i'
+    assert df[ df.rootid==roots[0]['root'].id ].maxdetmjd.values[0] == 60010.
+    assert df[ df.rootid==roots[0]['root'].id ].maxdetband.values[0] == 'i'
+    assert df[ df.rootid==roots[0]['root'].id ].lastforcedmjd.values[0] == 60050.
+    assert df[ df.rootid==roots[0]['root'].id ].lastforcedband.values[0] == 'i'
+    assert df[ df.rootid==roots[0]['root'].id ].numdetinwindow.values[0] is None
+    assert df[ df.rootid==roots[1]['root'].id ].ra.values[0] == pytest.approx( 42., abs=0.2/3600. )
+    assert df[ df.rootid==roots[1]['root'].id ].dec.values[0] == pytest.approx( 13.0036, abs=0.2/3600. )
+    assert df[ df.rootid==roots[1]['root'].id ].numdet.values[0] == 17
+    assert df[ df.rootid==roots[1]['root'].id ].firstdetmjd.values[0] == 60020.
+    assert df[ df.rootid==roots[1]['root'].id ].firstdetband.values[0] == 'r'
+    assert df[ df.rootid==roots[1]['root'].id ].lastdetmjd.values[0] == 60060.
+    assert df[ df.rootid==roots[1]['root'].id ].lastdetband.values[0] == 'r'
+    assert df[ df.rootid==roots[1]['root'].id ].maxdetmjd.values[0] == 60035.
+    assert df[ df.rootid==roots[1]['root'].id ].maxdetband.values[0] == 'r'
+    assert df[ df.rootid==roots[1]['root'].id ].lastforcedmjd.values[0] == 60080.
+    assert df[ df.rootid==roots[1]['root'].id ].lastforcedband.values[0] == 'r'
+    assert df[ df.rootid==roots[1]['root'].id ].numdetinwindow.values[0] is None
 
     # Check that json return works
     j = ltcv.object_search( processing_version='pvc_pv3', return_format='json',
-                            ra=42., dec=13., radius=17. )
+                            ra=42., dec=13., radius=17., ignore_object_processing_version=True  )
     for col in df.columns:
         # == isn't working in the None case... ?  Weird.  Different kind of None?
         if col == 'numdetinwindow':
@@ -457,43 +460,43 @@ def test_object_search( set_of_lightcurves ):
 
     # Quick check that just_objids works
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
-                             ra=42., dec=13., radius=17., just_objids=True )
-    assert df.columns == [ 'diaobjectid' ]
-    assert set( df.diaobjectid ) == { 200, 201 }
+                             ra=42., dec=13., radius=17., just_objids=True, ignore_object_processing_version=True  )
+    assert df.columns == [ 'rootid' ]
+    assert set( df.rootid ) == { roots[0]['root'].id, roots[1]['root'].id }
     j = ltcv.object_search( processing_version='pvc_pv3', return_format='json',
-                            ra=42., dec=13., radius=17., just_objids=True )
-    assert list( j.keys() ) == [ 'diaobjectid' ]
-    assert set( j['diaobjectid'] ) == { 200, 201 }
+                            ra=42., dec=13., radius=17., just_objids=True, ignore_object_processing_version=True  )
+    assert list( j.keys() ) == [ 'rootid' ]
+    assert set( j['rootid'] ) == { roots[0]['root'].id, roots[1]['root'].id }
 
     # Quick check that noforced works.  Well, sort of.  It tests that we don't
     #   get the forced columns back, but doesn't test that the function actually
     #   skipped searching that table.  But, whatevs.
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
-                             ra=42., dec=13., radius=17., noforced=True )
-    assert set( df.diaobjectid ) == { 200, 201 }
+                             ra=42., dec=13., radius=17., noforced=True, ignore_object_processing_version=True  )
+    assert set( df.rootid ) == { roots[0]['root'].id, roots[1]['root'].id }
     assert all( i not in df.columns for i in [ 'lastforcedmjd', 'lastforcedband',
                                                'lastforcedflux', 'lastforcedfluxerr' ] )
     j = ltcv.object_search( processing_version='pvc_pv3', return_format='json',
-                            ra=42., dec=13., radius=17., noforced=True )
-    assert set( j['diaobjectid'] ) == { 200, 201 }
+                            ra=42., dec=13., radius=17., noforced=True, ignore_object_processing_version=True  )
+    assert set( j['rootid'] ) == { roots[0]['root'].id, roots[1]['root'].id }
     assert all( i not in j.keys() for i in [ 'lastforcedmjd', 'lastforcedband',
                                              'lastforcedflux', 'lastforcedfluxerr' ] )
 
     # Quick bigger search; should get 3 of the 4 objects, ginormous search all of them
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
-                             ra=42., dec=13., radius=1800. )
+                             ra=42., dec=13., radius=1800., ignore_object_processing_version=True  )
     assert len(df) == 3
-    assert set( df.diaobjectid ) == { 200, 201, 202 }
+    assert set( df.rootid ) == set( roots[i]['root'].id for i in range(3) )
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
-                             ra=42., dec=13., radius=7200. )
+                             ra=42., dec=13., radius=7200., ignore_object_processing_version=True  )
     assert len(df) == 4
-    assert set( df.diaobjectid ) == { 200, 201, 202, 203 }
+    assert set( df.rootid ) == set( roots[i]['root'].id for i in range(4) )
 
     # If we ask for pvc_pv1, we should only find diaobject 200, and it should have different latest thingies
     df = ltcv.object_search( processing_version='pvc_pv1', return_format='pandas',
-                             ra=42., dec=13., radius=7200. )
+                             ra=42., dec=13., radius=7200., ignore_object_processing_version=True  )
     assert len(df) == 1
-    assert set( df.diaobjectid ) == { 100 }
+    assert set( df.rootid ) == { roots[0]['root'].id }
     assert df.ra.values[0] == pytest.approx( 42., abs=0.2/3600. )
     assert df.dec.values[0] == pytest.approx( 13., abs=0.4/3600. ) # , abs=0.2/3600. )
     assert df.numdet.values[0] == 13
@@ -501,180 +504,189 @@ def test_object_search( set_of_lightcurves ):
 
     # Try an earlier mjd_now
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
-                             ra=42., dec=13., radius=17., mjd_now=60026. )
+                             ra=42., dec=13., radius=17., mjd_now=60026., ignore_object_processing_version=True  )
     assert len(df) == 2
-    assert set( df.diaobjectid ) == { 200, 201 }
-    assert df[ df.diaobjectid==200 ].ra.values[0] == pytest.approx( 42., abs=0.2/3600. )
-    assert df[ df.diaobjectid==200 ].dec.values[0] == pytest.approx( 13., abs=0.2/3600. )
-    assert df[ df.diaobjectid==200 ].numdet.values[0] == 11
-    assert df[ df.diaobjectid==200 ].firstdetmjd.values[0] == 60000.
-    assert df[ df.diaobjectid==200 ].firstdetband.values[0] == 'i'
-    assert df[ df.diaobjectid==200 ].lastdetmjd.values[0] == 60025.
-    assert df[ df.diaobjectid==200 ].lastdetband.values[0] == 'i'
-    assert df[ df.diaobjectid==200 ].maxdetmjd.values[0] == 60010.
-    assert df[ df.diaobjectid==200 ].maxdetband.values[0] == 'i'
-    assert df[ df.diaobjectid==200 ].lastforcedmjd.values[0] == 60025.
-    assert df[ df.diaobjectid==200 ].lastforcedband.values[0] == 'i'
-    assert df[ df.diaobjectid==200 ].numdetinwindow.values[0] is None
-    assert df[ df.diaobjectid==201 ].ra.values[0] == pytest.approx( 42., abs=0.2/3600. )
-    assert df[ df.diaobjectid==201 ].dec.values[0] == pytest.approx( 13.0036, abs=0.2/3600. )
-    assert df[ df.diaobjectid==201 ].numdet.values[0] == 3
-    assert df[ df.diaobjectid==201 ].firstdetmjd.values[0] == 60020.
-    assert df[ df.diaobjectid==201 ].firstdetband.values[0] == 'r'
-    assert df[ df.diaobjectid==201 ].lastdetmjd.values[0] == 60025.
-    assert df[ df.diaobjectid==201 ].lastdetband.values[0] == 'r'
-    assert df[ df.diaobjectid==201 ].maxdetmjd.values[0] == 60025.
-    assert df[ df.diaobjectid==201 ].maxdetband.values[0] == 'r'
-    assert df[ df.diaobjectid==201 ].lastforcedmjd.values[0] == 60025.
-    assert df[ df.diaobjectid==201 ].lastforcedband.values[0] == 'r'
+    assert set( df.rootid ) == { roots[0]['root'].id, roots[1]['root'].id }
+    assert df[ df.rootid==roots[0]['root'].id ].ra.values[0] == pytest.approx( 42., abs=0.2/3600. )
+    assert df[ df.rootid==roots[0]['root'].id ].dec.values[0] == pytest.approx( 13., abs=0.2/3600. )
+    assert df[ df.rootid==roots[0]['root'].id ].numdet.values[0] == 11
+    assert df[ df.rootid==roots[0]['root'].id ].firstdetmjd.values[0] == 60000.
+    assert df[ df.rootid==roots[0]['root'].id ].firstdetband.values[0] == 'i'
+    assert df[ df.rootid==roots[0]['root'].id ].lastdetmjd.values[0] == 60025.
+    assert df[ df.rootid==roots[0]['root'].id ].lastdetband.values[0] == 'i'
+    assert df[ df.rootid==roots[0]['root'].id ].maxdetmjd.values[0] == 60010.
+    assert df[ df.rootid==roots[0]['root'].id ].maxdetband.values[0] == 'i'
+    assert df[ df.rootid==roots[0]['root'].id ].lastforcedmjd.values[0] == 60025.
+    assert df[ df.rootid==roots[0]['root'].id ].lastforcedband.values[0] == 'i'
+    assert df[ df.rootid==roots[0]['root'].id ].numdetinwindow.values[0] is None
+    assert df[ df.rootid==roots[1]['root'].id ].ra.values[0] == pytest.approx( 42., abs=0.2/3600. )
+    assert df[ df.rootid==roots[1]['root'].id ].dec.values[0] == pytest.approx( 13.0036, abs=0.2/3600. )
+    assert df[ df.rootid==roots[1]['root'].id ].numdet.values[0] == 3
+    assert df[ df.rootid==roots[1]['root'].id ].firstdetmjd.values[0] == 60020.
+    assert df[ df.rootid==roots[1]['root'].id ].firstdetband.values[0] == 'r'
+    assert df[ df.rootid==roots[1]['root'].id ].lastdetmjd.values[0] == 60025.
+    assert df[ df.rootid==roots[1]['root'].id ].lastdetband.values[0] == 'r'
+    assert df[ df.rootid==roots[1]['root'].id ].maxdetmjd.values[0] == 60025.
+    assert df[ df.rootid==roots[1]['root'].id ].maxdetband.values[0] == 'r'
+    assert df[ df.rootid==roots[1]['root'].id ].lastforcedmjd.values[0] == 60025.
+    assert df[ df.rootid==roots[1]['root'].id ].lastforcedband.values[0] == 'r'
 
     # Throw in a window
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
-                             ra=42., dec=13., radius=17., window_t0=60010, window_t1=60025 )
+                             ra=42., dec=13., radius=17., window_t0=60010, window_t1=60025,
+                             ignore_object_processing_version=True  )
     assert len(df) == 2
-    assert set( df.diaobjectid ) == { 200, 201 }
-    assert df[ df.diaobjectid==200 ].numdetinwindow.values[0] == 7
-    assert df[ df.diaobjectid==201 ].numdetinwindow.values[0] == 3
+    assert set( df.rootid ) == { roots[0]['root'].id, roots[1]['root'].id }
+    assert df[ df.rootid==roots[0]['root'].id ].numdetinwindow.values[0] == 7
+    assert df[ df.rootid==roots[1]['root'].id ].numdetinwindow.values[0] == 3
     # All of the following is cut and paste from the first search above
-    assert df[ df.diaobjectid==200 ].ra.values[0] == pytest.approx( 42., abs=0.2/3600. )
-    assert df[ df.diaobjectid==200 ].dec.values[0] == pytest.approx( 13., abs=0.2/3600. )
-    assert df[ df.diaobjectid==200 ].numdet.values[0] == 13
-    assert df[ df.diaobjectid==200 ].firstdetmjd.values[0] == 60000.
-    assert df[ df.diaobjectid==200 ].firstdetband.values[0] == 'i'
-    assert df[ df.diaobjectid==200 ].lastdetmjd.values[0] == 60030.
-    assert df[ df.diaobjectid==200 ].lastdetband.values[0] == 'i'
-    assert df[ df.diaobjectid==200 ].maxdetmjd.values[0] == 60010.
-    assert df[ df.diaobjectid==200 ].maxdetband.values[0] == 'i'
-    assert df[ df.diaobjectid==200 ].lastforcedmjd.values[0] == 60050.
-    assert df[ df.diaobjectid==200 ].lastforcedband.values[0] == 'i'
-    assert df[ df.diaobjectid==201 ].ra.values[0] == pytest.approx( 42., abs=0.2/3600. )
-    assert df[ df.diaobjectid==201 ].dec.values[0] == pytest.approx( 13.0036, abs=0.2/3600. )
-    assert df[ df.diaobjectid==201 ].numdet.values[0] == 17
-    assert df[ df.diaobjectid==201 ].firstdetmjd.values[0] == 60020.
-    assert df[ df.diaobjectid==201 ].firstdetband.values[0] == 'r'
-    assert df[ df.diaobjectid==201 ].lastdetmjd.values[0] == 60060.
-    assert df[ df.diaobjectid==201 ].lastdetband.values[0] == 'r'
-    assert df[ df.diaobjectid==201 ].maxdetmjd.values[0] == 60035.
-    assert df[ df.diaobjectid==201 ].maxdetband.values[0] == 'r'
-    assert df[ df.diaobjectid==201 ].lastforcedmjd.values[0] == 60080.
-    assert df[ df.diaobjectid==201 ].lastforcedband.values[0] == 'r'
+    assert df[ df.rootid==roots[0]['root'].id ].ra.values[0] == pytest.approx( 42., abs=0.2/3600. )
+    assert df[ df.rootid==roots[0]['root'].id ].dec.values[0] == pytest.approx( 13., abs=0.2/3600. )
+    assert df[ df.rootid==roots[0]['root'].id ].numdet.values[0] == 13
+    assert df[ df.rootid==roots[0]['root'].id ].firstdetmjd.values[0] == 60000.
+    assert df[ df.rootid==roots[0]['root'].id ].firstdetband.values[0] == 'i'
+    assert df[ df.rootid==roots[0]['root'].id ].lastdetmjd.values[0] == 60030.
+    assert df[ df.rootid==roots[0]['root'].id ].lastdetband.values[0] == 'i'
+    assert df[ df.rootid==roots[0]['root'].id ].maxdetmjd.values[0] == 60010.
+    assert df[ df.rootid==roots[0]['root'].id ].maxdetband.values[0] == 'i'
+    assert df[ df.rootid==roots[0]['root'].id ].lastforcedmjd.values[0] == 60050.
+    assert df[ df.rootid==roots[0]['root'].id ].lastforcedband.values[0] == 'i'
+    assert df[ df.rootid==roots[1]['root'].id ].ra.values[0] == pytest.approx( 42., abs=0.2/3600. )
+    assert df[ df.rootid==roots[1]['root'].id ].dec.values[0] == pytest.approx( 13.0036, abs=0.2/3600. )
+    assert df[ df.rootid==roots[1]['root'].id ].numdet.values[0] == 17
+    assert df[ df.rootid==roots[1]['root'].id ].firstdetmjd.values[0] == 60020.
+    assert df[ df.rootid==roots[1]['root'].id ].firstdetband.values[0] == 'r'
+    assert df[ df.rootid==roots[1]['root'].id ].lastdetmjd.values[0] == 60060.
+    assert df[ df.rootid==roots[1]['root'].id ].lastdetband.values[0] == 'r'
+    assert df[ df.rootid==roots[1]['root'].id ].maxdetmjd.values[0] == 60035.
+    assert df[ df.rootid==roots[1]['root'].id ].maxdetband.values[0] == 'r'
+    assert df[ df.rootid==roots[1]['root'].id ].lastforcedmjd.values[0] == 60080.
+    assert df[ df.rootid==roots[1]['root'].id ].lastforcedband.values[0] == 'r'
 
     # Now filter on numdetinwindow
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
                              ra=42., dec=13., radius=17., window_t0=60010, window_t1=60025,
-                             min_window_numdetections=4 )
+                             min_window_numdetections=4, ignore_object_processing_version=True  )
     assert len(df) == 1
-    assert set( df.diaobjectid ) == { 200 }
+    assert set( df.rootid ) == { roots[0]['root'].id }
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
                              ra=42., dec=13., radius=17., window_t0=60010, window_t1=60025,
-                             max_window_numdetections=5 )
+                             max_window_numdetections=5, ignore_object_processing_version=True  )
     assert len(df) == 1
-    assert set( df.diaobjectid ) == { 201 }
+    assert set( df.rootid ) == { roots[1]['root'].id }
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
                              ra=42., dec=13., radius=17., window_t0=60010, window_t1=60025,
-                             min_window_numdetections=4, max_window_numdetections=5 )
+                             min_window_numdetections=4, max_window_numdetections=5,
+                             ignore_object_processing_version=True  )
     assert len(df) == 0
 
 
     # Filter on first detection
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
-                             mint_firstdetection=60010 )
+                             mint_firstdetection=60010, ignore_object_processing_version=True )
     assert len(df) == 3
-    assert set( df.diaobjectid ) == { 201, 202, 203 }
+    assert set( df.rootid ) == set( roots[i]['root'].id for i in [ 1, 2, 3 ] )
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
-                             maxt_firstdetection=60030 )
+                             maxt_firstdetection=60030, ignore_object_processing_version=True )
     assert len(df) == 2
-    assert set( df.diaobjectid ) == { 200, 201 }
+    assert set( df.rootid ) == set( roots[i]['root'].id for i in [ 0, 1 ] )
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
-                             mint_firstdetection=60010, maxt_firstdetection=60030 )
+                             mint_firstdetection=60010, maxt_firstdetection=60030,
+                             ignore_object_processing_version=True )
     assert len(df) == 1
-    assert set( df.diaobjectid ) == { 201 }
+    assert set( df.rootid ) == { roots[1]['root'].id }
 
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
-                             minmag_firstdetection=25.6 )
+                             minmag_firstdetection=25.6, ignore_object_processing_version=True )
     assert len(df) == 2
-    assert set( df.diaobjectid ) == { 200, 203 }
+    assert set( df.rootid ) == set( roots[i]['root'].id for i in [ 0, 3 ] )
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
-                             maxmag_firstdetection=25.9 )
+                             maxmag_firstdetection=25.9, ignore_object_processing_version=True )
     assert len(df) == 3
-    assert set( df.diaobjectid ) == { 201, 202, 203 }
+    assert set( df.rootid ) == set( roots[i]['root'].id for i in [ 1, 2, 3 ] )
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
-                             minmag_firstdetection=25.6, maxmag_firstdetection=25.9 )
+                             minmag_firstdetection=25.6, maxmag_firstdetection=25.9,
+                             ignore_object_processing_version=True )
     assert len(df) == 1
-    assert set( df.diaobjectid ) == { 203 }
+    assert set( df.rootid ) == { roots[3]['root'].id }
 
     # Filter on last detection
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
-                             mint_lastdetection=60035 )
+                             mint_lastdetection=60035, ignore_object_processing_version=True )
     assert len( df ) == 3
-    assert set( df.diaobjectid ) == { 201, 202, 203 }
+    assert set( df.rootid ) == { roots[i]['root'].id for i in [ 1, 2, 3 ] }
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
-                             maxt_lastdetection=60065 )
+                             maxt_lastdetection=60065, ignore_object_processing_version=True )
     assert len( df ) == 3
-    assert set( df.diaobjectid ) == { 200, 201, 203 }
+    assert set( df.rootid ) == { roots[i]['root'].id for i in [ 0, 1, 3] }
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
-                             mint_lastdetection=60035, maxt_lastdetection=60065 )
+                             mint_lastdetection=60035, maxt_lastdetection=60065,
+                             ignore_object_processing_version=True  )
     assert len( df ) == 2
-    assert set( df.diaobjectid ) == { 201, 203 }
+    assert set( df.rootid ) == { roots[i]['root'].id for i in [ 1, 3 ] }
 
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
-                             minmag_lastdetection=25.5 )
+                             minmag_lastdetection=25.5, ignore_object_processing_version=True )
     assert len(df) == 3
-    assert set( df.diaobjectid ) == { 200, 202, 203 }
+    assert set( df.rootid ) == { roots[i]['root'].id for i in [ 0, 2, 3 ] }
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
-                             maxmag_lastdetection=25.8 )
+                             maxmag_lastdetection=25.8, ignore_object_processing_version=True )
     assert len(df) == 2
-    assert set( df.diaobjectid ) == { 201, 202 }
+    assert set( df.rootid ) == { roots[i]['root'].id for i in [ 1, 2 ] }
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
-                             minmag_lastdetection=25.5, maxmag_lastdetection=25.8 )
+                             minmag_lastdetection=25.5, maxmag_lastdetection=25.8,
+                             ignore_object_processing_version=True )
     assert len(df) == 1
-    assert set( df.diaobjectid ) == { 202 }
+    assert set( df.rootid ) == { roots[2]['root'].id }
 
     # Filter on max detection
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
-                             mint_maxdetection=60020 )
+                             mint_maxdetection=60020, ignore_object_processing_version=True )
     assert len(df) == 3
-    assert set( df.diaobjectid ) == { 201, 202, 203 }
+    assert set( df.rootid ) == { roots[i]['root'].id for i in [ 1, 2, 3 ] }
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
-                             maxt_maxdetection=60052 )
+                             maxt_maxdetection=60052, ignore_object_processing_version=True )
     assert len(df) == 3
-    assert set( df.diaobjectid ) == { 200, 201, 202 }
+    assert set( df.rootid ) == { roots[i]['root'].id for i in [ 0, 1, 2 ] }
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
-                             mint_maxdetection=60020, maxt_maxdetection=60052 )
+                             mint_maxdetection=60020, maxt_maxdetection=60052,
+                             ignore_object_processing_version=True )
     assert len(df) == 2
-    assert set( df.diaobjectid ) == { 201, 202 }
+    assert set( df.rootid ) == { roots[i]['root'].id for i in [ 1, 2 ] }
 
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
-                             minmag_maxdetection=22.5 )
+                             minmag_maxdetection=22.5, ignore_object_processing_version=True )
     assert len(df) == 3
-    assert set( df.diaobjectid ) == { 200, 202, 203 }
+    assert set( df.rootid ) == { roots[i]['root'].id for i in [ 0, 2, 3 ] }
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
-                             maxmag_maxdetection=24.5 )
+                             maxmag_maxdetection=24.5, ignore_object_processing_version=True )
     assert len(df) == 3
-    assert set( df.diaobjectid ) == { 200, 201, 202 }
+    assert set( df.rootid ) == { roots[i]['root'].id for i in [ 0,  1, 2 ] }
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
-                             minmag_maxdetection=22.5, maxmag_maxdetection=24.5 )
+                             minmag_maxdetection=22.5, maxmag_maxdetection=24.5,
+                             ignore_object_processing_version=True )
     assert len(df) == 2
-    assert set( df.diaobjectid ) == { 200, 202 }
+    assert set( df.rootid ) == { roots[i]['root'].id for i in [ 0, 2 ] }
 
     # To filter on lastmag, we need to use mjd_now, because the fixture filled out
     #   forced photometry all down to mag 32.
-    df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas', mjd_now=60056. )
-    df.set_index( 'diaobjectid', inplace=True )
-    dexen = np.array( [ 200, 201, 202, 203 ] )
+    df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas', mjd_now=60056.,
+                             ignore_object_processing_version=True )
+    df.set_index( 'rootid', inplace=True )
+    dexen = np.array( roots[i]['root'].id for i in range(4) )
     assert list( df.loc[ dexen, 'lastforcedmjd' ] ) == [ 60050., 60055., 60055., 60055. ]
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas', mjd_now=60056.,
-                             min_lastmag=24. )
+                             min_lastmag=24., ignore_object_processing_version=True )
     assert len(df) == 3
-    assert set( df.diaobjectid ) == { 200, 201, 203 }
+    assert set( df.rootid ) == { roots[i]['root'].id for i in [ 0, 1, 3 ] }
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas', mjd_now=60056.,
-                             max_lastmag=24.8 )
+                             max_lastmag=24.8, ignore_object_processing_version=True )
     assert len(df) == 2
-    assert set( df.diaobjectid ) == { 201, 202 }
+    assert set( df.rootid ) == { roots[i]['root'].id for i in [ 1, 2 ] }
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas', mjd_now=60056.,
-                             min_lastmag= 24., max_lastmag=24.8 )
+                             min_lastmag= 24., max_lastmag=24.8, ignore_object_processing_version=True )
     assert len(df) == 1
-    assert set( df.diaobjectid ) == { 201 }
+    assert set( df.rootid ) == { roots[1]['root'].id }
 
 
     # TODO : test statbands.  (It is tested in test_ltcv_object_search.py)

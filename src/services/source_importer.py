@@ -421,20 +421,16 @@ class SourceImporter:
             # TODO : test this with multiple processing versions and multiple
             #   objects that match!!!
             FDBLogger.debug( "   ...linking to existing root diaobjects..." )
-            dbcon.execute( "UPDATE temp_new_diaobject tno SET rootid=o.rootid\n"
-                           "FROM diaobject o\n"
-                           "INNER JOIN diaobject_position p ON p.diaobjectid=o.diaobjectid\n"
-                           "                               AND p.base_procver_id=%(bpv)s\n"
-                           "WHERE o.base_procver_id=tno.base_procver_id \n"
-                           "  AND q3c_radial_query(p.ra, p.dec, tno.ra, tno.dec, %(rad)s)",
-                           { 'rad': self.object_match_radius/3600.,
-                             'bpv': self.object_position_base_processing_version } )
+            dbcon.execute( "UPDATE temp_new_diaobject tno SET rootid=r.rootid\n"
+                           "FROM root_diaobject r\n"
+                           "WHERE q3c_radial_query( r.ra, r.dec, tno.ra, tno.dec, %(rad)s)",
+                           { 'rad': self.object_match_radius/3600. } )
 
             # Create new root objects
             FDBLogger.debug( "   ...creating new root diaobjects..." )
-            dbcon.execute( "CREATE TEMP TABLE temp_new_root_obj (id UUID)" )
-            dbcon.execute( "INSERT INTO temp_new_root_obj "
-                           "( SELECT gen_random_uuid() FROM temp_new_diaobject "
+            dbcon.execute( "CREATE TEMP TABLE temp_new_root_obj (id UUID, ra double precision, dec double precision)" )
+            dbcon.execute( "INSERT INTO temp_new_root_obj(id, ra, dec) "
+                           "( SELECT gen_random_uuid(), ra, dec FROM temp_new_diaobject "
                            "  WHERE rootid IS NULL )" )
             # This next one is byzantine.  I'm trying to say, "hey, there are n
             # rows in temp_new_diaobject that have NULL rootid, and I've just
@@ -453,7 +449,7 @@ class SourceImporter:
 
             # Add the new root diaobjects
             FDBLogger.debug( "   ...inserting new root objects into root_diaobject tables..." )
-            dbcon.execute( "INSERT INTO root_diaobject ( SELECT * FROM temp_new_root_obj )" )
+            dbcon.execute( "INSERT INTO root_diaobject(id, ra, dec) ( SELECT id, ra, dec FROM temp_new_root_obj )" )
             nroot = dbcon.cursor.rowcount
             FDBLogger.debug( f"      ...inserted {nroot} objects" )
 

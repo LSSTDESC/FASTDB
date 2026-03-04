@@ -733,9 +733,9 @@ def debug_count_temp_table( con, table ):
     FDBLogger.debug( f"Table {table} has {res[0][0]} rows" )
 
 
-def object_search( processing_version='default', object_processing_version=None, position_processing_version=None,
-                   return_format='json',
-                   just_objids=False, noforced=False, dbcon=None, mjd_now=None,
+def object_search( processing_version='default', ignore_object_processing_version=False,
+                   object_processing_version=None, position_processing_version=None,
+                   return_format='json', just_objids=False, noforced=False, dbcon=None, mjd_now=None,
                    **kwargs ):
     """Search for objects.
 
@@ -747,17 +747,17 @@ def object_search( processing_version='default', object_processing_version=None,
       processing_version : UUID or str
          The processing version you're looking at (for sources and forced sources).
 
-      object_processing_version : UUID or str, default None
-          If not None, only consider diaobjects from this processing
-          version.  If None, consider all diaobjects.  Note, however,
-          that only diaobjects that have sources with the given
-          processing_version, some object_processing_versions shouldn't
-          really be considered.  There's no _quick_ automatic way to
-          figure that out, so allow passing that to make the first
-          diaobject cut more efficient.
+      ignore_object_processing_version: book default False
+          If True, then consider all diaobjects.  In practice, if you're
+          doing any detection cuts, only objects that had photometry in
+          the desired processing_version will be included anyway.  Only
+          set this to True if you know what you're doing, because it
+          probably makes things slower.  (But, it may be necessary
+          eventually.)
 
-          (Notice that a None here behaves differently than a None
-          passed to object_ltcv.)
+      object_processing_version : UUID or str, default None
+          The processing version for objects.  Defaults to
+          processing_version if not given.
 
       position_processing_version : UUID or str, default None
           The processing version of diaobject positions.  If None, will
@@ -854,7 +854,6 @@ def object_search( processing_version='default', object_processing_version=None,
          magnitude.  Probably max_lastmag is more useful if you're
          trying to through out things that are too dim.
 
-
       mint_maxdetection : float, default None
          Only return objects whose highest-flux detection is on this MJD or later.
 
@@ -913,10 +912,10 @@ def object_search( processing_version='default', object_processing_version=None,
       retval : pandas.DataFrame or dict
 
       A table of data.  If just_objids is true, this will have a single
-      column, "diaobjectid" that has the object ids within the specified
-      processing verison of objects that match the search.  Otherwise,
-      there will be additional columns.  (For all of these columns,
-      assume that there is a "within statbands" in the definition.)
+      column, "rootid" that has the root diaobject ids that match the
+      search.  Otherwise, there will be additional columns.  (For all of
+      these columns, assume that there is a "within statbands" in the
+      definition.)
 
           diaobjectid — object id (within the specified processing version)
 
@@ -1043,7 +1042,9 @@ def object_search( processing_version='default', object_processing_version=None,
     with db.DBCon( dbcon ) as con:
         procver = util.procver_id( processing_version, dbcon=con.con )
         posprocver = procver if position_processing_version is None else util.procver_id( position_processing_version )
-        objprocver = None if object_processing_version is None else util.procver_id( object_processing_version )
+        objprocver = ( None if ignore_object_processing_version
+                       else procver if object_processing_version is None
+                       else util.procver_id( object_processing_version ) )
 
         # Search criteria consistency checks
         if ( any( [ ( ra is None ), ( dec is None ), ( radius is None ) ] )
@@ -1064,34 +1065,42 @@ def object_search( processing_version='default', object_processing_version=None,
 
         # TODO : compare max detection time to first and last detection time
 
-        nexttable = 'diaobject'
         addlfields = []
 
         # So that futher queries won't have to worry about the object procver join
-        #  or the diaboject position join, make a view that does it for us.
-        q = sql.SQL( textwrap.dedent(
-            """
-            CREATE TEMPORARY VIEW tmp_diaobject_with_position AS
-            SELECT o.diaobjectid, p.ra, p.dec""" ) )
+        #  or the root join for position, make a view that does that for us
+        if ra is not None:
+            q = sql.SQL( textwrap.dedent(
+                """
+                CREATE TEMPORARY VIEW tmp_diaobject_with_position AS
+                SELECT DISTINCT ON (o.rootid) o.rootid, p.ra, p.dec""" ) )
+        else:
+            q = sql.SQL( textwrap.dedent(
+                """
+                CREATE TEMPORARY VIEW tmp_diaobject_with_position AS
+                SELECT DISTINCT ON (o.rootid) o.rootid, r.ra, r.dec""" ) )
         if objprocver is not None:
-            q += sql.SQL( ", pv.prio" )
+            q += sql.SQL( ", pv.priority" )
         q += sql.SQL( "\nFROM diaobject o\n" )
+        if ra is None:
+            q += sql.SQL( "INNER JOIN root_diaobject r ON o.rootid=r.id\n" )
         if objprocver is not None:
             q += sql.SQL( textwrap.dedent(
                 """
                 INNER JOIN base_procver_of_procver pv ON pv.base_procver_id=o.base_procver_id
                                                      AND pv.procver_id={objprocver}
-                """ ) ).format( objprocver=sql.Identifier( objprocver ) )
-        q += sql.SQL( textwrap.dedent(
-            """
-            LEFT JOIN (
-              SELECT DISTINCT ON(p1.diaobjectid) p1.diaobjectid, p1.ra, p1.dec
-              FROM diaobject_position p1
-              INNER JOIN base_procver_of_procver p1pv ON p1.base_procver_id=p1pv.base_procveR_id
-                                                     AND p1pv.procver_id={pospv}
-              ORDER BY p1.diaobjectid, p1pv.priority DESC
-            ) p ON p.diaobjectid=o.diaobjectid
-            """ ) ).format( pospv=posprocver )
+                """ ) ).format( objprocver=str(objprocver) )
+        if ra is not None:
+            q += sql.SQL( textwrap.dedent(
+                """
+                INNER JOIN (
+                  SELECT DISTINCT ON(p1.diaobjectid) p1.diaobjectid, p1.ra, p1.dec
+                  FROM diaobject_position p1
+                  INNER JOIN base_procver_of_procver p1pv ON p1.base_procver_id=p1pv.base_procver_id
+                                                         AND p1pv.procver_id={pospv}
+                  ORDER BY p1.diaobjectid, p1pv.priority DESC
+                ) p ON p.diaobjectid=o.diaobjectid
+                """ ) ).format( pospv=str(posprocver) )
         con.execute_nofetch( q )
         nexttable = "tmp_diaobject_with_position"
 
@@ -1102,13 +1111,13 @@ def object_search( processing_version='default', object_processing_version=None,
             radius = radius if radius is not None else 10.
             q = sql.SQL( textwrap.dedent(
                 """
-                SELECT DISTINCT ON(o.diaobjectid) o.diaobjectid,o.ra,o.dec INTO TEMP TABLE objsearch_radeccut
+                SELECT DISTINCT ON(o.rootid) o.rootid, o.ra, o.dec INTO TEMP TABLE objsearch_radeccut
                 FROM {nexttable} o
                 WHERE q3c_radial_query( o.ra, o.dec, %(ra)s, %(dec)s, %(rad)s )
-                ORDER BY diaobjectid
+                ORDER BY rootid
                 """ ) ).format( nexttable=sql.Identifier( nexttable ) )
             if objprocver is not None:
-                q += sql.SQL( ", o.prio DESC\n" )
+                q += sql.SQL( ", o.priority DESC\n" )
             subdict = { 'ra': ra, 'dec': dec, 'rad': radius/3600. }
             con.execute_nofetch( q, subdict )
             # ****
@@ -1120,26 +1129,29 @@ def object_search( processing_version='default', object_processing_version=None,
         # ROB TODO : use processing version index
         if window_t0 is not None:
             FDBLogger.debug( "Object search finding detections within window" )
-            if nexttable != 'diaobject':
-                # Make a primary key so we can group by
-                con.execute_nofetch( f"ALTER TABLE {nexttable} ADD PRIMARY KEY (diaobjectid)",
-                                     explain=False, analyze=False )
+            # # ROB -- whgy was thus necessary?
+            # # Needs to be adapted fo runreliable diabjectid
+            # if nexttable != 'diaobject':
+            #     # Make a primary key so we can group by
+            #     con.execute_nofetch( f"ALTER TABLE {nexttable} ADD PRIMARY KEY (diaobjectid)",
+            #                          explain=False, analyze=False )
             subdict = { 'pv': procver, 't0': window_t0, 't1': window_t1 }
             q = sql.SQL( textwrap.dedent(
                 """
                 /*+ IndexScan(s idx_diasource_diaobjectid idx_diasource_mjd) */
-                SELECT diaobjectid, ra, dec, numdetinwindow
+                SELECT rootid, ra, dec, numdetinwindow
                 INTO TEMP TABLE objsearch_windowdet
                 FROM (
-                  SELECT diaobjectid,ra,dec,COUNT(visit) AS numdetinwindow
+                  SELECT rootid,ra,dec,COUNT(visit) AS numdetinwindow
                   FROM (
-                    SELECT DISTINCT ON (o.diaobjectid,s.visit) o.diaobjectid, o.ra, o.dec, s.visit
+                    SELECT DISTINCT ON (o.rootid,s.visit) o.rootid, o.ra, o.dec, s.visit
                     FROM {nexttable} o
-                    INNER JOIN diasource s ON s.diaobjectid=o.diaobjectid
+                    INNER JOIN diaobject o2 ON o.rootid=o2.rootid
+                    INNER JOIN diasource s ON s.diaobjectid=o2.diaobjectid
                     INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id
                            AND pv.procver_id=%(pv)s
                     WHERE s.midpointmjdtai>=%(t0)s AND s.midpointmjdtai<=%(t1)s
-                    ORDER BY o.diaobjectid, s.visit, pv.priority DESC
+                    ORDER BY o.rootid, s.visit, pv.priority DESC
                 """ ) ).format( nexttable=sql.Identifier(nexttable) )
             if statbands is not None:
                 q += sql.SQL( " AND s.band=ANY(%(bands)s)\n" )
@@ -1147,7 +1159,7 @@ def object_search( processing_version='default', object_processing_version=None,
             q += sql.SQL( textwrap.dedent(
                 """
                   ) subsubq
-                  GROUP BY diaobjectid, ra, dec
+                  GROUP BY rootid, ra, dec
                 ) subq
                 """ ) )
             _and = "WHERE"
@@ -1181,13 +1193,14 @@ def object_search( processing_version='default', object_processing_version=None,
                 """
                 /*+ IndexScan(s idx_diasource_diaobjectid idx_diasource_mjd) */
                 SELECT * INTO TEMP TABLE objsearch_detcut FROM (
-                  SELECT DISTINCT ON (o.diaobjectid) o.diaobjectid,o.ra,o.dec""" ) )
+                  SELECT DISTINCT ON (o.rootid) o.rootid,o.ra,o.dec""" ) )
             for f in addlfields:
                 q += sql.SQL( "," ) + sql.Identifier( 'o', f )
             q += sql.SQL( textwrap.dedent(
                 """
                   FROM {nexttable} o
-                  INNER JOIN diasource s ON o.diaobjectid=s.diaobjectid
+                  INNER JOIN diaobject o2 ON o.rootid=o2.rootid
+                  INNER JOIN diasource s ON o2.diaobjectid=s.diaobjectid
                   INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id
                     AND pv.procver_id=%(pv)s
                 """ ) ).format( nexttable=sql.Identifier( nexttable ) )
@@ -1207,7 +1220,7 @@ def object_search( processing_version='default', object_processing_version=None,
             if statbands is not None:
                 q += sql.SQL( f"  {_and} s.band=ANY(%(bands)s)\n" )
                 subdict['bands'] = statbands
-            q += sql.SQL( "  ORDER BY o.diaobjectid\n"           # , s.visit, pv.priority DESC\n"
+            q += sql.SQL( "  ORDER BY o.rootid\n"           # , s.visit, pv.priority DESC\n"
                           ") subq\n" )
             con.execute_nofetch( q, subdict )
             # ****
@@ -1232,7 +1245,7 @@ def object_search( processing_version='default', object_processing_version=None,
         #   forced source index to filter out processing verions first,
         #   because it will consider millions of rows that could be
         #   ignored once we filtered by object.
-        # Also, analyze the latest table on column diaobjectid,
+        # Also, analyze the latest table on column rootid,
         #   so where the postgres query optimizer is still doing
         #   things it will work with reasonable data.  (It's possible
         #   that this is enough, and we don't need the hints,
@@ -1242,7 +1255,7 @@ def object_search( processing_version='default', object_processing_version=None,
 
         subdict = { 'pv': procver }
 
-        con.execute( f"ANALYZE {nexttable}(diaobjectid)", explain=False )
+        con.execute( f"ANALYZE {nexttable}(rootid)", explain=False )
 
         # First: build the table, put in first detection
         FDBLogger.debug( "Object search making stat tab with first detection" )
@@ -1251,8 +1264,8 @@ def object_search( processing_version='default', object_processing_version=None,
             /*+ IndexScan(s idx_diasource_diaobjectid)
                 Leading( ( (o s) pv ) ) */
             SELECT * INTO TEMP TABLE objsearch_stattab FROM (
-              SELECT DISTINCT ON (diaobjectid)
-                     diaobjectid,ra,dec""" ) )
+              SELECT DISTINCT ON (rootid) rootid,ra,dec
+            """ ) )
         for f in addlfields:
             q += sql.SQL(",") + sql.Identifier( f )
         q += sql.SQL( textwrap.dedent(
@@ -1265,22 +1278,23 @@ def object_search( processing_version='default', object_processing_version=None,
                      NULL::double precision as maxdetmjd, NULL::text as maxdetband,
                      NULL::double precision as maxdetflux, NULL::double precision as maxdetfluxerr
               FROM (
-                SELECT diaobjectid, ra, dec, midpointmjdtai, band, psfflux, psffluxerr""" ) )
+                SELECT rootid, ra, dec, midpointmjdtai, band, psfflux, psffluxerr""" ) )
         for f in addlfields:
             q += sql.SQL( ", " ) + sql.Identifier( f )
         q += sql.SQL( textwrap.dedent(
             """
                 FROM (
-                  SELECT DISTINCT ON (o.diaobjectid,s.visit) o.diaobjectid, o.ra, o.dec,
+                  SELECT DISTINCT ON (o.rootid,s.visit) o.rootid, o.ra, o.dec,
                     s.midpointmjdtai, s.band, s.psfflux, s.psffluxerr""" ) )
         for f in addlfields:
             q += sql.SQL( ", " ) + sql.Identifier( 'o', f )
         q += sql.SQL( textwrap.dedent(
             """
                   FROM {nexttable} o
-                  INNER JOIN diasource s ON o.diaobjectid=s.diaobjectid
+                  INNER JOIN diaobject o2 ON o.rootid=o2.rootid
+                  INNER JOIN diasource s ON o2.diaobjectid=s.diaobjectid
                   INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id
-                    AND pv.procver_id=%(pv)s\
+                                                       AND pv.procver_id=%(pv)s\
             """ ) ).format( nexttable=sql.Identifier(nexttable) )
         _and = "WHERE"
         if statbands is not None:
@@ -1293,18 +1307,13 @@ def object_search( processing_version='default', object_processing_version=None,
             _and = "  AND"
         q += sql.SQL( textwrap.dedent(
             """
-                  ORDER BY o.diaobjectid, s.visit, pv.priority DESC
+                  ORDER BY o.rootid, s.visit, pv.priority DESC
                 ) subsubq
-                ORDER BY diaobjectid, midpointmjdtai
+                ORDER BY rootid, midpointmjdtai
               ) subq
             ) outersubq
             """ ) )
         con.execute_nofetch( q, subdict )
-
-        # Analyze the objsearch_stattab table to help postgres do the right thing.
-        FDBLogger.debug( f"Object search analyzing diaobjectid on {nexttable}" )
-        con.execute( sql.SQL( "ANALYZE {nexttable}(diaobjectid)" ).format(nexttable=sql.Identifier(nexttable)),
-                     explain=False )
 
         # Add in last detection
         FDBLogger.debug( "Object search adding last detection to stat tab" )
@@ -1316,12 +1325,13 @@ def object_search( processing_version='default', object_processing_version=None,
             SET lastdetmjd=midpointmjdtai, lastdetband=band,
                 lastdetflux=psfflux, lastdetfluxerr=psffluxerr
             FROM (
-              SELECT DISTINCT ON (diaobjectid) diaobjectid, midpointmjdtai, band, psfflux, psffluxerr
+              SELECT DISTINCT ON (rootid) rootid, midpointmjdtai, band, psfflux, psffluxerr
               FROM (
-                SELECT DISTINCT ON (o.diaobjectid, s.visit) o.diaobjectid, s.midpointmjdtai,
-                                                            s.band, s.psfflux, s.psffluxerr
+                SELECT DISTINCT ON (o.rootid, s.visit) o.rootid, s.midpointmjdtai,
+                                                       s.band, s.psfflux, s.psffluxerr
                 FROM {nexttable} o
-                INNER JOIN diasource s ON o.diaobjectid=s.diaobjectid
+                INNER JOIN diaobject o2 ON o.rootid=o2.rootid
+                INNER JOIN diasource s ON o2.diaobjectid=s.diaobjectid
                 INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id
                   AND pv.procver_id=%(pv)s\n
             """ ) ).format( nexttable=sql.Identifier( nexttable ) )
@@ -1334,11 +1344,11 @@ def object_search( processing_version='default', object_processing_version=None,
             _and = "  AND"
         q += sql.SQL( textwrap.dedent(
             """
-                ORDER BY o.diaobjectid, s.visit, pv.priority DESC
+                ORDER BY o.rootid, s.visit, pv.priority DESC
               ) subsubq
-              ORDER BY diaobjectid, midpointmjdtai DESC
+              ORDER BY rootid, midpointmjdtai DESC
             ) subq
-            WHERE subq.diaobjectid=ost.diaobjectid
+            WHERE subq.rootid=ost.rootid
             """ ) )
         con.execute_nofetch( q, subdict )
 
@@ -1352,12 +1362,13 @@ def object_search( processing_version='default', object_processing_version=None,
             SET maxdetmjd=midpointmjdtai, maxdetband=band,
                 maxdetflux=psfflux, maxdetfluxerr=psffluxerr
             FROM (
-              SELECT DISTINCT ON (diaobjectid) diaobjectid, midpointmjdtai, band, psfflux, psffluxerr
+              SELECT DISTINCT ON (rootid) rootid, midpointmjdtai, band, psfflux, psffluxerr
               FROM (
-                SELECT DISTINCT ON (o.diaobjectid, s.visit) o.diaobjectid, s.midpointmjdtai,
-                                                            s.band, s.psfflux, s.psffluxerr
+                SELECT DISTINCT ON (o.rootid, s.visit) o.rootid, s.midpointmjdtai,
+                                                       s.band, s.psfflux, s.psffluxerr
                 FROM {nexttable} o
-                INNER JOIN diasource s ON o.diaobjectid=s.diaobjectid
+                INNER JOIN diaobject o2 ON o.rootid=o2.rootid
+                INNER JOIN diasource s ON o2.diaobjectid=s.diaobjectid
                 INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id
                   AND pv.procver_id=%(pv)s
             """ ) ).format( nexttable=sql.Identifier( nexttable ) )
@@ -1370,11 +1381,11 @@ def object_search( processing_version='default', object_processing_version=None,
             _and = "  AND"
         q += sql.SQL( textwrap.dedent(
             """
-                ORDER BY o.diaobjectid, s.visit, pv.priority DESC
+                ORDER BY o.rootid, s.visit, pv.priority DESC
               ) subsubq
-              ORDER BY diaobjectid, psfflux DESC
+              ORDER BY rootid, psfflux DESC
             ) subq
-            WHERE subq.diaobjectid=ost.diaobjectid
+            WHERE subq.rootid=ost.rootid
             """ ) )
         con.execute_nofetch( q, subdict )
 
@@ -1387,11 +1398,12 @@ def object_search( processing_version='default', object_processing_version=None,
             UPDATE objsearch_stattab o
             SET numdet=n
             FROM (
-              SELECT diaobjectid, COUNT(visit) AS n
+              SELECT rootid, COUNT(visit) AS n
               FROM (
-                SELECT DISTINCT ON (o.diaobjectid, s.visit) o.diaobjectid, s.visit
+                SELECT DISTINCT ON (o.rootid, s.visit) o.rootid, s.visit
                 FROM {nexttable} o
-                INNER JOIN diasource s ON s.diaobjectid=o.diaobjectid
+                INNER JOIN diaobject o2 ON o.rootid=o2.rootid
+                INNER JOIN diasource s ON s.diaobjectid=o2.diaobjectid
                 INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id
                   AND pv.procver_id=%(pv)s
             """ ) ).format( nexttable=sql.Identifier( nexttable ) )
@@ -1404,11 +1416,11 @@ def object_search( processing_version='default', object_processing_version=None,
             _and = "  AND"
         q += sql.SQL( textwrap.dedent(
             """
-                ORDER BY o.diaobjectid, s.visit, pv.priority DESC
+                ORDER BY o.rootid, s.visit, pv.priority DESC
               ) subsubq
-              GROUP BY diaobjectid
+              GROUP BY rootid
             ) subq
-            WHERE subq.diaobjectid=o.diaobjectid
+            WHERE subq.rootid=o.rootid
             """ ) )
         con.execute_nofetch( q, subdict )
         # ****
@@ -1485,7 +1497,7 @@ def object_search( processing_version='default', object_processing_version=None,
             # No need to search the forced source table, and that can be slow because the
             #  forced photometry table is huge, so just skip it.
             if just_objids:
-                rows, columns = con.execute( "SELECT diaobjectid FROM objsearch_stattab" )
+                rows, columns = con.execute( "SELECT rootid FROM objsearch_stattab" )
             else:
                 rows, columns = con.execute( "SELECT * FROM objsearch_stattab" )
 
@@ -1495,12 +1507,12 @@ def object_search( processing_version='default', object_processing_version=None,
             nexttable = 'objsearch_stattab'
 
             # Because the diaforcedsource table is going to be the hugest one,
-            #   create an index diabojectid of {nexttable} here to help
+            #   create an index rootid of {nexttable} here to help
             #   this next query along.  We hope.
-            con.execute( f"CREATE INDEX idx_t_diaobjectid ON {nexttable}(diaobjectid)", explain=False )
+            con.execute( f"CREATE INDEX idx_t_rootid ON {nexttable}(rootid)", explain=False )
 
             # Reanalyze this table to help postgres do the right thing
-            con.execute( f"ANALYZE {nexttable}(diaobjectid)", explain=False )
+            con.execute( f"ANALYZE {nexttable}(rootid)", explain=False )
 
             # Get the last forced source
             # NOTE: I had a HashJoin( f t ) in here that I removed
@@ -1511,15 +1523,16 @@ def object_search( processing_version='default', object_processing_version=None,
                     Parallel( f 3 hard )
                 */
                 SELECT * INTO TEMP TABLE objsearch_final FROM (
-                  SELECT DISTINCT ON (diaobjectid) *
+                  SELECT DISTINCT ON (rootid) *
                   FROM (
-                    SELECT DISTINCT ON (t.diaobjectid, f.visit) t.*,
+                    SELECT DISTINCT ON (t.rootid, f.visit) t.*,
                         f.psfflux AS lastforcedflux, f.psffluxerr AS lastforcedfluxerr,
                         f.midpointmjdtai AS lastforcedmjd, f.band AS lastforcedband
                     FROM {nexttable} t
-                    INNER JOIN diaforcedsource f ON f.diaobjectid=t.diaobjectid
+                    INNER JOIN diaobject o ON t.rootid=o.rootid
+                    INNER JOIN diaforcedsource f ON f.diaobjectid=o.diaobjectid
                     INNER JOIN base_procver_of_procver pv ON f.base_procver_id=pv.base_procver_id
-                      AND pv.procver_id=%(pv)s
+                                                         AND pv.procver_id=%(pv)s
                 """ ) ).format( nexttable=sql.Identifier( nexttable ) )
             _and = "WHERE"
             if statbands is not None:
@@ -1530,9 +1543,9 @@ def object_search( processing_version='default', object_processing_version=None,
                 _and = "  AND"
             q += sql.SQL( textwrap.dedent(
                 """
-                    ORDER BY t.diaobjectid, f.visit, pv.priority DESC
+                    ORDER BY t.rootid, f.visit, pv.priority DESC
                   ) subsubq
-                  ORDER BY diaobjectid, lastforcedmjd DESC
+                  ORDER BY rootid, lastforcedmjd DESC
                 ) subq
                 """ ) )
             con.execute_nofetch( q, subdict )
@@ -1551,7 +1564,7 @@ def object_search( processing_version='default', object_processing_version=None,
             # Pull down the results
             FDBLogger.debug( "Object search pulling down results" )
             if just_objids:
-                rows, columns = con.execute( "SELECT diaobjectid FROM objsearch_final" )
+                rows, columns = con.execute( "SELECT rootid FROM objsearch_final" )
             else:
                 rows, columns = con.execute( "SELECT * FROM objsearch_final" )
 
