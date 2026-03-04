@@ -1542,7 +1542,7 @@ class DiaSourceBrokerInfo( DBBase ):
 class DiaForcedSource( DBBase ):
     __tablename__ = "diaforcedsource"
     _tablemeta = None
-    _pk = [ 'base_procver_id', 'diaobjectid', 'visit' ]
+    _pk = [ 'diaforcedsourceid', 'base_procver_id' ]
 
 
 # ======================================================================
@@ -1550,7 +1550,7 @@ class DiaForcedSource( DBBase ):
 class DiaForcedSourceExtra( DBBase ):
     __tablename__ = "diaforcedsource_extra"
     _tablemeta = None
-    _pk = [ 'base_procver_id', 'diaobjectid', 'visit' ]
+    _pk = [ 'diaforcedsourceid', 'base_procver_id' ]
 
 
 # ======================================================================

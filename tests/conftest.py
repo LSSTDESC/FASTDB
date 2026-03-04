@@ -476,8 +476,7 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
                     rootdict['objs'][0]['frc']['realtime'].append( frc )
 
                     if sourcemjd < 60050.:
-                        frcex = DiaForcedSourceExtra( diaobjectid=objr.diaobjectid,
-                                                      visit=visit,
+                        frcex = DiaForcedSourceExtra( diaforcedsourceid=objr.diaobjectid * 100000 + int(sourcemjd),
                                                       base_procver_id=bpvs['realtime_diaforcedsource'].id,
                                                       detector=0,
                                                       scienceflux=1.1*psfflux,
@@ -526,8 +525,7 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
                                                 y=1 )
                         srcexobjs.append( srcex )
                         rootdict['objs'][1]['srcex'][bpv].append( srcex )
-                        frcex = DiaForcedSourceExtra( diaobjectid=obj.diaobjectid,
-                                                      visit=visit,
+                        frcex = DiaForcedSourceExtra( diaforcedsourceid=obj.diaobjectid * 100000 + int(sourcemjd),
                                                       base_procver_id=frc.base_procver_id,
                                                       detector=0,
                                                       scienceflux=1.1*psfflux,
@@ -598,8 +596,7 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
                         rootdict['objs'][2]['frc'][bpv].append( frc )
 
                         if sourcemjd < 60050.:
-                            frcex = DiaForcedSourceExtra( diaobjectid=frc.diaobjectid,
-                                                          visit=visit,
+                            frcex = DiaForcedSourceExtra( diaforcedsourceid=obj1.diaobjectid * 100000 + int(sourcemjd),
                                                           base_procver_id=frc.base_procver_id,
                                                           detector=0,
                                                           scienceflux=1.1*psfflux,
@@ -638,7 +635,7 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
 
                 if ( i < 3 ) and ( sourcemjd <= 60055. ):
                     frc = DiaForcedSource( diaforcedsourceid=objr.diaobjectid * 100000 + int(sourcemjd),
-                                           base_procver_id=bpvs['realtime'].id,
+                                           base_procver_id=bpvs['realtime_diaforcedsource'].id,
                                            diaobjectid=objr.diaobjectid,
                                            visit=visit,
                                            band=('r' if visit%2==0 else 'i'),
@@ -651,8 +648,7 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
                     rootdict['objs'][0]['frc']['realtime'].append( frc )
 
                     if sourcemjd < 60050.:
-                        frcex = DiaForcedSourceExtra( diaobjectid=frc.diaobjectid,
-                                                      visit=visit,
+                        frcex = DiaForcedSourceExtra( diaforcedsourceid=objr.diaobjectid * 100000 + int(sourcemjd),
                                                       base_procver_id=frc.base_procver_id,
                                                       detector=0,
                                                       scienceflux=1.1*psfflux,
@@ -664,7 +660,7 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
 
                 for bpv in [ 'bpv2', 'bpv2a', 'bpv3' ]:
                     frc = DiaForcedSource( diaforcedsourceid=obj.diaobjectid * 100000 + int(sourcemjd),
-                                           base_procver_id=bpvs[bpv].id,
+                                           base_procver_id=bpvs[f'{bpv}_diaforcedsource'].id,
                                            diaobjectid=obj.diaobjectid,
                                            visit=visit,
                                            band=('r' if visit%2==0 else 'i'),
@@ -677,8 +673,7 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
                     rootdict['objs'][1]['frc'][bpv].append( frc )
 
                     if sourcemjd < 60050.:
-                        frcex = DiaForcedSourceExtra( diaobjectid=frc.diaobjectid,
-                                                      visit=visit,
+                        frcex = DiaForcedSourceExtra( diaforcedsourceid=obj.diaobjectid * 100000 + int(sourcemjd),
                                                       base_procver_id=frc.base_procver_id,
                                                       detector=0,
                                                       scienceflux=1.1*psfflux,
@@ -694,7 +689,7 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
                              ( ( bpv == 'bpv1' ) and ( sourcemjd > 60025. ) ) ):
                             continue
                         frc = DiaForcedSource( diaforcedsourceid=obj.diaobjectid * 100000 + int(sourcemjd),
-                                               base_procver_id=bpvs[bpv].id,
+                                               base_procver_id=bpvs[f'{bpv}_diaforcedsource'].id,
                                                diaobjectid=obj1.diaobjectid,
                                                visit=visit,
                                                band=('r' if visit%2==0 else 'i'),
@@ -707,8 +702,7 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
                         rootdict['objs'][2]['frc'][bpv].append( frc )
 
                         if sourcemjd < 60050.:
-                            frcex = DiaForcedSourceExtra( diaobjectid=frc.diaobjectid,
-                                                          visit=visit,
+                            frcex = DiaForcedSourceExtra( diaforcedsourceid=obj.diaobjectid * 100000 + int(sourcemjd),
                                                           base_procver_id=frc.base_procver_id,
                                                           detector=0,
                                                           scienceflux=1.1*psfflux,

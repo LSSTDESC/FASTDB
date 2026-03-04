@@ -78,15 +78,18 @@ def test_get_object_infos( set_of_lightcurves, procver_collection ):
 
 
 def test_object_ltcv( procver_collection, set_of_lightcurves ):
+    # TODO : write a test for the case where there are multiple objects within the
+    #   same processing version that point to the same root object!
+
     roots = set_of_lightcurves
     _bpvs, pvs = procver_collection
 
     # The fixture loads up lightcurves every 2.5 days
 
-    # Try to get the object lightcurve for the second object of roots[0] using pv1
-    # Should get detections starting 60000, forced starting 50090,
-    # sources through 60015 and forced through 60010 in bpv1a, then sources through 60030
-    # and forced through 60050 in bpv1
+    # Try to get the object lightcurve for the third object (diaobjectid 100) of roots[0] using pv1
+    # Should get detections starting 60000, forced starting 59990,
+    # sources through 60015 and forced through 60010 in bpv1a,
+    # sources through 60030 and forced through 60025 in bpv1
 
     sources = ltcv.object_ltcv( pvs['pv1'].id, roots[0]['objs'][2]['obj'].diaobjectid,
                                 return_format='pandas', which='detections', include_base_procver=True )
@@ -135,10 +138,10 @@ def test_object_ltcv( procver_collection, set_of_lightcurves ):
     df = ltcv.object_ltcv( pvs['pv2'].id, roots[1]['root'].id, return_format='pandas',
                            which='patch', include_base_procver=True )
     assert ( df.loc[ :, [ c for c in df.columns if c!='ispatch'] ] == forced ).all().all()
-    assert ( ~df.ispatch ).all()
-    assert len( df[ df.isdet ] ) == len( sources )
-    assert df[ df.isdet ].isdet.all()
-    assert ( ~df[ df.ispatch ].ispatch ).all()
+    assert ( df.ispatch == 0 ).all()
+    assert len( df[ df.isdet == 1 ] ) == len( sources )
+    assert df[ df.isdet == 1 ].isdet.all()
+    assert ( df[ df.ispatch == 1 ].ispatch ).all()
     assert ( df.base_procver == 'pvc_bpv2a' ).all()
 
     # Make sure json output is consistent
@@ -747,7 +750,6 @@ def test_get_hot_ltcvs( set_of_lightcurves ):
     postime_procver_60060 = db.BaseProcessingVersion.base_procver_id( 'pvc_bpv3_60060' )
     postime_procver_60080 = db.BaseProcessingVersion.base_procver_id( 'pvc_bpv3_60080' )
 
-    import pdb; pdb.set_trace()
     df, objdf, _ = ltcv.get_hot_ltcvs( 'pvc_pv3', detected_since_mjd=60035, mjd_now=60056 )
     assert set( df.index.names ) == { 'diaobjectid', 'mjd' }
     assert set( df.columns ) == { 'visit', 'band', 'flux', 'fluxerr', 'isdet' }

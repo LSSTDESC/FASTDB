@@ -7,6 +7,7 @@ import textwrap
 import json   # noqa: F401
 
 from psycopg import sql
+import numpy
 import pandas
 import astropy.time
 
@@ -32,23 +33,25 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None,
         that temporary tables are meaningful).
 
       processing_version : str, uuid, or None
-        The processing version for the objects.  Ignored objis is a list
-        of int, not a list of uuid.  If not given and a list of uuids is
-        given, will default to 'default'.
+        The processing version (*not* base processing version) for the
+        objects.  Ignored objis is a list of int, not a list of uuid.
+        If not given and a list of uuids is given, will default to
+        'default'.
 
       position_processing_version : str, uuid, or None
-        The processing version for the object positions.  If None, then
-        the position processing version will be assumed to be the same
-        as the diaobject processing version.  If both processing_version
-        and position_processing version is None, then you will not get
-        back positions, those columns will all be null.
+        The processing version (*not* base processing version) for the
+        object positions.  If None, then the position processing version
+        will be assumed to be the same as the diaobject processing
+        version.  If both processing_version and position_processing
+        version is None, then you will not get back positions, those
+        columns will all be null.
 
       columns : list of str, default None
         If given only include these columns in the returned data.  If
         'diaobjectid' is not included in this list, it will be prepended
         to it.  (You can't not get diaobjectid back, because it's the
         index of the returned dataframe or the keys of the returned
-        dictionary.)
+        dictionary.)  See "Returns" below for allowed columns.
 
       return_format : str, default 'json'
         Either 'pandas' or 'json'
@@ -152,18 +155,7 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None,
             gotsomepos = True
             sqlcolumns.append( sql.Identifier( 'p', c ) if c != 'pos_base_procver_id'
                                else sql.Identifier( 'p', 'base_procver_id' ) + sql.SQL( " AS " ) + sql.Identifier( c ) )
-
-    # sqlcolumns = sql.SQL(',').join( c for c in columns )
-    # SQL().join() doesn't do what we want it to; it's turning stuff into literals and removing prefixes
-    #   and so forth.  Gotta do this the hard way.
-    first = True
-    for c in sqlcolumns:
-        if first:
-            first = False
-            sqlcolobj = c
-        else:
-            sqlcolobj += sql.SQL( "," )
-            sqlcolobj += c
+    sqlcolumns = sql.SQL(',').join( c for c in sqlcolumns )
 
     with db.DBCon( dbcon ) as dbcon:
         if gotsomepos:
@@ -172,6 +164,7 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None,
                 SELECT DISTINCT ON(p1.diaobjectid) p1.*
                 FROM diaobject_position p1
                 INNER JOIN base_procver_of_procver p1pv ON p1.base_procver_id=p1pv.base_procver_id
+                                                       AND p1pv._table='diaobject_position'
                                                        AND p1pv.procver_id={pospv}
                 ORDER BY p1.diaobjectid, p1pv.priority DESC
                 """ ) ).format( pospv=pospv )
@@ -185,7 +178,7 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None,
                 SELECT {sqlcolumns}
                 FROM {objids_table} t
                 INNER JOIN diaobject o ON o.diaobjectid=t.diaobjectid
-                """ ) ).format( sqlcolumns=sqlcolobj, objids_table=sql.Identifier(objids_table) )
+                """ ) ).format( sqlcolumns=sqlcolumns, objids_table=sql.Identifier(objids_table) )
             if gotsomepos:
                 q += sql.SQL( "LEFT JOIN (\n" )
                 q += positionclause
@@ -200,8 +193,9 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None,
                     SELECT DISTINCT ON(o.diaobjectid) {sqlcolumns}
                     FROM diaobject o
                     INNER JOIN base_procver_of_procver pv ON o.base_procver_id=pv.base_procver_id
+                                                         AND pv._table='diaobject'
                                                          AND pv.procver_id={pv}
-                    """ ) ).format( sqlcolumns=sqlcolobj, pv=pv )
+                    """ ) ).format( sqlcolumns=sqlcolumns, pv=pv )
                 if gotsomepos:
                     q += sql.SQL( "LEFT JOIN (\n" )
                     q += positionclause
@@ -223,7 +217,7 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None,
                     */
                     SELECT {sqlcolumns}
                     FROM diaobject o
-                    """ ) ).format( sqlcolumns=sqlcolobj )
+                    """ ) ).format( sqlcolumns=sqlcolumns )
                 if gotsomepos:
                     q += sql.SQL( "LEFT JOIN (\n" )
                     q += positionclause
@@ -247,7 +241,7 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None,
 
 def many_object_ltcvs( processing_version='default', objids=None, objids_table=None,
                        bands=None, which='patch', include_base_procver=False, include_source_positions=False,
-                       return_format='json', string_keys=False, mjd_now=None, dbcon=None ):
+                       return_format='json', mjd_now=None, dbcon=None ):
     """Get lightcurves for objects.
 
     Parameters
@@ -266,9 +260,9 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
 
       objid_table : str, default None
          If not None, then this is the name of a table (probably a
-         temporary table) that has the object ids already loaded into it
-         in the column "diaobjectid".  Use of this requires dbcon to be
-         non-None.
+         temporary table) that has the object ids and root object ids
+         already loaded into it in the columns "diaobjectid" and
+         "rootid".  Use of this requires dbcon to be non-None.
 
       # Offset and limit don't work right, I have to think harder
       # offset: int, default None
@@ -300,15 +294,6 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
       return_format : str, default 'json'
          'json' or 'pandas'
 
-      string_keys : bool, default False
-         Ignored unless return_format is 'json'.  Normally, with
-         return_format 'json', the keys of the returned thing are all
-         bigints, as thats what diaobjectids are.  But, if you really
-         want to encode this to actual json, that's a problem, because
-         actual json specifies that keys have to be strings. (Why do we
-         use this format??)  Set string_keys to True, and the diaobjectid
-         keys of the returned dictionary will be wrapped in str().
-
       mjd_now : float, default None
          You almost always want to leave this at None.  It's here for
          testing purposes.  Normally you will get back all data on an
@@ -333,13 +318,19 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
     -------
       retval: pandas.DataFrame or dict
         If return_format is 'pandas', then you get back a DataFrame with
-        indexes (diaobjectid, mjd) and columns (band, flux,
-        fluxerr, isdet, [ispatch]).  (ispatch will only be included if
-        which is 'patch').
+        indexes (rootid, mjd) and columns (diaobjectid, visit,
+        [diaforcedsourceid], diasourceid, band, flux, fluxerr, isdet,
+        [ispatch]).  (ispatch will only be included if which is 'patch';
+        diaforcedsourceid will only be include if which is not
+        'detected')
 
-        If return_format is 'json', then you get back a dict of diaobjectid -> dict
-        The inner dict has fields:
-          { 'visit': list of bigint,
+        If return_format is 'json', then you get back a list, each element of which
+        is a dictionary:
+          { 'rootid': uuid (the deduplicated "root" object id in FASTDB),
+            'diaobjectid': list of bigint,
+            'diasourceid': list of bigint or null,
+            [ 'diaforcedsourceid': list of bigint or null ] (only included if which isn't 'detections'),
+            'visit': list of bigint,
             'mjd': list of float,
             'band': list of str,
             'flux': list of float,
@@ -363,9 +354,8 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
             raise ValueError( "objids_table requires dbcon" )
         if objids is not None:
             raise ValueError( "objids_table and objids cannot be used together" )
-        objfield = 'diaobjectid'
     else:
-        objids_table = "tmp_objids"
+        objids_table = 'tmp_objids'
         if objids is None:
             raise ValueError( "objids is required" )
         if not util.isSequence( objids ):
@@ -373,9 +363,9 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
         if all( isinstance( o, numbers.Integral ) for o in objids ):
             # Make sure they're int, because if it's something like np.int64, postgres will choke
             objids = [ int(o) for o in objids ]
-            objfield = 'diaobjectid'
+            objids_are_root = False
         else:
-            objfield = 'rootid'
+            objids_are_root = True
             try:
                 objids = [ util.asUUID(o) for o in objids ]
             except ValueError:
@@ -409,24 +399,45 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
             # could be doing something with the object's processing version, but consisder
             # all the complicated messy cases.)
 
-            q = sql.SQL( "CREATE TEMP TABLE {objids_table}( diaobjectid bigint )"
-                        ).format( objids_table=sql.Identifier( objids_table ) )
+            q = sql.SQL( "CREATE TEMP TABLE tmp_objids( diaobjectid bigint, rootid uuid )" )
             dbcon.execute( q, explain=False )
-            if objfield == 'rootid':
+            if objids_are_root:
                 q = sql.SQL( textwrap.dedent(
-                    """INSERT INTO {objids_table} (
-                         SELECT diaobjectid FROM diaobject
+                    """INSERT INTO tmp_objids (
+                         SELECT diaobjectid, rootid FROM diaobject
                          WHERE rootid=ANY(%(roots)s)
                        )
                     """
-                ) ).format( objids_table=sql.Identifier(objids_table) )
+                ) )
                 dbcon.execute_nofetch( q, { 'roots': objids } )
             else:
-                q = sql.SQL( "COPY {objids_table}(diaobjectid) FROM STDIN"
+                q = sql.SQL( "CREATE TEMP TABLE temp_input_diaobject( diaobjectid bigint )" )
+                dbcon.execute( q, explain=False )
+                q = sql.SQL( "COPY temp_input_diaobject(diaobjectid) FROM STDIN"
                             ).format( objids_table=sql.Identifier( objids_table ) )
                 with dbcon.cursor.copy( q ) as copier:
                     for objid in objids:
                         copier.write_row( [ objid ] )
+                # Join all other objectids that are from the same roots
+                #   and base processing verson as these.  Frustratingly,
+                #   in the LSST alert stream, there were cases where the
+                #   same physical object had different diaObjectIds.
+                #   There were even cases, in previous source arrays,
+                #   where the same diaSource was associated with
+                #   different values of diaObjectId at different times.
+                #   (Not within the same alert, but in different alerts
+                #   that had the same diaSourceId in the previous
+                #   sources array.)
+                q = sql.SQL( textwrap.dedent(
+                    """
+                    INSERT INTO tmp_objids( diaobjectid, rootid ) (
+                      SELECT o.diaobjectid, o.rootid FROM temp_input_diaobject t
+                      INNER JOIN diaobject ot ON ot.diaobjectid=t.diaobjectid
+                      INNER JOIN diaobject o ON ot.rootid=o.rootid
+                                            AND ot.base_procver_id=o.base_procver_id
+                    )
+                    """ ) )
+                dbcon.execute( q )
 
         # Extract detections
         if include_source_positions:
@@ -436,7 +447,7 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
             source_fields = sql.SQL( "" )
         q = sql.SQL( textwrap.dedent(
             """
-            CREATE TEMP TABLE tmp_sources( diaobjectid bigint, visit bigint,
+            CREATE TEMP TABLE tmp_sources( rootid uuid, diasourceid bigint, diaobjectid bigint, visit bigint,
                                            mjd double precision, band text, flux real, fluxerr real,
                                            {source_fields}
                                            isdet bool, base_procver text )
@@ -451,13 +462,14 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
             """
             /*+ IndexScan(s idx_diasource_diaobjectid) */
             INSERT INTO tmp_sources
-            SELECT DISTINCT ON (s.diaobjectid, s.visit)
-              s.diaobjectid, s.visit, s.midpointmjdtai AS mjd,
+            SELECT DISTINCT ON (s.diasourceid)
+              t.rootid, s.diasourceid, s.diaobjectid, s.visit, s.midpointmjdtai AS mjd,
               s.band, s.psfflux AS flux, s.psffluxerr AS fluxerr, {source_fields}
               TRUE as isdet, p.description AS base_procver
             FROM {objids_table} t
             INNER JOIN diasource s ON s.diaobjectid=t.diaobjectid
             INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id
+                                                 AND pv._table='diasource'
                                                  AND pv.procver_id={procver}
             INNER JOIN base_processing_version p ON pv.base_procver_id=p.id
             """
@@ -469,16 +481,18 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
         if bands is not None:
             q += sql.SQL( f"                   {_and} s.band=ANY(%(bands)s)" )
             _and = "  AND"
-        q += sql.SQL( "   ORDER BY s.diaobjectid, s.visit, pv.priority DESC\n")
+        q += sql.SQL( "   ORDER BY s.diasourceid, pv.priority DESC\n")
         dbcon.execute_nofetch( q, { 'bands': bands } )
 
         if which == 'detections':
-            rows, cols = dbcon.execute( "SELECT * FROM tmp_sources" )
+            rows, cols = dbcon.execute( "SELECT * FROM tmp_sources "
+                                        "ORDER BY rootid, mjd" )
 
         else:
             # Extract forced photometry if necessary
             q = sql.SQL( textwrap.dedent(
-                """CREATE TEMP TABLE tmp_forced( diaobjectid bigint, visit bigint,
+                """CREATE TEMP TABLE tmp_forced( rootid uuid, diaforcedsourceid bigint,
+                                                 diaobjectid bigint, visit bigint,
                                                  mjd double precision, band text,
                                                  flux real, fluxerr real,
                                                  isdet bool, base_procver text )
@@ -489,13 +503,14 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                 """
                 /*+ IndexScan(s idx_diaforcedsource_diaobjectid) */
                 INSERT INTO tmp_forced
-                SELECT DISTINCT ON (s.diaobjectid, s.visit)
-                  s.diaobjectid, s.visit, s.midpointmjdtai AS mjd,
+                SELECT DISTINCT ON (s.diaforcedsourceid)
+                  t.rootid, s.diaforcedsourceid, s.diaobjectid, s.visit, s.midpointmjdtai AS mjd,
                   s.band, s.psfflux AS flux, s.psffluxerr AS fluxerr,
                   FALSE as isdet, p.description AS base_procver
                 FROM {objids_table} t
                 INNER JOIN diaforcedsource s ON s.diaobjectid=t.diaobjectid
                 INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id
+                                                     AND pv._table='diaforcedsource'
                                                      AND pv.procver_id={procver}
                 INNER JOIN base_processing_version p ON pv.base_procver_id=p.id
                 """
@@ -507,7 +522,7 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
             if bands is not None:
                 q += sql.SQL( f"                   {_and} s.band=ANY(%(bands)s)" )
                 _and = "  AND"
-            q += sql.SQL( "   ORDER BY s.diaobjectid, s.visit, pv.priority DESC\n" )
+            q += sql.SQL( "   ORDER BY s.diaforcedsourceid, pv.priority DESC\n" )
             dbcon.execute_nofetch( q, { 'bands': bands } )
 
             # Join detections to forced photometry to set the 'isdet' and 'ispatch' flags
@@ -517,7 +532,10 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                 source_fields = sql.SQL( "" )
             q = sql.SQL( textwrap.dedent(
                 """
-                SELECT CASE WHEN f.diaobjectid IS NULL THEN s.diaobjectid ELSE f.diaobjectid END AS diaobjectid,
+                SELECT CASE WHEN f.rootid IS NULL THEN s.rootid ELSE f.rootid END AS rootid,
+                       f.diaforcedsourceid,
+                       s.diasourceid,
+                       CASE WHEN f.diaobjectid IS NULL THEN s.diaobjectid ELSE f.diaobjectid END AS diaobjectid,
                        CASE WHEN f.visit IS NULL THEN s.visit ELSE f.visit END AS visit,
                        CASE WHEN f.mjd IS NULL THEN s.mjd ELSE f.mjd END AS mjd,
                        CASE WHEN f.band IS NULL THEN s.band ELSE f.band END AS band,
@@ -534,7 +552,41 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                 """ ) ).format( source_fields=source_fields )
             rows, cols = dbcon.execute( q )
 
-    retframe = pandas.DataFrame( rows, columns=cols )
+    # ...OK. I can't do this next one, because pandas can't handle None as integers,
+    #   and will silently convert them to doubles so it can put NA in place.
+    #   That loses precision off of 64-bit integers.  I should really move away
+    #   from using pandas.
+    #   (There may be some hope with pandas and pyarrow datatypes, but I think
+    #   that would still require a lot of intervention.)
+
+    # retframe = pandas.DataFrame( rows, columns=cols )
+
+    #   Because pandas.DataFrame only allows a single dtype in the constructor,
+    #   we have to do it the long way.
+
+    # obj_cols = [ 'rootid', 'band', 'base_procver' ]
+    bool_cols = [ 'isdet', 'ispatch' ]
+    double_cols = [ 'mjd' ]
+    float_cols = [ 'flux', 'fluxerr' ]
+    int_cols = [ 'diaforcedsourceid', 'diasourceid', 'diaobjectid', 'visit' ]
+    serieses = {}
+    for i, col in enumerate( cols ):
+        if col in int_cols:
+            series = pandas.Series( [ r[i] for r in rows ], dtype="int64[pyarrow]" )
+        elif col in bool_cols:
+            # Pandas doesn't handle "bool[pyarrow]"
+            # In fact, trying numpy.bool made pandas convert
+            #   the column to float64 and all NA.
+            # Pandas is dysfunctional
+            series = pandas.Series( [ r[i] for r in rows ], dtype=numpy.int16 )
+        elif col in double_cols:
+            series = pandas.Series( [ r[i] for r in rows ], dtype="float64[pyarrow]" )
+        elif col in float_cols:
+            series = pandas.Series( [ r[i] for r in rows ], dtype="float32[pyarrow]" )
+        else:
+            series = pandas.Series( [ r[i] for r in rows ] )
+        serieses[ col ] = series
+    retframe = pandas.DataFrame( serieses )
 
     if not include_base_procver:
         retframe.drop( 'base_procver', axis='columns', inplace=True )
@@ -543,36 +595,41 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
         if len(retframe) > 0:
             # Pandas annoyance: if retframe has 0 length, this next
             #   statement wipes out the columns.  Grrr.
-            retframe = retframe[ ~retframe.ispatch ]
+            retframe = retframe[ retframe.ispatch==0 ]
         retframe.drop( 'ispatch', axis='columns', inplace=True )
 
     if return_format == 'pandas':
-        retframe.set_index( ['diaobjectid', 'mjd'], inplace=True )
+        retframe.set_index( ['rootid', 'mjd'], inplace=True )
         return retframe
 
     elif return_format == 'json':
-        retval = {}
-        for objid in retframe.diaobjectid.unique():
-            subf = retframe[ retframe.diaobjectid==objid  ]
-            thisretval = { 'visit': list( subf.visit.values ),
-                           'mjd': list( subf.mjd.values ),
-                           'band': list( subf.band.values ),
-                           'flux': list( subf.flux.values ),
-                           'fluxerr': list( subf.fluxerr.values ),
-                           'isdet': [ int(i) for i in subf.isdet.values ] }
+        retval = []
+        for objid in retframe.rootid.unique():
+            subf = retframe[ retframe.rootid==objid  ]
+            thisretval = { 'rootid': subf.loc[ 0, 'rootid' ],
+                           'diaobjectid': list( subf.diaobjectid.values ),
+                           'visit': list( subf.visit.values ),
+                           'diasourceid': list( subf.diasourceid.values )
+                          }
+            if which != 'detections':
+                thisretval['diaforcedsourceid'] = list( subf.diaforcedsourceid.values )
+            thisretval.update( {'mjd': list( subf.mjd.values ),
+                                'band': list( subf.band.values ),
+                                'flux': list( subf.flux.values ),
+                                'fluxerr': list( subf.fluxerr.values ),
+                                'isdet': [ int(i) for i in subf.isdet.values ] } )
             if include_source_positions:
-                thisretval.update( { 'ra': list( subdf.ra.values ),
-                                     'dec': list( subdf.dec.values ),
-                                     'raerr': list( subdf.raerr.values ),
-                                     'decerr': list( subdf.decerr.values ),
-                                     'ra_dec_cov': list( subdf.ra_dec_cov.values )
+                thisretval.update( { 'ra': list( subf.ra.values ),
+                                     'dec': list( subf.dec.values ),
+                                     'raerr': list( subf.raerr.values ),
+                                     'decerr': list( subf.decerr.values ),
+                                     'ra_dec_cov': list( subf.ra_dec_cov.values )
                                     } )
             if which == 'patch':
                 thisretval['ispatch'] = [ int(i) for i in subf.ispatch.values ]
             if include_base_procver:
                 thisretval['base_procver'] = list( subf.base_procver )
-            k = str(objid) if string_keys else objid
-            retval[ k ] = thisretval
+            retval.append( thisretval )
         return retval
 
     else:
@@ -639,15 +696,19 @@ def object_ltcv( processing_version='default', diaobjectid=None, bands=None, whi
 
     Returns
     -------
-       Either a pandas dataframe, or a json which is a dict of lists.
+       Either a pandas dataframe, or a json which is a dict
        Fields:
-         mjd : float
-         band : str
-         flux : float
-         fluxerr : float
-         isdet : bool (True if this is detected, false otherwise)
-         ispatch : bool (True if this is detected but had no forced photometry, false otherwise;
-                         this field is only present if which='patch'.)
+         root_diaobjectid: uuid (or str)
+         diaobjectid: list of bigint
+         diasourceid: list of bigint
+         [ diaforcedsourceid: list of bigint ] (only if which is not 'detections')
+         mjd : list of float
+         band : list of str
+         flux : list of float
+         fluxerr : list of float
+         isdet : list of bool (True if this is detected, false otherwise)
+         [ ispatch : list of bool (True if this is detected but had no forced photometry, false otherwise ]
+             (ispatch is only present if which='patch'.)
 
     """
 
@@ -664,8 +725,7 @@ def object_ltcv( processing_version='default', diaobjectid=None, bands=None, whi
         return rval
 
     elif return_format == 'json':
-        rval = rval[ list(rval.keys())[0] ]
-        return rval
+        return rval[0]
 
 
 def debug_count_temp_table( con, table ):
@@ -1686,7 +1746,7 @@ def get_hot_ltcvs( processing_version, position_processing_version=None,
             objdf.pos_base_procver_id = None
             objdf.ra = None
             objdf.dec = None
-        if use_weighted_source_positiosn:
+        if use_weighted_source_positions:
             import pdb; pdb.set_trace()
             pass
 
