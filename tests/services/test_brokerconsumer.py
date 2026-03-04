@@ -288,7 +288,6 @@ def test_ampel_justpull():
     #   password: <password>
     # with Scimma credentials
     scimmacredfilename = None
-    scimmacredfilename = "scimmacreds"
     if scimmacredfilename is None:
         raise RuntimeError( "You need a file with SCiMMA credentials; see test source" )
     creds = yaml.safe_load( open(scimmacredfilename) )
@@ -331,7 +330,6 @@ def test_antares():
     #   password: <password>
     # with antares
     antarescredfilename = None
-    antarescredfilename = 'antarescreds'
     if antarescredfilename is None:
         raise RuntimeError( "You need a file with ANTARES cedentials; see test source" )
     creds = yaml.safe_load( open(antarescredfilename) )
