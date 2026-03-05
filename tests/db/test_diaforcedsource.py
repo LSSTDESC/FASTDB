@@ -78,6 +78,7 @@ class TestDiaForcedSourceExtra( BaseTestDB ):
     def basetest_setup( self, obj1_frced1, obj1_frced2, obj1_frced3 ):
         self.cls = DiaForcedSourceExtra
         self.columns = {
+            'diaforcedsourceid',
             'base_procver_id',
             'detector',
             'scienceflux',
@@ -104,7 +105,8 @@ class TestDiaForcedSourceExtra( BaseTestDB ):
         t2 = util.mjd_from_mjd_or_datetime_or_timestring( t2 )
         t3 = util.mjd_from_mjd_or_datetime_or_timestring( t3 )
         t4 = util.mjd_from_mjd_or_datetime_or_timestring( t4 )
-        self.obj1 = DiaForcedSourceExtra( base_procver_id=obj1_frced1.base_procver_id,
+        self.obj1 = DiaForcedSourceExtra( diaforcedsourceid=obj1_frced1.diaforcedsourceid,
+                                          base_procver_id=obj1_frced1.base_procver_id,
                                           detector=1,
                                           scienceflux=234.5,
                                           sciencefluxerr=7.8,
@@ -112,7 +114,8 @@ class TestDiaForcedSourceExtra( BaseTestDB ):
                                           timewithdrawnmjdtai=None
                                          )
         self.dict1 = { k: getattr( self.obj1, k ) for k in self.columns }
-        self.obj2 = DiaForcedSourceExtra( base_procver_id=obj1_frced2.base_procver_id,
+        self.obj2 = DiaForcedSourceExtra( diaforcedsourceid=obj1_frced2.diaforcedsourceid,
+                                          base_procver_id=obj1_frced2.base_procver_id,
                                           detector=2,
                                           scienceflux=235.5,
                                           sciencefluxerr=7.9,
@@ -120,7 +123,8 @@ class TestDiaForcedSourceExtra( BaseTestDB ):
                                           timewithdrawnmjdtai=t2,
                                          )
         self.dict2 = { k: getattr( self.obj2, k ) for k in self.columns }
-        self.dict3 = { 'base_procver_id': obj1_frced3.base_procver_id,
+        self.dict3 = { 'diaforcedsourceid': obj1_frced3.diaforcedsourceid,
+                       'base_procver_id': obj1_frced3.base_procver_id,
                        'detector': 3,
                        'scienceflux': 233.4,
                        'sciencefluxerr': 5.6,

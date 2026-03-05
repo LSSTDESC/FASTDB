@@ -6,9 +6,9 @@ import util
 
 def test_get_alert_schema():
     schema = util.get_alert_schema()
-    assert set( schema.keys() ) == { 'alert', 'diaobject', 'diasource', 'diaforcedsource', 'MPCORB',
+    assert set( schema.keys() ) == { 'alert', 'diaobject', 'diasource', 'diaforcedsource', 'mpc_orbits',
                                      'sssource', 'brokermessage', 'alert_schema_file', 'brokermessage_schema_file' }
-    for key in [ 'alert', 'diaobject', 'diasource', 'diaforcedsource', 'MPCORB', 'sssource', 'brokermessage' ]:
+    for key in [ 'alert', 'diaobject', 'diasource', 'diaforcedsource', 'mpc_orbits', 'sssource', 'brokermessage' ]:
         assert isinstance( schema[key], dict )
     assert isinstance( schema['alert_schema_file'], pathlib.Path )
     assert isinstance( schema['brokermessage_schema_file'], pathlib.Path )

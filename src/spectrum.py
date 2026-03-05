@@ -97,7 +97,7 @@ def what_spectra_are_wanted( procver='realtime', position_procver=None,
     -------
       pandas.DataFrame with columns:
          root_diaobject_id
-         diabojectid
+         diabojectid [ WARNING -- these aren't unique, so this is just a "random" one ]
          requester
          priority
          ra
@@ -120,6 +120,7 @@ def what_spectra_are_wanted( procver='realtime', position_procver=None,
 
     with db.DBCon() as con:
         procver = util.procver_id( procver, dbcon=con )
+        posprocver = procver if position_procver is None else util.procverid( position_procver, dbcon=con )
 
         # Create a temporary table with things that are wanted but that have not been claimed.
         #
@@ -225,15 +226,15 @@ def what_spectra_are_wanted( procver='realtime', position_procver=None,
                   "  SELECT DISTINCT ON(t.root_diaobject_id,requester,priority)\n"
                   "    t.root_diaobject_id, requester, priority\n"
                   "  FROM tmp_wanted_no_spec t\n"
-                  "  INNER JOIN diaobject o ON t.root_diaobject_id=o.rootid\n"
                   "  INNER JOIN (\n"
-                  "    SELECT DISTINCT ON(src.diaobjectid,src.visit) src.diaobjectid\n"
+                  "    SELECT DISTINCT ON(src.diasourceid) src.diaobjectid, obj.rootid\n"
                   "    FROM diasource src\n"
+                  "    INNER JOIN diaobject obj ON src.diaobjectid=obj.diaobjectid\n"
                   "    INNER JOIN base_procver_of_procver pv ON src.base_procver_id=pv.base_procver_id\n"
                   "      AND pv.procver_id=%(procver)s\n"
                   "    WHERE src.midpointmjdtai>=%(detsince)s AND src.midpointmjdtai<=%(now)s\n"
-                  "    ORDER BY src.diaobjectid,src.visit,pv.priority DESC\n"
-                  "  ) s ON o.diaobjectid=s.diaobjectid\n"
+                  "    ORDER BY src.diasourceid,pv.priority DESC\n"
+                  "  ) s ON t.root_diaobject_id=s.rootid\n"
                   "  ORDER BY root_diaobject_id,requester,priority\n"
                   ")" )
             con.execute_nofetch( q, { 'detsince': detsince, 'procver': procver, 'now': mjdnow } )
@@ -271,18 +272,18 @@ def what_spectra_are_wanted( procver='realtime', position_procver=None,
               "           s.band AS band, s.midpointmjdtai AS mjd,\n"
               "           CASE WHEN s.psfflux>0 THEN -2.5*LOG(s.psfflux)+31.4 ELSE 99 END AS mag\n"
               "    FROM tmp_wanted_detected t\n"
-              "    INNER JOIN diaobject o ON t.root_diaobject_id=o.rootid\n"
               "    INNER JOIN (\n"
-              "      SELECT DISTINCT ON (src.diaobjectid,src.visit) src.diaobjectid,src.midpointmjdtai,\n"
-              "                                                     src.psfflux,src.band\n"
+              "      SELECT DISTINCT ON (src.diasourceid) obj.rootid,src.diaobjectid,src.midpointmjdtai,\n"
+              "                                           src.psfflux,src.band\n"
               "      FROM diasource src\n"
+              "      INNER JOIN diaobject obj ON src.diaobjectid=obj.diaobjectid\n"
               "      INNER JOIN base_procver_of_procver pv ON src.base_procver_id=pv.base_procver_id\n"
               "        AND pv.procver_id=%(procver)s\n"
               "      WHERE src.midpointmjdtai<=%(now)s\n" )
         if lim_mag_band is not None:
             q += "      AND src.band=%(band)s "
-        q += ( "      ORDER BY src.diaobjectid, src.visit, pv.priority DESC\n"
-               "    ) s ON o.diaobjectid=s.diaobjectid\n"
+        q += ( "      ORDER BY src.diasourceid, pv.priority DESC\n"
+               "    ) s ON t.root_diaobject_id=s.rootid\n"
                "    ORDER BY t.root_diaobject_id,mjd DESC\n"
                "  ) subq\n"
                ")" )
@@ -314,18 +315,18 @@ def what_spectra_are_wanted( procver='realtime', position_procver=None,
               "           f.band AS band, f.midpointmjdtai AS mjd,\n"
               "           CASE WHEN f.psfflux>0 THEN -2.5*LOG(f.psfflux)+31.4 ELSE NULL END AS mag\n"
               "    FROM tmp_wanted_detected t\n"
-              "    INNER JOIN diaobject o ON t.root_diaobject_id=o.rootid\n"
               "    INNER JOIN (\n"
-              "      SELECT DISTINCT ON (frc.diaobjectid,frc.visit) frc.diaobjectid,frc.midpointmjdtai,\n"
-              "                                                     frc.band,frc.psfflux\n"
+              "      SELECT DISTINCT ON (frc.diaforcedsourceid) obj.rootid,frc.diaobjectid,frc.midpointmjdtai,\n"
+              "                                                 frc.band,frc.psfflux\n"
               "      FROM diaforcedsource frc\n"
+              "      INNER JOIN diaobject obj ON frc.diaobjectid=obj.diaobjectid\n"
               "      INNER JOIN base_procver_of_procver pv ON frc.base_procver_id=pv.base_procver_id\n"
               "        AND pv.procver_id=%(procver)s\n"
               "      WHERE frc.midpointmjdtai<=%(now)s\n" )
         if lim_mag_band is not None:
             q += "        AND frc.band=%(band)s\n"
-        q += ( "      ORDER BY frc.diaobjectid, frc.visit, pv.priority DESC\n"
-               "    ) f ON o.diaobjectid=f.diaobjectid\n"
+        q += ( "      ORDER BY frc.diaforcedsourceid, pv.priority DESC\n"
+               "    ) f ON t.root_diaobject_id=f.rootid\n"
                "    ORDER BY t.root_diaobject_id,mjd DESC\n"
                "  ) AS subq\n"
                ")" )
@@ -343,18 +344,23 @@ def what_spectra_are_wanted( procver='realtime', position_procver=None,
                 sio.write( f"{str(row[0]):36s} {row[1]:8.2f} {row[2]:6s} {row[3]:6.2f}\n" )
             logger.debug( sio.getvalue() )
 
-        # Get object info; base this off of the latest detection table so we know
-        #   which diaobjectid to use, in case there are multiple diaobjects for
-        #   the root diaobject.
+        # Get object position
         con.execute_nofetch( "CREATE TEMP TABLE tmp_object_info( root_diaobject_id UUID, diaobjectid bigint,\n"
                              "                                   ra double precision, dec double precision )",
                              explain=False, analyze=False )
         q = ( "INSERT INTO tmp_object_info (\n"
-              "  SELECT DISTINCT ON (t.root_diaobject_id) t.root_diaobject_id, t.diaobjectid, o.ra, o.dec\n"
+              "  SELECT DISTINCT ON (t.root_diaobject_id) t.root_diaobject_id, t.diaobjectid, p.ra, p.dec\n"
               "  FROM tmp_latest_detection t\n"
-              "  INNER JOIN diaobject o ON t.diaobjectid=o.diaobjectid\n"
+              "  LEFT JOIN (\n"
+              "    SELECT DISTINCT ON (obj.rootid) obj.rootid, pos.ra, pos.dec\n"
+              "    FROM diaobject_position pos\n"
+              "    INNER JOIN diaobject obj ON pos.diaobjectid=obj.diaobjectid\n"
+              "    INNER JOIN base_procver_of_procver pv ON pos.base_procver_id=pv.base_procver_id\n"
+              "                                         AND pv.procver_id=%(procver)s\n"
+              "  ) p ON t.root_diaobject_id=p.rootid\n"
+              "  ORDER BY t.root_diaobject_id\n"
               ")\n" )
-        con.execute_nofetch( q )
+        con.execute_nofetch( q, { 'procver': posprocver } )
 
         rows, _cols = con.execute( "SELECT COUNT(*) FROM tmp_object_info" )
         logger.debug( f"{rows[0][0]} rows in tmp_object_info" )
@@ -379,7 +385,27 @@ def what_spectra_are_wanted( procver='realtime', position_procver=None,
               "LEFT JOIN tmp_latest_detection s ON t.root_diaobject_id=s.root_diaobject_id "
               "LEFT JOIN tmp_latest_forced f ON t.root_diaobject_id=f.root_diaobject_id" )
         rows, cols = con.execute( q )
-        df = pandas.DataFrame( rows, columns=cols )
+        # Have to be anal because pandas has this very disturbing tendency to convert
+        #   bigints to doubles, and by default doesn't handle NULL columns.  (It will
+        #   make NULLS into NA, which triggers a conversion from bigint to double.)
+        bigint_cols = [ 'diaobjectid' ]
+        int_cols = [ 'priority' ]
+        double_cols = [ 'ra', 'dec', 'src_mjd', 'frced_mjd' ]
+        float_cols = [ 'src_mag' ]
+        serieses = {}
+        for i, col in enumerate(cols):
+            if col in bigint_cols:
+                series = pandas.Series( [ r[i] for r in rows ], dtype="int64[pyarrow]" )
+            elif col in int_cols:
+                series = pandas.Series( [ r[i] for r in rows ], dtype="int32[pyarrow]" )
+            elif col in double_cols:
+                series = pandas.Series( [ r[i] for r in rows ], dtype="float64[pyarrow]" )
+            elif col in float_cols:
+                series = pandas.Series( [ r[i] for r in rows ], dtype="float32[pyarrow]" )
+            else:
+                series = pandas.Series( [ r[i] for r in rows ] )
+            serieses[ col ] = series
+        df = pandas.DataFrame( serieses )
 
     # Filter by limiting magnitude if necessary
     if lim_mag is not None:
