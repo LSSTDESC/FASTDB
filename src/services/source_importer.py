@@ -421,7 +421,7 @@ class SourceImporter:
             # TODO : test this with multiple processing versions and multiple
             #   objects that match!!!
             FDBLogger.debug( "   ...linking to existing root diaobjects..." )
-            dbcon.execute( "UPDATE temp_new_diaobject tno SET rootid=r.rootid\n"
+            dbcon.execute( "UPDATE temp_new_diaobject tno SET rootid=r.id\n"
                            "FROM root_diaobject r\n"
                            "WHERE q3c_radial_query( r.ra, r.dec, tno.ra, tno.dec, %(rad)s)",
                            { 'rad': self.object_match_radius/3600. } )
