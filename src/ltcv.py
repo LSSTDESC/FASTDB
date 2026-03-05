@@ -232,7 +232,7 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None,
         # Next line deals with what I think is a dysfunctional psycopg return
         cols = columns if len(rows) == 0 else cols
         if return_format == 'pandas':
-            return pandas.DataFrame( rows, columns=cols ).set_index( 'diaobjectid' )
+            return pandas.DataFrame( rows, columns=cols ).set_index( 'rootid' )
         elif return_format == 'json':
             return { c: [ r[i] for r in rows ] for i, c in enumerate( cols ) }
         else:
@@ -1727,9 +1727,10 @@ def get_hot_ltcvs( processing_version, position_processing_version=None,
         #   we're distincting on objectid anyway.
 
         q = ( "/*+ IndexScan(s idx_diasource_mjd) */\n"
-              "SELECT DISTINCT ON(s.diaobjectid) s.diaobjectid\n"
+              "SELECT DISTINCT ON(s.diaobjectid) s.diaobjectid, o.rootid\n"
               "INTO TEMP TABLE tmp_objids\n"
               "FROM diasource s\n"
+              "INNER JOIN diaobject o ON s.diaobjectid=o.diaobjectid\n"
               "INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id\n"
               "                                     AND pv.procver_id=%(procver)s\n"
               "WHERE s.midpointmjdtai>=%(t0)s\n" )

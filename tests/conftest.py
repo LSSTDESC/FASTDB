@@ -837,19 +837,32 @@ def snana_fits_maintables_loaded_module( procver_collection ):
             cursor.execute( "SELECT COUNT(*) FROM diaforcedsource" )
             nfrc = cursor.fetchone()[0]
             assert nfrc == 52172
-            cursor.execute( "SELECT COUNT(*) FROM host_galaxy" )
-            nhost = cursor.fetchone()[0]
-            assert nhost == 356
+            nhost = 0
+            # cursor.execute( "SELECT COUNT(*) FROM host_galaxy" )
+            # nhost = cursor.fetchone()[0]
+            # assert nhost == 356
             cursor.execute( "SELECT COUNT(*) FROM root_diaobject" )
             assert cursor.fetchone()[0] == 346
 
         yield nobj, nsrc, nfrc, nhost
 
     finally:
-        with DB() as conn:
-            cursor = conn.cursor()
+        with DBCon() as conn:
             for tab in [ 'root_diaobject', 'host_galaxy', 'diaobject', 'diasource', 'diaforcedsource' ]:
-                cursor.execute( f"TRUNCATE TABLE {tab} CASCADE" )
+                conn.execute( f"TRUNCATE TABLE {tab} CASCADE" )
+
+            # The loader will also have created a host_galaxy processing version, which as of
+            #   this writing is not in the procver_collection fixture so won't cleaned up.
+            # WARNING -- if we have host galaxies again, then these deletions here may cause trouble!
+            # (Maybe not, since both this and procver_collection are module scope fixtures.)
+
+            conn.execute( "DELETE FROM base_procver_of_procver WHERE procver_id=%(pv)s "
+                          "  AND _table IN ('host_galaxy', 'diaobject_host_match')",
+                          { 'pv': procver_collection[1]['pv1'].id } )
+            conn.execute( "DELETE FROM base_processing_version WHERE description=%(d)s "
+                          "  AND _table in ('host_galaxy', 'diaobject_host_match')",
+                          { "d": procver_collection[1]['pv1'].description } )
+
             conn.commit()
 
 

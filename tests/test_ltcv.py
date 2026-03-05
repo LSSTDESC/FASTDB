@@ -10,12 +10,12 @@ def test_get_object_infos( set_of_lightcurves, procver_collection ):
     roots = set_of_lightcurves
 
     info = ltcv.get_object_infos( [ 200, 201, 202 ], return_format='pandas' )
-    assert info.index.name == 'diaobjectid'
-    assert set(info.columns.values) == { 'rootid', 'obj_base_procver_id', 'pos_base_procver_id',
+    assert info.index.name == 'rootid'
+    assert set(info.columns.values) == { 'diaobjectid', 'obj_base_procver_id', 'pos_base_procver_id',
                                          'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' }
     assert len(info) == 3
-    assert list( info.index.values ) == [ 200, 201, 202 ]
-    assert info.rootid.values.tolist() == [ roots[i]['root'].id for i in [0, 1, 2] ]
+    assert list( info.index.values ) == [ roots[i]['root'].id for i in [ 0, 1, 2 ] ]
+    assert info.diaobjectid.values.tolist() == [ 200, 201, 202 ]
     # Since we didn't get a position processing version, none of the position fields should be filled
     assert all( all( i is None for i in info[col] ) for col in ['pos_base_procver_id', 'ra', 'dec',
                                                                 'raerr', 'decerr', 'ra_dec_cov'] )
@@ -29,12 +29,12 @@ def test_get_object_infos( set_of_lightcurves, procver_collection ):
 
     # Make sure we get position information if we give a position processing version
     info = ltcv.get_object_infos( [ 200, 201, 202 ], return_format='pandas', processing_version='pvc_pv2' )
-    assert list( info.index.values ) == [ 200, 201, 202 ]
+    assert list( info.index.values ) == [ roots[i]['root'].id for i in [ 0, 1, 2 ] ]
     assert all( all( i is not None for i in info[col] )for col in ['pos_base_procver_id', 'ra', 'dec',
                                                                    'raerr', 'decerr', 'ra_dec_cov'] )
-    assert info.loc[ 200, 'pos_base_procver_id'] == bpvs['bpv2a_diaobject_position_60030'].id
-    assert info.loc[ 201, 'pos_base_procver_id'] == bpvs['bpv2a_diaobject_position_60060'].id
-    assert info.loc[ 202, 'pos_base_procver_id'] == bpvs['bpv2a_diaobject_position_60080'].id
+    assert info.loc[ roots[0]['root'].id, 'pos_base_procver_id'] == bpvs['bpv2a_diaobject_position_60030'].id
+    assert info.loc[ roots[1]['root'].id, 'pos_base_procver_id'] == bpvs['bpv2a_diaobject_position_60060'].id
+    assert info.loc[ roots[2]['root'].id, 'pos_base_procver_id'] == bpvs['bpv2a_diaobject_position_60080'].id
 
     info2 = ltcv.get_object_infos( [ 200, 201, 202 ], return_format='pandas',
                                    position_processing_version='pvc_pv2' )
@@ -697,51 +697,55 @@ def test_get_hot_ltcvs( set_of_lightcurves ):
     # ...not sure how to test this without mjd_now since it uses the current time,
     #    and that will be different based on when this is run
 
+    roots = set_of_lightcurves
+
     df, objdf, _ = ltcv.get_hot_ltcvs( 'pvc_pv3', detected_since_mjd=60035, mjd_now=60056 )
-    assert set( df.index.names ) == { 'diaobjectid', 'mjd' }
-    assert set( df.columns ) == { 'visit', 'band', 'flux', 'fluxerr', 'isdet' }
-    assert set( df.index.get_level_values('diaobjectid') ) == { 201, 202, 203 }
-    assert set( objdf.index.get_level_values('diaobjectid') ) == set( df.index.get_level_values('diaobjectid') )
+    assert set( df.index.names ) == { 'rootid', 'mjd' }
+    assert set( df.columns ) == { 'diaobjectid', 'diasourceid', 'diaforcedsourceid',
+                                  'visit', 'band', 'flux', 'fluxerr', 'isdet' }
+    assert set( df.index.get_level_values('rootid') ) == { roots[i]['root'].id for i in [ 1, 2, 3 ] }
+    assert set( objdf.index.get_level_values('rootid') ) == set( df.index.get_level_values('rootid') )
 
     df, objdf, _ = ltcv.get_hot_ltcvs( 'pvc_pv3', detected_since_mjd=60035, mjd_now=60046 )
-    assert set( df.index.get_level_values('diaobjectid') ) == { 201, 202 }
-    assert set( objdf.index.get_level_values('diaobjectid') ) == set( df.index.get_level_values('diaobjectid') )
+    assert set( df.index.get_level_values('rootid') ) == { roots[i]['root'].id for i in [ 1, 2 ] }
+    assert set( objdf.index.get_level_values('rootid') ) == set( df.index.get_level_values('rootid') )
 
     df, objdf, _ = ltcv.get_hot_ltcvs( 'pvc_pv3', detected_in_last_days=2, mjd_now=60021 )
-    assert set( df.index.get_level_values('diaobjectid') ) == { 200, 201 }
-    assert set( objdf.index.get_level_values('diaobjectid') ) == set( df.index.get_level_values('diaobjectid') )
+    assert set( df.index.get_level_values('rootid') ) == { roots[i]['root'].id for i in [ 0, 1 ] }
+    assert set( objdf.index.get_level_values('rootid') ) == set( df.index.get_level_values('rootid') )
 
     df, objdf, _ = ltcv.get_hot_ltcvs( 'pvc_pv3', detected_in_last_days=2, mjd_now=60041 )
-    assert set( df.index.get_level_values('diaobjectid') ) == { 201, 202 }
-    assert set( objdf.index.get_level_values('diaobjectid') ) == set( df.index.get_level_values('diaobjectid') )
+    assert set( df.index.get_level_values('rootid') ) == { roots[i]['root'].id for i in [ 1, 2 ] }
+    assert set( objdf.index.get_level_values('rootid') ) == set( df.index.get_level_values('rootid') )
 
     # detected_in_last_days defaults to 30
     df, objdf, _ = ltcv.get_hot_ltcvs( 'pvc_pv3', mjd_now=60085 )
-    assert set( df.index.get_level_values('diaobjectid') ) == { 201, 202, 203 }
-    assert set( objdf.index.get_level_values('diaobjectid') ) == set( df.index.get_level_values('diaobjectid') )
+    assert set( df.index.get_level_values('rootid') ) == { roots[i]['root'].id for i in [ 1, 2, 3 ] }
+    assert set( objdf.index.get_level_values('rootid') ) == set( df.index.get_level_values('rootid') )
     df, objdf, _ = ltcv.get_hot_ltcvs( 'pvc_pv3', mjd_now=60095 )
-    assert set( df.index.get_level_values('diaobjectid') ) == { 202 }
-    assert set( objdf.index.get_level_values('diaobjectid') ) == set( df.index.get_level_values('diaobjectid') )
+    assert set( df.index.get_level_values('rootid') ) == { roots[2]['root'].id }
+    assert set( objdf.index.get_level_values('rootid') ) == set( df.index.get_level_values('rootid') )
 
     # Now let's look a the pulled forced photometry
     df, _, _ = ltcv.get_hot_ltcvs( 'pvc_pv3', detected_in_last_days=2, mjd_now=60041 )
     assert ( df.index.get_level_values('mjd') <= 60041. ).all()
-    assert ( df.reset_index().groupby( 'diaobjectid' ).max().mjd == 60040. ).all()
-    assert len( df.xs( 201, level='diaobjectid' ) ) == 13
-    assert len( df.xs( 202, level='diaobjectid' ) ) == 5
+    assert ( df.reset_index().groupby( 'rootid' ).max().mjd == 60040. ).all()
+    assert len( df.xs( roots[1]['root'].id, level='rootid' ) ) == 13
+    assert len( df.xs( roots[2]['root'].id, level='rootid' ) ) == 5
     # ...should I look at the actual values?  I should.
 
     # Test source patch.  Gotta use pvc_pv1 for this.  (I guess we coulda also used realtime.)
 
     df, objdf, _ = ltcv.get_hot_ltcvs( 'pvc_pv1', mjd_now=60031 )
-    assert set( df.index.get_level_values('diaobjectid') ) == { 100 }
-    assert set( objdf.index.get_level_values('diaobjectid') ) == set( df.index.get_level_values('diaobjectid') )
+    assert set( df.index.get_level_values('rootid') ) == { roots[0]['root'].id }
+    assert set( objdf.index.get_level_values('rootid') ) == set( df.index.get_level_values('rootid') )
     assert df.index.get_level_values('mjd').max() == 60025.
 
     df2, objdf2, _ = ltcv.get_hot_ltcvs( 'pvc_pv1', mjd_now=60031, source_patch=True )
-    assert set( df2.columns ) == { 'visit', 'band', 'flux', 'fluxerr', 'isdet', 'ispatch' }
-    assert set( df2.index.get_level_values('diaobjectid') ) == { 100 }
-    assert set( objdf2.index.get_level_values('diaobjectid') ) == set( df2.index.get_level_values('diaobjectid') )
+    assert set( df2.columns ) == { 'diaobjectid', 'diasourceid', 'diaforcedsourceid',
+                                   'visit', 'band', 'flux', 'fluxerr', 'isdet', 'ispatch' }
+    assert set( df2.index.get_level_values('rootid') ) == { roots[0]['root'].id }
+    assert set( objdf2.index.get_level_values('rootid') ) == set( df2.index.get_level_values('rootid') )
     assert df2.index.get_level_values('mjd').max() == 60030.
     assert len(df2) == len(df) + 2
     assert ( df == df2.loc[ df2.index.get_level_values('mjd') <= 60025., df2.columns != 'ispatch' ] ).all().all()
@@ -760,17 +764,18 @@ def test_get_hot_ltcvs( set_of_lightcurves ):
     # 201 is detected trhough 60060, so will have 60060 as its position time
     # 202 is detected through 60080, so will have 60080 as its position time
     # 203 is detected through 60060, so will have 60006 as its position time
-    postime_procver_60060 = db.BaseProcessingVersion.base_procver_id( 'pvc_bpv3_60060' )
-    postime_procver_60080 = db.BaseProcessingVersion.base_procver_id( 'pvc_bpv3_60080' )
+    postime_procver_60060 = db.BaseProcessingVersion.base_procver_id( 'pvc_bpv3_60060', 'diaobject_position' )
+    postime_procver_60080 = db.BaseProcessingVersion.base_procver_id( 'pvc_bpv3_60080', 'diaobject_position' )
 
     df, objdf, _ = ltcv.get_hot_ltcvs( 'pvc_pv3', detected_since_mjd=60035, mjd_now=60056 )
-    assert set( df.index.names ) == { 'diaobjectid', 'mjd' }
-    assert set( df.columns ) == { 'visit', 'band', 'flux', 'fluxerr', 'isdet' }
-    assert set( df.index.get_level_values('diaobjectid') ) == { 201, 202, 203 }
-    assert set( objdf.index.get_level_values('diaobjectid') ) == set( df.index.get_level_values('diaobjectid') )
-    assert objdf.loc[201, 'pos_base_procver_id'] == postime_procver_60060
-    assert objdf.loc[202, 'pos_base_procver_id'] == postime_procver_60080
-    assert objdf.loc[203, 'pos_base_procver_id'] == postime_procver_60060
+    assert set( df.index.names ) == { 'rootid', 'mjd' }
+    assert set( df.columns ) == { 'diaobjectid', 'diasourceid', 'diaforcedsourceid',
+                                  'visit', 'band', 'flux', 'fluxerr', 'isdet' }
+    assert set( df.index.get_level_values('rootid') ) == { roots[i]['root'].id for i in [ 1, 2, 3 ] }
+    assert set( objdf.index.get_level_values('rootid') ) == set( df.index.get_level_values('rootid') )
+    assert objdf.loc[roots[1]['root'].id, 'pos_base_procver_id'] == postime_procver_60060
+    assert objdf.loc[roots[2]['root'].id, 'pos_base_procver_id'] == postime_procver_60080
+    assert objdf.loc[roots[3]['root'].id, 'pos_base_procver_id'] == postime_procver_60060
 
     # TODO : test the case where some objects have no positions, and make sure the patch position goes in there.
     #  (This will require changing the set of lightcurves fixtures....)
