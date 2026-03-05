@@ -2,30 +2,34 @@
 # environment.
 
 services:
-  kafka-zookeeper:
-    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-kafka-test:${DOCKER_VERSION:-test20260225}
-    build:
-      context: ./docker/kafka
-    healthcheck:
-      test: netcat -w 1 localhost 2181 || exit 1
-      interval: 5s
-      timeout: 10s
-      retries: 10
-    entrypoint: [ "bin/zookeeper-server-start.sh", "config/zookeeper.properties" ]
-
   kafka-server:
-    depends_on:
-       kafka-zookeeper:
-         condition: service_healthy
-    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-kafka-test:${DOCKER_VERSION:-test20260225}
+    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-kafka-test:${DOCKER_VERSION-test20260225}
     build:
       context: ./docker/kafka
+    environment:
+      # cf: https://github.com/apache/kafka/blob/trunk/docker/examples/docker-compose-files/single-node/plaintext/docker-compose.yml
+      # Generate a new CLUSTER_ID with: uuid -v4 | tr -d '-' | base64 | cut -b 1-22
+      CLUSTER_ID: MjAyZjRjNzk5OGI3NGMxNm
+      KAFKA_NODE_ID: 1
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-server:9092
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka-server:9093
+      KAFKA_LISTENERS: CONTROLLER://:9093,PLAINTEXT://:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_MIN_ISR: 1
+      KAFKA_LOG_DIRS: /tmp/kraft-combined-logs
     healthcheck:
-      test: netcat -w 1 localhost 9092 || exit 1
+      test: nc -w 1 localhost 9092 || exit 1
       interval: 5s
       timeout: 10s
       retries: 10
-    entrypoint: [ "bin/kafka-server-start.sh", "config/server.properties" ]
 
   postgres:
     image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-postgres:${DOCKER_VERSION:-test20260225}
@@ -185,9 +189,6 @@ services:
       createdb:
         condition: service_completed_successfully
     image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-shell:${DOCKER_VERSION:-test20260225}
-    build:
-      context: ./docker/webserver
-      target: shell
     environment:
       - MONGODB_HOST=mongodb
       - MONGODB_DBNAME=brokeralert
@@ -236,9 +237,6 @@ services:
       mongodb:
         condition: service_healthy
     image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-shell:${DOCKER_VERSION:-test20260225}
-    build:
-      context: ./docker/webserver
-      target: shell
     environment:
       - MONGODB_HOST=mongodb
       - MONGODB_DBNAME=brokeralert
@@ -282,9 +280,6 @@ services:
 
   makeinstall:
     image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-shell:${DOCKER_VERSION:-test20260225}
-    build:
-      context: ./docker/webserver
-      target: shell
     user: ${USERID:-0}:${GROUPID:-0}
     volumes:
       - type: bind
@@ -320,9 +315,6 @@ services:
       makeinstall:
         condition: service_completed_successfully
     image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-shell:${DOCKER_VERSION:-test20260225}
-    build:
-      context: ./docker/webserver
-      target: shell
     environment:
       - MONGODB_HOST=mongodb
       - MONGODB_DBNAME=brokeralert
