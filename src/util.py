@@ -3,10 +3,12 @@ __all__ = [ "FDBLogger", "parse_bool", "env_as_bool", "asUUID", "isSequence",
             "datetime_or_none_from_dict_mjd_or_timestring", "mjd_or_none_from_dict_mjd_or_timestring",
             "datetime_to_utc",
             "parse_sexigesimal", "float_or_none_from_dict_float_or_dms", "float_or_none_from_dict_float_or_hms",
-             "mjd_from_mjd_or_datetime_or_timestring", "get_alert_schema", "procver_id" ]
+             "mjd_from_mjd_or_datetime_or_timestring", "laboriously_construct_pandas",
+             "get_alert_schema", "procver_id" ]
 
 import sys
 import os
+import io
 import re
 import datetime
 import pytz
@@ -17,6 +19,7 @@ import uuid
 import collections.abc
 import multiprocessing
 
+import pandas
 import fastavro
 import astropy.time
 import rkwebutil
@@ -375,6 +378,78 @@ def datetime_to_utc( t, with_tz=False, now_on_none=False ):
         t.replace( tzinfo=None )
 
     return t
+
+
+def laboriously_construct_pandas( data, columns=None, int16cols=[], int32cols=[], int64cols=[],
+                                  floatcols=[], doublecols=[], boolcols=[], ignore_missing_cols=False ):
+    if len(data) == 0:
+        if columns is None:
+            return pandas.DataFrame( {} )
+        else:
+            wrangleddata = { c: [] for c in columns }
+    elif isSequence( data ):
+        if all( isinstance( row, dict ) for row in data ):
+            if columns is not None:
+                raise ValueError( "Cannot pass columns with a list of dictionaries" )
+            keys = set( data[0].keys() )
+            if any( set( r.keys() != keys for r in data ) ):
+                raise ValueError( "List of dicts must all have the same keys" )
+            columns = list( data[0].keys() )
+            wrangleddata = { k: [ r['k'] for r in data ] for k in columns }
+        elif all( isSequence( row ) for row in data ):
+            numcols = len( data[0] )
+            if any( len(row) != numcols for row in data ):
+                raise ValueError( "List of lists, all rows must have the same length" )
+            if columns is not None:
+                if not isSequence( columns ):
+                    raise TypeError( "columns must be a list" )
+                if len(columns) != numcols:
+                    raise ValueError( "columns must have the same length as each row" )
+            else:
+                columns = [ f"column_{i}" for i in range(numcols) ]
+            wrangleddata = { k: [ r[i] for r in data ] for i, k in enumerate(columns) }
+    elif isinstance( data, dict ):
+        if columns is not None:
+            raise ValueError( "columns inconsistent with passing a dictionary" )
+        if not all( isSequence( row ) for row in data.values() ):
+            raise TypeError( "All dictionary values must be lists" )
+        columns = list( data.keys() )
+        wrangleddata = data
+
+    if not ignore_missing_cols:
+        bad = {}
+        for name, arr in zip( [ "int16cols", "int32cols", "int64cols", "floatcols", "doublecols", "boolcols"],
+                              [ int16cols, int32cols, int64cols, floatcols, doublecols, boolcols ] ):
+            if any( i not in columns for i in arr ):
+                bad[name] = { i for i in arr if i not in columns }
+        if len(bad) > 0:
+            strio = io.StringIO()
+            strio.write( "Some type columns weren't in the data:\n" )
+            for k, v in bad.items():
+                strio.write( f"   {k} had unknown columns {v}\n" )
+            raise ValueError( strio.getvalue() )
+
+    serieses = {}
+    for col in columns:
+        if col in int16cols:
+            serieses[col] = pandas.Series( wrangleddata[col], dtype="int16[pyarrow]" )
+        elif col in int32cols:
+            serieses[col] = pandas.Series( wrangleddata[col], dtype="int32[pyarrow]" )
+        elif col in int64cols:
+            serieses[col] = pandas.Series( wrangleddata[col], dtype="int64[pyarrow]" )
+        elif col in floatcols:
+            serieses[col] = pandas.Series( wrangleddata[col], dtype="float32[pyarrow]" )
+        elif col in doublecols:
+            serieses[col] = pandas.Series( wrangleddata[col], dtype="float64[pyarrow]" )
+        elif col in boolcols:
+            # Pandas doesn't seem to have a bool type that one can nullify,
+            #   so turn it into an int
+            serieses[col] = pandas.Series( [ None if i is None else int(i) for i in wrangleddata[col] ],
+                                           dtype="int16[pyarrow]" )
+        else:
+            serieses[col] = pandas.Series( wrangleddata[col] )
+
+    return pandas.DataFrame( serieses )
 
 
 def get_alert_schema( schemadir=None ):

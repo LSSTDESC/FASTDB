@@ -7,13 +7,12 @@ import textwrap
 import json   # noqa: F401
 
 from psycopg import sql
-import numpy
 import pandas
 import astropy.time
 
 import db
 import util
-from util import FDBLogger
+from util import FDBLogger, laboriously_construct_pandas
 
 
 def get_object_infos( objids=None, objids_table=None, processing_version=None,
@@ -27,16 +26,20 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None,
         Either this or objids_table is required.
 
       objids_table : str, default None
-        The name of a table (probably a temporary table) with the
-        objects whose info to get in its diaobjectid column.  Cannot
-        pass objids if you pass this.  Requires dbcon to be passed (so
-        that temporary tables are meaningful).
+        The name of a table (probably a temporary table) with either a
+        diaobjectid or a rootid column that has the ids of the objects
+        you want information for.  (If both columns are present, the
+        rootid column will be used.)  Cannot pass objids if you
+        pass this.
 
       processing_version : str, uuid, or None
         The processing version (*not* base processing version) for the
-        objects.  Ignored objis is a list of int, not a list of uuid.
-        If not given and a list of uuids is given, will default to
-        'default'.
+        objects.  If not given, will default to 'default'.  Note that if
+        you pass a list of integer diaobjectid values in objids, or a
+        table with diaobjectids in objids_table, and the
+        processing_verson you ask for is not consistent with those ids,
+        then you will not get back information on all the objects you
+        asked for.
 
       position_processing_version : str, uuid, or None
         The processing version (*not* base processing version) for the
@@ -63,10 +66,14 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None,
     Returns
     -------
       rval: pandas.DataFrame or dict
-        If return_format is 'pandas', the dataframe is indexed by
-        diaobjectid.  If return_format is 'json', then the return is a
-        dictionary whose keys are the columns of diaobject, and whose
-        values are lists all of the same length.
+        If return_format is 'pandas', get back a dataframe indexed by
+        'diaobject'.  (Not 'rootid', because there may be multiple
+        diaobjects for one root, but there will never be multiple roots
+        for one diaobject.  Base on how you pass it, you might get back
+        more than one row with the same diaobjectid.)  If return_format
+        is 'json', then the return is a dictionary whose keys are the
+        columns names, and whose values are lists all of the same
+        length.
 
         Columns included come from the diaobject and diaboject_position tables:
 
@@ -82,20 +89,33 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None,
 
     """
 
-    obj_is_root = False
     if objids_table is not None:
         if dbcon is None:
             raise ValueError( "objids_table requires dbcon" )
         if objids is not None:
             raise ValueError( "objids_table and objids cannot be used together" )
-        if processing_version is not None:
-            raise ValueError( "Cannot pass processing_version when passing objids_table" )
+        with db.DBCon( dbcon ) as con:
+            q = sql.SQL( "SELECT column_name FROM information_schema.columns "
+                         "WHERE table_name={table_name}" ).format( table_name=objids_table )
+            rows, _cols = con.execute( q )
+            if len(rows) == 0:
+                raise RuntimeError( f"Could not find objids table {objids_table}" )
+            cols = { r[0] for r in rows }
+            if 'rootid' in cols:
+                if 'diaobjectid' in cols:
+                    FDBLogger.warning( f"Both rootid and diaobjectid are in {objids_table}, using rootid" )
+                obj_is_root = True
+            elif 'diaobjectid' in cols:
+                obj_is_root = False
+            else:
+                raise RuntimeError( f"Could not find column diaobjectid nor rootid in table {objids_table}" )
     else:
         if ( objids is not None ) and ( not util.isSequence( objids ) ):
             objids = [ objids ]
         if all( isinstance( o, numbers.Integral ) for o in objids ):
             # Make sure they're int, because if it's something like np.int64, postgres may choke
             objids = [ int(o) for o in objids ]
+            obj_is_root = False
         else:
             try:
                 # See if we they're all uuids
@@ -111,10 +131,7 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None,
         if len(objids) == 0:
             raise ValueError( "no objids requested" )
 
-    pv = None
-    if obj_is_root:
-        pv = db.ProcessingVersion.procver_id( processing_version if processing_version is not None else 'default' )
-
+    pv = db.ProcessingVersion.procver_id( processing_version if processing_version is not None else 'default' )
     if position_processing_version is None:
         if pv is not None:
             pospv = pv
@@ -131,6 +148,7 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None,
 
     objcols = [ 'diaobjectid', 'rootid', 'obj_base_procver_id' ]
     poscols = [ 'pos_base_procver_id', 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ]
+    joincolumn = "rootid" if obj_is_root else "diaobjectid"
     sqlcolumns = []
     gotsomepos = False
     if columns is None:
@@ -175,64 +193,57 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None,
                 /*+ IndexScan(o idx_diaobject_diaobjectid)
                     IndexScan(p1 idx_diaobject_position_diaobjectid)
                 */
-                SELECT {sqlcolumns}
+                SELECT DISTINCT ON(o.diaobjectid) {sqlcolumns}
                 FROM {objids_table} t
-                INNER JOIN diaobject o ON o.diaobjectid=t.diaobjectid
-                """ ) ).format( sqlcolumns=sqlcolumns, objids_table=sql.Identifier(objids_table) )
+                INNER JOIN diaobject o ON o.{joincolumn}=t.{joincolumn}
+                INNER JOIN base_procver_of_procver pv ON o.base_procver_id=pv.base_procver_id
+                                                     AND pv._table='diaobject'
+                                                     AND pv.procver_id={pv}
+                """ ) ).format( sqlcolumns=sqlcolumns,
+                                objids_table=sql.Identifier(objids_table),
+                                joincolumn=sql.Identifier(joincolumn),
+                                pv=pv )
             if gotsomepos:
                 q += sql.SQL( "LEFT JOIN (\n" )
                 q += positionclause
                 q += sql.SQL( ") p ON p.diaobjectid=o.diaobjectid\n" )
+            q += sql.SQL( "ORDER BY o.diaobjectid" )
         else:
-            if obj_is_root:
-                q = sql.SQL( textwrap.dedent(
-                    """
-                    /*+ IndexScan(o idx_diaobject_diaobjectid)
-                        IndexScan(p1 idx_diaobject_position_diaobjectid)
-                    */
-                    SELECT DISTINCT ON(o.diaobjectid) {sqlcolumns}
-                    FROM diaobject o
-                    INNER JOIN base_procver_of_procver pv ON o.base_procver_id=pv.base_procver_id
-                                                         AND pv._table='diaobject'
-                                                         AND pv.procver_id={pv}
-                    """ ) ).format( sqlcolumns=sqlcolumns, pv=pv )
-                if gotsomepos:
-                    q += sql.SQL( "LEFT JOIN (\n" )
-                    q += positionclause
-                    q += sql.SQL( textwrap.dedent(
-                        """
-                        ) p
-                        ON p.diaobjectid=o.diaobjectid
-                        """ ) )
-                q += sql.SQL( textwrap.dedent(
-                    """
-                    WHERE o.rootid=ANY(%(objids)s)
-                    ORDER BY o.diaobjectid, pv.priority DESC
-                    """ ) )
-            else:
-                q = sql.SQL( textwrap.dedent(
-                    """
-                    /*+ IndexScan(o idx_diaobject_diaobjectid)
-                        IndexScan(p1 idx_diaobject_position_diaobjectid)
-                    */
-                    SELECT {sqlcolumns}
-                    FROM diaobject o
-                    """ ) ).format( sqlcolumns=sqlcolumns )
-                if gotsomepos:
-                    q += sql.SQL( "LEFT JOIN (\n" )
-                    q += positionclause
-                    q += sql.SQL( textwrap.dedent(
-                        """
-                        ) p
-                        ON p.diaobjectid=o.diaobjectid
-                        """ ) )
-                q += sql.SQL( "WHERE o.diaobjectid=ANY(%(objids)s)" )
+            q = sql.SQL( textwrap.dedent(
+                """
+                /*+ IndexScan(o idx_diaobject_diaobjectid)
+                    IndexScan(p1 idx_diaobject_position_diaobjectid)
+                */
+                SELECT DISTINCT ON(o.diaobjectid) {sqlcolumns}
+                FROM diaobject o
+                INNER JOIN base_procver_of_procver pv ON o.base_procver_id=pv.base_procver_id
+                                                     AND pv._table='diaobject'
+                                                     AND pv.procver_id={pv}
+                """ ) ).format( sqlcolumns=sqlcolumns, pv=pv )
+            if gotsomepos:
+                q += sql.SQL( "LEFT JOIN (\n" )
+                q += positionclause
+                q += sql.SQL( ") p ON p.diaobjectid=o.diaobjectid\n" )
+            q += sql.SQL( "WHERE o.{joincolumn}=ANY(%(objids)s)\n"
+                          "ORDER BY o.diaobjectid" ).format( joincolumn=sql.Identifier(joincolumn) )
 
+        # ****
+        # TEMP DEBUGGING, TAKE THIS OUT
+        dbcon.echoqueries = True
+        # ****
         rows, cols = dbcon.execute( q, { 'objids': objids } )
         # Next line deals with what I think is a dysfunctional psycopg return
         cols = columns if len(rows) == 0 else cols
         if return_format == 'pandas':
-            return pandas.DataFrame( rows, columns=cols ).set_index( 'rootid' )
+            df = laboriously_construct_pandas( rows, columns=cols,
+                                               int64cols=[ 'diaobjectid' ],
+                                               doublecols=[ 'ra', 'dec' ],
+                                               floatcols=[ 'raerr', 'decerr', 'ra_dec_cov' ],
+                                               ignore_missing_cols=True
+                                              )
+            if len(df) > 0:
+                df.set_index( 'diaobjectid', inplace=True )
+            return df
         elif return_format == 'json':
             return { c: [ r[i] for r in rows ] for i, c in enumerate( cols ) }
         else:
@@ -564,30 +575,12 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
     #   Because pandas.DataFrame only allows a single dtype in the constructor,
     #   we have to do it the long way.
 
-    # obj_cols = [ 'rootid', 'band', 'base_procver' ]
-    bool_cols = [ 'isdet', 'ispatch' ]
-    double_cols = [ 'mjd' ]
-    float_cols = [ 'flux', 'fluxerr' ]
-    int_cols = [ 'diaforcedsourceid', 'diasourceid', 'diaobjectid', 'visit' ]
-    serieses = {}
-    for i, col in enumerate( cols ):
-        if col in int_cols:
-            series = pandas.Series( [ r[i] for r in rows ], dtype="int64[pyarrow]" )
-        elif col in bool_cols:
-            # Pandas doesn't handle "bool[pyarrow]"
-            # In fact, trying numpy.bool made pandas convert
-            #   the column to float64 and all NA.
-            # Pandas is dysfunctional
-            series = pandas.Series( [ r[i] for r in rows ], dtype=numpy.int16 )
-        elif col in double_cols:
-            series = pandas.Series( [ r[i] for r in rows ], dtype="float64[pyarrow]" )
-        elif col in float_cols:
-            series = pandas.Series( [ r[i] for r in rows ], dtype="float32[pyarrow]" )
-        else:
-            series = pandas.Series( [ r[i] for r in rows ] )
-        serieses[ col ] = series
-    retframe = pandas.DataFrame( serieses )
-
+    retframe = laboriously_construct_pandas( rows, cols,
+                                             int64cols=['diaforcedsourceid', 'diasourceid', 'diaobjectid', 'visit'],
+                                             floatcols=['flux', 'fluxerr'],
+                                             doublecols=['mjd'],
+                                             boolcols=['isdet', 'ispatch'],
+                                             ignore_missing_cols=True )
     if not include_base_procver:
         retframe.drop( 'base_procver', axis='columns', inplace=True )
 

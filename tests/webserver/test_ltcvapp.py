@@ -15,7 +15,7 @@ def test_getmanyltcvs( test_user, fastdb_client, set_of_lightcurves ):
         assert list( int(i) for i in res.keys() ) == infos['diaobjectid']
 
         for rooti, strid in enumerate( res.keys() ):
-            dex = infos['diaobjectid'].index( int(strid) )
+            dex = infos['rootid'].index( int(strid) )
             for k in infos.keys():
                 if isinstance( infos[k][dex], uuid.UUID ):
                     assert str( infos[k][dex] ) == res[strid][k]

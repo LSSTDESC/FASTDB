@@ -38,7 +38,7 @@ class GetManyLtcvs( BaseView ):
         Returns
         -------
           result: dict
-            keys are diaobjectids (warning: stringified ints, because JSON), values are dicts
+            keys are root diaobject ids (stringified uuids), values are dicts
               The inner dict keys are are everything from diaobject
               plus 'ltcv', which is itself a dict
                 The inner-inner dicts have keys:
@@ -84,25 +84,36 @@ class GetManyLtcvs( BaseView ):
             FDBLogger.debug( f"Asking for lightcurves for {objids}, processing version {procver}, "
                              f"which {which}, bands {bands}" )
             ltcvs = ltcv.many_object_ltcvs( procver, objids, bands=bands, which=which,
-                                            return_format='json', string_keys=True,
-                                            mjd_now=mjd_now, dbcon=dbcon )
+                                            return_format='json', mjd_now=mjd_now, dbcon=dbcon )
+            # ****
+            if len(ltcvs) > 0:
+                FDBLogger.error( f"ltcvs[0] = {ltcvs[0]}" )
+            # ****
+            ltcvs = { row['rootid']: row for row in ltcvs }
             if len(ltcvs) != len(objids):
                 FDBLogger.warning( f"Asked for {len(objids)} lightcurves, got {len(ltcvs)}" )
             if len(ltcvs) == 0:
                 return {}
-            objids = list( int(i) for i in ltcvs.keys() )
-            objinfo = ltcv.get_object_infos( objids, dbcon=dbcon )
+            foundobjids = list( ltcvs.keys() )
+            objinfo = ltcv.get_object_infos( foundobjids, processing_version=procver, dbcon=dbcon )
 
-        if len(ltcvs) != len(objinfo['diaobjectid']):
-            raise RuntimeError( f"len(ltcvs)={len(ltcvs)}, len(objinfo['diaobjectid'])={len(objinfo['diaobjectid'])}, "
+        foundobjids = set( foundobjids )
+        objinfoids = set( objinfo['rootid'] )
+        if objids != objinfoids:
+            FDBLogger.error( f"objids = {objids}\n"
+                             f"foundobjids = {foundobjids}\n"
+                             f"procver = {procver}\n"
+                             f"foundobjids - objinfoids = {foundobjids - objinfoids}\n"
+                             f"objinfoids - foundobjids = {objinfoids - foundobjids}\n" )
+            raise RuntimeError( "rootids from many_object_ltcvs and get_object_infos don't match; "
                                 "I am perplexed." )
 
         rval = {}
-        for i in range( len(objinfo['diaobjectid']) ):
-            diaobjectid = str( objinfo['diaobjectid'][i] )
-            rval[ diaobjectid ] = { 'ltcv': ltcvs[ diaobjectid ] }
+        for i in range( len(objinfo['rootid']) ):
+            rootid = str( objinfo['rootid'][i] )
+            rval[ rootid ] = { 'ltcv': ltcvs[ rootid ] }
             for k, v in objinfo.items():
-                rval[ diaobjectid ][k] = v[i]
+                rval[ rootid ][k] = v[i]
 
         return rval
 

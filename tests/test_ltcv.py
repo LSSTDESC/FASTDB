@@ -1,5 +1,6 @@
 import pytest
 import numpy as np
+import pandas
 
 import db
 import ltcv
@@ -9,72 +10,107 @@ def test_get_object_infos( set_of_lightcurves, procver_collection ):
     bpvs, _pvs = procver_collection
     roots = set_of_lightcurves
 
-    info = ltcv.get_object_infos( [ 200, 201, 202 ], return_format='pandas' )
-    assert info.index.name == 'rootid'
-    assert set(info.columns.values) == { 'diaobjectid', 'obj_base_procver_id', 'pos_base_procver_id',
+    info = ltcv.get_object_infos( [ 200, 201, 202 ], return_format='pandas',
+                                  processing_version='pvc_pv2', position_processing_version='pvc_pv1' )
+    assert info.index.name == 'diaobjectid'
+    assert set(info.columns.values) == { 'rootid', 'obj_base_procver_id', 'pos_base_procver_id',
                                          'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' }
     assert len(info) == 3
-    assert list( info.index.values ) == [ roots[i]['root'].id for i in [ 0, 1, 2 ] ]
-    assert info.diaobjectid.values.tolist() == [ 200, 201, 202 ]
-    # Since we didn't get a position processing version, none of the position fields should be filled
-    assert all( all( i is None for i in info[col] ) for col in ['pos_base_procver_id', 'ra', 'dec',
-                                                                'raerr', 'decerr', 'ra_dec_cov'] )
+    assert list( info.index.values ) == [ 200, 201, 202 ]
+    assert info.rootid.values.tolist() == [ roots[i]['root'].id for i in [ 0, 1, 2 ] ]
+    # Since we gave a position processing versoin that was inconsistent with the diaobject
+    #   processing version, none of the position fields should be filled.
+    assert all( all( ( i is None ) or pandas.isna(i) for i in info[col] )
+                for col in ['pos_base_procver_id', 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov'] )
 
-    # Make sure json return gives the same stuff
-    jsinfo = ltcv.get_object_infos( [ 200, 201, 202 ], return_format='json' )
-    assert jsinfo['diaobjectid'] == [ 200, 201, 202 ]
-    info.reset_index( inplace=True )
-    for col in info.columns:
-        assert ( info.loc[ :, col ].values == np.array( jsinfo[col] ) ).all()
-
-    # Make sure we get position information if we give a position processing version
+    # Make sure we get position information if we use the position processing default
+    #   to the processing version
     info = ltcv.get_object_infos( [ 200, 201, 202 ], return_format='pandas', processing_version='pvc_pv2' )
-    assert list( info.index.values ) == [ roots[i]['root'].id for i in [ 0, 1, 2 ] ]
-    assert all( all( i is not None for i in info[col] )for col in ['pos_base_procver_id', 'ra', 'dec',
-                                                                   'raerr', 'decerr', 'ra_dec_cov'] )
-    assert info.loc[ roots[0]['root'].id, 'pos_base_procver_id'] == bpvs['bpv2a_diaobject_position_60030'].id
-    assert info.loc[ roots[1]['root'].id, 'pos_base_procver_id'] == bpvs['bpv2a_diaobject_position_60060'].id
-    assert info.loc[ roots[2]['root'].id, 'pos_base_procver_id'] == bpvs['bpv2a_diaobject_position_60080'].id
-
-    info2 = ltcv.get_object_infos( [ 200, 201, 202 ], return_format='pandas',
+    assert list( info.index.values ) == [ 200, 201, 202 ]
+    assert all( all( ( i is not None ) and ( not pandas.isna(i) ) for i in info[col] )
+                for col in ['pos_base_procver_id', 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov'] )
+    assert info.loc[ 200, 'pos_base_procver_id'] == bpvs['bpv2a_diaobject_position_60030'].id
+    assert info.loc[ 201, 'pos_base_procver_id'] == bpvs['bpv2a_diaobject_position_60060'].id
+    assert info.loc[ 202, 'pos_base_procver_id'] == bpvs['bpv2a_diaobject_position_60080'].id
+    info2 = ltcv.get_object_infos( [ 200, 201, 202 ], return_format='pandas', processing_version='pvc_pv2',
                                    position_processing_version='pvc_pv2' )
     assert info2.equals( info )
 
-    info = ltcv.get_object_infos( [ roots[i]['root'].id for i in [0, 1, 2] ] )
+    # Make sure json return gives the same stuff
+    jsinfo = ltcv.get_object_infos( [ 200, 201, 202 ], processing_version='pvc_pv2', return_format='json' )
+    assert jsinfo['diaobjectid'] == [ 200, 201, 202 ]
+    info.reset_index( inplace=True )
+    for col in info.columns:
+        if col in { 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' }:
+            assert np.array( info.loc[:, col].values ) == pytest.approx( np.array( jsinfo[col] ), rel=1e-5 )
+        else:
+            assert ( np.array( info.loc[:, col].values ) == np.array( jsinfo[col] ) ).all()
+
     # TODO : right now there are no diaobjects in the default processing version!  Fix that in Issue #70.
+    info = ltcv.get_object_infos( [ roots[i]['root'].id for i in [0, 1, 2] ] )
     assert info['diaobjectid'] == []
 
-    info = ltcv.get_object_infos( [ roots[i]['root'].id for i in [0, 1, 2] ], processing_version='pvc_pv2' )
-    dex200 = info['diaobjectid'].index( 200 )
-    dex201 = info['diaobjectid'].index( 201 )
-    dex202 = info['diaobjectid'].index( 202 )
-    assert all( info['obj_base_procver_id'][i] == bpvs['bpv2'].id for i in range(3) )
-    assert info['pos_base_procver_id'][dex200] == bpvs['bpv2a_diaobject_position_60030'].id
-    assert info['pos_base_procver_id'][dex201] == bpvs['bpv2a_diaobject_position_60060'].id
-    assert info['pos_base_procver_id'][dex202] == bpvs['bpv2a_diaobject_position_60080'].id
+    info = ltcv.get_object_infos( [ roots[i]['root'].id for i in [0, 1, 2] ], processing_version='pvc_pv2',
+                                  return_format='pandas' )
+    assert all( b == bpvs['bpv2'].id for b in info['obj_base_procver_id'] )
+    assert info.loc[ 200, 'pos_base_procver_id' ] == bpvs['bpv2a_diaobject_position_60030'].id
+    assert info.loc[ 201, 'pos_base_procver_id' ] == bpvs['bpv2a_diaobject_position_60060'].id
+    assert info.loc[ 202, 'pos_base_procver_id' ] == bpvs['bpv2a_diaobject_position_60080'].id
 
-    info = ltcv.get_object_infos( [ 200, 201, 202 ], columns=['ra', 'dec'] )
-    assert info['diaobjectid'] == [ 200, 201, 202 ]
-    assert set( info.keys() ) == { 'diaobjectid', 'ra', 'dec' }
+    info = ltcv.get_object_infos( [ 200, 201, 202 ], columns=['ra', 'dec'], processing_version='pvc_pv2',
+                                  return_format='pandas' )
+    assert info.index.values.tolist() == [ 200, 201, 202 ]
+    assert set( info.keys() ) == { 'ra', 'dec' }
 
     with db.DBCon() as dbcon:
         dbcon.execute( "CREATE TEMP TABLE tempthing(diaobjectid bigint)", explain=False )
         dbcon.execute( "INSERT INTO tempthing(diaobjectid) VALUES ( 200 )" )
         dbcon.execute( "INSERT INTO tempthing(diaobjectid) VALUES ( 202 )" )
-        info = ltcv.get_object_infos( objids_table='tempthing', dbcon=dbcon )
-        assert info['diaobjectid'] == [ 200, 202 ]
+        info = ltcv.get_object_infos( objids_table='tempthing', dbcon=dbcon, processing_version='pvc_pv2',
+                                      return_format='pandas' )
+        assert info.index.values.tolist() == [ 200, 202 ]
+        assert all( info['rootid'] == [ roots[i]['root'].id for i in [ 0, 2 ] ] )
+        assert all ( all( ( i is not None ) and ( not pandas.isna(i) ) for i in info[col] )
+                     for col in [ 'pos_base_procver_id', 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ] )
+        # If we pass an inconjsistent processing version, we should get nothing back
+        info = ltcv.get_object_infos( objids_table='tempthing', dbcon=dbcon, processing_version='pvc_pv3',
+                                      return_format='pandas' )
+        assert len( info ) == 0
 
+        dbcon.execute( "DROP TABLE tempthing" )
+        dbcon.execute( "CREATE TEMP TABLE tempthing(rootid uuid)", explain=False )
+        dbcon.execute( "INSERT INTO tempthing(rootid) VALUES (%(id)s)", { 'id': roots[1]['root'].id } )
+        dbcon.execute( "INSERT INTO tempthing(rootid) VALUES (%(id)s)", { 'id': roots[3]['root'].id } )
+        info = ltcv.get_object_infos( objids_table='tempthing', dbcon=dbcon, processing_version='pvc_pv2',
+                                      return_format='pandas' )
+        assert info.index.values.tolist() == [ 201, 203 ]
+        info = ltcv.get_object_infos( objids_table='tempthing', dbcon=dbcon, processing_version='realtime',
+                                      return_format='pandas' )
+        assert info.index.values.tolist() == [ 1 ]
+        assert all( all( ( i is not None ) and ( not pandas.isna(i) ) for i in info[col] )
+                    for col in [ 'pos_base_procver_id', 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ] )
+
+        # If the temp table has both rootid and diaobjectid, it should use diaobjectid.  Test this
+        # By passing an inconsistent input
+        dbcon.execute( "DROP TABLE tempthing" )
+        dbcon.execute( "CREATE TABLE tempthing(rootid uuid, diaobjectid bigint)" )
+        dbcon.execute( "INSERT INTO tempthing VALUES (%(id)s, 200)", { 'id': roots[1]['root'].id } )
+        dbcon.execute( "INSERT INTO tempthing VALUES (%(id)s, 202)", { 'id': roots[3]['root'].id } )
+        info = ltcv.get_object_infos( objids_table='tempthing', dbcon=dbcon, processing_version='pvc_pv2',
+                                     return_format='pandas' )
+        assert info.index.values.tolist() == [ 201, 203 ]
+
+        # Check failures
         with pytest.raises( ValueError, match='objids_table requires dbcon' ):
-            ltcv.get_object_infos( objids_table='tempthing' )
+            ltcv.get_object_infos( objids_table='tempthing', processing_version='pvc_pv2' )
 
         with pytest.raises( ValueError, match='objids_table and objids cannot be used together' ):
-            ltcv.get_object_infos( objids_table='tempthing', objids=[0, 1, 2], dbcon=dbcon )
+            ltcv.get_object_infos( objids_table='tempthing', objids=[0, 1, 2], dbcon=dbcon,
+                                   processing_version='pvc_pv2' )
 
         with pytest.raises( ValueError, match='objids_table and objids cannot be used together' ):
-            ltcv.get_object_infos( [0, 1, 2], objids_table='tempthing', dbcon=dbcon )
-
-        with pytest.raises( ValueError, match='Cannot pass processing_version when passing objids_table' ):
-            ltcv.get_object_infos( objids_table='tempthing', processing_version='pvc_pv2', dbcon=dbcon )
+            ltcv.get_object_infos( [0, 1, 2], objids_table='tempthing', dbcon=dbcon,
+                                   processing_version='pvc_pv2' )
 
 
 def test_object_ltcv( procver_collection, set_of_lightcurves ):
