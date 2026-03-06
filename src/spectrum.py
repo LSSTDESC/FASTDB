@@ -6,6 +6,7 @@ import logging
 
 import pandas
 import astropy.time
+from psycopg import sql
 
 import db
 import util
@@ -430,8 +431,7 @@ def what_spectra_are_wanted( procver='realtime', position_procver=None,
     return df
 
 
-def get_spectrum_info( root_diaobject_ids=None, facility=None, mjd_min=None, mjd_max=None, classid=None,
-                       z_min=None, z_max=None, since=None, logger=None ):
+def get_spectrum_info( logger=None, **kwargs ):
     if logger is None:
         logger = logging.getLogger( __name__ )
         logger.propagate = False
@@ -443,58 +443,96 @@ def get_spectrum_info( root_diaobject_ids=None, facility=None, mjd_min=None, mjd
             logout.setFormatter( formatter )
             logger.setLevel( logging.INFO )
 
-    with db.DB() as con:
-        cursor = con.cursor()
-        where = "WHERE"
-        q = "SELECT * FROM spectruminfo "
-        subdict = {}
+    with db.DBCon() as con:
+        q = sql.SQL( "SELECT * FROM spectruminfo " )
 
-        if root_diaobject_ids is not None:
-            if util.isSequence( root_diaobject_ids ):
-                q += f"{where} root_diaobject_id=ANY(%(ids)s) "
-                subdict['ids'] = [ str(i) for i in root_diaobject_ids ]
-            else:
-                q += f"{where} root_diaobject_id=%(id)s "
-                subdict['id'] = str(root_diaobject_ids)
-            where = "AND"
+        # Backwards compatibility
+        if 'since' in kwargs:
+            kwargs['inserted_at_min'] = kwargs['since']
+            del kwargs['since']
+        if 'root_diaobject_ids' in kwargs:
+            kwargs['root_diaobject_id'] = kwargs['root_diaobject_ids']
+            del kwargs['root_diaobject_ids']
 
-        if facility is not None:
-            q += f"{where} facility=%(fac)s "
-            subdict['fac'] = facility
-            where = "AND"
+        # searchspec = {
+        #     'root_diaobject_id':  { 'mult': True,  'substr': False, 'minmax': False },
+        #     'facility':           { 'mult': True,  'substr': True,  'minmax': True },
+        #     'mjd':                { 'mult': False, 'substr': False, 'minmax': True },
+        #     'z':                  { 'mult': False, 'substr': False, 'minmax': True },
+        #     'class_description':  { 'mult': True,  'substr': True,  'minmax': False },
+        #     'classid':            { 'mult': True,  'substr': False, 'minmax': True }
+        # }
 
-        if mjd_min is not None:
-            q += f"{where} mjd>=%(mjdmin)s "
-            subdict['mjdmin'] = mjd_min
-            where = "AND"
+        # for field, fieldinfo in searchspec:
+        #     if field in kwargs:
+        #         if util.isSequence( kwargs[field] ):
+        #             if not fieldinfo[ 'mult' ]:
+        #                 raise ValueError( f"Field {field} can't be a list" )
+        #             q += sql.SQL( "{where} {field}=ANY(%(field)s)" ).format( where=sql.SQL(where),
+        #                                                                      field=sql.Identifier(field) )
+        #             subdict['field'] = list( kwargs[field] )
+        #         else:
+        #             q += sql.SQL( f"{where} {field}=%(field)s" ).format( where=sql.SQL(where),
+        #                                                                  field=sql.Identifier(field) )
+        #             subdict['field'] = kwargs[field]
+        #         where = " AND "
 
-        if mjd_max is not None:
-            q += f"{where} mjd<=%(mjdmax)s "
-            subdict['mjdmax'] = mjd_max
-            where = "AND"
+        #     if f'field_contains' in kwargs:
+        #         if not fieldinfo['mult']:
+        #             raise ValueError( f'Field {field} doesn\'t work with "contains"' )
+        #         q += sql.SQL( f"{where} {field}="%%%(field)s%%" ).format( field=
 
-        if classid is not None:
-            q += f"{where} classid=%(class)s "
-            subdict['class'] = classid
-            where = "AND"
 
-        if z_min is not None:
-            q += f"{where} z>=%(zmin)s "
-            subdict['zmin'] = z_min
-            where = "AND"
 
-        if z_max is not None:
-            q += f"{where} z<=%(zmax)s "
-            subdict['zmax'] = z_max
-            where = "AND"
 
-        if since is not None:
-            q += f"{where} inserted_at>=%(since)s "
-            subdict['since'] = since
-            where = "AND"
 
-        cursor.execute( q, subdict )
-        columns = [ col.name for col in cursor.description ]
-        df = pandas.DataFrame( cursor.fetchall(), columns=columns )
 
-    return df
+    #     if root_diaobject_ids is not None:
+    #         if util.isSequence( root_diaobject_ids ):
+    #             q += sql.SQL( f"{where} root_diaobject_id=ANY(%(ids)s) " )
+    #             subdict['ids'] = [ str(i) for i in root_diaobject_ids ]
+    #         else:
+    #             q += sql.SQL( f"{where} root_diaobject_id=%(id)s " )
+    #             subdict['id'] = str(root_diaobject_ids)
+    #         where = "AND"
+
+    #     if facility is not None:
+    #         q += sql.SQL( f"{where} facility=%(fac)s " )
+    #         subdict['fac'] = facility
+    #         where = "AND"
+
+    #     if mjd_min is not None:
+    #         q += sql.SQL( f"{where} mjd>=%(mjdmin)s " )
+    #         subdict['mjdmin'] = mjd_min
+    #         where = "AND"
+
+    #     if mjd_max is not None:
+    #         q += sql.SQL( f"{where} mjd<=%(mjdmax)s " )
+    #         subdict['mjdmax'] = mjd_max
+    #         where = "AND"
+
+    #     if classid is not None:
+    #         q += sql.SQL( f"{where} classid=%(class)s " )
+    #         subdict['class'] = classid
+    #         where = "AND"
+
+    #     if z_min is not None:
+    #         q += sql.SQL( f"{where} z>=%(zmin)s " )
+    #         subdict['zmin'] = z_min
+    #         where = "AND"
+
+    #     if z_max is not None:
+    #         q += sql.SQL( f"{where} z<=%(zmax)s " )
+    #         subdict['zmax'] = z_max
+    #         where = "AND"
+
+    #     if since is not None:
+    #         q += sql.SQL( f"{where} inserted_at>=%(since)s " )
+    #         subdict['since'] = since
+    #         where = "AND"
+
+    #     cursor.execute( q, subdict )
+    #     columns = [ col.name for col in cursor.description ]
+    #     df = pandas.DataFrame( cursor.fetchall(), columns=columns )
+
+    # return df

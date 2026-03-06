@@ -17,7 +17,7 @@ from contextlib import contextmanager
 import numpy as np
 import psycopg
 import psycopg.rows
-import psycopg.sql
+from psycopg import sql
 import psycopg.types.json
 import pymongo
 
@@ -271,8 +271,8 @@ class DBCon:
         """
 
         alreadydid = False
-        if not isinstance( q, ( psycopg.sql.SQL, psycopg.sql.Composed ) ):
-            q = psycopg.sql.SQL( q )
+        if not isinstance( q, ( sql.SQL, sql.Composed ) ):
+            q = sql.SQL( q )
 
         if FDBLogger.instance().get().level <= logging.DEBUG:
             echo = echo if echo is not None else self.echoqueries
@@ -284,13 +284,13 @@ class DBCon:
             nl = '\n'
             if explain:
                 FDBLogger.debug( "Explaining..." )
-                self.cursor.execute( psycopg.sql.SQL("EXPLAIN ") + q, subdict )
+                self.cursor.execute( sql.SQL("EXPLAIN ") + q, subdict )
                 rows = self.cursor.fetchall()
                 dex = 'QUERY PLAN' if self.curcursorisdict else 0
                 FDBLogger.debug( f"Query plan:\n{nl.join([r[dex] for r in rows])}" )
             if analyze:
                 FDBLogger.debug( "Doing EXPLAIN ANALYZE..." )
-                self.cursor.execute( psycopg.sql.SQL("EXPLAIN ANALYZE ") + q, subdict )
+                self.cursor.execute( sql.SQL("EXPLAIN ANALYZE ") + q, subdict )
                 alreadydid = True
                 rows = self.cursor.fetchall()
                 dex = 'QUERY PLAN' if self.curcursorisdict else 0
@@ -311,7 +311,7 @@ class DBCon:
 
         Parmaeters
         ----------
-          q : str or psycopg.sql.Composed
+          q : str or sql.Composed
             The query.  Use %(var)s in the string for a substitution, if
             necessary.  The key "var" must then show up in subdict.
 
@@ -358,6 +358,82 @@ class DBCon:
             rows = self.cursor.fetchall()
             cols = [ desc[0] for desc in self.cursor.description ]
             return rows, cols
+
+
+# ======================================================================
+
+def construct_pgsql_where_clause( searchspec, where="WHERE", **kwargs ):
+    # See spectrum.py::get_spectrum_info for an exmple
+
+    q = sql.SQL( "" )
+    subdict = {}
+
+    for field, fieldinfo in searchspec.items():
+        if field in kwargs:
+            if util.isSequence( kwargs[field] ):
+                if not fieldinfo[ 'mult' ]:
+                    raise ValueError( f"Field {field} can't be a list" )
+                q += sql.SQL( "{where} {field}=ANY(%({sfield})s)" ).format( where=sql.SQL(where),
+                                                                            field=sql.Identifier(field),
+                                                                            sfield=sql.SQL(field) )
+                subdict[field] = list( kwargs[field] )
+            else:
+                q += sql.SQL( "{where} {field}=%({sfield})s" ).format( where=sql.SQL(where),
+                                                                       field=sql.Identifier(field),
+                                                                       sfield=sql.SQL(field) )
+                subdict[field] = kwargs[field]
+            where = " AND"
+            del kwargs[field]
+
+        if f'{field}_contains' in kwargs:
+            if not fieldinfo['substr']:
+                raise ValueError( f'Field {field} doesn\'t work with "contains"' )
+            if util.isSequence( kwargs[f'{field}_contains'] ) and ( len( kwargs[f'{field}_contains'] ) > 0 ):
+                q += sql.SQL( "{where} (" ).format( where=sql.SQL(where) )
+                first = True
+                for i, val in enumerate( kwargs[f'{field}_contains'] ):
+                    if first:
+                        first = False
+                    else:
+                        q += sql.SQL( " OR" )
+                    q += ( sql.SQL( " {field} LIKE %({sfield}_contains_{i})s " )
+                           .format( field=sql.Identifier(field),
+                                    sfield=sql.SQL(field),
+                                    i=sql.SQL(i) ) )
+                    subdict[f'{field}_contains_{i}'] = f'%{val}%'
+                q += sql.SQL( ")" )
+                where = " AND"
+            else:
+                q += sql.SQL( "{where} {field} LIKE %({sfield}_contains)s" ).format( where=sql.SQL(where),
+                                                                                           field=sql.Identifier(field),
+                                                                                           sfield=sql.SQL(field) )
+                subdict[f'{field}_contains'] = f"%{kwargs[f'{field}_contains']}%"
+                where = " AND"
+            del kwargs[f'{field}_contains']
+
+        if f'{field}_min' in kwargs:
+            if not fieldinfo['minmax']:
+                raise ValueError( f'Field {field} doesn\'t work with "min"' )
+            if util.isSequence( f'{field}_max' ):
+                raise ValueError( f"{field}_max can't be a list" )
+            q += sql.SQL( "{where} {field}>=%({sfield}_min)s" ).format( where=sql.SQL(where),
+                                                                        field=sql.Identifier(field),
+                                                                        sfield=sql.SQL(field) )
+            subdict['f{field}_min'] = kwargs[f'{field}_min']
+            del kwargs[f'{field}_min']
+
+        if f'{field}_max' in kwargs:
+            if not fieldinfo['minmax']:
+                raise ValueError( f'Field {field} doesn\'t work with "max"' )
+            if util.isSequence( f'{field}_max' ):
+                raise ValueError( f"{field}_max can't be a list" )
+            q += sql.SQL( "{where} {field}<=%({sfield}_max)s" ).format( where=sql.SQL(where),
+                                                                        field=sql.Identifier(field) )
+            subdict[f'{field}_max'] = kwargs[f'{field}_max']
+            where = " AND"
+            del kwargs[f'{field}_max']
+
+    return q, subdict, set(kwargs.keys())
 
 
 # ======================================================================
@@ -641,19 +717,19 @@ class DBBase:
 
     @classmethod
     def all_columns_sql( cls, prefix=None, omit=[], asmap={} ):
-        """Returns a psycopg.sql.SQL thingy with all columns comma separated."""
+        """Returns a sql.SQL thingy with all columns comma separated."""
         if cls._tablemeta is None:
             cls.load_table_meta()
         mess = []
         for col in cls._tablemeta.keys():
             if col in omit:
                 continue
-            thing = psycopg.sql.Identifier( col ) if prefix is None else psycopg.sql.Identifier( prefix, col )
+            thing = sql.Identifier( col ) if prefix is None else sql.Identifier( prefix, col )
             if col in asmap:
-                thing += psycopg.sql.SQL( " AS " ) + psycopg.sql.Identifier( asmap[col] )
+                thing += sql.SQL( " AS " ) + sql.Identifier( asmap[col] )
             mess.append( thing )
 
-        return psycopg.sql.SQL(',').join( mess )
+        return sql.SQL(',').join( mess )
 
     @classmethod
     def load_table_meta( cls, dbcon=None ):
