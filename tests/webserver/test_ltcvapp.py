@@ -1,5 +1,5 @@
 import pytest
-import uuid
+import numbers
 
 import numpy as np
 
@@ -9,29 +9,57 @@ import ltcv
 def test_getmanyltcvs( test_user, fastdb_client, set_of_lightcurves ):
     roots = set_of_lightcurves
 
-    def _check_res( infos, ltcvs, res, mjdnow=None, which='patch' ):
-        # JSON only allows string keys, which makes me rage.
-        # We should be using a binary format, yes?
-        assert list( int(i) for i in res.keys() ) == infos['diaobjectid']
+    def _check_res( infos, ltcvs, res, mjdnow=None, which='patch',
+                    include_base_procver=False, include_source_ids=False, include_source_positions=False ):
+        info_str_rootid = [ str(i) for i in infos['rootid'] ]
+        assert set(res.keys() ) == set( info_str_rootid )
 
-        for rooti, strid in enumerate( res.keys() ):
-            dex = infos['rootid'].index( int(strid) )
-            for k in infos.keys():
-                if isinstance( infos[k][dex], uuid.UUID ):
-                    assert str( infos[k][dex] ) == res[strid][k]
-                else:
-                    assert infos[k][dex] == res[strid][k]
-            for k in ltcvs[int(strid)].keys():
-                if k == 'rootid':
-                    assert str( ltcvs[int(strid)][k] ) == res[strid]['ltcv'][k]
-                else:
-                    # Really hope I don't gotta pytest.approx here, but I might need to
-                    assert all( [ i == j for i, j in zip( ltcvs[int(strid)][k], res[strid]['ltcv'][k] ) ] )
+        for rootid, mess in res.items():
+            # Because of the test set we're using, there is only one diaobjectid
+            #   for any rootid.  This is too bad, because it means we can't test
+            #   the case of multiple diaobjectids.  However, the thought of
+            #   redoing the set_of_lightcurves fixture and every test that
+            #   depends on it makes me shudder.
+            infodex = info_str_rootid.index( rootid )
+            thisltcv = ltcvs[ [ str(l['rootid']) for l in ltcvs ].index( rootid ) ]
+            if include_base_procver:
+                expectedkeys = [ 'diaobjectid', 'obj_base_procverid', 'pos_base_procver_id',
+                                 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ]
+            else:
+                expectedkeys = [ 'diaobjectid', 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ]
 
-    infos = ltcv.get_object_infos( [ 200, 201, 202 ], return_format='json' )
-    ltcvs = ltcv.many_object_ltcvs( 'pvc_pv2', [ 200, 201, 202 ], return_format='json', which='patch' )
-    res = fastdb_client.post( '/ltcv/getmanyltcvs', json={ 'objids': [ 200, 201, 202 ] } )
-    assert 'ispatch' in res['200']['ltcv'].keys()
+            assert all( k in mess for k in expectedkeys )
+            assert 'ltcv' in mess
+            assert all( infos[k][infodex] == ( pytest.approx( mess[k][0], rel=1e-6 )
+                                               if isinstance( mess[k][0], numbers.Real )
+                                               else mess[k][0] )
+                        for k in expectedkeys )
+
+            expectedkeys = [ 'mjd', 'band', 'flux', 'fluxerr', 'isdet' ]
+            if which == 'patch':
+                expectedkeys.append( 'ispatch' )
+            if include_source_ids:
+                expectedkeys.extend( 'diaobjectid', 'visit', 'diasourceid', 'diaforcedsourceid' )
+            if include_base_procver:
+                expectedkeys.append( 'base_procver_s' )
+                if which != 'detections':
+                    expectedkeys.append( 'base_procver_f' )
+            if include_source_positions:
+                expectedkeys.extend( [ 'det_ra', 'det_dec', 'det_raerr', 'det_decerr', 'det_ra_dec_cov' ] )
+
+            assert set( mess['ltcv'].keys() ) == set( expectedkeys )
+            assert all(
+                all( lval == ( pytest.approx( mval, rel=1e-6 ) if isinstance( mval, numbers.Real ) else mval )
+                     for lval, mval in zip( thisltcv[k], mess['ltcv'][k] ) )
+                for k in expectedkeys
+            )
+
+    infos = ltcv.get_object_infos( [ 200, 201, 202 ], processing_version='pvc_pv2', return_format='json' )
+    ltcvs = ltcv.many_object_ltcvs( 'pvc_pv3', [ 200, 201, 202 ], return_format='json', which='patch' )
+    res = fastdb_client.post( '/ltcv/getmanyltcvs', json={ 'objids': [ 200, 201, 202 ],
+                                                           'object_procver': 'pvc_pv2' } )
+    import pdb; pdb.set_trace()
+    assert 'ispatch' in res[ str(roots[0]['root'].id) ]['ltcv'].keys()
     _check_res( infos, ltcvs, res )
 
     res = fastdb_client.post( '/ltcv/getmanyltcvs/pvc_pv2',

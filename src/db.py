@@ -39,7 +39,7 @@ from util import FDBLogger
 # a query plan (I don't know why; is it a pg_hint_plan thing?)
 #
 # We should replace them with configurable options.
-_echoqueries = False
+_echoqueries = True
 _dumpmongopipeline = False
 _alwaysexplain = False
 _alwaysanalyze = False

@@ -327,7 +327,7 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
 
     Returns
     -------
-      retval: pandas.DataFrame or dict
+      retval: pandas.DataFrame or list
         If return_format is 'pandas', then you get back a DataFrame with
         indexes (rootid, mjd) and columns (diaobjectid, visit,
         [diaforcedsourceid], diasourceid, band, flux, fluxerr, isdet,
@@ -354,7 +354,7 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
             [ 'det_dec': list of float, ] (only included if include_source_positions is True )
             [ 'det_raerr': list of float, ] (only included if include_source_positions is True )
             [ 'det_decerr': list of float, ] (only included if include_source_positions is True )
-            [ 'det_dec_cov': list of float, ] (only included if include_source_positions is True )
+            [ 'det_ra_dec_cov': list of float, ] (only included if include_source_positions is True )
          }
 
     """
@@ -559,7 +559,7 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                          AS base_procver
                 FROM tmp_forced f
                 FULL OUTER JOIN tmp_sources s ON f.diaobjectid=s.diaobjectid AND s.visit=f.visit
-                ORDER BY diaobjectid, mjd
+                ORDER BY rootid, mjd
                 """ ) ).format( source_fields=source_fields )
             rows, cols = dbcon.execute( q )
 

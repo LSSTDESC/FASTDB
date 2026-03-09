@@ -1,3 +1,5 @@
+import itertools
+
 from psycopg import sql
 import flask
 
@@ -18,10 +20,16 @@ class GetManyLtcvs( BaseView ):
     def get_ltcvs( self, procver, objids, dbcon=None ):
         """Return lightcurves of objects as json.
 
-        Reads parameters 'bands', 'which', and 'mjd_now' from
-        flask.request.json.  'bands' is a list of bands to include in
-        the lightcurve.  'which' is one of 'detections', 'forced', or
-        'patch'.  See ltcv.object_ltcv
+        Reads the following parameters from POST data via flask.request.json:
+
+             'bands': list of char, bands to include in the lightcurve
+             'which': one of 'detctions', 'forced', or 'patch' (default).  See ltcv.object_ltcv
+             'mjd_now': see ltcv.object_ltcv
+             'object_procver': processing version to use for objects; if missing or None, use procver
+             'position_procver': processing version to use for positon; if missing or None, use object_procver
+             'include_base_procver': If present and true, there will be additional columns in output
+             'include_source_ids': If present and true, there will be additional columns in output
+             'include_source_positions': If present and true, there will be additinoal columns in output
 
         Parameters
         ----------
@@ -39,16 +47,37 @@ class GetManyLtcvs( BaseView ):
         -------
           result: dict
             keys are root diaobject ids (stringified uuids), values are dicts
-              The inner dict keys are are everything from diaobject
-              plus 'ltcv', which is itself a dict
-                The inner-inner dicts have keys:
-                { 'mjd': list of float,
-                  'band': list of str,
-                  'flux': list of float,
-                  'fluxerr': list of float,
-                  'isdet': list of int,   (1 for true, 0 for false)
-                  'ispatch': list of int,  (1 for true, 0 for false; only present if 'which' is 'patch')
-                }
+              The inner dicts are:
+              { 'diaobjectid': list of bigint (if include_sourceids),
+                'obj_base_procver_id': list of uuid (if include_base_procver),
+                'pos_base_procver_id': list of uuid (if include_base_procver),
+                'ra': list of double or None,
+                'dec': list of double or None,
+                'raerr': list of float or None,
+                'decerr': list of float or None,
+                'ra_dec_cov': list of float or None,
+                'ltcv': {
+                   'mjd': list of float,
+                   'band': list of str,
+                   'flux': list of float,
+                   'fluxerr': list of float,
+                   'isdet': list of int,   (1 for true, 0 for false)
+                   'ispatch': list of int,  (1 for true, 0 for false; only present if 'which' is 'patch')
+                   'diaobjectid': list of bigint, (only if include_source_ids given)
+                   'visit': list of bigint, (only if include_source_ids given)
+                   'diasourceid': list of bigint or None, (only if include_source_ids given)
+                   'diaforcedsourceid': list of bigint or None, (only if include_sourced_ids is given and
+                                                                 if which is not 'detections')
+                   'base_procver_s': list of uuid or None, (only if include_base_procver)
+                   'base_procver_f': list of uuid or None, (only if include_base_procver and
+                                                            if which is not 'detections')
+                   'det_ra': list of double, (only if include_source_positions)
+                   'det_dec': list of double, (only if include_source_positions)
+                   'det_raerr': list of float, (only if include_source_positions)
+                   'det_decerr': list of float, (only if include_source_positions)
+                   'det_ra_dec_cov': list of float, (only if include_source_positions)
+                 }
+              }
         """
 
         if not util.isSequence( objids ):
@@ -66,9 +95,15 @@ class GetManyLtcvs( BaseView ):
         bands = None
         which = 'patch'
         mjd_now = None
+        object_procver = None
+        position_procver = None
+        include_base_procver = False
+        include_source_ids = False
+        include_source_positions = False
         if flask.request.is_json:
             data = flask.request.json
-            unknown = set( data.keys() ) - { 'bands', 'which', 'mjd_now' }
+            unknown = set( data.keys() ) - { 'bands', 'which', 'mjd_now', 'object_procver', 'position_procver',
+                                             'include_base_procver', 'include_source_ids', 'include_source_positions' }
             if len(unknown) > 0:
                 raise ValueError( f"Unknown data parameters: {unknown}" )
             if 'bands' in data:
@@ -79,41 +114,77 @@ class GetManyLtcvs( BaseView ):
                 which = data['which']
             if 'mjd_now' in data:
                 mjd_now = float( data['mjd_now'] )
+            if 'object_procver' in data:
+                object_procver = data['object_procver']
+            if 'position_procver' in data:
+                position_procver = data['position_procver']
+            if 'include_base_procver' in data:
+                include_base_procver = bool( data['include_base_procver'] )
+            if 'include_source_ids' in data:
+                include_source_ids = bool( data['include_source_ids'] )
+            if 'include_source_positions' in data:
+                include_source_positions = bool( data['include_source_positions'] )
+
+        if object_procver is None:
+            object_procver = procver
+        if position_procver is None:
+            position_procver = object_procver
 
         with db.DBCon() as dbcon:
             FDBLogger.debug( f"Asking for lightcurves for {objids}, processing version {procver}, "
                              f"which {which}, bands {bands}" )
-            ltcvs = ltcv.many_object_ltcvs( procver, objids, bands=bands, which=which,
-                                            return_format='json', mjd_now=mjd_now, dbcon=dbcon )
-            # ****
-            if len(ltcvs) > 0:
-                FDBLogger.error( f"ltcvs[0] = {ltcvs[0]}" )
-            # ****
-            ltcvs = { row['rootid']: row for row in ltcvs }
+            ltcvlist = ltcv.many_object_ltcvs( procver, objids, bands=bands, which=which,
+                                               include_base_procver=include_base_procver,
+                                               include_source_positions=include_source_positions,
+                                               return_format='json', mjd_now=mjd_now, dbcon=dbcon )
+            # Read this line and then tell me with a straight face that Python is not mysterious
+            foundobjids = list( set( itertools.chain( *[ i['diaobjectid'] for i in ltcvlist ] ) ) )
+            if include_source_ids:
+                ltcvs = { row['rootid']: { k: v for k, v in row.items() if k != 'rootid' }
+                          for row in ltcvlist }
+            else:
+                ltcvs = { row['rootid']: { k: v for k, v in row.items()
+                                           if k not in { 'rootid', 'diaobjectid', 'visit',
+                                                         'diasourceid', 'diaforcedsourceid' } }
+                          for row in ltcvlist }
             if len(ltcvs) != len(objids):
                 FDBLogger.warning( f"Asked for {len(objids)} lightcurves, got {len(ltcvs)}" )
             if len(ltcvs) == 0:
                 return {}
-            foundobjids = list( ltcvs.keys() )
-            objinfo = ltcv.get_object_infos( foundobjids, processing_version=procver, dbcon=dbcon )
+            foundrootids = list( ltcvs.keys() )
+            FDBLogger.info( f"About to ask for object infos on {foundobjids} with "
+                            f"processing version {procver}, position_processing_version {position_procver}" )
+            objinfos = ltcv.get_object_infos( foundobjids, processing_version=object_procver,
+                                              position_processing_version=position_procver,
+                                              return_format='pandas', dbcon=dbcon )
+            FDBLogger.info( f"Return from ltcv.get_object_infos:\n{objinfos}" )
 
-        foundobjids = set( foundobjids )
-        objinfoids = set( objinfo['rootid'] )
-        if objids != objinfoids:
+        foundrootids = set( foundrootids )
+        objinfoids = set( objinfos['rootid'] )
+        if foundrootids != objinfoids:
             FDBLogger.error( f"objids = {objids}\n"
-                             f"foundobjids = {foundobjids}\n"
+                             f"foundrootids = {foundrootids}\n"
                              f"procver = {procver}\n"
-                             f"foundobjids - objinfoids = {foundobjids - objinfoids}\n"
-                             f"objinfoids - foundobjids = {objinfoids - foundobjids}\n" )
+                             f"foundrootids - objinfoids = {foundrootids - objinfoids}\n"
+                             f"objinfoids - foundrootids = {objinfoids - foundrootids}\n" )
             raise RuntimeError( "rootids from many_object_ltcvs and get_object_infos don't match; "
-                                "I am perplexed." )
+                                "you probably have the wrong object_procver." )
 
         rval = {}
-        for i in range( len(objinfo['rootid']) ):
-            rootid = str( objinfo['rootid'][i] )
-            rval[ rootid ] = { 'ltcv': ltcvs[ rootid ] }
-            for k, v in objinfo.items():
-                rval[ rootid ][k] = v[i]
+        for rootid, thisltcv in ltcvs.items():
+            objinfo = objinfos[ objinfos['rootid'] == rootid ].reset_index()
+            # So we can use the key in json, stringify:
+            rootid = str(rootid)
+            rval[rootid] = { 'diaobjectid': list( objinfo['diaobjectid'] ),
+                             'ra': list( objinfo['ra'].values ),
+                             'dec': list( objinfo['dec'].values ),
+                             'raerr': list( objinfo['raerr'].values ),
+                             'decerr': list( objinfo['decerr'].values ),
+                             'ra_dec_cov': list( objinfo['ra_dec_cov'].values ),
+                             'ltcv': thisltcv }
+            if include_base_procver:
+                rval[rootid]['obj_base_procver_id'] = list( objinfo['obj_base_procver_id'].values )
+                rval[rootid]['pos_base_procver_id'] = list( objinfo['pos_base_procver_id'].values )
 
         return rval
 
