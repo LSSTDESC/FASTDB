@@ -395,11 +395,11 @@ def construct_pgsql_where_clause( searchspec, where="WHERE", **kwargs ):
                     if first:
                         first = False
                     else:
-                        q += sql.SQL( " OR" )
-                    q += ( sql.SQL( " {field} LIKE %({sfield}_contains_{i})s " )
+                        q += sql.SQL( " OR " )
+                    q += ( sql.SQL( "{field} LIKE %({sfield}_contains_{i})s" )
                            .format( field=sql.Identifier(field),
                                     sfield=sql.SQL(field),
-                                    i=sql.SQL(i) ) )
+                                    i=sql.SQL(str(i)) ) )
                     subdict[f'{field}_contains_{i}'] = f'%{val}%'
                 q += sql.SQL( ")" )
                 where = " AND"

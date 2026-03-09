@@ -153,13 +153,19 @@ def check_mongodb( collection_base_name, tfirstalert, cached_alerts=False ):
             assert allsources == set( s['diasourceid'] for s in sources )
             assert allforcedsources == set( f['diaforcedsourceid'] for f in forcedsources )
 
-            # TODO : check that the contents of the various collections match the contents
-            #   of the alert cache.  One thing we'll check here is the previous
-            #   source and forced source ids.
+            # TODO : check that the actual contents of the various collections match the contents
+            #   of the alert cache.  (Here we just check brokerinfo.)
 
             for b in brokerinfos:
                 cs = [ c for c in cachedalerts if c['msg']['diaSourceId'] == b['diasourceid'] ]
+                assert ( ( b['brokername'], b['topic'], b['diasourceid'] )
+                         in set( ( c['brokername'], c['topic'], c['msg']['diaSourceId'] ) for c in cs ) )
                 for c in cs:
+                    if ( b['brokername'], b['topic'] ) == ( c['brokername'], c['topic'] ):
+                        assert b['diaobjectid'] is not None
+                        assert b['diaobjectid'] == c['msg']['diaObject']['diaObjectId']
+                        assert b['info'] == { k:v for k, v in c['msg'].items()
+                                              if k not in BrokerConsumer._standard_lsst_alert_fields }
                     if b['prv_diasourceid'] is None:
                         assert c['msg']['prvDiaSources'] is None
                     else:
@@ -169,6 +175,10 @@ def check_mongodb( collection_base_name, tfirstalert, cached_alerts=False ):
                     else:
                         assert b['prv_diaforcedsourceid'] == [ m['diaForcedSourceId']
                                                                for m in c['msg']['prvDiaForcedSources'] ]
+
+            for c in cachedalerts:
+                assert ( ( c['brokername'], c['topic'], c['msg']['diaSourceId'] )
+                         in set( ( b['brokername'], b['topic'], b['diasourceid'] ) for b in brokerinfos ) )
 
         FDBLogger.info( "...done verifying that saved info matches cached alerts." )
 

@@ -421,7 +421,6 @@ class BrokerConsumer:
     @classmethod
     def _wrangle_diasource( cls, submsg, metamsg, msg ):
         out = cls._filter_dict_to_table( submsg, db.DiaSource.tablemeta() )
-        out['msg_diasourceid'] = msg['diaSourceId']
         out['savetime'] = metamsg['savetime']
         return out
 
@@ -433,7 +432,6 @@ class BrokerConsumer:
              and ( not any( i in submsg for i in [ db.DiaSourceExtra._pixelflags_bits.values() ] ) )
             ):
             return None
-        out['msg_diasourceid'] = msg['diaSourceId']
         out['savetime'] = metamsg['savetime']
         # a couple fields that are composed from mutiple fileds from the alert
         cls.add_flags( out, 'flags', db.DiaSourceExtra._flags_bits, submsg )
@@ -443,6 +441,7 @@ class BrokerConsumer:
     @classmethod
     def _wrangle_diaforcedsource( cls, submsg, metamsg, msg ):
         out = cls._filter_dict_to_table( submsg, db.DiaForcedSource.tablemeta() )
+        # This next field is used in one of our tests....
         out['msg_diasourceid'] = msg['diaSourceId']
         out['savetime'] = metamsg['savetime']
         return out
@@ -452,7 +451,6 @@ class BrokerConsumer:
         out = cls._filter_dict_to_table( submsg, db.DiaForcedSourceExtra.tablemeta() )
         if len( out ) == 0:
             return None
-        out['msg_diasourceid'] = msg['diaSourceId']
         out['savetime'] = metamsg['savetime']
         return out
 

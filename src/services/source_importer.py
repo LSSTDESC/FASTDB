@@ -293,7 +293,7 @@ class SourceImporter:
                             strio.write( f"simplejson: {jsondump}" )
                     # ****
                     data = [ None if row[f] is None
-                             else simplejson.dumps(row[f], ignore_nan=True) if isinstance( row[f], ( dict, list ) )
+                             else simplejson.dumps(row[f], ignore_nan=True) if isinstance( row[f], dict )
                              else row[f]
                              for f in fields ]
                     if base_procver_id is not None:
@@ -383,6 +383,7 @@ class SourceImporter:
                       "brokername": { "$first": "$brokername" },
                       "topic": { "$first": "$topic" },
                       "diasourceid": { "$first": "$diasourceid" },
+                      "diaobjectid": { "$first": "$diaobjectid" },
                       "prv_diasourceid": { "$first": "$prv_diasourceid" },
                       "prv_diaforcedsourceid": { "$first": "$prv_diaforcedsourceid" },
                       "msgtime": { "$first": "$timestamp" },

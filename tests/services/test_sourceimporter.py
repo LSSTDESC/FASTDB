@@ -1,12 +1,13 @@
 import pytest
 import datetime
 import time
+import numbers
 import random
 import psycopg.errors
 from psycopg import sql
 
 import db
-from util import env_as_bool, FDBLogger
+from util import env_as_bool, FDBLogger, datetime_to_utc
 from services.source_importer import SourceImporter
 from services.brokerconsumer import FinkConsumer
 
@@ -426,17 +427,27 @@ def test_read_mongo_brokerinfo( alerts_30days_sent_and_brokermessage_consumed, s
     si = SourceImporter( **sourceimporter_args )
     with db.DBCon( dictcursor=True ) as conn:
         si.read_mongo_brokerinfo( conn )
-        rows = conn.execute( "SELECT brokername, topic, diasourceid FROM temp_diasource_brokerinfo_import" )
-        assert len(rows) == 154
-        pginfos = set( ( r['brokername'], r['topic'], r['diasourceid'] ) for r in rows )
+        pginfos = conn.execute( "SELECT brokername, topic, diasourceid, prv_diasourceid, prv_diaforcedsourceid, info "
+                                "FROM temp_diasource_brokerinfo_import" )
         assert len(pginfos) == 154
+        pginfoids = set( ( r['brokername'], r['topic'], r['diasourceid'] ) for r in pginfos )
+        assert len(pginfoids) == 154
 
     # Make sure it matches what was in mongo
     with db.MGCon() as mg:
         col = mg.collection( 'fastdb_alertcycle_test_brokerinfo' )
-        docs = col.find( {}, projection={ 'brokername': 1, 'topic': 1, 'diasourceid': 1 } )
-        mginfos = set( ( d['brokername'], d['topic'], d['diasourceid'] ) for d in docs )
-        assert pginfos == mginfos
+        docs = list( col.find( {} ) )
+        mginfoids = set( ( d['brokername'], d['topic'], d['diasourceid'] ) for d in docs )
+        assert pginfoids == mginfoids
+        for doc in docs:
+            pginfo = [ p for p in pginfos if ( ( p['brokername'] == doc['brokername'] ) and
+                                               ( p['topic'] == doc['topic'] ) and
+                                               ( p['diasourceid'] == doc['diasourceid'] ) ) ]
+            assert len(pginfo) == 1
+            pginfo = pginfo[0]
+            assert pginfo['prv_diasourceid'] == doc['prv_diasourceid']
+            assert pginfo['prv_diaforcedsourceid'] == doc['prv_diaforcedsourceid']
+            assert pginfo['info'] == doc['info']
 
 
 def test_import_objects( import_first30days_objects ):
@@ -475,6 +486,7 @@ def test_import_sources( import_first30days_sources ):
     with db.DBCon( dictcursor=True ) as conn:
         sources = conn.execute( "SELECT * FROM diasource" )
         extras = conn.execute( "SELECT * FROM diasource_extra" )
+        brokerinfos = conn.execute( "SELECT * FROM diasource_brokerinfo" )
 
     assert len( sources ) == 77
     assert len( extras ) == len( sources )
@@ -482,11 +494,47 @@ def test_import_sources( import_first30days_sources ):
     assert min( s['midpointmjdtai'] for s in sources ) == pytest.approx( 60278.029, abs=0.01 )
     assert max( s['midpointmjdtai'] for s in sources ) ==  pytest.approx( 60303.211, abs=0.01 )
 
-    with db.MG() as mongoclient:
-        collection = db.get_mongo_collection( mongoclient, "source_thumbnails" )
-        assert collection.count_documents( {} ) == nsrc
+    with db.MGCon() as mg:
+        assert mg.collection( "source_thumbnails" ).count_documents({}) == nsrc
+        mgsources = list( mg.collection( "fastdb_alertcycle_test_diasource" ).find({}) )
+        mgsources_extra = list( mg.collection( "fastdb_alertcycle_test_diasource_extra" ).find({}) )
+        mgbrokerinfo = list( mg.collection( "fastdb_alertcycle_test_brokerinfo" ).find({}) )
 
-    # TODO :more?
+        for source in sources:
+            msource = [ s for s in mgsources if s['diasourceid'] == source['diasourceid'] ]
+            # There will be multiple matches because of previous sources.  We'll just compare against the first.
+            assert len(msource) > 0
+            msource = msource[0]
+            assert all( source[k] == ( pytest.approx( msource[k], rel=1e-6 )
+                                       if isinstance( msource[k], numbers.Real )
+                                       else msource[k] )
+                        for k in msource.keys() if k not in ( '_id', 'savetime' ) )
+
+        for source_extra in extras:
+            mextra = [ e for e in mgsources_extra if e['diasourceid'] == source_extra['diasourceid'] ]
+            # Again, multiple matches because of previous
+            assert len(mextra) > 0
+            mextra = mextra[0]
+            assert all( source_extra[k] == ( pytest.approx( mextra[k], rel=1e-6 )
+                                             if isinstance( mextra[k], numbers.Real )
+                                             else mextra[k] )
+                        for k in mextra.keys() if k  not in ( '_id', 'savetime' ) )
+
+        for info in brokerinfos:
+            minfo = [ i for i in mgbrokerinfo if ( ( i['brokername'], i['topic'], i['diasourceid'] ) ==
+                                                   ( info['brokername'], info['topic'], info['diasourceid'] ) ) ]
+            assert len(minfo) == 1
+            minfo = minfo[0]
+            assert ( set( k for k in info.keys() if k not in ( 'importtime', 'receivedtime', 'base_procver_id' ) )
+                     == set( k for k in minfo.keys() if k not in ( '_id', 'savetime' ) ) )
+            assert datetime_to_utc( info['receivedtime'] ) == datetime_to_utc( minfo['savetime'] )
+            assert all( info[k] == minfo[k] for k in [ 'prv_diasourceid', 'prv_diaforcedsourceid' ] )
+            assert all( info['info'][k] == minfo['info'][k]
+                        for k in ['brokerName', 'classifierName', 'classifierVersion' ] )
+            assert all( i['classId'] == m['classId']
+                        for i, m in zip( info['info']['classifications'], minfo['info']['classifications'] ) )
+            assert all( i['probability'] == pytest.approx( m['probability'], rel=1e-6 )
+                        for i, m in zip( info['info']['classifications'], minfo['info']['classifications'] ) )
 
 
 def test_import_prvforcedsources( import_30days_prvforcedsources ):
