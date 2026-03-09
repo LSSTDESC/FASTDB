@@ -383,6 +383,8 @@ class SourceImporter:
                       "brokername": { "$first": "$brokername" },
                       "topic": { "$first": "$topic" },
                       "diasourceid": { "$first": "$diasourceid" },
+                      "prv_diasourceid": { "$first": "$prv_diasourceid" },
+                      "prv_diaforcedsourceid": { "$first": "$prv_diaforcedsourceid" },
                       "msgtime": { "$first": "$timestamp" },
                       "receivedtime": { "$first": "$savetime" },
                       "importtime": { "$first": now },
@@ -391,6 +393,8 @@ class SourceImporter:
             pipeline.append( { "$group": group } )
             collection = mg.collection( f"{self.collection_base_name}_brokerinfo" )
             self._read_mongo_fields( dbcon, collection, pipeline, [ "brokername", "topic", "diasourceid",
+                                                                    "diaobjectid", "prv_diasourceid",
+                                                                    "prv_diaforcedsourceid",
                                                                     "msgtime", "receivedtime", "importtime",
                                                                     "info" ],
                                      "temp_diasource_brokerinfo_import", "diasource_brokerinfo",

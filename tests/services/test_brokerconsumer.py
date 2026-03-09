@@ -7,6 +7,7 @@ import random
 import multiprocessing
 import yaml
 
+from services.projectsim import AlertSender
 from services.brokerconsumer import (
     BrokerConsumer,
     BrokerConsumerLauncher,
@@ -14,11 +15,48 @@ from services.brokerconsumer import (
     AMPELConsumer,
     AntaresConsumer
 )
-from util import logger, env_as_bool
+from util import FDBLogger, env_as_bool
 import db
 
 
-def check_mongodb( collection_base_name, cached_alerts=False ):
+# This is a fixture that will send all alerts from days 30-90, but NOT
+# from days 0-30.  Reason to do this: so that we get sources that will
+# only show up in prvDiaSources.
+#
+# DO NOT USE THIS FIXTURE TOGETHER WITH ANYTHING FROM alertcycle.py
+# (other than fakebroker and barf), or chaos will ensue.
+@pytest.fixture( scope='module' )
+def alerts_30_to_90_sent_and_classified( snana_fits_ppdb_loaded, barf, fakebroker ):
+    try:
+        with db.DBCon() as dbcon:
+            # First, tell the system that it's already sent the first 30 days of alerts so that
+            #  it won't send them.
+            rows, _cols = dbcon.execute( "SELECT MIN(midpointmjdtai) AS minmjd FROM ppdb_diasource" )
+            t = rows[0][0] + 30
+            dbcon.execute( "INSERT INTO ppdb_alerts_sent(senttime, diaobjectid, visit) "
+                           "SELECT NOW(), diaobjectid, visit FROM ppdb_diasource "
+                           "WHERE midpointmjdtai<%(t)s",
+                           { 't': t } )
+            dbcon.commit()
+
+        sender = AlertSender( 'kafka-server', f'alerts-{barf}', make_cutouts=True )
+        nsent = sender( addeddays=60, reallysend=True )
+        assert nsent == 104
+        FDBLogger.info( "Sleeping 10 seconds to give fakebroker time to catch  up..." )
+        time.sleep( 10 )
+        FDBLogger.info( "...I hope fakebroker did its stuff." )
+        # ****
+        # For debugging, reduce output spam
+        fakebroker.terminate()
+        # ****
+        yield nsent, t
+    finally:
+        with db.DBCon() as dbcon:
+            dbcon.execute( "DELETE FROM ppdb_alerts_sent" )
+            dbcon.commit()
+
+
+def check_mongodb( collection_base_name, tfirstalert, cached_alerts=False ):
     base = collection_base_name
     with db.MGCon( readonly=True ) as mg:
         expectedcollections = set( [ f'{base}_{s}' for s in
@@ -32,57 +70,54 @@ def check_mongodb( collection_base_name, cached_alerts=False ):
             #   something is written to it.
             assert f'{base}_alertcache' in knowncollections
 
-        # 154 objects, only 12 unique
+        # 208 objects, only 29 unique
         msgcursor = mg.collection( f"{base}_diaobject" ).find( {}, projection={'diaobjectid': 1 } )
         objids = [ c['diaobjectid'] for c in msgcursor ]
-        assert len( objids ) == 154
-        assert len( set(objids) ) == 12
+        assert len( objids ) == 208
+        assert len( set(objids) ) == 29
 
         # Same number of cached alerts if we cached alerts
         nalerts = mg.collection( f'{base}_alertcache' ).count_documents( {} )
         assert nalerts == ( len( objids ) if cached_alerts else 0 )
 
-        # 154 sources + 770 previous sources, only 77 unique.  (154 = 2*77... two broker classifiers)
-        #   (Sadly, we're not really testing previous source import here, becasue of how
-        #   the fixtures are put together, the only previous sources we had were in earlier alerts.)
+        # 208 sources + 1326 previous sources, only 152 unique.
         msgcursor = mg.collection( f'{base}_diasource' ).find( {}, projection={'diasourceid': 1 } )
         srcids = [ c['diasourceid'] for c in msgcursor ]
-        assert len( srcids ) == 154 + 770
+        assert len( srcids ) == 208 + 1326
         msgcursor = mg.collection( f'{base}_diasource_extra' ).find( {}, projection={'diasourceid': 1 } )
         extsrcids = [ c['diasourceid'] for c in msgcursor ]
         assert len( extsrcids ) == len( srcids )
         srcids = set( srcids )
         extsrcids = set( extsrcids )
-        assert len( srcids ) == 77
+        assert len( srcids ) == 152
         assert extsrcids == srcids
 
-        # 1382 previous forced sources, only 148 unique
+        # 4044 previous forced sources, only 770 unique
         msgcursor = mg.collection( f'{base}_diaforcedsource' ).find( {}, projection={'diaforcedsourceid': 1} )
         frcedids = [ c['diaforcedsourceid'] for c in msgcursor ]
-        assert len( frcedids ) == 1382
+        assert len( frcedids ) == 4044
         msgcursor = mg.collection( f'{base}_diaforcedsource_extra' ).find( {}, projection={'diaforcedsourceid': 1} )
         extfrcedids = [ c['diaforcedsourceid'] for c in msgcursor ]
         assert len( extfrcedids ) == len( frcedids )
         frcedids = set( frcedids )
         extfrcedids = set( extfrcedids )
-        assert len( frcedids ) == 148
+        assert len( frcedids ) == 770
         assert extfrcedids == frcedids
 
         for broker in [ "FakeBroker-Nugent", "FakeBroker-Random" ]:
             msgcursor = mg.collection( f'{base}_brokerinfo' ).find( { "brokername": broker },
                                                                     projection={'diasourceid': 1} )
             bksrcids = [ c['diasourceid'] for c in msgcursor ]
-            assert len( bksrcids ) == len( srcids )
+            assert len( bksrcids ) == 104
             bksrcids = set( bksrcids)
-            assert len( bksrcids ) == len( srcids )
-            # This next one would not be true if we had actually imported anything from previous sources
-            assert bksrcids == srcids
+            assert len( bksrcids ) == 104
+            assert bksrcids.issubset( srcids )
 
         # Make sure that the artifical NULLs that fakebroker inserted got properly converted to NaN
         # (This is really here to make sure that we'll be putting the JSON importer through its workout
         # when we test sourceimporter.)
         coll = mg.collection( f'{base}_diaforcedsource' )
-        msgcursor = coll.find( { 'msg_diasourceid': 155218500013 } )
+        msgcursor = coll.find( { 'msg_diasourceid': 198154000011 } )
         num_nans = 0
         num_nones = 0
         for c in msgcursor:
@@ -94,16 +129,63 @@ def check_mongodb( collection_base_name, cached_alerts=False ):
         assert num_nans == 2
         assert num_nones == 0
 
+        # Slower: make sure lots of stuff matches what's in the alertcache
+        FDBLogger.info( "Verifying that saved info matches cached alerts..." )
+        if cached_alerts:
+            cachedalerts = list( mg.collection( f"{base}_alertcache" ).find( {} ) )
+            objects = list( mg.collection( f"{base}_diaobject" ).find( {} ) )
+            sources = list( mg.collection( f"{base}_diasource" ).find( {} ) )
+            forcedsources = list( mg.collection( f"{base}_diaforcedsource" ).find( {} ) )
+            brokerinfos = list( mg.collection( f"{base}_brokerinfo" ).find( {} ) )
+
+            assert ( set( c['msg']['diaObject']['diaObjectId'] for c in cachedalerts )
+                     == set( o['diaobjectid'] for o in objects ) )
+            allsources = set( c['msg']['diaSourceId'] for c in cachedalerts )
+            assert allsources.issubset( set( s['diasourceid'] for s in sources ) )
+            assert allsources == set( b['diasourceid'] for b in brokerinfos )
+            allforcedsources = set()
+            for c in cachedalerts:
+                if c['msg']['prvDiaSources'] is not None:
+                    allsources = allsources.union( set( m['diaSourceId'] for m in c['msg']['prvDiaSources'] ) )
+                if c['msg']['prvDiaForcedSources'] is not None:
+                    allforcedsources = allforcedsources.union( set( m['diaForcedSourceId']
+                                                                    for m in c['msg']['prvDiaForcedSources'] ) )
+            assert allsources == set( s['diasourceid'] for s in sources )
+            assert allforcedsources == set( f['diaforcedsourceid'] for f in forcedsources )
+
+            # TODO : check that the contents of the various collections match the contents
+            #   of the alert cache.  One thing we'll check here is the previous
+            #   source and forced source ids.
+
+            for b in brokerinfos:
+                cs = [ c for c in cachedalerts if c['msg']['diaSourceId'] == b['diasourceid'] ]
+                for c in cs:
+                    if b['prv_diasourceid'] is None:
+                        assert c['msg']['prvDiaSources'] is None
+                    else:
+                        assert b['prv_diasourceid'] == [ m['diaSourceId'] for m in c['msg']['prvDiaSources'] ]
+                    if b['prv_diaforcedsourceid'] is None:
+                        assert c['msg']['prvDiaForcedSources'] is None
+                    else:
+                        assert b['prv_diaforcedsourceid'] == [ m['diaForcedSourceId']
+                                                               for m in c['msg']['prvDiaForcedSources'] ]
+
+        FDBLogger.info( "...done verifying that saved info matches cached alerts." )
+
     # Make sure sources and previous sources match what's expected
     #  (Sadly, because of how this test works, there won't be any
     #   sources in previous sources that weren't also in sources.
     #   that'd be nice to be able to check all functionality.)
 
+    FDBLogger.info( "Verifying that consumed source ids match alerts sent..." )
     with db.DB() as conn:
         cursor = conn.cursor()
         cursor.execute( "SELECT s.diasourceid FROM ppdb_alerts_sent p\n"
-                        "INNER JOIN ppdb_diasource s ON p.diaobjectid=s.diaobjectid AND p.visit=s.visit" )
+                        "INNER JOIN ppdb_diasource s ON p.diaobjectid=s.diaobjectid AND p.visit=s.visit\n"
+                        "WHERE s.midpointmjdtai>=%(t)s",
+                        { 't': tfirstalert } )
         srcexpected = set( row[0] for row in cursor.fetchall() )
+        assert len( srcexpected ) == 104
 
         # For LSST, diaobjectid is not reliable and cannot be used this way.
         # But, its OK for the sample data set we have. And, since when I
@@ -117,7 +199,9 @@ def check_mongodb( collection_base_name, cached_alerts=False ):
                         "                                AND a.visit=sprime.visit\n"
                         "INNER JOIN ppdb_diasource s ON s.diaobjectid=sprime.diaobjectid\n"
                         "                           AND s.midpointmjdtai<sprime.midpointmjdtai\n"
-                        "GROUP BY s.diaobjectid, s.visit\n" )
+                        "WHERE sprime.midpointmjdtai>=%(t)s\n"
+                        "GROUP BY s.diaobjectid, s.visit\n",
+                        { 't': tfirstalert } )
         srcexpected = srcexpected.union( row[0] for row in cursor.fetchall() )
         assert srcexpected == srcids
 
@@ -127,11 +211,15 @@ def check_mongodb( collection_base_name, cached_alerts=False ):
                         "                           AND a.visit=s.visit\n"
                         "INNER JOIN ppdb_diaforcedsource f ON f.diaobjectid=s.diaobjectid\n"
                         "                                 AND f.midpointmjdtai<=s.midpointmjdtai-1\n"
-                        "GROUP BY f.diaobjectid, f.visit\n" )
+                        "WHERE s.midpointmjdtai>=%(t)s\n"
+                        "GROUP BY f.diaobjectid, f.visit\n",
+                        { 't': tfirstalert } )
         prvfrcedexpected = set( row[0] for row in cursor.fetchall() )
         assert prvfrcedexpected == frcedids
 
     # TODO : more checks?
+
+    FDBLogger.info( "...done verifying that consumed source ids match alerts sent" )
 
 
 def cleanup_mongodb( collection_base_name ):
@@ -146,8 +234,10 @@ def cleanup_mongodb( collection_base_name ):
         assert not any( c in mg.db.list_collection_names() for c in colnames )
 
 
-def test_BrokerConsumer( barf, alerts_30days_sent_and_classified ):
+def test_BrokerConsumer( barf, alerts_30_to_90_sent_and_classified ):
     brokertopic = f'classifications-{barf}'
+    nsent, tfirstalert = alerts_30_to_90_sent_and_classified
+    assert nsent == 104
 
     try:
         # First, make sure it times out properly if it never sees a topic
@@ -173,7 +263,7 @@ def test_BrokerConsumer( barf, alerts_30days_sent_and_classified ):
         assert time.perf_counter() - t0 < 20
 
         # Check that the mongo database got populated
-        check_mongodb( 'fastdb_test' )
+        check_mongodb( 'fastdb_test', tfirstalert )
 
         cleanup_mongodb( 'fastdb_test' )
 
@@ -184,7 +274,7 @@ def test_BrokerConsumer( barf, alerts_30days_sent_and_classified ):
                              cache_alerts=True )
         bc.poll( restart_time=datetime.timedelta(seconds=10), max_restarts=0, notopic_sleeptime=2 )
         assert time.perf_counter() - t0 < 20
-        check_mongodb( 'fastdb_test', cached_alerts=True )
+        check_mongodb( 'fastdb_test', tfirstalert, cached_alerts=True )
 
     finally:
         cleanup_mongodb( 'fastdb_test' )
@@ -195,7 +285,9 @@ def test_BrokerConsumer( barf, alerts_30days_sent_and_classified ):
 #   dockerfile created by docker-compose.yaml at the root of the
 #   git checkout.
 #   (i.e., it looks for file /code/tests/services/brokerconsumer.yaml).
-def test_BrokerConsumerLauncher( barf, alerts_30days_sent_and_classified ):
+def test_BrokerConsumerLauncher( barf, alerts_30_to_90_sent_and_classified ):
+    _nsent, tfirstalert = alerts_30_to_90_sent_and_classified
+
     proc = None
     try:
         def launch_launcher():
@@ -206,18 +298,18 @@ def test_BrokerConsumerLauncher( barf, alerts_30days_sent_and_classified ):
         proc = multiprocessing.Process( target=launch_launcher )
         proc.start()
         # Give it 10 seconds to do its stuff
-        logger.info( "Sleeping 10s for BrokerConsumerLauncher to do its thing" )
+        FDBLogger.info( "Sleeping 10s for BrokerConsumerLauncher to do its thing" )
         time.sleep( 10 )
         # Kill the BrokerConsumerLauncher
-        logger.info( "Sending TERM to BrokerConsumerLauncher" )
+        FDBLogger.info( "Sending TERM to BrokerConsumerLauncher" )
         proc.terminate()
         proc.join()
-        logger.info( "Closing BrokerConsumerLauncher" )
+        FDBLogger.info( "Closing BrokerConsumerLauncher" )
         proc.close()
         proc = None
 
         # Check that the mongo database got populated
-        check_mongodb( 'fastdb_test' )
+        check_mongodb( 'fastdb_test', tfirstalert )
 
     finally:
         if proc is not None:
@@ -247,7 +339,7 @@ def test_fink():
                            consume_timeout=1, nomsg_sleeptime=1, batch_size=10, cache_alerts=True )
         fc.poll( restart_time=datetime.timedelta(seconds=10), max_restarts=0, notopic_sleeptime=2, max_msgs=10 )
         t1 = time.perf_counter()
-        logger.info( f"Fink poll finished in {t1-t0} seconds." )
+        FDBLogger.info( f"Fink poll finished in {t1-t0} seconds." )
 
         expectedcollections = [ f'fastdb_fink_test_{s}' for s in
                                 [ 'diaobject', 'diasource', 'diasource_extra',
@@ -305,7 +397,7 @@ def test_ampel_justpull():
                             username=username, password=password )
         ac.poll( restart_time=datetime.timedelta(seconds=10), max_restarts=0, notopic_sleeptime=2, max_msgs=10 )
         t1 = time.perf_counter()
-        logger.info( f"AMPEL poll finished in {t1-t0} seconds." )
+        FDBLogger.info( f"AMPEL poll finished in {t1-t0} seconds." )
 
         with db.MGCon() as mg:
             assert 'fastdb_test_ampel_alertcache' in mg.db.list_collection_names()
@@ -347,7 +439,7 @@ def test_antares():
         # REmove this with a call to poll once I've figured out how to use ANTARES
         ac.create_connection()
         t1 = time.perf.counter()
-        logger.info( f"Created ANTARES connection in {t1-t0} seconds" )
+        FDBLogger.info( f"Created ANTARES connection in {t1-t0} seconds" )
         import pdb; pdb.set_trace()
         pass
 

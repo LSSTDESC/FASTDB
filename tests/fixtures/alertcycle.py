@@ -59,7 +59,7 @@ def fakebroker( barf ):
         logger.info( "Starting fakebroker." )
         proc.start()
 
-        yield True
+        yield proc
 
     finally:
         if proc is not None:

@@ -78,10 +78,13 @@ class BrokerConsumer:
           }
 
        {mongodb_collection_base}_brokerinfo
-          { 'diasourceid': long long [INDEX],
-            'savetime': datetime [INDEX],
-            'brokername': str,
+          { 'brokername': str,
             'topic': str,
+            'diasourceid': long long [INDEX],
+            'diaobjectid': long long,
+            'prv_diasourceid': array of long long or null,
+            'prv_diaforcedsourceid': array of long long or null,
+            'savetime': datetime [INDEX],
             'msgtime': str,
             'info': dict
           }
@@ -427,7 +430,7 @@ class BrokerConsumer:
         out = cls._filter_dict_to_table(submsg, db.DiaSourceExtra.tablemeta() )
         if ( ( len(out) == 0 )
              and ( not any( i in submsg for i in [ db.DiaSourceExtra._flags_bits.values() ] ) )
-             and ( not any( i in submsg for i in [ db.DiaSoruceExtra._pixelflags_bits.values() ] ) )
+             and ( not any( i in submsg for i in [ db.DiaSourceExtra._pixelflags_bits.values() ] ) )
             ):
             return None
         out['msg_diasourceid'] = msg['diaSourceId']
@@ -534,10 +537,15 @@ class BrokerConsumer:
                 thumbnailses.append( stuff['thumbnails'] )
 
             brokerinfos.append(
-                { 'diasourceid': msg['diaSourceId'],
-                  'savetime': metamsg['savetime'],
-                  'brokername': metamsg['brokername'],
+                { 'brokername': metamsg['brokername'],
                   'topic': metamsg['topic'],
+                  'diasourceid': msg['diaSourceId'],
+                  'diaobjectid': msg['diaObject']['diaObjectId'],
+                  'prv_diasourceid': ( None if msg['prvDiaSources'] is None
+                                       else [ m['diaSourceId'] for m in msg['prvDiaSources'] ] ),
+                  'prv_diaforcedsourceid': ( None if msg['prvDiaForcedSources'] is None
+                                             else [ m['diaForcedSourceId'] for m in msg['prvDiaForcedSources'] ] ),
+                  'savetime': metamsg['savetime'],
                   'msgtime': metamsg['timestamp'],
                   'info': { k:v for k, v in msg.items() if k not in self._standard_lsst_alert_fields }
                  }

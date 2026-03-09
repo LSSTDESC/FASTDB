@@ -1,3 +1,5 @@
+# EDITING OF THIS MODULE IS IN PROGRESS, IT'S CURRENTLY BROKEN
+
 import sys
 import io
 import datetime
@@ -6,7 +8,7 @@ import logging
 
 import pandas
 import astropy.time
-from psycopg import sql
+# from psycopg import sql
 
 import db
 import util
@@ -443,44 +445,44 @@ def get_spectrum_info( logger=None, **kwargs ):
             logout.setFormatter( formatter )
             logger.setLevel( logging.INFO )
 
-    with db.DBCon() as con:
-        q = sql.SQL( "SELECT * FROM spectruminfo " )
+    # with db.DBCon() as con:
+    #     q = sql.SQL( "SELECT * FROM spectruminfo " )
 
-        # Backwards compatibility
-        if 'since' in kwargs:
-            kwargs['inserted_at_min'] = kwargs['since']
-            del kwargs['since']
-        if 'root_diaobject_ids' in kwargs:
-            kwargs['root_diaobject_id'] = kwargs['root_diaobject_ids']
-            del kwargs['root_diaobject_ids']
+    #     # Backwards compatibility
+    #     if 'since' in kwargs:
+    #         kwargs['inserted_at_min'] = kwargs['since']
+    #         del kwargs['since']
+    #     if 'root_diaobject_ids' in kwargs:
+    #         kwargs['root_diaobject_id'] = kwargs['root_diaobject_ids']
+    #         del kwargs['root_diaobject_ids']
 
-        # searchspec = {
-        #     'root_diaobject_id':  { 'mult': True,  'substr': False, 'minmax': False },
-        #     'facility':           { 'mult': True,  'substr': True,  'minmax': True },
-        #     'mjd':                { 'mult': False, 'substr': False, 'minmax': True },
-        #     'z':                  { 'mult': False, 'substr': False, 'minmax': True },
-        #     'class_description':  { 'mult': True,  'substr': True,  'minmax': False },
-        #     'classid':            { 'mult': True,  'substr': False, 'minmax': True }
-        # }
+    #     # searchspec = {
+    #     #     'root_diaobject_id':  { 'mult': True,  'substr': False, 'minmax': False },
+    #     #     'facility':           { 'mult': True,  'substr': True,  'minmax': True },
+    #     #     'mjd':                { 'mult': False, 'substr': False, 'minmax': True },
+    #     #     'z':                  { 'mult': False, 'substr': False, 'minmax': True },
+    #     #     'class_description':  { 'mult': True,  'substr': True,  'minmax': False },
+    #     #     'classid':            { 'mult': True,  'substr': False, 'minmax': True }
+    #     # }
 
-        # for field, fieldinfo in searchspec:
-        #     if field in kwargs:
-        #         if util.isSequence( kwargs[field] ):
-        #             if not fieldinfo[ 'mult' ]:
-        #                 raise ValueError( f"Field {field} can't be a list" )
-        #             q += sql.SQL( "{where} {field}=ANY(%(field)s)" ).format( where=sql.SQL(where),
-        #                                                                      field=sql.Identifier(field) )
-        #             subdict['field'] = list( kwargs[field] )
-        #         else:
-        #             q += sql.SQL( f"{where} {field}=%(field)s" ).format( where=sql.SQL(where),
-        #                                                                  field=sql.Identifier(field) )
-        #             subdict['field'] = kwargs[field]
-        #         where = " AND "
+    #     # for field, fieldinfo in searchspec:
+    #     #     if field in kwargs:
+    #     #         if util.isSequence( kwargs[field] ):
+    #     #             if not fieldinfo[ 'mult' ]:
+    #     #                 raise ValueError( f"Field {field} can't be a list" )
+    #     #             q += sql.SQL( "{where} {field}=ANY(%(field)s)" ).format( where=sql.SQL(where),
+    #     #                                                                      field=sql.Identifier(field) )
+    #     #             subdict['field'] = list( kwargs[field] )
+    #     #         else:
+    #     #             q += sql.SQL( f"{where} {field}=%(field)s" ).format( where=sql.SQL(where),
+    #     #                                                                  field=sql.Identifier(field) )
+    #     #             subdict['field'] = kwargs[field]
+    #     #         where = " AND "
 
-        #     if f'field_contains' in kwargs:
-        #         if not fieldinfo['mult']:
-        #             raise ValueError( f'Field {field} doesn\'t work with "contains"' )
-        #         q += sql.SQL( f"{where} {field}="%%%(field)s%%" ).format( field=
+    #     #     if f'field_contains' in kwargs:
+    #     #         if not fieldinfo['mult']:
+    #     #             raise ValueError( f'Field {field} doesn\'t work with "contains"' )
+    #     #         q += sql.SQL( f"{where} {field}="%%%(field)s%%" ).format( field=
 
 
 

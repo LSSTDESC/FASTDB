@@ -98,7 +98,7 @@ class Classifier:
             # FOR TESTING PURPOSES
             # Pick out a source whose prvDiaSoruces flux will be set to null
             #   can make sure the rest of the code's null handing
-            if alert['diaSourceId'] == 155218500013:
+            if alert['diaSourceId'] == 198154000011:
                 alert['prvDiaForcedSources'][0]['psfFlux'] = None
                 alert['prvDiaForcedSources'][0]['psfFluxErr'] = None
                 self.logger.warning( f"Set first prvDiaForcedSource flux to null for diasource {alert['diaSourceId']}" )
