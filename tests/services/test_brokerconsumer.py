@@ -13,7 +13,8 @@ from services.brokerconsumer import (
     BrokerConsumerLauncher,
     FinkConsumer,
     AMPELConsumer,
-    AntaresConsumer
+    AntaresConsumer,
+    PittGoogleConsumer
 )
 from util import FDBLogger, env_as_bool
 import db
@@ -380,6 +381,31 @@ def test_fink():
         with db.MGCon() as mg:
             for col in expectedcollections:
                 mg.collection( col ).drop()
+
+
+@pytest.mark.skipif( not env_as_bool('RUN_PITTGOOGLE_TESTS'), reason='RUN_PITTGOOGLE_TESTS is not set' )
+def test_pittgoogle():
+    barf = "".join( random.choices( 'abcdefghijklmnopqrstuvwxyz', k=6 ) )
+    brokertopic = 'lsst-loop'
+    groupid = f'fastdb-test-{barf}'
+    extraconfig = { 'survey': 'lsst',
+                    'name': brokertopic
+                   }
+    os.environ['GOOGLE_CLOUD_PROJECT'] = 'fastdb-test-20251103'
+    os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = '/secrets/fastdb-test-20251103-41b12811558d.json'
+
+    try:
+        t0 = time.perf_counter()
+        pgb = PittGoogleConsumer( groupid=groupid, max_workers=2, batch_maxn=10, batch_maxwait=5,
+                                  mongodb_collection_base='fastdb_test_pittgoogle', extraconfig=extraconfig )
+        FDBLogger.info( "Running PittGoogleBroker.poll() for 10s...." )
+        pgb.poll( restart_time=datetime.timedelta( seconds=10 ) )
+        dt = time.perf_counter() - t0
+        FDBLogger.info( f"Returned from PittGoogleBroker.poll(), it handled {pgb.nmessagesconsumed} messages.  "
+                        f"Creaton plus poll time: {dt:.2s} sec." )
+
+    finally:
+        pass
 
 
 @pytest.mark.skipif( not env_as_bool('RUN_AMPEL_TESTS'), reason='RUN_AMPEL_TESTS is not set' )

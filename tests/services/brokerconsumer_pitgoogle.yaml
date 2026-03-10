@@ -1,6 +1,6 @@
 brokers:
   - name: "Pitt-Google"
-    class: PittGoogleBroker
+    class: PittGoogleConsumer
     server: null
     topics: null
     groupid: fastdb-iteration1
@@ -13,10 +13,14 @@ brokers:
     restart_time_min: 0.1
     max_restarts: null
     notopic_sleeptime_sec: 5
+    max_workers: 2
+    batch_maxn: 10
+    batch_maxwait: 2
     extraconfig:
       google_cloud_project: fastdb-test-20251103
       google_cloud_key_file: /secrets/fastdb-test-20251103-be3c5e9d0734.json
-      name: 'alerts'
+      name: 'lsst-loop'
+      # 'lsst-loop' is like alerts, but looping an archived alert every 1sec so there are always things there.
       # 'alerts' is just the lsst alerts straight, v10.0 schema
       # 'supernnova'  --> will have top level keys 'alert_light' and 'value_added'
       # 'upsilon'

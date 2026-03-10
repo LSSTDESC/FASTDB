@@ -11,6 +11,7 @@ import pathlib
 import urllib
 import logging
 import argparse
+import functools
 import multiprocessing
 import signal
 import simplejson
@@ -902,7 +903,7 @@ class AlerceConsumer(BrokerConsumer):
 
 # =====================================================================
 
-class PittGoogleBroker(BrokerConsumer):
+class PittGoogleConsumer(BrokerConsumer):
     """Pitt-Google-Hernandez Broker
 
     cf: https://mwvgroup.github.io/pittgoogle-client/api-reference/pubsub.html
@@ -922,24 +923,40 @@ class PittGoogleBroker(BrokerConsumer):
         loggername: str = "PITTGOOGLE",
         **kwargs
     ):
-        super().__init__(server=None, groupid=None, loggername=loggername, **kwargs)
+        super().__init__(server=None, groupid='not_used', brokername_for_alerts="Pitt-Google",
+                         loggername=loggername, **kwargs)
 
-        neededconfig = [ 'name', 'survey', 'google_cloud_project', 'google_cloud_key_file' ]
+        neededconfig = [ 'name', 'survey' ] # , 'google_cloud_project', 'google_cloud_key_file' ]
         if any( i not in self.extraconfig for i in neededconfig ):
             raise ValueError( f"need in extraconfig: {neededconfig}" )
 
+        # I would prefer it if I could pass the arguments explicitly as function arguments, but
+        #  I haven't figured out how ot get that to work, and it may not work with
+        #  pitgoogle.Topic.from_cloud.
+        if ( os.getenv("GOOGLE_CLOUD_PROJECT") is None ) or ( os.getenv("GOOGLE_APPLICATION_CREDENTIALS" ) is None ):
+            raise ValueError( "Need to set env vars GOOGLE_CLOUD_PROJECT and GOOGLE_APPLICATION_CREDENTIALS" )
+
         testid = self.extraconfig['testid'] if 'testid' in self.extraconfig else False
 
-        auth = pittgoogle.auth.Auth( GOOGLE_CLOUD_PROJECT=self.extraconfig['google_cloud_project'],
-                                     GOOGLE_APPLICATION_CREDENTIALS=self.extraconfig['google_cloud_key_file'] )
         topic = pittgoogle.Topic.from_cloud( name=self.extraconfig['name'],
                                              survey=self.extraconfig['survey'],
                                              testid=testid,
                                              projectid=pittgoogle.ProjectIds().pittgoogle )
-        subscription = pittgoogle.pubsub.Subscription(name=groupid,
-                                                      topic=topic,
-                                                      auth=auth,
-                                                      schema_name="lsst")
+        subscription = pittgoogle.Subscription( name=groupid,
+                                                topic=topic,
+                                                schema_name="lsst" )
+
+        # auth = pittgoogle.auth.Auth( GOOGLE_CLOUD_PROJECT=self.extraconfig['google_cloud_project'],
+        #                              GOOGLE_APPLICATION_CREDENTIALS=self.extraconfig['google_cloud_key_file'] )
+        # topic = pittgoogle.Topic.from_cloud( name=self.extraconfig['name'],
+        #                                      survey=self.extraconfig['survey'],
+        #                                      testid=testid,
+        #                                      projectid=pittgoogle.ProjectIds().pittgoogle )
+        # subscription = pittgoogle.pubsub.Subscription(name=groupid,
+        #                                               topic=topic,
+        #                                               auth=auth,
+        #                                               schema_name="lsst")
+
         self.topic = subscription.topic.name
 
         # if the subscription doesn't already exist, this will create one
@@ -973,6 +990,9 @@ class PittGoogleBroker(BrokerConsumer):
         """Callback that will process a single message. This will run in a background thread."""
 
         self.logger.info( "In handle_message" )
+        import pdb; pdb.set_trace()
+
+        self.nmessagesconsumed += 1
 
         self.logger.warning( f"alert is a {type(alert)}, alert.msg is a {type(alert.msg)} and is {alert.msg}" )
         message = {
@@ -994,19 +1014,47 @@ class PittGoogleBroker(BrokerConsumer):
     def handle_message_batch(self, messagebatch: list) -> None:
         """Callback that will process a batch of messages. This will run in the main thread."""
 
-        self.logger.info( "In handle_message_batch" )
-        # import pdb; pdb.set_trace()
+        self.logger.info( f"In handle_message_batch, handling {len(messagebatch)} messages" )
+        import pdb; pdb.set_trace()
 
-        nadded = self.mongodb_store( messagebatch )
-        self.countlogger.info( f"...added {nadded} messages to mongodb {self.mongodb_dbname} "
-                               f"collection {self.mongodb_collection}" )
+        self.nmessagesconsumed += len(messagebatch)
+
+        # nadded = self.mongodb_store( messagebatch )
+        # self.countlogger.info( f"...added {nadded} messages to mongodb {self.mongodb_dbname} "
+        #                        f"collection {self.mongodb_collection}" )
 
 
-    # ROB TODO : think about **kwargs here, maybe we should do something with the standard values
-    def poll(self, **kwargs):
-        # this blocks indefinitely or until a fatal error
-        # use Control-C to exit
-        self.consumer.stream( pipe=self.pipe, heartbeat=60 )
+    def poll(self, reset=None, restart_time=None, max_restarts=None, max_msgs=None, **kwargs ):
+        if len(kwargs) > 0:
+            raise RuntimeError( f"Parameters unknown to PittGoogleBroker.poll: {list(kwargs.keys())}" )
+
+        if max_restarts is not None:
+            raise NotImplementedError( "Actual restarts not yet implemented; "
+                                       "restart_time is just a straight timeout." )
+        if max_msgs is not None:
+            raise NotImplementedError( "max_msgs is not supported" )
+
+
+        if restart_time is None:
+            self.consumer.stream( pipe=self.pipe, heartbeat=60 )
+        else:
+            if not isinstance( restart_time, datetime.timedelta ):
+                raise TypeError( f"restart_time must be a datetime.timedelta, not a {type(restart_time)}" )
+
+            def launch_stream( obj ):
+                obj.consumer.stream( pipe=obj.pipe, heartbeat=60 )
+
+            launcher = functools.partial( launch_stream, self )
+            proc = multiprocessing.Process( launcher )
+            self.logger.info( f"Starting poll process for PittGoogleBroker, running for {str(restart_time)}" )
+            proc.start()
+            time.sleep( restart_time.total_seconds() )
+            self.logger.info( f"Sending SIGINT to poll process after {str(restart_time)}" )
+            self.countlogger.info( f"Sending SIGINT to poll process after {str(restart_time)}" )
+            proc.interrupt()
+            proc.join()
+            self.logger.info( "Poll process has ended." )
+            proc.close()
 
 
 class BrokerConsumerLauncher:
@@ -1142,7 +1190,9 @@ class BrokerConsumerLauncher:
         brokers = []
         clsmap = { 'BrokerConsumer': BrokerConsumer,
                    'FinkConsumer': FinkConsumer,
-                   'PittGoogleBroker': PittGoogleBroker }
+                   'PittGoogleConsumer': PittGoogleConsumer }
+
+        # WARNING -- this code may not work as is for the PittGoogleConsumer, look into that
 
         # Parse the config for all brokers before launching anything, so that if we get an exception
         #   we won't have started subprocesses.

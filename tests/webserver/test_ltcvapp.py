@@ -21,7 +21,7 @@ def test_getmanyltcvs( test_user, fastdb_client, set_of_lightcurves ):
             #   redoing the set_of_lightcurves fixture and every test that
             #   depends on it makes me shudder.
             infodex = info_str_rootid.index( rootid )
-            thisltcv = ltcvs[ [ str(l['rootid']) for l in ltcvs ].index( rootid ) ]
+            thisltcv = ltcvs[ [ str(lc['rootid']) for lc in ltcvs ].index( rootid ) ]
             if include_base_procver:
                 expectedkeys = [ 'diaobjectid', 'obj_base_procverid', 'pos_base_procver_id',
                                  'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ]
