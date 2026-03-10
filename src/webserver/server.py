@@ -58,7 +58,7 @@ class ProcVer( BaseView ):
         with db.DBCon() as con:
             pvid = db.ProcessingVersion.procver_id( procver, dbcon=con )
             if pvid is None:
-                return f"Unknown processing version {procver}", 500
+                return f"Unknown processing version {procver}", 422
 
             retval = { 'status': 'ok', 'id': None, 'description': None, 'aliases': [], 'base_procvers': [] }
             row, _ = con.execute( "SELECT id,description FROM processing_version WHERE id=%(pv)s", { 'pv': pvid } )
@@ -118,7 +118,7 @@ class CountThings( BaseView ):
         tablemap['diaforcedsource'] = tablemap['forced']
 
         if which not in tablemap:
-            return f"Unknown thing to count: {which}", 500
+            return f"Unknown thing to count: {which}", 422
         table = tablemap[ which ][0]
         objfields = tablemap[ which ][1]
 

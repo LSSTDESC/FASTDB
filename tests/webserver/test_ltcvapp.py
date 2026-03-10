@@ -58,59 +58,72 @@ def test_getmanyltcvs( test_user, fastdb_client, set_of_lightcurves ):
     ltcvs = ltcv.many_object_ltcvs( 'pvc_pv3', [ 200, 201, 202 ], return_format='json', which='patch' )
     res = fastdb_client.post( '/ltcv/getmanyltcvs', json={ 'objids': [ 200, 201, 202 ],
                                                            'object_procver': 'pvc_pv2' } )
-    import pdb; pdb.set_trace()
     assert 'ispatch' in res[ str(roots[0]['root'].id) ]['ltcv'].keys()
     _check_res( infos, ltcvs, res )
 
+    # Default is pv3, which should be identical to pv2, except there are no objects in
+    #   pv2, so we have to give it an object_procver to avoid an error
+    with pytest.raises( RuntimeError, match=( "Error response from server, status 422: rootids from "
+                                              "many_object_ltcvs and get_object_infos don't match; "
+                                              "you probably have the wrong object_procver." ) ):
+        _ = fastdb_client.post( '/ltcv/getmanyltcvs',
+                                json={ 'objids': [ str(roots[i]['root'].id) for i in [0, 1, 2] ] } )
+    resdef = fastdb_client.post( '/ltcv/getmanyltcvs',
+                                 json={ 'objids': [ str(roots[i]['root'].id) for i in [0, 1, 2] ],
+                                        'object_procver': 'pvc_pv2' } )
+    _check_res( infos, ltcvs, resdef )
+    assert res == resdef
+
+    # If we just give it procver pv2, then the object procver shouldn't be needed.
     res = fastdb_client.post( '/ltcv/getmanyltcvs/pvc_pv2',
                               json={ 'objids': [ str(roots[i]['root'].id) for i in [0, 1, 2] ] } )
     _check_res( infos, ltcvs, res )
 
-    # Default is pv3, which should be identical to pv2
-    resdef = fastdb_client.post( '/ltcv/getmanyltcvs',
-                                 json={ 'objids': [ str(roots[i]['root'].id) for i in [0, 1, 2] ] } )
-    _check_res( infos, ltcvs, resdef )
-    assert res == resdef
-
     # Test mjd_now
-    resdefnow = fastdb_client.post( '/ltcv/getmanyltcvs',
+    resdefnow = fastdb_client.post( '/ltcv/getmanyltcvs/pvc_pv2',
                                     json={ 'objids': [ str(roots[i]['root'].id) for i in [0, 1, 2] ],
                                            'mjd_now': 60041. } )
     for d in resdefnow.values():
         assert all( [ m <= 60041 for m in d['ltcv']['mjd'] ] )
-    for mess in ltcvs.values():
-        for k in ( 'mjd', 'band', 'flux', 'fluxerr', 'isdet', 'ispatch' ):
+    for mess in ltcvs:
+        # ...zip is magic.  It will only provide as many elements as the
+        # shorter of the two arrays.  So, we don't have to worry if mjd
+        # gets truncated before another.  (It actually makes me feel a
+        # little queasy that zip is magic like this...  I might rather
+        # get an exception?)
+        for k in mess.keys():
+            if k == 'rootid':
+                continue
             mess[k] = [ i for i, m in zip( mess[k], mess['mjd'] ) if m <= 60041 ]
     _check_res( infos, ltcvs, resdef )
 
     # Only the first object exists in pv1
-    infos = ltcv.get_object_infos( [ 100 ], return_format='json' )
+    infos = ltcv.get_object_infos( [ 100 ], processing_version='pvc_pv1', return_format='json' )
     ltcvs = ltcv.many_object_ltcvs( 'pvc_pv1', 100, return_format='json', which='patch' )
     res = fastdb_client.post( '/ltcv/getmanyltcvs/pvc_pv1',
                               json={ 'objids': [ str(roots[i]['root'].id) for i in [0, 1, 2] ] } )
-    assert list( res.keys() ) == [ '100' ]
+    assert list( res.keys() ) == [ str(roots[0]['root'].id) ]
     _check_res( infos, ltcvs, res )
 
     # Test which='detections' and 'forced'
-    infos = ltcv.get_object_infos( [ 200, 201, 202 ], return_format='json' )
+    infos = ltcv.get_object_infos( [ 200, 201, 202 ], processing_version='pvc_pv2', return_format='json' )
     ltcvs = ltcv.many_object_ltcvs( 'pvc_pv2', [ 200, 201, 202 ], return_format='json', which='detections' )
-    res = fastdb_client.post( '/ltcv/getmanyltcvs', json={ 'objids': [ 200, 201, 202 ], 'which': 'detections' } )
-    assert 'ispatch' not in res['200']['ltcv'].keys()
-    _check_res( infos, ltcvs, res )
+    res = fastdb_client.post( '/ltcv/getmanyltcvs/pvc_pv2',
+                              json={ 'objids': [ 200, 201, 202 ], 'which': 'detections' } )
+    _check_res( infos, ltcvs, res, which='detections' )
 
-    infos = ltcv.get_object_infos( [ 200, 201, 202 ], return_format='json' )
+    infos = ltcv.get_object_infos( [ 200, 201, 202 ], processing_version='pvc_pv2', return_format='json' )
     ltcvs = ltcv.many_object_ltcvs( 'pvc_pv2', [ 200, 201, 202 ], return_format='json', which='forced' )
-    res = fastdb_client.post( '/ltcv/getmanyltcvs', json={ 'objids': [ 200, 201, 202 ], 'which': 'forced' } )
-    assert 'ispatch' not in res['200']['ltcv'].keys()
-    _check_res( infos, ltcvs, res )
+    res = fastdb_client.post( '/ltcv/getmanyltcvs/pvc_pv2',
+                              json={ 'objids': [ 200, 201, 202 ], 'which': 'forced' } )
+    _check_res( infos, ltcvs, res, which='forced' )
 
     # Test 'ispatch' where patch it matters (i.e. where there are sources without corresponding forced sources)
-    infos = ltcv.get_object_infos( [ 0, 1, 2 ], return_format='json' )
+    infos = ltcv.get_object_infos( [ 0, 1, 2 ], processing_version='realtime', return_format='json' )
     ltcvs = ltcv.many_object_ltcvs( 'realtime', [ 0, 1, 2 ], return_format='json', which='patch' )
     res = fastdb_client.post( '/ltcv/getmanyltcvs/realtime', json={ 'objids': [ 0, 1, 2 ], 'which': 'patch' } )
-    assert 'ispatch' in res['0']['ltcv'].keys()
-    assert any( res['2']['ltcv']['ispatch'] )
-    assert not all( res['2']['ltcv']['ispatch'] )
+    assert any( res[ str(roots[2]['root'].id) ][ 'ltcv' ][ 'ispatch' ] )
+    assert not all( res[ str(roots[2]['root'].id) ][ 'ltcv' ][ 'ispatch' ] )
     _check_res( infos, ltcvs, res )
 
 

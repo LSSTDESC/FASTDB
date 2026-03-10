@@ -30,6 +30,14 @@ class UUIDJSONEncoder( simplejson.JSONEncoder ):
 
 # ======================================================================
 
+class FASTDBWebException( RuntimeError ):
+    def __init__( self, *args, returncode=422, **kwargs ):
+        self.returncode = returncode
+        super().__init__( *args, **kwargs )
+
+
+# ======================================================================
+
 class BaseView( flask.views.View ):
     """A BaseView that all other views can be based on.
 
@@ -103,4 +111,7 @@ class BaseView( flask.views.View ):
             # traceback.print_exc( file=sio )
             # FDBLogger.debug( sio.getvalue() )
             FDBLogger.exception( str(ex) )
-            return str(ex), 500
+            if isinstance( ex, FASTDBWebException ):
+                return str(ex), ex.returncode
+            else:
+                return str(ex), 500

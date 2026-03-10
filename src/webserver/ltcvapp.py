@@ -7,7 +7,7 @@ import db
 import ltcv
 import util
 from util import FDBLogger
-from webserver.baseview import BaseView
+from webserver.baseview import BaseView, FASTDBWebException
 
 
 # ======================================================================
@@ -88,9 +88,9 @@ class GetManyLtcvs( BaseView ):
             try:
                 objids = [ util.asUUID( o ) for o in objids ]
             except ValueError:
-                raise ValueError( f"objids must be a list of integers or a list of uuids, got {objids}" )
+                raise FASTDBWebException( f"objids must be a list of integers or a list of uuids, got {objids}" )
         if len( objids ) == 0:
-            raise ValueError( "no objids requested" )
+            raise FASTDBWebException( "no objids requested" )
 
         bands = None
         which = 'patch'
@@ -105,12 +105,12 @@ class GetManyLtcvs( BaseView ):
             unknown = set( data.keys() ) - { 'bands', 'which', 'mjd_now', 'object_procver', 'position_procver',
                                              'include_base_procver', 'include_source_ids', 'include_source_positions' }
             if len(unknown) > 0:
-                raise ValueError( f"Unknown data parameters: {unknown}" )
+                raise FASTDBWebException( f"Unknown data parameters: {unknown}" )
             if 'bands' in data:
                 bands = data['bands']
             if 'which' in data:
                 if data['which'] not in ( 'detections', 'forced', 'patch' ):
-                    raise ValueError( f"Unknown value of which: {which}" )
+                    raise FASTDBWebException( f"Unknown value of which: {which}" )
                 which = data['which']
             if 'mjd_now' in data:
                 mjd_now = float( data['mjd_now'] )
@@ -167,8 +167,8 @@ class GetManyLtcvs( BaseView ):
                              f"procver = {procver}\n"
                              f"foundrootids - objinfoids = {foundrootids - objinfoids}\n"
                              f"objinfoids - foundrootids = {objinfoids - foundrootids}\n" )
-            raise RuntimeError( "rootids from many_object_ltcvs and get_object_infos don't match; "
-                                "you probably have the wrong object_procver." )
+            raise FASTDBWebException( "rootids from many_object_ltcvs and get_object_infos don't match; "
+                                      "you probably have the wrong object_procver." )
 
         rval = {}
         for rootid, thisltcv in ltcvs.items():
@@ -191,7 +191,7 @@ class GetManyLtcvs( BaseView ):
 
     def do_the_things( self, procver='default' ):
         if ( not flask.request.is_json ) or ( 'objids' not in flask.request.json ):
-            raise ValueError( "Must pass POST data as a json dict with at least objids as a key" )
+            raise FASTDBWebException( "Must pass POST data as a json dict with at least objids as a key" )
         objids = flask.request.json['objids']
         del flask.request.json['objids']
         return self.get_ltcvs( procver, objids )
@@ -213,7 +213,7 @@ class GetLtcv( GetManyLtcvs ):
 
         mess = self.get_ltcvs( procver, [ objid ] )
         if len(mess) == 0:
-            raise ValueError( f"Could not find lightcurve for {objid} in processing version {procver}" )
+            raise FASTDBWebException( f"Could not find lightcurve for {objid} in processing version {procver}" )
         key0 = list( mess.keys() )[0]
         return mess[ key0 ]
 
@@ -385,7 +385,7 @@ class GetHotTransients( BaseView ):
         bands = [ 'u', 'g', 'r', 'i', 'z', 'y' ]
 
         if not flask.request.is_json:
-            raise TypeError( "POST data was not JSON" )
+            raise FASTDBWebException( "POST data was not JSON" )
         data = flask.request.json
 
         kwargs = {}
@@ -430,7 +430,7 @@ class GetHotTransients( BaseView ):
                     sne[ f'hostgal_stdcolor_{bands[bandi]}_{bands[bandi+1]}' ] = []
                     sne[ f'hostgal_stdcolor_{bands[bandi]}_{bands[bandi+1]}_err' ] = []
         else:
-            raise RuntimeError( "This should never happen." )
+            raise FASTDBWebException( "This should never happen." )
 
         # ZEROPOINT
         #
@@ -518,7 +518,7 @@ class GetHotTransients( BaseView ):
                             sne[ f'hostgal_stdcolor_{bands[bandi]}_{bands[bandi+1]}_err' ].append(
                                 subhostdf[f'stdcolor_{bands[bandi]}_{bands[bandi+1]}_err'] )
                 else:
-                    raise RuntimeError( "This should never happen." )
+                    raise FASTDBWebException( "This should never happen." )
 
 
         # FDBLogger.info( "GetHotTransients; returning" )

@@ -206,32 +206,36 @@ class FASTDBClient:
                 else:
                     raise ValueError( f"Unknown method {method}, must be get or post" )
                 if res.status_code != 200:
-                    errmsg = f"Got status {res.status_code} trying to connect to {url}"
-                    if tries == self.retries:
-                        self.logger.error( errmsg )
-                    else:
-                        self.logger.debug( errmsg )
-                    raise RuntimeError( errmsg )
+                    raise RuntimeError( f"Got status {res.status_code} trying to connect to {url}" )
                 if previous_fail:
                     dt = time.perf_counter() - t0
                     self.logger.info( f"Connection to {url} succeeded after {tries} retries "
                                       f"over {dt:.2f} seconds." )
                 return res
-            except Exception:
+            except Exception as ex:
                 previous_fail = True
+                if 'res' not in locals():
+                    self.logger.error( f"Error trying contact the webserver: {ex}" )
+                    raise
+                if res.status_code in ( 409, 422 ):
+                    # This is what the server should return to indicate that while the
+                    #   server connection was fine (so not a 500), something went wrong
+                    #   that will keep going wrong if you retry, so there's no point
+                    #   in retrying.
+                    self.logger.error( f"Error response from server, status {res.status_code}: {res.text}" )
+                    raise RuntimeError( f"Error response from server, status {res.status_code}: {res.text}" )
                 dt = time.perf_counter() - t0
                 if tries < self.retries:
-                    status_code = "<unknown>" if res is None else res.status_code
                     self.logger.warning( f"Failed to connect to {url} after {tries+1} tries "
-                                         f"Over {dt:.2f} seconds, got status {status_code}; "
+                                         f"Over {dt:.2f} seconds, got status {res.status_code}; "
                                          f"sleeping {sleeptime} seconds and retrying" )
+                    self.logger.debug( f"Body of 500 return: {res.text}" )
                     time.sleep( sleeptime )
                     sleeptime += self.retrysleepinc
                 else:
                     self.logger.error( f"Failed to connect to {url} after {self.retries} tries "
-                                       f"over {dt:.2f} seconds.  Giving up." )
-                    if ( res is not None ) and ( res.status_code == 500 ):
-                        self.logger.debug( f"Body of 500 return: {res.text}" )
+                                       f"over {dt:.2f} seconds.  Giving up.\n"
+                                       f"    Body of 500 return: {res.text}" )
                     raise
 
 
