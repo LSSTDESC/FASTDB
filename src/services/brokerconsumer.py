@@ -941,7 +941,7 @@ class PittGoogleConsumer(BrokerConsumer):
         topic = pittgoogle.Topic.from_cloud( name=self.extraconfig['name'],
                                              survey=self.extraconfig['survey'],
                                              testid=testid,
-                                             projectid=pittgoogle.ProjectIds().pittgoogle )
+                                             projectid='pitt-alert-broker' )
         subscription = pittgoogle.Subscription( name=groupid,
                                                 topic=topic,
                                                 schema_name="lsst" )

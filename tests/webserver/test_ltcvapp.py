@@ -131,18 +131,44 @@ def test_getltcv( test_user, fastdb_client, set_of_lightcurves, procver_collecti
     roots = set_of_lightcurves
     bpvs, _pvs = procver_collection
 
-    def _check_ltcv( res, rootdex, objdex, bpv ):
-        assert res['diaobjectid'] == roots[rootdex]['objs'][objdex]['obj'].diaobjectid
+    def _check_ltcv( res, rootdex, objdex, which='patch',
+                     include_base_procver=False, include_source_ids=False, include_source_positions=False,
+                     obj_base_procver=None, pos_base_procver=None )
+        expectedkeys = [ 'rootid', 'diaobjectid', 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov', 'ltcv', 'rootid' ]
+        expectedkeys_ltcv = [ 'mjd', 'band', 'flux', 'fluxerr', 'isdet' ]
+        if which == 'patch':
+            expectedkeys_ltcv.append( 'ispatch' )
+        if include_base_procver:
+            expectedkeys.extend( [ 'obj_base_procver_id', 'pos_base_procver_id' ] )
+            expectedkeys_ltcv.extend( [ 'base_procver_s', 'base_procver_f' ] )
+        if include_source_ids:
+            expectedkeys_ltcv.extend( [ 'diaobjectid', 'diasourceid' ] )
+            if which != 'detections':
+                expectedkeys_ltcv.append( 'diaforcedsourceid' )
+        if include_source_positions:
+            expectedkeys_ltcv.extend( [ 'det_ra', 'det_dec', 'det_raerr', 'det_decerr', 'det_ra_dec_cov' ] )
+
+        assert set( res.keys() ) == set( expectedkeys )
+        assert set( res['ltcv'].keys() ) == set( expectedkeys_ltcv )
+
         assert res['rootid'] == str( roots[rootdex]['root'].id )
-        assert res['ra'] == roots[rootdex]['objs'][objdex]['obj'].ra
-        assert res['dec'] == roots[rootdex]['objs'][objdex]['obj'].dec
-        assert res['base_procver_id'] == str( bpvs[bpv].id )
+        assert all( o == roots[rootdex]['objs'][objdex]['obj'].diaobjectid for o in res['diaobjectid'] )
+        assert all( r == pytest.approx( roots[rootdex]['objs'][objdex]['obj'].ra, abs=1e-5 ) for r in res['ra'] )
+        assert all( d == pytest.approx( roots[rootdex]['objs'][objdex]['obj'].dec, abs=1e-5 ) for d in res['dec'] )
+        if which == 'detections':
+            assert all( r == 1 for r in res['ltcv']['isdet'] )
+        if include_base_procver:
+            if obj_base_procver is not None:
+                assert all( b == str(bpvs[obj_base_procver].id) for b in res['obj_base_procver_id'] )
+            if pos_base_procver is not None:
+                assert all( b == str(bpvs[pos_base_procver].id) for b in res['pos_base_procver_id'] )
         forced = roots[rootdex]['objs'][objdex]['frc'][bpv]
         sources = roots[rootdex]['objs'][objdex]['src'][bpv]
         srci = 0
         for i in range( len(res['ltcv']['mjd'] ) ):
             # Should have forced photometry where ispatch is not 1.  (ispatch will only be 1 for last n points)
-            if ( 'ispatch' in res['ltcv'] ) and not ( res['ltcv']['ispatch'][i] ):
+            if ( ( 'which' == 'forced' ) or
+                 ( ( 'ispatch' in res['ltcv'] ) and not ( res['ltcv']['ispatch'][i] ) ) ):
                 assert res['ltcv']['mjd'][i] == pytest.approx( forced[i].midpointmjdtai, abs=1./3600./24. )
                 assert res['ltcv']['band'][i] == forced[i].band
                 assert res['ltcv']['flux'][i] == pytest.approx( forced[i].psfflux, rel=1e-6 )
@@ -154,6 +180,10 @@ def test_getltcv( test_user, fastdb_client, set_of_lightcurves, procver_collecti
                 assert res['ltcv']['flux'][i] == pytest.approx( sources[srci].psfflux, rel=1e-6 )
                 assert res['ltcv']['fluxerr'][i] == pytest.approx( sources[srci].psffluxerr, rel=1e-6 )
                 srci += 1
+
+    res = fastdb_client.post( f'/ltcv/getltcv/pvc_pv2/{roots[3]["root"].id}' )
+    import pdb; pdb.set_trace()
+    _check_ltcv( res, 3, 1, 'bpv2' )
 
     # The base processing version of the *object* is going to be bpv2,
     #   even though we're supposed to be pulling photometry from default

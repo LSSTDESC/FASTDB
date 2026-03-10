@@ -386,7 +386,7 @@ def test_fink():
 @pytest.mark.skipif( not env_as_bool('RUN_PITTGOOGLE_TESTS'), reason='RUN_PITTGOOGLE_TESTS is not set' )
 def test_pittgoogle():
     barf = "".join( random.choices( 'abcdefghijklmnopqrstuvwxyz', k=6 ) )
-    brokertopic = 'lsst-loop'
+    brokertopic = 'loop'
     groupid = f'fastdb-test-{barf}'
     extraconfig = { 'survey': 'lsst',
                     'name': brokertopic

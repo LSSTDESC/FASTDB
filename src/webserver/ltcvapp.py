@@ -48,7 +48,7 @@ class GetManyLtcvs( BaseView ):
           result: dict
             keys are root diaobject ids (stringified uuids), values are dicts
               The inner dicts are:
-              { 'diaobjectid': list of bigint (if include_sourceids),
+              { 'diaobjectid': list of bigint
                 'obj_base_procver_id': list of uuid (if include_base_procver),
                 'pos_base_procver_id': list of uuid (if include_base_procver),
                 'ra': list of double or None,
@@ -204,6 +204,8 @@ class GetManyLtcvs( BaseView ):
 # Returns a dict with keys everything from diaobject, plus ltcv
 # ltcv is itself a dict with keys mjd, band, flux, fluxerr, isdet, and maybe ispatch,
 # each of which is a list.
+#
+# Can pass optional parameters in JSON POST; see GetManyLtcvs.get_ltcvs
 
 class GetLtcv( GetManyLtcvs ):
     def do_the_things( self, procver, objid=None ):
@@ -214,8 +216,13 @@ class GetLtcv( GetManyLtcvs ):
         mess = self.get_ltcvs( procver, [ objid ] )
         if len(mess) == 0:
             raise FASTDBWebException( f"Could not find lightcurve for {objid} in processing version {procver}" )
+        if len(mess) > 1:
+            raise FastDBWebException( f"Got {len(mess)} lightcurves for {obj} in processing version {procver}; "
+                                      f"this is suprising, and something is wrong somewhere." )
         key0 = list( mess.keys() )[0]
-        return mess[ key0 ]
+        mess = mess[ key0 ]
+        mess['rootid'] = key0
+        return mess
 
 
 # ======================================================================
