@@ -11,7 +11,6 @@ import pathlib
 import urllib
 import logging
 import argparse
-import functools
 import multiprocessing
 import signal
 import simplejson
@@ -983,7 +982,6 @@ class PittGoogleConsumer(BrokerConsumer):
         for me.  But maybe I'm wrong.
 
         I really don't understand how this all works.
-        
         """
 
         self.logger.info( f"In handle_message_batch, received {len(messagebatch)} messages" )

@@ -1,5 +1,5 @@
---- venv/lib/python3.13/site-packages/pittgoogle/pubsub.py	2026-03-11 12:15:02.688903698 -0700
-+++ ../pubsub.py	2026-03-11 12:41:41.179841773 -0700
+--- venv2/lib/python3.13/site-packages/pittgoogle/pubsub.py	2026-03-11 13:38:13.740869274 -0700
++++ pubsub.py	2026-03-11 13:40:11.986579111 -0700
 @@ -1,4 +1,4 @@
 -# -*- coding: UTF-8 -*-
 +# -*- coding: utf-8 -*-
@@ -14,7 +14,7 @@
  import queue
  import time
  from typing import Any, Callable, List, Literal, Optional, Union
-@@ -578,7 +579,12 @@
+@@ -640,7 +641,12 @@
              self._executor = concurrent.futures.ThreadPoolExecutor(self.max_workers)
          return self._executor
  
@@ -28,7 +28,7 @@
          """Open the stream in a background thread and process messages through the callbacks.
  
          Recommended for long-running listeners.
-@@ -588,19 +594,36 @@
+@@ -650,19 +656,36 @@
                  Whether to block the main thread while the stream is open. If `True`, block
                  indefinitely (use `Ctrl-C` to close the stream and unblock). If `False`, open the
                  stream and then return (use :meth:`~Consumer.stop()` to close the stream).
@@ -69,7 +69,7 @@
  
          # catch all exceptions and attempt to close the stream before raising
          except (KeyboardInterrupt, Exception):
-@@ -634,42 +657,102 @@
+@@ -696,42 +719,102 @@
          else:
              message.nack()
  
