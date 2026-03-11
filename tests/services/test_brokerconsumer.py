@@ -392,17 +392,17 @@ def test_pittgoogle():
                     'name': brokertopic
                    }
     os.environ['GOOGLE_CLOUD_PROJECT'] = 'fastdb-test-20251103'
-    os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = '/secrets/fastdb-test-20251103-41b12811558d.json'
+    os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = '/secrets/fastdb-test-20251103-5a0f5182da01.json'
 
     try:
         t0 = time.perf_counter()
         pgb = PittGoogleConsumer( groupid=groupid, max_workers=2, batch_maxn=10, batch_maxwait=5,
                                   mongodb_collection_base='fastdb_test_pittgoogle', extraconfig=extraconfig )
         FDBLogger.info( "Running PittGoogleBroker.poll() for 10s...." )
-        pgb.poll( restart_time=datetime.timedelta( seconds=10 ) )
+        pgb.poll( restart_time=datetime.timedelta( seconds=10 ), max_restarts=1 )
         dt = time.perf_counter() - t0
-        FDBLogger.info( f"Returned from PittGoogleBroker.poll(), it handled {pgb.nmessagesconsumed} messages.  "
-                        f"Creaton plus poll time: {dt:.2s} sec." )
+        FDBLogger.info( f"Returned from PittGoogleBroker.poll(), it handled {pgb.tot_n_messages_consumed} messages.  "
+                        f"Creaton plus poll time: {dt:.2f} sec." )
 
     finally:
         pass

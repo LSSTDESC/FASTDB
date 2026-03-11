@@ -133,7 +133,7 @@ def test_getltcv( test_user, fastdb_client, set_of_lightcurves, procver_collecti
 
     def _check_ltcv( res, rootdex, objdex, which='patch',
                      include_base_procver=False, include_source_ids=False, include_source_positions=False,
-                     obj_base_procver=None, pos_base_procver=None )
+                     obj_base_procver=None, pos_base_procver=None ):
         expectedkeys = [ 'rootid', 'diaobjectid', 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov', 'ltcv', 'rootid' ]
         expectedkeys_ltcv = [ 'mjd', 'band', 'flux', 'fluxerr', 'isdet' ]
         if which == 'patch':

@@ -218,7 +218,7 @@ class BrokerConsumer:
           pipe : multiprocessing.Pipe or None
             If not None, a call to poll will regularly send hearbeats to
             this Pipe.  It will also poll the pipe for messages.
-            (Currentl;y ,the only message it will handle is a request to
+            (Currently ,the only message it will handle is a request to
             die.)
 
           loggername : str, default "BROKER"
@@ -302,7 +302,7 @@ class BrokerConsumer:
             self.schemafile = schemafile
             self.schema = fastavro.schema.load_schema( self.schemafile )
 
-        self.nmessagesconsumed = 0
+        self.tot_n_messages_consumed = 0
 
         if ( not isinstance( mongodb_collection_base, str ) ) or ( len(mongodb_collection_base) == 0 ):
             raise ValueError( "Must pass a non-0 length string as mongdb_collection_base" )
@@ -910,7 +910,6 @@ class PittGoogleConsumer(BrokerConsumer):
 
     """
 
-
     _brokername = 'pitt-google'
 
     def __init__(
@@ -932,55 +931,16 @@ class PittGoogleConsumer(BrokerConsumer):
 
         # I would prefer it if I could pass the arguments explicitly as function arguments, but
         #  I haven't figured out how ot get that to work, and it may not work with
-        #  pitgoogle.Topic.from_cloud.
-        if ( os.getenv("GOOGLE_CLOUD_PROJECT") is None ) or ( os.getenv("GOOGLE_APPLICATION_CREDENTIALS" ) is None ):
+        #  pittgoogle.Topic.from_cloud.
+        if ( ( os.getenv("GOOGLE_CLOUD_PROJECT") is None )
+             or ( os.getenv("GOOGLE_APPLICATION_CREDENTIALS" ) is None )
+            ):
             raise ValueError( "Need to set env vars GOOGLE_CLOUD_PROJECT and GOOGLE_APPLICATION_CREDENTIALS" )
 
-        testid = self.extraconfig['testid'] if 'testid' in self.extraconfig else False
-
-        topic = pittgoogle.Topic.from_cloud( name=self.extraconfig['name'],
-                                             survey=self.extraconfig['survey'],
-                                             testid=testid,
-                                             projectid='pitt-alert-broker' )
-        subscription = pittgoogle.Subscription( name=groupid,
-                                                topic=topic,
-                                                schema_name="lsst" )
-
-        # auth = pittgoogle.auth.Auth( GOOGLE_CLOUD_PROJECT=self.extraconfig['google_cloud_project'],
-        #                              GOOGLE_APPLICATION_CREDENTIALS=self.extraconfig['google_cloud_key_file'] )
-        # topic = pittgoogle.Topic.from_cloud( name=self.extraconfig['name'],
-        #                                      survey=self.extraconfig['survey'],
-        #                                      testid=testid,
-        #                                      projectid=pittgoogle.ProjectIds().pittgoogle )
-        # subscription = pittgoogle.pubsub.Subscription(name=groupid,
-        #                                               topic=topic,
-        #                                               auth=auth,
-        #                                               schema_name="lsst")
-
-        self.topic = subscription.topic.name
-
-        # if the subscription doesn't already exist, this will create one
-        subscription.touch()
-
-        self.consumer = pittgoogle.pubsub.Consumer(
-            subscription=subscription,
-            msg_callback=self.handle_message,
-            batch_callback=self.handle_message_batch,
-            batch_maxn=batch_maxn,
-            batch_max_wait_between_messages=batch_maxwait,
-            executor=ThreadPoolExecutor(
-                max_workers=max_workers,
-                initializer=self.worker_init,
-                initargs=(),
-                # initargs=(
-                #     self,
-                #     self.schema,
-                #     subscription.topic.name,
-                #     self.logger,
-                #     self.countlogger
-                # ),
-            ),
-        )
+        self._max_workers = max_workers
+        self._batch_maxn = batch_maxn
+        self._batch_maxwait = batch_maxwait
+        self._groupid = groupid
 
     def worker_init(self):
         """Initializer for the ThreadPoolExecutor."""
@@ -990,9 +950,13 @@ class PittGoogleConsumer(BrokerConsumer):
         """Callback that will process a single message. This will run in a background thread."""
 
         self.logger.info( "In handle_message" )
-        import pdb; pdb.set_trace()
 
-        self.nmessagesconsumed += 1
+        # ...this makes me a little queasy because of the
+        #    ThreadPoolExectutor thing.  However, I'm not sure that this
+        #    is actually called from one of those threads (dunno!), but
+        #    also I think that the threads all share the same pointer to
+        #    self.tot_n_messages_consumed, so this will work.
+        self.tot_n_messages_consumed += 1
 
         self.logger.warning( f"alert is a {type(alert)}, alert.msg is a {type(alert.msg)} and is {alert.msg}" )
         message = {
@@ -1012,12 +976,19 @@ class PittGoogleConsumer(BrokerConsumer):
         return pittgoogle.pubsub.Response(result=message, ack=True)
 
     def handle_message_batch(self, messagebatch: list) -> None:
-        """Callback that will process a batch of messages. This will run in the main thread."""
+        """Callback that will process a batch of messages. This will run in the main thread.
 
-        self.logger.info( f"In handle_message_batch, handling {len(messagebatch)} messages" )
-        import pdb; pdb.set_trace()
+        I don't fully understand how pubsub works, but I *think* that this is called *after*
+        handle_message on each message, which kind of violates the principle of least surprise
+        for me.  But maybe I'm wrong.
 
-        self.nmessagesconsumed += len(messagebatch)
+        I really don't understand how this all works.
+        
+        """
+
+        self.logger.info( f"In handle_message_batch, received {len(messagebatch)} messages" )
+
+        # self.tot_n_messages_consumed += len(messagebatch)
 
         # nadded = self.mongodb_store( messagebatch )
         # self.countlogger.info( f"...added {nadded} messages to mongodb {self.mongodb_dbname} "
@@ -1026,35 +997,62 @@ class PittGoogleConsumer(BrokerConsumer):
 
     def poll(self, reset=None, restart_time=None, max_restarts=None, max_msgs=None, **kwargs ):
         if len(kwargs) > 0:
-            raise RuntimeError( f"Parameters unknown to PittGoogleBroker.poll: {list(kwargs.keys())}" )
+            raise RuntimeError( f"Parameters unknown to PittGoogleConsumer.poll: {list(kwargs.keys())}" )
+        if reset is not None:
+            self.logger.warning( "reset is not known by PittGoogleConsumer.poll" )
 
-        if max_restarts is not None:
-            raise NotImplementedError( "Actual restarts not yet implemented; "
-                                       "restart_time is just a straight timeout." )
-        if max_msgs is not None:
-            raise NotImplementedError( "max_msgs is not supported" )
+        currenttotconsumed = 0
+        restarts = 0
+        while True:
+            testid = self.extraconfig['testid'] if 'testid' in self.extraconfig else False
 
+            topic = pittgoogle.Topic.from_cloud( name=self.extraconfig['name'],
+                                                 survey=self.extraconfig['survey'],
+                                                 testid=testid,
+                                                 projectid='pitt-alert-broker' )
+            subscription = pittgoogle.Subscription( name=self._groupid,
+                                                    topic=topic,
+                                                    schema_name="lsst" )
+            self.topic = subscription.topic.name
 
-        if restart_time is None:
-            self.consumer.stream( pipe=self.pipe, heartbeat=60 )
-        else:
-            if not isinstance( restart_time, datetime.timedelta ):
-                raise TypeError( f"restart_time must be a datetime.timedelta, not a {type(restart_time)}" )
+            # if the subscription doesn't already exist, this will create one
+            subscription.touch()
 
-            def launch_stream( obj ):
-                obj.consumer.stream( pipe=obj.pipe, heartbeat=60 )
+            self.consumer = pittgoogle.pubsub.Consumer(
+                subscription=subscription,
+                msg_callback=self.handle_message,
+                batch_callback=self.handle_message_batch,
+                batch_maxn=self._batch_maxn,
+                batch_max_wait_between_messages=self._batch_maxwait,
+                executor=ThreadPoolExecutor(
+                    max_workers=self._max_workers,
+                    initializer=self.worker_init,
+                    initargs=(),
+                    # initargs=(
+                    #     self,
+                    #     self.schema,
+                    #     subscription.topic.name,
+                    #     self.logger,
+                    #     self.countlogger
+                    # ),
+                ),
+            )
 
-            launcher = functools.partial( launch_stream, self )
-            proc = multiprocessing.Process( launcher )
-            self.logger.info( f"Starting poll process for PittGoogleBroker, running for {str(restart_time)}" )
-            proc.start()
-            time.sleep( restart_time.total_seconds() )
-            self.logger.info( f"Sending SIGINT to poll process after {str(restart_time)}" )
-            self.countlogger.info( f"Sending SIGINT to poll process after {str(restart_time)}" )
-            proc.interrupt()
-            proc.join()
-            self.logger.info( "Poll process has ended." )
-            proc.close()
+            self.countlogger.info( f"Launching a pittgoogle stream, topic={self.topic}..." )
+
+            nconsumed = self.consumer.stream( pipe=self.pipe, heartbeat=60,
+                                              max_runtime=restart_time, max_nmsgs=max_msgs )
+            self.countlogger.info( f"...pittgoogle stream consumed {nconsumed} messages; "
+                                   f"this call to poll consumed {currenttotconsumed} messages, "
+                                   f"overall {self.tot_n_messages_consumed} messages." )
+            currenttotconsumed += nconsumed
+            self.tot_n_messages_consumed += nconsumed
+            if ( max_restarts is not None ) and ( restarts >= max_restarts ):
+                self.countlogger.info( f"Exiting after {restarts} restarts." )
+                return
+            else:
+                self.countlogger.info( f"Restarting the stream after {restarts} previous restarts..." )
+            restarts += 1
 
 
 class BrokerConsumerLauncher:
