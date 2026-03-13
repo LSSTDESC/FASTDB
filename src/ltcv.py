@@ -1582,11 +1582,11 @@ def object_search( processing_version='default', ignore_object_processing_versio
         raise RuntimeError( "This should never happen." )
 
 
-def get_hot_ltcvs( processing_version, position_processing_version=None,
+def get_hot_ltcvs( processing_version, object_processing_version=None, position_processing_version=None,
                    use_weighted_source_positions=False, always_use_weighted_source_positions=False,
                    detected_since_mjd=None, detected_in_last_days=None,
                    mjd_now=None, source_patch=False, include_hostinfo=False, host_processing_version=None,
-                   object_processing_version=None, dbcon=None ):
+                   dbcon=None ):
     """Get lightcurves of objects with a recent detection.
 
     Parameters
@@ -1594,6 +1594,11 @@ def get_hot_ltcvs( processing_version, position_processing_version=None,
       processing_version: string
         The description of the processing version, or processing version
         alias, to use for searching diasource and diaforcedsource tables.
+
+      object_processing_version: string, default None
+        The description of the processing version, or processing version
+        alias, to use for searching for diaobjects.  If None, will be
+        the same as processing_version.
 
       position_procesing_version: string, default None
         Ignored if always_use_weighted_source_positions is True.
@@ -1711,13 +1716,17 @@ def get_hot_ltcvs( processing_version, position_processing_version=None,
 
     with db.DBCon( dbcon ) as con:
         procver = util.procver_id( processing_version, dbcon=con.con )
+        if object_processing_version is None:
+            objprocver = procver
+        else:
+            objprocver = util.procver_id( object_processing_version, dbcon=con.con )
 
         # First : get a table of all the object ids (root object ids)
-        #   that have a detection (i.e. a diasource) in the
-        #   desired time period.  Note that if there are multiple
-        #   base processing versions for the desired processing version,
-        #   they will all be included, but that's not a big deal because
-        #   we're distincting on objectid anyway.
+        #   that have a detection (i.e. a diasource) in the desired time
+        #   period.  Note that if there are multiple base processing
+        #   versions for the desired processing version, they will all
+        #   be included, but that's not a big deal (...maybe?...)
+        #   because we're distincting on objectid anyway.
 
         q = ( "/*+ IndexScan(s idx_diasource_mjd) */\n"
               "SELECT DISTINCT ON(s.diaobjectid) s.diaobjectid, o.rootid\n"
@@ -1737,18 +1746,18 @@ def get_hot_ltcvs( processing_version, position_processing_version=None,
             position_processing_version = None
         elif position_processing_version is None:
             position_processing_version = processing_version
-        objdf = get_object_infos( objids_table='tmp_objids', position_processing_version=position_processing_version,
-                                  dbcon=con, return_format='pandas' )
+        objdf = get_object_infos( objids_table='tmp_objids',return_format='pandas', dbcon=con,
+                                  processing_version=objprocver,
+                                  position_processing_version=position_processing_version )
 
         # Third: get the host stuff
         hostdf = None
 
         # Fourth: get the lightcurves
-        df = many_object_ltcvs( processing_version=processing_version,
-                                objids_table='tmp_objids',
+        df = many_object_ltcvs( processing_version=procver, objids_table='tmp_objids',
+                                return_format='pandas', mjd_now=mjd_now, dbcon=con,
                                 which='patch' if source_patch else 'forced',
-                                include_source_positions=use_weighted_source_positions,
-                                return_format='pandas', mjd_now=mjd_now, dbcon=con )
+                                include_source_positions=use_weighted_source_positions )
         if always_use_weighted_source_positions:
             objdf.pos_base_procver_id = None
             objdf.ra = None
