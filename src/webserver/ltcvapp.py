@@ -271,7 +271,16 @@ class GetHotTransients( BaseView ):
     optional):
 
        processing_version : str
-         The processing version or alias.  If not given, uses "realtime".
+         The processing version or alias for searching photometry.  If
+         not given, uses "realtime".
+
+       object_processing_version : str
+         The processing version or alias for searching objects.  If not given,
+         defaults to the same as processing_version.
+
+       position_processing_version : str
+         The processing version or alias for searching object positions.  If not given,
+         defaults to the same as object_processing_version.
 
        return format : int
          Specifies the format of the data returned; see below.  If not given,

@@ -69,11 +69,11 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None,
         If return_format is 'pandas', get back a dataframe indexed by
         'diaobject'.  (Not 'rootid', because there may be multiple
         diaobjects for one root, but there will never be multiple roots
-        for one diaobject.  Base on how you pass it, you might get back
-        more than one row with the same diaobjectid.)  If return_format
-        is 'json', then the return is a dictionary whose keys are the
-        columns names, and whose values are lists all of the same
-        length.
+        for one diaobject.  Base on how call this function, you might
+        get back more than one row with the same rootid.)  If
+        return_format is 'json', then the return is a dictionary whose
+        keys are the columns names, and whose values are lists all of
+        the same length.
 
         Columns included come from the diaobject and diaboject_position tables:
 
@@ -452,8 +452,8 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
 
         # Extract detections
         if include_source_positions:
-            source_fields = sql.SQL( "ra double precision, dec double precision, "
-                                     "raerr real, decerr real, ra_dec_cov real," )
+            source_fields = sql.SQL( "det_ra double precision, det_dec double precision, "
+                                     "det_raerr real, det_decerr real, det_ra_dec_cov real," )
         else:
             source_fields = sql.SQL( "" )
         q = sql.SQL( textwrap.dedent(
@@ -466,7 +466,8 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
         ) ).format( source_fields=source_fields )
         dbcon.execute( q, explain=False )
         if include_source_positions:
-            source_fields = sql.SQL( "ra, dec, raerr, decerr, ra_dec_cov, " )
+            source_fields = sql.SQL( "ra AS det_ra, dec AS det_dec, raerr AS det_raerr, "
+                                     "decerr AS det_decerr, ra_dec_cov AS det_ra_dec_cov, " )
         else:
             source_fields = sql.SQL( "" )
         q = sql.SQL( textwrap.dedent(
@@ -508,7 +509,7 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                                                  flux real, fluxerr real,
                                                  isdet bool, base_procver text )
                 """
-            ) ).format( source_fields=source_fields )
+            ) )
             dbcon.execute( q, explain=False )
             q = sql.SQL( textwrap.dedent(
                 """
@@ -525,7 +526,7 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                                                      AND pv.procver_id={procver}
                 INNER JOIN base_processing_version p ON pv.base_procver_id=p.id
                 """
-            ) ).format( source_fields=source_fields, procver=pvid, objids_table=sql.Identifier(objids_table) )
+            ) ).format( procver=pvid, objids_table=sql.Identifier(objids_table) )
             _and = "WHERE"
             if mjd_now is not None:
                 q += sql.SQL( f"                   {_and} s.midpointmjdtai<={{t0}}" ).format( t0=mjd_now )
@@ -538,7 +539,7 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
 
             # Join detections to forced photometry to set the 'isdet' and 'ispatch' flags
             if include_source_positions:
-                source_fields = sql.SQL( "s.ra, s.dec, s.raerr, s.decerr, s.ra_dec_cov," )
+                source_fields = sql.SQL( "s.det_ra, s.det_dec, s.det_raerr, s.det_decerr, s.det_ra_dec_cov, " )
             else:
                 source_fields = sql.SQL( "" )
             q = sql.SQL( textwrap.dedent(
@@ -577,8 +578,8 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
 
     retframe = laboriously_construct_pandas( rows, cols,
                                              int64cols=['diaforcedsourceid', 'diasourceid', 'diaobjectid', 'visit'],
-                                             floatcols=['flux', 'fluxerr'],
-                                             doublecols=['mjd'],
+                                             floatcols=['flux', 'fluxerr', 'det_raerr', 'det_decerr', 'det_ra_dec_cov'],
+                                             doublecols=['mjd', 'det_ra', 'det_dec'],
                                              boolcols=['isdet', 'ispatch'],
                                              ignore_missing_cols=True )
     if not include_base_procver:
@@ -612,11 +613,11 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                                 'fluxerr': list( subf.fluxerr.values ),
                                 'isdet': [ int(i) for i in subf.isdet.values ] } )
             if include_source_positions:
-                thisretval.update( { 'ra': list( subf.ra.values ),
-                                     'dec': list( subf.dec.values ),
-                                     'raerr': list( subf.raerr.values ),
-                                     'decerr': list( subf.decerr.values ),
-                                     'ra_dec_cov': list( subf.ra_dec_cov.values )
+                thisretval.update( { 'det_ra': list( subf.det_ra.values ),
+                                     'det_dec': list( subf.det_dec.values ),
+                                     'det_raerr': list( subf.det_raerr.values ),
+                                     'det_decerr': list( subf.det_decerr.values ),
+                                     'det_ra_dec_cov': list( subf.det_ra_dec_cov.values )
                                     } )
             if which == 'patch':
                 thisretval['ispatch'] = [ int(i) for i in subf.ispatch.values ]
@@ -690,7 +691,7 @@ def object_ltcv( processing_version='default', diaobjectid=None, bands=None, whi
     Returns
     -------
        Either a pandas dataframe, or a json which is a dict
-       Fields:
+       Fields (I THINK THIS WRONG, REVIEW AND UPDATE):
          root_diaobjectid: uuid (or str)
          diaobjectid: list of bigint
          diasourceid: list of bigint
@@ -1762,8 +1763,34 @@ def get_hot_ltcvs( processing_version, object_processing_version=None, position_
             objdf.pos_base_procver_id = None
             objdf.ra = None
             objdf.dec = None
+            objdf.raerr = None
+            objdf.decerr = None
+            objdf.ra_dec_cov = None
         if use_weighted_source_positions:
+            # I'm not sure we can count on really getting ra_err for everything, so instead
+            #  of using that for weighting, we'll use S/N^2 (like variance weighting)
+            usesource = df[ ( df.flux > df.fluxerr * 3. ) &
+                            ( ~pandas.isna(df.det_ra) ) &
+                           ( ~pandas.isna(df.det_dec) ) ].reset_index()
+            usesource = usesource.loc[ :, [ 'rootid', 'flux', 'fluxerr', 'det_ra', 'det_dec' ] ]
+            usesource['weight'] = ( usesource['flux'] / usesource['fluxerr'] ) ** 2
+            usesource['weightedra'] = usesource['weight'] * usesource['det_ra']
+            usesource['weighteddec'] = usesource['weight'] * usesource['det_dec']
+            usesource = usesource.groupby('rootid').agg( sumra=('weightedra', 'sum'),
+                                                         sumdec=('weighteddec', 'sum'),
+                                                         sumweight=('weight', 'sum') )
+            usesource['ra'] = usesource['sumra'] / usesource['sumweight']
+            usesource['dec'] = usesource['sumdec'] / usesource['sumweight']
+
+            # There is probably a cleverer pandas way to do this
+            #   that would avoid a for loop
             import pdb; pdb.set_trace()
-            pass
+            for row in objdf.itertuples():
+                if ( pandas.isna( row.ra ) and pandas.isna( row.dec ) and
+                     row.rootid in usesource.index.values ):
+                    objdf.at[ row.Index, 'pos_base_procver_id' ] = None
+                    objdf.at[ row.Index, 'ra' ] = usesource.loc[ row.rootid, 'ra' ]
+                    objdf.at[ row.Index, 'dec' ] = usesource.loc[ row.rootid, 'dec' ]
+
 
     return df, objdf, hostdf

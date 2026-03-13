@@ -217,7 +217,7 @@ def test_object_ltcv( procver_collection, set_of_lightcurves ):
     df = ltcv.object_ltcv( pvs['pv1'].id, roots[0]['objs'][2]['obj'].diaobjectid,
                            return_format='pandas', which='patch',
                            include_base_procver=True, include_source_positions=True )
-    for field in [ 'ra', 'dec' ]:
+    for field in [ 'det_ra', 'det_dec' ]:
         assert not any( sources[field].isna() )
         assert not any( forced[ forced.isdet == True ][field].isna() )
         assert all( forced[ forced.isdet == False ][field].isna() )
@@ -789,7 +789,7 @@ def test_get_hot_ltcvs( set_of_lightcurves ):
     assert not df2[ df2.index.get_level_values('mjd') <= 20025. ].ispatch.any()
     assert df2[ df2.index.get_level_values('mjd') > 60025. ].ispatch.all()
 
-    # Test using weighted positions. (...which is actually a TODO right now...)
+    # Test using weighted positions.
     # First, a baseline redo of the first
     #   set of hot ltcvs we tested above, make sure that the positions are
     #   coming out as expected.
@@ -812,6 +812,12 @@ def test_get_hot_ltcvs( set_of_lightcurves ):
     assert objdf.loc[roots[1]['objs'][1]['obj'].diaobjectid, 'pos_base_procver_id'] == postime_procver_60060
     assert objdf.loc[roots[2]['objs'][1]['obj'].diaobjectid, 'pos_base_procver_id'] == postime_procver_60080
     assert objdf.loc[roots[3]['objs'][1]['obj'].diaobjectid, 'pos_base_procver_id'] == postime_procver_60060
+
+    weightdf, weightobjdf, _ = ltcv.get_hot_ltcvs( 'pvc_pv2', detected_since_mjd=60035, mjd_now=60056,
+                                                   always_use_weighted_source_positions=True )
+    # TODO, inspect these results
+    assert False
+
 
     # TODO : test object_processing_version and position_processing_version
 
