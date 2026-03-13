@@ -131,9 +131,12 @@ def test_getltcv( test_user, fastdb_client, set_of_lightcurves, procver_collecti
     roots = set_of_lightcurves
     bpvs, _pvs = procver_collection
 
-    def _check_ltcv( res, rootdex, objdex, which='patch',
+    def _check_ltcv( res, rootdex, objdex, which='patch', bpv_key='unknown', obj_bpv_key=None,
                      include_base_procver=False, include_source_ids=False, include_source_positions=False,
                      obj_base_procver=None, pos_base_procver=None ):
+        obj_bpv_key = bpv_key if obj_bpv_key is None else obj_bpv_key
+        bpv_key = [ bpv_key ] if not isinstance( bpv_key, list ) else bpv_key
+        obj_bpv_key = [ obj_bpv_key ] if not isinstance( obj_bpv_key, list ) else obj_bpv_key
         expectedkeys = [ 'rootid', 'diaobjectid', 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov', 'ltcv', 'rootid' ]
         expectedkeys_ltcv = [ 'mjd', 'band', 'flux', 'fluxerr', 'isdet' ]
         if which == 'patch':
@@ -153,27 +156,43 @@ def test_getltcv( test_user, fastdb_client, set_of_lightcurves, procver_collecti
 
         assert res['rootid'] == str( roots[rootdex]['root'].id )
         assert all( o == roots[rootdex]['objs'][objdex]['obj'].diaobjectid for o in res['diaobjectid'] )
-        assert all( r == pytest.approx( roots[rootdex]['objs'][objdex]['obj'].ra, abs=1e-5 ) for r in res['ra'] )
-        assert all( d == pytest.approx( roots[rootdex]['objs'][objdex]['obj'].dec, abs=1e-5 ) for d in res['dec'] )
+        for r, d in zip( res['ra'], res['dec'] ):
+            assert any( r == pytest.approx( roots[rootdex]['objs'][objdex]['pos'][b][-1].ra, abs=1e-5 )
+                        for b in obj_bpv_key )
+            assert any( d == pytest.approx( roots[rootdex]['objs'][objdex]['pos'][b][-1].dec, abs=1e-5 )
+                        for b in obj_bpv_key )
         if which == 'detections':
             assert all( r == 1 for r in res['ltcv']['isdet'] )
         if include_base_procver:
-            if obj_base_procver is not None:
-                assert all( b == str(bpvs[obj_base_procver].id) for b in res['obj_base_procver_id'] )
-            if pos_base_procver is not None:
-                assert all( b == str(bpvs[pos_base_procver].id) for b in res['pos_base_procver_id'] )
-        forced = roots[rootdex]['objs'][objdex]['frc'][bpv]
-        sources = roots[rootdex]['objs'][objdex]['src'][bpv]
+            for rb in res['obj_base_procver_id']:
+                assert any( rb == str(bpvs[o].id) for o in obj_bpv_key )
+            for rb in res['pos_base_procver_id']:
+                for opv in obj_bpv_key:
+                    valid_bpvkeys = [ bpvs[k].id for k in bpvs.keys() if k[0:len(opv)+19]==f'{opv}_diaobject_position' ]
+                    assert any( rb == str(v) for v in valid_bpvkeys )
+
+        forced = {}
+        sources = {}
+        # We're assuming that the bpv keys passed will be in increasing priority order
+        for bk in bpv_key:
+            forced.update( { f.visit: f for f in roots[rootdex]['objs'][objdex]['frc'][bk] } )
+            sources.update( { s.visit: s for s in roots[rootdex]['objs'][objdex]['src'][bk] } )
+        forced = list( forced.values() )
+        sources = list( sources.values() )
+        forced.sort( key=lambda f: f.midpointmjdtai )
+        sources.sort( key=lambda s: s.midpointmjdtai )
         srci = 0
+        frci = 0
         for i in range( len(res['ltcv']['mjd'] ) ):
             # Should have forced photometry where ispatch is not 1.  (ispatch will only be 1 for last n points)
             if ( ( 'which' == 'forced' ) or
                  ( ( 'ispatch' in res['ltcv'] ) and not ( res['ltcv']['ispatch'][i] ) ) ):
-                assert res['ltcv']['mjd'][i] == pytest.approx( forced[i].midpointmjdtai, abs=1./3600./24. )
-                assert res['ltcv']['band'][i] == forced[i].band
-                assert res['ltcv']['flux'][i] == pytest.approx( forced[i].psfflux, rel=1e-6 )
-                assert res['ltcv']['fluxerr'][i] == pytest.approx( forced[i].psffluxerr, rel=1e-6 )
-            # If 'isdet' is true, should correspond to a source (which are sorted... I think)
+                assert res['ltcv']['mjd'][i] == pytest.approx( forced[frci].midpointmjdtai, abs=1./3600./24. )
+                assert res['ltcv']['band'][i] == forced[frci].band
+                assert res['ltcv']['flux'][i] == pytest.approx( forced[frci].psfflux, rel=1e-6 )
+                assert res['ltcv']['fluxerr'][i] == pytest.approx( forced[frci].psffluxerr, rel=1e-6 )
+                frci += 1
+            # If 'isdet' is true, should correspond to a source
             if res['ltcv']['isdet'][i]:
                 assert res['ltcv']['mjd'][i] == pytest.approx( sources[srci].midpointmjdtai, abs=1./3600./24. )
                 assert res['ltcv']['band'][i] == sources[srci].band
@@ -182,8 +201,7 @@ def test_getltcv( test_user, fastdb_client, set_of_lightcurves, procver_collecti
                 srci += 1
 
     res = fastdb_client.post( f'/ltcv/getltcv/pvc_pv2/{roots[3]["root"].id}' )
-    import pdb; pdb.set_trace()
-    _check_ltcv( res, 3, 1, 'bpv2' )
+    _check_ltcv( res, 3, 1, bpv_key='bpv2a' )
 
     # The base processing version of the *object* is going to be bpv2,
     #   even though we're supposed to be pulling photometry from default
@@ -191,26 +209,46 @@ def test_getltcv( test_user, fastdb_client, set_of_lightcurves, procver_collecti
     #   processing versions are different for different sources so we
     #   can test that!  That probably means editing other tests too when
     #   the fixture changes....)
-    res = fastdb_client.post( '/ltcv/getltcv/203' )
-    _check_ltcv( res, 3, 1, 'bpv2' )
+    with pytest.raises( RuntimeError, match=( "Error response from server, status 422: rootids from "
+                                              "many_object_ltcvs and get_object_infos don't match; you probably "
+                                              "have the wrong object_procver." ) ):
+        res = fastdb_client.post( '/ltcv/getltcv/203' )
 
-    res = fastdb_client.post( '/ltcv/getltcv/pvc_pv3/203' )
-    _check_ltcv( res, 3, 1, 'bpv2' )
+    with pytest.raises( RuntimeError, match=( "Error response from server, status 422: rootids from "
+                                              "many_object_ltcvs and get_object_infos don't match; you probably "
+                                              "have the wrong object_procver." ) ):
+        res = fastdb_client.post( '/ltcv/getltcv/pvc_pv3/203' )
 
-    res = fastdb_client.post( f'/ltcv/getltcv/{roots[3]["root"].id}' )
-    _check_ltcv( res, 3, 1, 'bpv2' )
+    res = fastdb_client.post( '/ltcv/getltcv/pvc_pv3/203', json={ 'object_procver': 'pvc_pv2' } )
+    _check_ltcv( res, 3, 1, bpv_key='bpv3', obj_bpv_key='bpv2a' )
 
-    res = fastdb_client.post( f'/ltcv/getltcv/pvc_pv3/{roots[3]["root"].id}' )
-    _check_ltcv( res, 3, 1, 'bpv2' )
+    # Objects aren't defined in 'default', which is probably bad, damn, I really need to
+    #   rethink these fixtures, which will be PAINFUL.
+    with pytest.raises( RuntimeError, match=( "Error response from server, status 422: rootids from "
+                                              "many_object_ltcvs and get_object_infos don't match; you probably "
+                                              "have the wrong object_procver." ) ):
+        res = fastdb_client.post( f'/ltcv/getltcv/{roots[3]["root"].id}' )
+
+    with pytest.raises( RuntimeError, match=( "Error response from server, status 422: rootids from "
+                                              "many_object_ltcvs and get_object_infos don't match; you probably "
+                                              "have the wrong object_procver." ) ):
+        res = fastdb_client.post( f'/ltcv/getltcv/pvc_pv3/{roots[3]["root"].id}' )
+
+    res = fastdb_client.post( f'/ltcv/getltcv/pvc_pv3/{roots[3]["root"].id}',
+                              json={ 'object_procver': 'pvc_pv2' } )
+    _check_ltcv( res, 3, 1, bpv_key='bpv3', obj_bpv_key='bpv2a' )
 
     res = fastdb_client.post( '/ltcv/getltcv/realtime/0' )
-    _check_ltcv( res, 0, 0, 'realtime' )
+    _check_ltcv( res, 0, 0, bpv_key='realtime' )
 
+    # The object *is* defined in realtime, so the fallback defaults server side should work here
     res = fastdb_client.post( f'/ltcv/getltcv/realtime/{roots[0]["root"].id}' )
-    _check_ltcv( res, 0, 0, 'realtime' )
+    _check_ltcv( res, 0, 0, bpv_key='realtime' )
 
+    # This is an example where there's actually a mix of base processing versions on
+    #   the returned forced photometry.
     res = fastdb_client.post( '/ltcv/getltcv/pvc_pv1/100' )
-    _check_ltcv( res, 0, 2, 'bpv1' )
+    _check_ltcv( res, 0, 2, bpv_key=['bpv1a', 'bpv1'], obj_bpv_key='bpv1a' )
 
 
 # TODO : test getrandomltcv ; that might require the ability to pass a random seed for a reproducible test.

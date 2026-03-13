@@ -217,7 +217,7 @@ class GetLtcv( GetManyLtcvs ):
         if len(mess) == 0:
             raise FASTDBWebException( f"Could not find lightcurve for {objid} in processing version {procver}" )
         if len(mess) > 1:
-            raise FASTDBWebException( f"Got {len(mess)} lightcurves for {obj} in processing version {procver}; "
+            raise FASTDBWebException( f"Got {len(mess)} lightcurves for {objid} in processing version {procver}; "
                                       f"this is suprising, and something is wrong somewhere." )
         key0 = list( mess.keys() )[0]
         mess = mess[ key0 ]
