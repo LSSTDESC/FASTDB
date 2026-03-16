@@ -11,7 +11,7 @@ import webserver.rkauth_flask as rkauth_flask
 import webserver.dbapp as dbapp
 import webserver.ltcvapp as ltcvapp
 import webserver.spectrumapp as spectrumapp
-from webserver.baseview import BaseView
+from webserver.baseview import BaseView, FASTDBWebException
 
 # ======================================================================
 # Global config
@@ -69,12 +69,17 @@ class ProcVer( BaseView ):
                                    { 'pv': pvid } )
             retval['aliases'] = [ r[0] for r in rows ]
 
-            rows, _ = con.execute( "SELECT description FROM base_processing_version b "
-                                   "INNER JOIN base_procver_of_procver j ON b.id=j.base_procver_id "
-                                   "WHERE j.procver_id=%(pv)s "
-                                   "ORDER BY j.priority DESC",
+            rows, _ = con.execute( "SELECT _table, ARRAY_AGG(description), ARRAY_AGG(priority)\n"
+                                   "FROM (\n"
+                                   "  SELECT b.description,b._table,j.priority\n"
+                                   "  FROM base_processing_version b\n"
+                                   "  INNER JOIN base_procver_of_procver j ON b.id=j.base_procver_id\n"
+                                   "  WHERE j.procver_id=%(pv)s\n"
+                                   "  ORDER BY b._table,j.priority DESC\n"
+                                   ") subq\n"
+                                   "GROUP BY _table",
                                    { 'pv': pvid } )
-            retval['base_procvers'] = [ r[0] for r in rows ]
+            retval['base_procvers'] = { r[0]: { p: d for p, d in zip(r[1], r[2]) } for r in rows }
 
             return retval
 
@@ -82,18 +87,22 @@ class ProcVer( BaseView ):
 # ======================================================================
 
 class BaseProcVer( BaseView ):
-    def do_the_things( self, procver ):
+    def do_the_things( self, procver, table=None ):
         with db.DBCon() as con:
-            pvid = db.BaseProcessingVersion.base_procver_id( procver )
+            try:
+                pvid = db.BaseProcessingVersion.base_procver_id( procver, table )
+            except Exception as ex:
+                raise FASTDBWebException( str(ex) )
             if pvid is None:
                 return f"Unknown base processing version {procver}", 500
 
-            retval = { 'status': 'ok', 'id': None, 'description': None, 'procvers': [] }
-            row, _ = con.execute( "SELECT id,description FROM base_processing_version WHERE id=%(pv)s",
+            row, _ = con.execute( "SELECT id,description,_table FROM base_processing_version WHERE id=%(pv)s",
                                   { 'pv': pvid } )
-            retval['id'] = row[0][0]
-            retval['description'] = row[0][1]
-
+            retval = { 'status': 'ok',
+                       'id': row[0][0],
+                       'description': row[0][1],
+                       'table': row[0][2]
+                      }
             rows, _ = con.execute( "SELECT description FROM processing_version p "
                                    "INNER JOIN base_procver_of_procver j ON p.id=j.procver_id "
                                    "WHERE j.base_procver_id=%(pv)s "
@@ -275,6 +284,7 @@ urls = {
     "/getprocvers": GetProcVers,
     "/procver/<procver>": ProcVer,
     "/baseprocver/<procver>": BaseProcVer,
+    "/baseprocver/<procver>/<table>": BaseProcVer,
     "/count/<which>": CountThings,
     "/count/<which>/<procver>": CountThings,
     "/getdiaobjectinfo": GetDiaObjectInfo,

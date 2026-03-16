@@ -175,7 +175,7 @@ def procver_collection( procver_postimes, procver_bases ):
                         for postime in procver_postimes:
                             uuiddex += 1
                             key = f'{base}_diaobject_position_{postime}'
-                            desc = f'pvc_{base}_{postime}'
+                            desc = f'{base}_{postime}' if base == 'realtime' else f'pvc_{base}_{postime}'
                             bpvs[key] = BaseProcessingVersion( id=uuidbatch[uuiddex], _table=table, description=desc )
                     else:
                         uuiddex += 1

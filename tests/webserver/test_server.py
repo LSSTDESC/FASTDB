@@ -17,36 +17,40 @@ def test_getprocvers( procver_collection, test_user, fastdb_client ):
     assert res['procvers'] == [ 'default', 'pvc_pv1', 'pvc_pv2', 'pvc_pv3', 'realtime' ]
 
 
-def test_procver( procver_collection, test_user, fastdb_client ):
-    bpvs, pvs = procver_collection
+def test_procver( procver_collection, test_user, fastdb_client, procver_postimes ):
+    allbpvs, allpvs = procver_collection
 
-    for suffix in [ 'default', pvs['pv3'].description, pvs['pv3'].id ]:
-        res = fastdb_client.post( f'/procver/{suffix}' )
-        assert res['id'] == str( pvs['pv3'].id )
-        assert res['description'] == pvs['pv3'].description
-        assert res['aliases'] == [ 'default' ]
-        assert res['base_procvers'] == [ bpvs[i].description for i in [ 'bpv3' ] ]
+    def check_res( pv, bpvs, aliases=[] ):
+        assert res['id'] == str( allpvs[pv].id )
+        assert res['description'] == allpvs[pv].description
+        assert res['aliases'] == aliases
+        for tab in 'diaobject', 'diasource', 'diaforcedsource':
+            for prio, bpv in enumerate( bpvs ):
+                assert res['base_procvers'][tab][ allbpvs[bpv].description ] == prio
+        baseprio = 0
+        for bpv in bpvs:
+            for prio, postime in enumerate( procver_postimes ):
+                assert ( res['base_procvers']['diaobject_position'][ f'{allbpvs[bpv].description}_{postime}' ]
+                         == baseprio + prio )
+                prio += 1
+            baseprio += 10
 
-    for suffix in [ pvs['pv2'].description, pvs['pv2'].id ]:
+    for suffix in [ 'default', allpvs['pv3'].description, allpvs['pv3'].id ]:
         res = fastdb_client.post( f'/procver/{suffix}' )
-        assert res['id'] == str( pvs['pv2'].id )
-        assert res['description'] == pvs['pv2'].description
-        assert res['aliases'] == []
-        assert res['base_procvers'] == [ bpvs[i].description for i in [ 'bpv2a', 'bpv2' ] ]
+        check_res( 'pv3', [ 'bpv3' ], [ 'default' ] )
 
-    for suffix in [ pvs['pv1'].description, pvs['pv1'].id ]:
+    for suffix in [ allpvs['pv2'].description, allpvs['pv2'].id ]:
         res = fastdb_client.post( f'/procver/{suffix}' )
-        assert res['id'] == str( pvs['pv1'].id )
-        assert res['description'] == pvs['pv1'].description
-        assert res['aliases'] == []
-        assert res['base_procvers'] == [ bpvs[i].description for i in [ 'bpv1b', 'bpv1a', 'bpv1' ] ]
+        check_res( 'pv2', [ 'bpv2', 'bpv2a' ] )
 
-    for suffix in [ pvs['realtime'].description, pvs['realtime'].id ]:
+    for suffix in [ allpvs['pv1'].description, allpvs['pv1'].id ]:
         res = fastdb_client.post( f'/procver/{suffix}' )
-        assert res['id'] == str( pvs['realtime'].id )
-        assert res['description'] == pvs['realtime'].description
-        assert res['aliases'] == []
-        assert res['base_procvers'] == [ bpvs[i].description for i in [ 'realtime' ] ]
+        check_res( 'pv1', [ 'bpv1', 'bpv1a', 'bpv1b' ] )
+
+    for suffix in [ allpvs['realtime'].description, allpvs['realtime'].id ]:
+        res = fastdb_client.post( f'/procver/{suffix}' )
+        check_res( 'realtime', [ 'realtime' ] )
+
 
     # Temporarily reduce retries to 0 so these will fail fast
     orig_retries = fastdb_client.retries
@@ -64,16 +68,20 @@ def test_base_procver( procver_collection, test_user, fastdb_client ):
     bpvs, _pvs = procver_collection
 
     for k, bpv in bpvs.items():
-        for suffix in [ k, bpv.id ]:
-            suffix = f'pvc_{k}' if k != 'realtime' else suffix
+        with pytest.raises( RuntimeError, match=( 'Error response from server, status 422: table is required '
+                                                  'when base_processing_version is not a uuid' ) ):
+            res = fastdb_client.post( f'/baseprocver/{bpv.description}' )
+
+        for suffix in [ bpv.id, f'{bpv.description}/{bpv._table}' ]:
             res = fastdb_client.post( f'/baseprocver/{suffix}' )
             assert res['id'] == str( bpv.id )
+            assert res['table'] == bpv._table
             assert res['description'] == bpv.description
-            if k == 'realtime':
+            if k[0:8] == 'realtime':
                 assert res['procvers'] == [ 'realtime' ]
             else:
-                match = re.search( r'pv(\d)', k )
-                pv = f'pvc_pv{match.group(1)}'
+                mat = re.search( r'pv(\d)', k )
+                pv = f'pvc_pv{mat.group(1)}'
                 assert res['procvers'] == [ pv ]
 
 
