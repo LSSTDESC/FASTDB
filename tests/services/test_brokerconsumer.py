@@ -402,7 +402,7 @@ def test_pittgoogle():
         pgb.poll( restart_time=datetime.timedelta( seconds=10 ), max_restarts=1 )
         dt = time.perf_counter() - t0
         FDBLogger.info( f"Returned from PittGoogleBroker.poll(), it handled {pgb.tot_n_messages_consumed} messages.  "
-                        f"Creaton plus poll time: {dt:.2f} sec." )
+                        f"Creation plus poll time: {dt:.2f} sec." )
 
     finally:
         pass

@@ -422,7 +422,12 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
                 endmag = firstmag[i] if sourcemjd < tpeak[i] else lastmag[i]
                 mag = endmag + ( sourcemjd - mjdend ) * ( peakmag[i] - endmag ) / ( tpeak[i] - mjdend  )
                 psfflux = flux( mag )
-                psffluxerr = 0.1 * psfflux
+                # We have objects in magnitude range 22-25
+                # nJy flux (zp 31.4) at mag 26 is 145
+                # nJy flux (zp 31.4) at mag 22 is 5754
+                # Let's say sky noise is mag 26 over the psf area, just for the hell of it
+                # Let's say the gain is 1, just for the hell of it.
+                psffluxerr = np.sqrt( 145.**2 + max(psfflux, 0) )
 
                 # realtime sources
                 if ( i < 3 ) and ( sourcemjd <= 60060. ):

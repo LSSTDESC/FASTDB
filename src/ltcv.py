@@ -736,6 +736,10 @@ def object_search( processing_version='default', ignore_object_processing_versio
     For parameters that define the search, if they are None, they are
     not considered in the search.  (I.e. that filter will be skipped.)
 
+    THIS IS WAY TOO SLOW RIGHT NOW.  Even in tests with modest database.
+    TODO: explore and figure out where the queries are slow, make them
+    faster.
+
     Parameters
     ----------
       processing_version : UUID or str
@@ -1771,26 +1775,52 @@ def get_hot_ltcvs( processing_version, object_processing_version=None, position_
             #  of using that for weighting, we'll use S/N^2 (like variance weighting)
             usesource = df[ ( df.flux > df.fluxerr * 3. ) &
                             ( ~pandas.isna(df.det_ra) ) &
-                           ( ~pandas.isna(df.det_dec) ) ].reset_index()
+                            ( ~pandas.isna(df.det_dec) ) ].reset_index()
             usesource = usesource.loc[ :, [ 'rootid', 'flux', 'fluxerr', 'det_ra', 'det_dec' ] ]
-            usesource['weight'] = ( usesource['flux'] / usesource['fluxerr'] ) ** 2
+            # Flux and fluxerr are floats.  To avoid floating point roundoff in sums, make sure that
+            #   the weight array is doubles.
+            usesource['weight'] = pandas.Series( usesource['flux'] / usesource['fluxerr'], dtype='float64[pyarrow]' )
+            usesource['weight'] = usesource['weight'] ** 2
             usesource['weightedra'] = usesource['weight'] * usesource['det_ra']
             usesource['weighteddec'] = usesource['weight'] * usesource['det_dec']
-            usesource = usesource.groupby('rootid').agg( sumra=('weightedra', 'sum'),
-                                                         sumdec=('weighteddec', 'sum'),
-                                                         sumweight=('weight', 'sum') )
-            usesource['ra'] = usesource['sumra'] / usesource['sumweight']
-            usesource['dec'] = usesource['sumdec'] / usesource['sumweight']
+            combsource = usesource.groupby('rootid').agg( sumra=('weightedra', 'sum'),
+                                                          sumdec=('weighteddec', 'sum'),
+                                                          sumweight=('weight', 'sum') )
+            combsource['ra'] = combsource['sumra'] / combsource['sumweight']
+            combsource['dec'] = combsource['sumdec'] / combsource['sumweight']
+
+
+            # ****
+            # Put this in for debugging purposes.  It lead to the conversion of the weights
+            #   dtype above to double....  (Tests were failing.)
+            # FDBLogger.info( "WEIGHTED POSITIONS FROM GET_HOT_TLCVS" )
+            # import io
+            # thing = usesource.set_index( 'rootid' )
+            # for rootid in df.index.unique(level='rootid').values: # thing.index.unique().values:
+            #     if rootid in thing.index.values:
+            #         subdf = thing.xs( rootid )
+            #         strio = io.StringIO()
+            #         strio.write( f"For rootid {rootid}, there are {len(subdf)} values to combine.\n" )
+            #         for row in subdf.itertuples():
+            #             strio.write( f"     ra={row.det_ra:12.8f}  dec={row.det_dec:12.8f}  weight={row.weight}\n" )
+            #         strio.write( f"  Combined: ra={combsource.loc[rootid,'ra']:12.8f}, "
+            #                      f" dec={combsource.loc[rootid, 'dec']:12.8f}\n" )
+            #         strio.write( f"  sumra={combsource.loc[rootid, 'sumra']}, "
+            #                      f"sumdec={combsource.loc[rootid, 'sumdec']}, "
+            #                      f"sumweight={combsource.loc[rootid, 'sumweight']}\n" )
+            #         FDBLogger.info( strio.getvalue() )
+            #     else:
+            #         FDBLogger.info( f"For rootid {rootid}, there are not any high s/n sources.\n" )
+            # ****
 
             # There is probably a cleverer pandas way to do this
             #   that would avoid a for loop
-            import pdb; pdb.set_trace()
             for row in objdf.itertuples():
                 if ( pandas.isna( row.ra ) and pandas.isna( row.dec ) and
-                     row.rootid in usesource.index.values ):
+                     row.rootid in combsource.index.values ):
                     objdf.at[ row.Index, 'pos_base_procver_id' ] = None
-                    objdf.at[ row.Index, 'ra' ] = usesource.loc[ row.rootid, 'ra' ]
-                    objdf.at[ row.Index, 'dec' ] = usesource.loc[ row.rootid, 'dec' ]
+                    objdf.at[ row.Index, 'ra' ] = combsource.loc[ row.rootid, 'ra' ]
+                    objdf.at[ row.Index, 'dec' ] = combsource.loc[ row.rootid, 'dec' ]
 
 
-    return df, objdf, hostdf
+        return df, objdf, hostdf

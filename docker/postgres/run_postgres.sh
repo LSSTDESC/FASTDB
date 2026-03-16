@@ -2,8 +2,8 @@
 
 if [ ! -f $POSTGRES_DATA_DIR/PG_VERSION ]; then
     echo "Running initdb in $POSTGRES_DATA_DIR"
-    /usr/lib/postgresql/15/bin/initdb -U postgres --pwfile=/secrets/pgpasswd $POSTGRES_DATA_DIR
-    /usr/lib/postgresql/15/bin/pg_ctl -o "-c listen_addresses=''" -D $POSTGRES_DATA_DIR start
+    /usr/lib/postgresql/17/bin/initdb -U postgres --pwfile=/secrets/pgpasswd $POSTGRES_DATA_DIR
+    /usr/lib/postgresql/17/bin/pg_ctl -o "-c listen_addresses=''" -D $POSTGRES_DATA_DIR start
     psql --command "CREATE DATABASE fastdb OWNER postgres"
     psql --command "CREATE EXTENSION q3c" fastdb
     psql --command "CREATE EXTENSION pgcrypto" fastdb
@@ -14,15 +14,15 @@ if [ ! -f $POSTGRES_DATA_DIR/PG_VERSION ]; then
     psql --command "GRANT CONNECT ON DATABASE fastdb TO postgres_ro"
     psql --command "GRANT USAGE ON SCHEMA public TO postgres_ro" fastdb
     psql --command "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO postgres_ro" fastdb
-    /usr/lib/postgresql/15/bin/pg_ctl -D $POSTGRES_DATA_DIR stop
+    /usr/lib/postgresql/17/bin/pg_ctl -D $POSTGRES_DATA_DIR stop
 fi
 
 # RKNOP 2025-11-05 : commented this out, confusion is reigning
 # Make sure the temporary tablespace directory is properly created
-# /usr/lib/postgresql/15/bin/pg_ctl -D $POSTGRES_DATA_DIR -o "-c listen_addresses=''" start
+# /usr/lib/postgresql/17/bin/pg_ctl -D $POSTGRES_DATA_DIR -o "-c listen_addresses=''" start
 # psql --command "DROP TABLESPACE IF EXISTS postgres_temp" fastdb
 # psql --command "CREATE TABLESPACE postgres_temp LOCATION '/tmp/postgres_temp'" fastdb
-# /usr/lib/postgresql/15/bin/pg_ctl -D $POSTGRES_DATA_DIR stop
+# /usr/lib/postgresql/17/bin/pg_ctl -D $POSTGRES_DATA_DIR stop
 
 # Now run the database server for real
-exec /usr/lib/postgresql/15/bin/postgres -c config_file=/etc/postgresql/15/main/postgresql.conf
+exec /usr/lib/postgresql/17/bin/postgres -c config_file=/etc/postgresql/17/main/postgresql.conf

@@ -561,7 +561,7 @@ class BrokerConsumer:
         messagebatch = []
         self.countlogger.info( f"Handling {len(msgs)} messages; consumer has received "
                                f"{self.consumer.tot_handled} messages." )
-        now = datetime.datetime.utcnow()
+        now = datetime.datetime.now( tz=datetime.UTC )
         t0 = time.perf_counter()
         for msg in msgs:
             timestamptype, timestamp = msg.timestamp()
@@ -885,7 +885,7 @@ class AlerceConsumer(BrokerConsumer):
         self.badtopics = [ 'lc_classifier_balto_20230807' ]
 
     def update_topics( self, *args, **kwargs ):
-        now = datetime.datetime.utcnow()
+        now = datetime.datetime.now( tz=datetime.UTC )
         datestrs = []
         for ddays in range(self.early_offset, 3):
             then = now + datetime.timedelta( days=ddays )
@@ -958,6 +958,7 @@ class PittGoogleConsumer(BrokerConsumer):
         self.tot_n_messages_consumed += 1
 
         self.logger.warning( f"alert is a {type(alert)}, alert.msg is a {type(alert.msg)} and is {alert.msg}" )
+        import remote_pdb; remote_pdb.RemotePdb('127.0.0.1', 4444).set_trace()
         message = {
             # NOTE -- start reading alert.msg.data at byte 5 because the first 4 bytes
             #   are a schema ID of some sort.
@@ -969,7 +970,7 @@ class PittGoogleConsumer(BrokerConsumer):
             # there is no offset in pubsub
             # if this cannot be null, perhaps the message id would work?
             "msgoffset": alert.msg.message_id,
-            "savetime": datetime.datetime.utcnow()
+            "savetime": datetime.datetime.now( tz=datetime.UTC )
         }
 
         return pittgoogle.pubsub.Response(result=message, ack=True)

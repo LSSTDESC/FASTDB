@@ -438,6 +438,8 @@ class FITSLoader( FastDBLoader ):
         # Do the long stuff
         try:
 
+            FDBLogger.info( f"PID {os.getpid()} about to launch subprocesses for FITS files." )
+
             loadOneFitsFile = functools.partial( do_loadOneFitsFile,
                                                  **{
                                                      'max_sources_per_object': self.max_sources_per_object,
@@ -482,6 +484,7 @@ class FITSLoader( FastDBLoader ):
             else:
 
                 FDBLogger.info( f'Launching {self.nprocs} processes to load the db.' )
+                # See comments in load_snana_fits.py re: fork vs. spawn
                 with multiprocessing.Pool( self.nprocs ) as pool:
                     for directory in self.directories:
                         direc = pathlib.Path( directory )

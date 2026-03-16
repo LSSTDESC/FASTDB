@@ -434,7 +434,7 @@ def test_many_object_ltcvs( procver_collection, set_of_lightcurves ):
     df = ltcv.many_object_ltcvs( pvs['pv1'].id, [ roots[i]['root'].id for i in [0,1] ],
                                  return_format='pandas', which='patch',
                                  include_base_procver=True, include_source_positions=True )
-    for field in [ 'ra', 'dec' ]:
+    for field in [ 'det_ra', 'det_dec' ]:
         assert not any( sources[field].isna() )
         assert not any( forced[ forced.isdet == True ][field].isna() )
         assert all( forced[ forced.isdet == False ][field].isna() )
@@ -815,8 +815,57 @@ def test_get_hot_ltcvs( set_of_lightcurves ):
 
     weightdf, weightobjdf, _ = ltcv.get_hot_ltcvs( 'pvc_pv2', detected_since_mjd=60035, mjd_now=60056,
                                                    always_use_weighted_source_positions=True )
-    # TODO, inspect these results
-    assert False
+    # The expected weighted postition will be from all detections before 60056.
+    # Dig through the data that was generated (in roots) and compare to what we
+    #   got back from the api.
+    for dex in range(1, 4):
+        rootid = roots[dex]['root'].id
+        diaobjectid = roots[dex]['objs'][1]['obj'].diaobjectid
+
+        # ...first, sanity check to make sure I'm indexing everything right.
+        # doubles have 53 mantissa bits, and log10(2^53) = 15, so as long
+        # as things stayed doubles everywhere, floating point roundoff
+        # should still be good to 14 digits.
+        assert all( weightdf.loc[ ( rootid, i.midpointmjdtai ), 'det_ra' ] == pytest.approx( i.ra, rel=1e-14 )
+                    for i in roots[dex]['objs'][1]['src']['bpv2a']
+                    if i.midpointmjdtai <= 60056 )
+        assert all( weightdf.loc[ ( rootid, i.midpointmjdtai ), 'det_dec' ] == pytest.approx( i.dec, rel=1e-14 )
+                    for i in roots[dex]['objs'][1]['src']['bpv2a']
+                    if i.midpointmjdtai < 60056 )
+        # (The roots data structure feels unnecessarily complicated... but maybe it is necessary given
+        #  all this processing version shenanigans.)
+
+        # bpv2a should take priority over bpv2
+        # (...though it turns out in this case that everthing is in bpv2a,
+        #  so we're not really testing the fallback....)
+        srcs = { i.diasourceid: ( i.ra, i.dec, i.psfflux, i.psffluxerr, 'bpv2' )
+                 for i in roots[dex]['objs'][1]['src']['bpv2']
+                 if i.midpointmjdtai <= 60056 }
+        srcs.update( { i.diasourceid: ( i.ra, i.dec, i.psfflux, i.psffluxerr, 'bpv2a' )
+                       for i in roots[dex]['objs'][1]['src']['bpv2a']
+                       if i.midpointmjdtai <= 60056 } )
+        srcs = [ i for i in srcs.values() if ( i[2] / i[3] ) > 3 ]
+
+        if len(srcs) == 0:
+            assert weightobjdf.loc[ diaobjectid, 'ra' ] is None
+            assert weightobjdf.loc[ diaobjectid, 'dec' ] is None
+            assert objdf.loc[ diaobjectid, 'ra' ] is not None
+            assert objdf.loc[ diaobjectid, 'dec' ] is not None
+        else:
+            ras = np.array( [ i[0] for i in srcs ] )
+            decs = np.array( [ i[1] for i in srcs ] )
+            weights = np.array( [ (i[2] / i[3])**2 for i in srcs ] )
+            expectedra = ( ras * weights ).sum() / weights.sum()
+            expecteddec = ( decs * weights ).sum() / weights.sum()
+
+            assert weightobjdf.loc[ diaobjectid, 'ra' ] == pytest.approx( expectedra, abs=0.001/3600. )
+            assert weightobjdf.loc[ diaobjectid, 'dec' ] == pytest.approx( expecteddec, abs=0.001/3600. )
+            # ...and this weighted average position should not be the same as what we got when we used
+            #   the diaobject_position values above
+            assert ( weightobjdf.loc[ diaobjectid, 'ra' ] !=
+                     pytest.approx( objdf.loc[ diaobjectid, 'ra' ], abs=0.001/3600. ) )
+            assert ( weightobjdf.loc[ diaobjectid, 'dec' ] !=
+                     pytest.approx( objdf.loc[ diaobjectid, 'dec' ], abs=0.001/3600. ) )
 
 
     # TODO : test object_processing_version and position_processing_version
