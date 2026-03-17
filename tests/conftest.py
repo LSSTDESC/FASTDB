@@ -254,7 +254,7 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
     #     object 0 : first detection mjd 60000, last detection mjd 60030, peak 60010, mag 24
     #     object 1 : first detection mjd 60020, last detection mjd 60060, peak 60035, mag 22
     #     object 2 : first detection mjd 60040, last detection mjd 60080, peak 60050, mag 23
-    #     object 3 : first detection mjd 60050, last detection mjd 60060, peak 60055, mag 25
+    #     object 3 : first detection mjd 60050, last detection mjd 60060, peak 60055, mag 23.5
     #
     # All lightcurves have a candence of 2.5 days.  (I'm counting on
     #   floats being perfectly representable in these ranges at
@@ -343,7 +343,7 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
             dex = bpvdex * len(procver_bases) + int( np.floor((mjd-lowestmjd) * 10) )
             return dra_list[dex], ddec_list[dex]
 
-        peakmag = [ 24., 22., 23., 25. ]
+        peakmag = [ 24., 22., 23., 23.5 ]
         firstmag = [ 26., 25., 25.5, 25.8 ]
         lastmag = [ 25.9, 25.1, 25.6, 26. ]
         zeromag = 32.

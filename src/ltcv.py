@@ -80,8 +80,8 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None,
 
            diaobjectid         | bigint           | Globally unique (across all proc vers) diaobject id [Index]
            rootid              | uuid             | root_diaobject id for this object
-           obj_base_procver_id | uuid             | base processing version for the diaobject
-           pos_base_procver_id | uuid             | base processing version for the diaobject_position
+           obj_base_procver    | uuid             | base processing version for the diaobject
+           pos_base_procver    | uuid             | base processing version for the diaobject_position
            ra                  | double precision | ra
            dec                 | double precision | dec
            raerr               | real             | uncertainty (NOT variance) on ra
@@ -149,8 +149,8 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None,
     if return_format not in ( 'pandas', 'json' ):
         raise ValueError( f"return_format must be pandas or json, not {return_format}" )
 
-    objcols = [ 'diaobjectid', 'rootid', 'obj_base_procver_id' ]
-    poscols = [ 'pos_base_procver_id', 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ]
+    objcols = [ 'diaobjectid', 'rootid', 'obj_base_procver' ]
+    poscols = [ 'pos_base_procver', 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ]
     joincolumn = "rootid" if obj_is_root else "diaobjectid"
     sqlcolumns = []
     gotsomepos = False
@@ -170,23 +170,24 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None,
 
     for c in columns:
         if c in objcols:
-            sqlcolumns.append( sql.Identifier( 'o', c ) if c != 'obj_base_procver_id'
-                               else sql.Identifier( 'o', 'base_procver_id' ) + sql.SQL( " AS " ) + sql.Identifier( c ) )
+            sqlcolumns.append( sql.Identifier( 'o', c ) if c != 'obj_base_procver'
+                               else sql.Identifier( 'b', 'description' ) + sql.SQL( " AS " ) + sql.Identifier( c ) )
         else:
             gotsomepos = True
-            sqlcolumns.append( sql.Identifier( 'p', c ) if c != 'pos_base_procver_id'
-                               else sql.Identifier( 'p', 'base_procver_id' ) + sql.SQL( " AS " ) + sql.Identifier( c ) )
+            sqlcolumns.append( sql.Identifier( 'p', c ) if c != 'pos_base_procver'
+                               else sql.Identifier( 'p', 'description' ) + sql.SQL( " AS " ) + sql.Identifier( c ) )
     sqlcolumns = sql.SQL(',').join( c for c in sqlcolumns )
 
     with db.DBCon( dbcon ) as dbcon:
         if gotsomepos:
             positionclause = sql.SQL( textwrap.dedent(
                 """
-                SELECT DISTINCT ON(p1.diaobjectid) p1.*
+                SELECT DISTINCT ON(p1.diaobjectid) p1.*, b1.description
                 FROM diaobject_position p1
                 INNER JOIN base_procver_of_procver p1pv ON p1.base_procver_id=p1pv.base_procver_id
                                                        AND p1pv._table='diaobject_position'
                                                        AND p1pv.procver_id={pospv}
+                INNER JOIN base_processing_version b1 ON p1pv.base_procver_id=b1.id
                 ORDER BY p1.diaobjectid, p1pv.priority DESC
                 """ ) ).format( pospv=pospv )
 
@@ -202,6 +203,7 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None,
                 INNER JOIN base_procver_of_procver pv ON o.base_procver_id=pv.base_procver_id
                                                      AND pv._table='diaobject'
                                                      AND pv.procver_id={pv}
+                INNER JOIN base_processing_version b ON b.id=pv.base_procver_id
                 """ ) ).format( sqlcolumns=sqlcolumns,
                                 objids_table=sql.Identifier(objids_table),
                                 joincolumn=sql.Identifier(joincolumn),
@@ -222,6 +224,7 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None,
                 INNER JOIN base_procver_of_procver pv ON o.base_procver_id=pv.base_procver_id
                                                      AND pv._table='diaobject'
                                                      AND pv.procver_id={pv}
+                INNER JOIN base_processing_version b ON b.id=pv.base_procver_id
                 """ ) ).format( sqlcolumns=sqlcolumns, pv=pv )
             if gotsomepos:
                 q += sql.SQL( "LEFT JOIN (\n" )
@@ -232,7 +235,7 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None,
 
         # ****
         # TEMP DEBUGGING, TAKE THIS OUT
-        dbcon.echoqueries = True
+        # dbcon.echoqueries = True
         # ****
         rows, cols = dbcon.execute( q, { 'objids': objids } )
         # Next line deals with what I think is a dysfunctional psycopg return
@@ -671,16 +674,16 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                 """ ) ).format( pos_fields=pos_fields, procver_fields=procver_fields )
             rows, cols = dbcon.execute( q )
 
-            # We might also need to get object info
-            if return_object_info:
-                columns = [ 'diaobjectid', 'rootid' ]
-                if include_base_procver:
-                    columns.extend( [ 'obj_base_procver_id', 'pos_base_procver_id' ] )
-                if not always_use_weighted_source_positions:
-                    columns.extend( [ 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ] )
-                objdf = get_object_infos( objids_table=objids_table, processing_version=objpvid,
-                                          position_procesing_version=pospvid, columns=columns,
-                                          return_format='pandas', dbcon=dbcon )
+        # We might also need to get object info
+        if return_object_info:
+            columns = [ 'diaobjectid', 'rootid' ]
+            if include_base_procver:
+                columns.extend( [ 'obj_base_procver', 'pos_base_procver' ] )
+            if not always_use_weighted_source_positions:
+                columns.extend( [ 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ] )
+            objdf = get_object_infos( objids_table=objids_table, processing_version=objpvid,
+                                      position_processing_version=pospvid, columns=columns,
+                                      return_format='pandas', dbcon=dbcon )
 
     # ...OK. I can't do this next one, because pandas can't handle None as integers,
     #   and will silently convert them to doubles so it can put NA in place.
@@ -704,82 +707,92 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
     # Update object positions if necessary
     if use_weighted_source_positions and return_object_info:
         if always_use_weighted_source_positions:
-            objdf.pos_base_procver_id = None
-            objdf.ra = None
-            objdf.dec = None
-            objdf.raerr = None
-            objdf.decerr = None
-            objdf.ra_dec_cov = None
+            # Pandas is so annoying.  Things like objdf.at[ :, 'pos_base_procver'] = None was
+            #   not working.  So, drop the columns first, then maybe it will work.
+            cols = [ i for i in [ 'pos_base_procver', 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ]
+                     if i in objdf.columns ]
+            if len( cols ) > 0:
+                objdf.drop( columns=cols, inplace=True )
+            if include_base_procver:
+                objdf.at[ :, 'pos_base_procver' ] = None
+            objdf.at[ :, 'ra' ] = None
+            objdf.at[ :, 'dec' ]= None
+            objdf.at[ :, 'raerr' ] = None
+            objdf.at[ :, 'decerr' ] = None
+            objdf.at[ :, 'ra_dec_cov' ] = None
 
         # I'm not sure we can count on really getting ra_err for everything, so instead
         #  of using that for weighting, we'll use S/N^2 (like variance weighting)
         usesource = ltcvsdf[ ( ltcvsdf.flux > ltcvsdf.fluxerr * 3. ) &
                              ( ~pandas.isna(ltcvsdf.det_ra) ) &
                              ( ~pandas.isna(ltcvsdf.det_dec) ) ].reset_index()
-        usesource = usesource.loc[ :, [ 'rootid', 'flux', 'fluxerr', 'det_ra', 'det_dec' ] ]
-        # Flux and fluxerr are floats.  To avoid floating point roundoff in sums, make sure that
-        #   the weight array is doubles.
-        usesource['weight'] = pandas.Series( usesource['flux'] / usesource['fluxerr'], dtype='float64[pyarrow]' )
-        usesource['weight'] = usesource['weight'] ** 2
-        usesource['weightedra'] = usesource['weight'] * usesource['det_ra']
-        usesource['weighteddec'] = usesource['weight'] * usesource['det_dec']
-        combsource = usesource.groupby('rootid').agg( sumra=('weightedra', 'sum'),
-                                                      sumdec=('weighteddec', 'sum'),
-                                                      sumweight=('weight', 'sum') )
-        combsource['ra'] = combsource['sumra'] / combsource['sumweight']
-        combsource['dec'] = combsource['sumdec'] / combsource['sumweight']
-        usesource = usesource.join( combsource, how='inner', on='rootid' )
-        usesource['weightedvarra'] = usesource['weight'] * ( usesource['det_ra'] - usesource['ra'] ) ** 2
-        usesource['weightedvardec'] = usesource['weight'] * ( usesource['det_dec'] - usesource['dec'] ) **2
-        usesource['weightedcovar'] = usesource['weight'] * ( ( usesource['det_ra'] - usesource['ra'] ) *
-                                                             ( usesource['det_dec'] - usesource['dec'] ) )
-        combsourcevar = usesource.groupby('rootid').agg( sumvarra=('weightedvarra', 'sum'),
-                                                         sumvardec=('weightedvardec', 'sum'),
-                                                         sumcovar=('weightedcovar', 'sum'),
-                                                         sumweight=('weight', 'sum') )
-        combsourcevar['ra_err'] = np.sqrt( combsourcevar['sumvarra'] / combsourcevar['sumweight'] )
-        combsourcevar['dec_err'] = np.sqrt( combsourcevar['sumvardec'] / combsourcevar['sumweight'] )
-        combsourcevar['ra_dec_cov'] = combsourcevar['sumcovar'] / combsourcevar['sumweight']
-        combsourcevar = combsourcevar.loc[ :, ['ra_err', 'dec_err', 'ra_dec_covar'] ]
-        combsource = combsource.join( combsourcevar, how='inner' )
+        if len(usesource) > 0:
+            # Only do things if there are things to do.
+            usesource = usesource.loc[ :, [ 'rootid', 'flux', 'fluxerr', 'det_ra', 'det_dec' ] ]
+            # Flux and fluxerr are floats.  To avoid floating point roundoff in sums, make sure that
+            #   the weight array is doubles.
+            usesource['weight'] = pandas.Series( usesource['flux'] / usesource['fluxerr'], dtype='float64[pyarrow]' )
+            usesource['weight'] = usesource['weight'] ** 2
+            usesource['weightedra'] = usesource['weight'] * usesource['det_ra']
+            usesource['weighteddec'] = usesource['weight'] * usesource['det_dec']
+            combsource = usesource.groupby('rootid').agg( sumra=('weightedra', 'sum'),
+                                                          sumdec=('weighteddec', 'sum'),
+                                                          sumweight=('weight', 'sum') )
+            combsource['ra'] = combsource['sumra'] / combsource['sumweight']
+            combsource['dec'] = combsource['sumdec'] / combsource['sumweight']
+            usesource = usesource.join( combsource, how='inner', on='rootid' )
+            usesource['weightedvarra'] = usesource['weight'] * ( usesource['det_ra'] - usesource['ra'] ) ** 2
+            usesource['weightedvardec'] = usesource['weight'] * ( usesource['det_dec'] - usesource['dec'] ) **2
+            usesource['weightedcovar'] = usesource['weight'] * ( ( usesource['det_ra'] - usesource['ra'] ) *
+                                                                 ( usesource['det_dec'] - usesource['dec'] ) )
+            combsourcevar = usesource.groupby('rootid').agg( sumvarra=('weightedvarra', 'sum'),
+                                                             sumvardec=('weightedvardec', 'sum'),
+                                                             sumcovar=('weightedcovar', 'sum'),
+                                                             sumweight=('weight', 'sum') )
+            combsourcevar['ra_err'] = np.sqrt( combsourcevar['sumvarra'] / combsourcevar['sumweight'] )
+            combsourcevar['dec_err'] = np.sqrt( combsourcevar['sumvardec'] / combsourcevar['sumweight'] )
+            combsourcevar['ra_dec_cov'] = combsourcevar['sumcovar'] / combsourcevar['sumweight']
+            combsourcevar = combsourcevar.loc[ :, ['ra_err', 'dec_err', 'ra_dec_cov'] ]
+            combsource = combsource.join( combsourcevar, how='inner' )
 
-        # ****
-        # I put this in for debugging purposes.  It lead to the conversion of the weights
-        #   dtype above to double....  (Tests were failing.)
-        # FDBLogger.info( "WEIGHTED POSITIONS FROM GET_HOT_TLCVS" )
-        # import io
-        # thing = usesource.set_index( 'rootid' )
-        # for rootid in ltcvsdf.index.unique(level='rootid').values: # thing.index.unique().values:
-        #     if rootid in thing.index.values:
-        #         subltcvsdf = thing.xs( rootid )
-        #         strio = io.StringIO()
-        #         strio.write( f"For rootid {rootid}, there are {len(subltcvsdf)} values to combine.\n" )
-        #         for row in subltcvsdf.itertuples():
-        #             strio.write( f"     ra={row.det_ra:12.8f}  dec={row.det_dec:12.8f}  weight={row.weight}\n" )
-        #         strio.write( f"  Combined: ra={combsource.loc[rootid,'ra']:12.8f}, "
-        #                      f" dec={combsource.loc[rootid, 'dec']:12.8f}\n" )
-        #         strio.write( f"  sumra={combsource.loc[rootid, 'sumra']}, "
-        #                      f"sumdec={combsource.loc[rootid, 'sumdec']}, "
-        #                      f"sumweight={combsource.loc[rootid, 'sumweight']}\n" )
-        #         FDBLogger.info( strio.getvalue() )
-        #     else:
-        #         FDBLogger.info( f"For rootid {rootid}, there are not any high s/n sources.\n" )
-        # ****
+            # ****
+            # I put this in for debugging purposes.  It lead to the conversion of the weights
+            #   dtype above to double....  (Tests were failing.)
+            # FDBLogger.info( "WEIGHTED POSITIONS FROM GET_HOT_TLCVS" )
+            # import io
+            # thing = usesource.set_index( 'rootid' )
+            # for rootid in ltcvsdf.index.unique(level='rootid').values: # thing.index.unique().values:
+            #     if rootid in thing.index.values:
+            #         subltcvsdf = thing.xs( rootid )
+            #         strio = io.StringIO()
+            #         strio.write( f"For rootid {rootid}, there are {len(subltcvsdf)} values to combine.\n" )
+            #         for row in subltcvsdf.itertuples():
+            #             strio.write( f"     ra={row.det_ra:12.8f}  dec={row.det_dec:12.8f}  weight={row.weight}\n" )
+            #         strio.write( f"  Combined: ra={combsource.loc[rootid,'ra']:12.8f}, "
+            #                      f" dec={combsource.loc[rootid, 'dec']:12.8f}\n" )
+            #         strio.write( f"  sumra={combsource.loc[rootid, 'sumra']}, "
+            #                      f"sumdec={combsource.loc[rootid, 'sumdec']}, "
+            #                      f"sumweight={combsource.loc[rootid, 'sumweight']}\n" )
+            #         FDBLogger.info( strio.getvalue() )
+            #     else:
+            #         FDBLogger.info( f"For rootid {rootid}, there are not any high s/n sources.\n" )
+            # ****
 
-        # There is probably a cleverer pandas way to do this
-        #   that would avoid a for loop
-        for row in objdf.itertuples():
-            if ( pandas.isna( row.ra ) and pandas.isna( row.dec ) and
-                 row.rootid in combsource.index.values ):
-                objdf.at[ row.Index, 'pos_base_procver_id' ] = None
-                objdf.at[ row.Index, 'ra' ] = combsource.loc[ row.rootid, 'ra' ]
-                objdf.at[ row.Index, 'dec' ] = combsource.loc[ row.rootid, 'dec' ]
-                objdf.at[ row.Index, 'raerr' ] = combsource.loc[ row.rootid, 'ra_err' ]
-                objdf.at[ row.Index, 'decerr' ] = combsource.loc[ row.rootid, 'dec_err' ]
-                objdf.at[ row.Index, 'ra_dec_cov' ] = combsource.loc[ row.rootid, 'ra_dec_covar' ]
+            # There is probably a cleverer pandas way to do this
+            #   that would avoid a for loop
+            for row in objdf.itertuples():
+                if ( pandas.isna( row.ra ) and pandas.isna( row.dec ) and
+                     row.rootid in combsource.index.values ):
+                    if include_base_procver:
+                        objdf.at[ row.Index, 'pos_base_procver' ] = None
+                    objdf.at[ row.Index, 'ra' ] = combsource.loc[ row.rootid, 'ra' ]
+                    objdf.at[ row.Index, 'dec' ] = combsource.loc[ row.rootid, 'dec' ]
+                    objdf.at[ row.Index, 'raerr' ] = combsource.loc[ row.rootid, 'ra_err' ]
+                    objdf.at[ row.Index, 'decerr' ] = combsource.loc[ row.rootid, 'dec_err' ]
+                    objdf.at[ row.Index, 'ra_dec_cov' ] = combsource.loc[ row.rootid, 'ra_dec_cov' ]
 
     if must_get_source_positions and ( not include_source_positions ):
-        ltcvsdf.drop( [ 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ], axis='columns', inplace=True )
+        ltcvsdf.drop( columns=[ 'det_ra', 'det_dec', 'det_raerr', 'det_decerr', 'det_ra_dec_cov' ], inplace=True )
 
     if which == 'forced':
         if len(ltcvsdf) > 0:
@@ -839,7 +852,10 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
 
 def object_ltcv( processing_version='default', diaobjectid=None, bands=None, which='patch',
                  include_base_procver=False, include_source_positions=False,
-                 return_format='json', mjd_now=None, dbcon=None ):
+                 use_weighted_source_positions=False, always_use_weighted_source_positions=False,
+                 return_format='json',
+                 return_object_info=False, object_processing_version=None, position_processing_version=None,
+                 mjd_now=None, dbcon=None ):
     """Get the lightcurve for an object.
 
     Parameters
@@ -897,36 +913,45 @@ def object_ltcv( processing_version='default', diaobjectid=None, bands=None, whi
 
     Returns
     -------
-       Either a pandas dataframe, or a json which is a dict
-       Fields (I THINK THIS WRONG, REVIEW AND UPDATE):
-         root_diaobjectid: uuid (or str)
-         diaobjectid: list of bigint
-         diasourceid: list of bigint
-         [ diaforcedsourceid: list of bigint ] (only if which is not 'detections')
-         mjd : list of float
-         band : list of str
-         flux : list of float
-         fluxerr : list of float
-         isdet : list of bool (True if this is detected, false otherwise)
-         [ ispatch : list of bool (True if this is detected but had no forced photometry, false otherwise ]
-             (ispatch is only present if which='patch'.)
+       One or two things, similar to what you get back from
+       many_object_ltcvs only if pandas, there is no index, and 'rootid'
+       column has been removed as there will only be one.
 
     """
 
-    rval = many_object_ltcvs( processing_version=processing_version, objids=[ diaobjectid ],
-                              bands=bands, which=which, include_base_procver=include_base_procver,
+    rval = many_object_ltcvs( processing_version=processing_version,
+                              objids=[ diaobjectid ],
+                              bands=bands,
+                              which=which,
+                              include_base_procver=include_base_procver,
                               include_source_positions=include_source_positions,
-                              return_format=return_format, mjd_now=mjd_now, dbcon=dbcon )
-    if len(rval) == 0:
+                              return_object_info=return_object_info,
+                              object_processing_version=object_processing_version,
+                              position_processing_version=position_processing_version,
+                              use_weighted_source_positions=use_weighted_source_positions,
+                              always_use_weighted_source_positions=always_use_weighted_source_positions,
+                              return_format=return_format,
+                              mjd_now=mjd_now,
+                              dbcon=dbcon )
+    if return_object_info:
+        ltcv = rval[0]
+        objinfo = rval[1]
+    else:
+        ltcv = rval
+
+    if len(ltcv) == 0:
         raise RuntimeError( f"Could not find object for diaobjectid {diaobjectid}" )
 
     if return_format == 'pandas':
-        rval.reset_index( inplace=True )
-        rval.drop( 'diaobjectid', axis='columns', inplace=True )
-        return rval
+        ltcv.reset_index( inplace=True )
+        ltcv.drop( 'rootid', axis='columns', inplace=True )
+    else:
+        ltcv = ltcv[0]
 
-    elif return_format == 'json':
-        return rval[0]
+    if return_object_info:
+        return ltcv, objinfo
+    else:
+        return ltcv
 
 
 def debug_count_temp_table( con, table ):
@@ -1812,7 +1837,7 @@ def get_hot_ltcvs( processing_version, object_processing_version=None, position_
         alias, to use for searching for diaobjects.  If None, will be
         the same as processing_version.
 
-      position_procesing_version: string, default None
+      position_processing_version: string, default None
         Ignored if always_use_weighted_source_positions is True or if
         include_object_positions=False.  The processing version for
         getting object positions.  If not given, will use

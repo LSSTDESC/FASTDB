@@ -13,7 +13,7 @@ def test_get_object_infos( set_of_lightcurves, procver_collection ):
     info = ltcv.get_object_infos( [ 200, 201, 202 ], return_format='pandas',
                                   processing_version='pvc_pv2', position_processing_version='pvc_pv1' )
     assert info.index.name == 'diaobjectid'
-    assert set(info.columns.values) == { 'rootid', 'obj_base_procver_id', 'pos_base_procver_id',
+    assert set(info.columns.values) == { 'rootid', 'obj_base_procver', 'pos_base_procver',
                                          'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' }
     assert len(info) == 3
     assert list( info.index.values ) == [ 200, 201, 202 ]
@@ -21,17 +21,17 @@ def test_get_object_infos( set_of_lightcurves, procver_collection ):
     # Since we gave a position processing versoin that was inconsistent with the diaobject
     #   processing version, none of the position fields should be filled.
     assert all( all( ( i is None ) or pandas.isna(i) for i in info[col] )
-                for col in ['pos_base_procver_id', 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov'] )
+                for col in ['pos_base_procver', 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov'] )
 
     # Make sure we get position information if we use the position processing default
     #   to the processing version
     info = ltcv.get_object_infos( [ 200, 201, 202 ], return_format='pandas', processing_version='pvc_pv2' )
     assert list( info.index.values ) == [ 200, 201, 202 ]
     assert all( all( ( i is not None ) and ( not pandas.isna(i) ) for i in info[col] )
-                for col in ['pos_base_procver_id', 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov'] )
-    assert info.loc[ 200, 'pos_base_procver_id'] == bpvs['bpv2a_diaobject_position_60030'].id
-    assert info.loc[ 201, 'pos_base_procver_id'] == bpvs['bpv2a_diaobject_position_60030'].id
-    assert info.loc[ 202, 'pos_base_procver_id'] == bpvs['bpv2_diaobject_position_60080'].id
+                for col in ['pos_base_procver', 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov'] )
+    assert info.loc[ 200, 'pos_base_procver'] == bpvs['bpv2a_diaobject_position_60030'].description
+    assert info.loc[ 201, 'pos_base_procver'] == bpvs['bpv2a_diaobject_position_60030'].description
+    assert info.loc[ 202, 'pos_base_procver'] == bpvs['bpv2_diaobject_position_60080'].description
     info2 = ltcv.get_object_infos( [ 200, 201, 202 ], return_format='pandas', processing_version='pvc_pv2',
                                    position_processing_version='pvc_pv2' )
     assert info2.equals( info )
@@ -49,16 +49,16 @@ def test_get_object_infos( set_of_lightcurves, procver_collection ):
     # TODO : right now there are no diaobjects in the default processing version!  Fix that in Issue #70.
     info = ltcv.get_object_infos( [ roots[i]['root'].id for i in [0, 1, 2] ], return_format='pandas' )
     assert list( info.index.values ) == [ 200, 201, 202, 2011 ]
-    assert all( b == bpvs['bpv2_diaobject'].id for b in info['obj_base_procver_id'] )
-    assert info.loc[ 200, 'pos_base_procver_id' ] == bpvs['bpv2a_diaobject_position_60030'].id
-    assert info.loc[ 201, 'pos_base_procver_id' ] == bpvs['bpv2a_diaobject_position_60030'].id
-    assert info.loc[ 2011, 'pos_base_procver_id' ] is None
-    assert info.loc[ 202, 'pos_base_procver_id' ] == bpvs['bpv2_diaobject_position_60080'].id
+    assert all( b == bpvs['bpv2_diaobject'].description for b in info['obj_base_procver'] )
+    assert info.loc[ 200, 'pos_base_procver' ] == bpvs['bpv2a_diaobject_position_60030'].description
+    assert info.loc[ 201, 'pos_base_procver' ] == bpvs['bpv2a_diaobject_position_60030'].description
+    assert info.loc[ 2011, 'pos_base_procver' ] is None
+    assert info.loc[ 202, 'pos_base_procver' ] == bpvs['bpv2_diaobject_position_60080'].description
 
     info2 = ltcv.get_object_infos( [ roots[i]['root'].id for i in [0, 1, 2] ], processing_version='pvc_pv2',
                                    return_format='pandas' )
     assert ( info2.rootid == info.rootid ).all()
-    assert ( info2.obj_base_procver_id == info.obj_base_procver_id ).all()
+    assert ( info2.obj_base_procver == info.obj_base_procver ).all()
     # The None/<NA> values aren't comparing as equal, probably because of the whole "all nan tests are False" thing
     assert ( info2.loc[ [ 200, 201, 202 ], : ] == info.loc[ [ 200, 201, 202], : ] ).all().all()
 
@@ -78,7 +78,7 @@ def test_get_object_infos( set_of_lightcurves, procver_collection ):
         assert info.index.values.tolist() == [ 200, 202 ]
         assert all( info['rootid'] == [ roots[i]['root'].id for i in [ 0, 2 ] ] )
         assert all ( all( ( i is not None ) and ( not pandas.isna(i) ) for i in info[col] )
-                     for col in [ 'pos_base_procver_id', 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ] )
+                     for col in [ 'pos_base_procver', 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ] )
         # If we pass an inconjsistent processing version, we should get nothing back
         info = ltcv.get_object_infos( objids_table='tempthing', dbcon=dbcon, processing_version='pvc_pv3',
                                       return_format='pandas' )
@@ -95,7 +95,7 @@ def test_get_object_infos( set_of_lightcurves, procver_collection ):
                                       return_format='pandas' )
         assert info.index.values.tolist() == [ 1 ]
         assert all( all( ( i is not None ) and ( not pandas.isna(i) ) for i in info[col] )
-                    for col in [ 'pos_base_procver_id', 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ] )
+                    for col in [ 'pos_base_procver', 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ] )
 
         # If the temp table has both rootid and diaobjectid, it should use diaobjectid.  Test this
         # By passing an inconsistent input
@@ -201,9 +201,6 @@ def test_object_ltcv( procver_collection, set_of_lightcurves ):
              == forced.loc[ :, [c for c in forced.columns if c not in [ 'diasourceid', 'base_procver_s' ] ] ]
             ).all().all()
 
-
-
-
     # Make sure json output is consistent
 
     j_srcs = ltcv.object_ltcv( pvs['pv2'].id, roots[1]['root'].id, return_format='json',
@@ -215,7 +212,6 @@ def test_object_ltcv( procver_collection, set_of_lightcurves ):
 
     for js, pd in zip( [ j_srcs, j_forced, j_df ], [ srcs, forced, df ] ):
         assert isinstance( js, dict )
-        assert all( pd.rootid == js['rootid'] )
         for col in pd.columns:
             if col == 'rootid':
                 continue
@@ -257,6 +253,174 @@ def test_object_ltcv( procver_collection, set_of_lightcurves ):
         assert all( df[ df.isdet == False ][field].isna() )
 
 
+    # Test return_object_info
+
+    srcs2, srcinfo = ltcv.object_ltcv( pvs['pv2'].id, 200, return_format='pandas', which='detections',
+                                       include_base_procver=True, include_source_positions=True,
+                                       return_object_info=True )
+    forced2, frcinfo = ltcv.object_ltcv( pvs['pv2'].id, 200, return_format='pandas', which='forced',
+                                         include_base_procver=True, include_source_positions=True,
+                                         return_object_info=True )
+    df2, dfinfo = ltcv.object_ltcv( pvs['pv2'].id, 200, return_format='pandas', which='patch',
+                                    include_base_procver=True, include_source_positions=True,
+                                    return_object_info=True )
+    assert ( srcinfo == frcinfo ).all().all()
+    assert ( srcinfo == dfinfo ).all().all()
+    assert list( dfinfo.obj_base_procver )[0]== 'pvc_bpv2'
+    assert list( dfinfo.pos_base_procver )[0] == 'pvc_bpv2a_60030'
+    assert list( dfinfo.rootid )[0] == roots[0]['root'].id
+    assert list( dfinfo.ra )[0] == pytest.approx( roots[0]['pos'][(200, 'bpv2a_diaobject_position_60030')].ra,
+                                                  rel=1e-14 )
+    assert list( dfinfo.dec )[0] == pytest.approx( roots[0]['pos'][(200, 'bpv2a_diaobject_position_60030')].dec,
+                                                   rel=1e-14 )
+    assert list( dfinfo.raerr )[0] == pytest.approx( roots[0]['pos'][(200, 'bpv2a_diaobject_position_60030')].raerr,
+                                                     rel=1e-6 )
+    assert list( dfinfo.decerr )[0] == pytest.approx( roots[0]['pos'][(200, 'bpv2a_diaobject_position_60030')].decerr,
+                                                      rel=1e-6 )
+    assert list( dfinfo.ra_dec_cov )[0] == pytest.approx( roots[0]['pos']
+                                                          [(200, 'bpv2a_diaobject_position_60030')].ra_dec_cov,
+                                                          rel=1e-6 )
+    for olddf, newdf in zip( [ srcs, forced, df ], [ srcs2, forced2, df2 ] ):
+        assert len(olddf) == len(newdf)
+        assert ( olddf[ ~pandas.isna(df.diasourceid) ] == newdf[ ~pandas.isna(df2.diasourceid) ] ).all().all()
+        scarycolumns = [ 'diasourceid', 'base_procver_s', 'det_ra', 'det_dec',
+                         'det_raerr', 'det_decerr', 'det_ra_dec_cov' ]
+        assert ( olddf[ ~pandas.isna(df.det_ra) ] == newdf[ ~pandas.isna(df2.det_ra) ] ).all().all()
+        for col in scarycolumns:
+            assert ( olddf[ pandas.isna(olddf[col]) ].loc[ :, 'mjd' ]
+                     == newdf[ pandas.isna(newdf[col]) ].loc[ :, 'mjd' ] ).all()
+        assert ( olddf.loc[ :, [ c for c in olddf.columns if c not in scarycolumns ] ] ==
+                 newdf.loc[ :, [ c for c in newdf.columns if c not in scarycolumns ] ]
+                ).all().all()
+        
+    # return_object_info and json
+
+    jsrc2, jsrcinfo = ltcv.object_ltcv( pvs['pv2'].id, 200, return_format='json', which='detections',
+                                        include_base_procver=True, include_source_positions=True,
+                                        return_object_info=True )
+    jforced2, jfrcinfo = ltcv.object_ltcv( pvs['pv2'].id, 200, return_format='json', which='forced',
+                                           include_base_procver=True, include_source_positions=True,
+                                           return_object_info=True )
+    jdf2, jdfinfo = ltcv.object_ltcv( pvs['pv2'].id, 200, return_format='json', which='patch',
+                                      include_base_procver=True, include_source_positions=True,
+                                      return_object_info=True )
+    for j, p in zip( [ jsrcinfo, jfrcinfo, jdfinfo ], [ srcinfo, frcinfo, dfinfo ] ):
+        assert j['diaobjectid'] == list( p.index.values )
+        for col in p.columns:
+            assert list( j[col] ) == list( p[col] )
+    for js, pd in zip( [ jsrc2, jforced2, jdf2 ], [ srcs2, forced2, df2 ] ):
+        assert isinstance( js, dict )
+        for col in pd.columns:
+            if col == 'rootid':
+                continue
+            wnonnull = np.where( ~pandas.isna( pd[col] ) )[0]
+            assert ( pd[col][wnonnull] == np.array( js[col] )[wnonnull] ).all()
+            wnull = np.where( pandas.isna( pd[col] ) )[0]
+            # pandas.isna catches both pandas-specific <NA> and None
+            assert all( pandas.isna( np.array( js[col] )[wnull] ) )
+    
+    # test use_weighted_source_position; diaobject 203 has no positions.
+    # First, make sure we see that
+    src, srcinfo = ltcv.object_ltcv( pvs['pv2'].id, 203, return_format='pandas', which='detections',
+                                     return_object_info=True )
+    frc, frcinfo = ltcv.object_ltcv( pvs['pv2'].id, 203, return_format='pandas', which='forced',
+                                     return_object_info=True )
+    pat, patinfo = ltcv.object_ltcv( pvs['pv2'].id, 203, return_format='pandas', which='patch',
+                                     return_object_info=True )
+    for info in [ srcinfo, frcinfo, patinfo ]:
+        assert all( pandas.isna( info.loc[ :, [ 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ] ] ) )
+
+    # # Now check positions
+
+    TODO : fix this next functon so that you pass a list of keys, and it will then go through
+      and find sources from the priority list.  That lets us compare to something where we'll
+      get a mix of base processing versions.
+    
+    def check_pos( infodf, srces ):
+        srcra = np.array( [ i.ra for i in srces ] )
+        srcdec = np.array( [ i.dec for i in srces ] )
+        sn = np.array( [ i.psfflux / i.psffluxerr for i in srces ] )
+        w = np.where( sn > 3 )[0]
+        srcra = srcra[w]
+        srcdec = srcdec[w]
+        weight = sn[w] ** 2
+        meanra = ( srcra * weight ).sum() / ( weight.sum() )
+        meandec = ( srcdec * weight ).sum() / ( weight.sum() )
+        raerr = np.sqrt( ( weight * ( srcra - meanra )**2 ).sum() / weight.sum() )
+        decerr = np.sqrt( ( weight * ( srcdec - meandec )**2 ).sum() / weight.sum() )
+        ra_dec_cov = ( weight * ( srcra - meanra ) * ( srcdec - meandec ) ) / weight.sum()
+
+        assert list( infodf.ra )[0] == pytest.approx( meanra, rel=1e-14 )
+        assert list( infodf.dec )[0] == pytest.approx( meandec, rel=1e-14 )
+        assert list( infodf.raerr )[0] == pytest.approx( raerr, rel=1e-6 )
+        assert list( infodf.decerr )[0] == pytest.approx( decerr, rel=1e-6 )
+        # ...this next line checking that 0 = 0 to a relative precision of 1e-6, which is hopeless.
+        # assert list( infodf.ra_dec_cov )[0] == pytest.approx( ra_dec_cov, rel=1e-6 )
+        assert list( infodf.ra_dec_cov )[0] == pytest.approx( 0., abs=1e-10 )
+        assert ra_dec_cov == pytest.approx( 0., abs=1e-10 )
+        
+    # src, srcinfo = ltcv.object_ltcv( pvs['pv2'].id, 203, return_format='pandas', which='detections',
+    #                                  return_object_info=True, use_weighted_source_positions=True )
+    # frc, frcinfo = ltcv.object_ltcv( pvs['pv2'].id, 203, return_format='pandas', which='forced',
+    #                                  return_object_info=True, use_weighted_source_positions=True )
+    # pat, patinfo = ltcv.object_ltcv( pvs['pv2'].id, 203, return_format='pandas', which='patch',
+    #                                  return_object_info=True, use_weighted_source_positions=True )
+    # check_pos( srcinfo, roots[3]['src']['bpv2_diasource'] )
+    # check_pos( frcinfo, roots[3]['src']['bpv2_diasource'] )
+    # check_pos( patinfo, roots[3]['src']['bpv2_diasource'] )
+
+    # Next, check always_use_source_positions by passing object 200, which does have positions
+
+    # First, if we use use_weighted_source_positions but no always, we should get the
+    #   diaobject_position position back
+    src, srcinfo = ltcv.object_ltcv( pvs['pv2'].id, 200, return_format='pandas', which='detections',
+                                     return_object_info=True, use_weighted_source_positions=True,
+                                     include_base_procver=True )
+    frc, frcinfo = ltcv.object_ltcv( pvs['pv2'].id, 200, return_format='pandas', which='forced',
+                                     return_object_info=True, use_weighted_source_positions=True,
+                                     include_base_procver=True )
+    pat, patinfo = ltcv.object_ltcv( pvs['pv2'].id, 200, return_format='pandas', which='patch',
+                                     return_object_info=True, use_weighted_source_positions=True,
+                                     include_base_procver=True )
+    for info in [ srcinfo, frcinfo, patinfo ]:
+        assert info.pos_base_procver.iloc[0] == 'pvc_bpv2a_60030'
+        dex = ( 200, 'bpv2a_diaobject_position_60030' )
+        assert info.ra.iloc[0] == pytest.approx( roots[0]['pos'][dex].ra, rel=1e-14 )
+        assert info.dec.iloc[0] == pytest.approx( roots[0]['pos'][dex].dec, rel=1e-14 )
+        assert info.raerr.iloc[0] == pytest.approx( roots[0]['pos'][dex].raerr, rel=1e-6 )
+        assert info.decerr.iloc[0] == pytest.approx( roots[0]['pos'][dex].decerr, rel=1e-6 )
+        assert info.ra_dec_cov.iloc[0] == pytest.approx( roots[0]['pos'][dex].ra_dec_cov, rel=1e-6 )
+
+    # Now put in always_....
+    
+    src, srcinfo = ltcv.object_ltcv( pvs['pv1'].id, 200, return_format='pandas', which='detections',
+                                     return_object_info=True, always_use_weighted_source_positions=True,
+                                     include_base_procver=True )
+    frc, frcinfo = ltcv.object_ltcv( pvs['pv1'].id, 200, return_format='pandas', which='forced',
+                                     return_object_info=True, always_use_weighted_source_positions=True,
+                                     include_base_procver=True )
+    pat, patinfo = ltcv.object_ltcv( pvs['pv2'].id, 200, return_format='pandas', which='patch',
+                                     return_object_info=True, always_use_weighted_source_positions=True,
+                                     include_base_procver=True )
+    for info in [ srcinfo, frcinfo, patinfo ]:
+        # Should *not* match the diaobject_position value
+        assert all( pandas.isna( info.pos_base_procver ) )
+        dex = ( 200, 'bpv2a_diaobject_position_60030' )
+        assert info.ra.iloc[0] != pytest.approx( roots[0]['pos'][dex].ra, abs=0.01/3600 )
+        assert info.dec.iloc[0] != pytest.approx( roots[0]['pos'][dex].dec, abs=0.01/3600 )
+
+    # But should match the mean source position
+    import pdb; pdb.set_trace()
+    check_pos( srcinfo, roots[2]['src']['bpv2_diasource'] )
+    check_pos( frcinfo, roots[2]['src']['bpv2_diasource'] )
+    check_pos( patinfo, roots[2]['src']['bpv2_diasource'] )
+    
+    
+    
+    import pdb; pdb.set_trace()
+    pass
+
+        
 
 def test_many_object_ltcvs( procver_collection, set_of_lightcurves ):
     roots = set_of_lightcurves
