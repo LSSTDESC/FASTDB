@@ -93,11 +93,12 @@ class BaseProcVer( BaseView ):
                 pvid = db.BaseProcessingVersion.base_procver_id( procver, table )
             except Exception as ex:
                 raise FASTDBWebException( str(ex) )
-            if pvid is None:
-                return f"Unknown base processing version {procver}", 500
 
             row, _ = con.execute( "SELECT id,description,_table FROM base_processing_version WHERE id=%(pv)s",
                                   { 'pv': pvid } )
+            if len(row) == 0:
+                return f"Unknown base processing version {procver}", 422
+
             retval = { 'status': 'ok',
                        'id': row[0][0],
                        'description': row[0][1],
@@ -195,18 +196,21 @@ class GetDiaObjectInfo( BaseView ):
             data = flask.request.json
             if ( ( procver is not None ) and ( 'processing_version' in data ) and
                  ( data['processing_version'] != procver ) ):
-                raise ValueError( f"Conflicting processing versions; {procver} specified in the URL, "
-                                  f"but {data['processing_version']} passed in the body!" )
+                raise FASTDBWebException( f"Conflicting processing versions; {procver} specified in the URL, "
+                                          f"but {data['processing_version']} passed in the body!" )
             procver = data['processing_version' ] if 'processing_version' in data else procver
             procver = 'default' if procver is None else procver
 
             if ( objid is not None ) and ( 'objectids' in data ):
-                raise ValueError( "Error, object id given in both URL and body.  Only do one." )
+                raise FASTDBWebException( "Error, object id given in both URL and body.  Only do one." )
             objid = data['objectids'] if objid is None else objid
             columns = data['columns'] if 'columns' in data else None
 
         procver = 'default' if procver is None else procver
-        return ltcv.get_object_infos( objid, processing_version=procver, columns=columns, return_format='json' )
+        try:
+            return ltcv.get_object_infos( objid, processing_version=procver, columns=columns, return_format='json' )
+        except Exception as ex:
+            raise FASTDBWebException( str(ex) )
 
 
 # ======================================================================

@@ -1,4 +1,5 @@
 import re
+import uuid
 import pytest
 
 
@@ -67,10 +68,15 @@ def test_procver( procver_collection, test_user, fastdb_client, procver_postimes
 def test_base_procver( procver_collection, test_user, fastdb_client ):
     bpvs, _pvs = procver_collection
 
+    badbpv = str( uuid.uuid4() )
+    with pytest.raises( RuntimeError, match=( f'Error response from server, status 422: '
+                                              f'Unknown base processing version {badbpv}' ) ):
+        _ = fastdb_client.post( f'/baseprocver/{badbpv}' )
+
     for k, bpv in bpvs.items():
         with pytest.raises( RuntimeError, match=( 'Error response from server, status 422: table is required '
                                                   'when base_processing_version is not a uuid' ) ):
-            res = fastdb_client.post( f'/baseprocver/{bpv.description}' )
+            _ = fastdb_client.post( f'/baseprocver/{bpv.description}' )
 
         for suffix in [ bpv.id, f'{bpv.description}/{bpv._table}' ]:
             res = fastdb_client.post( f'/baseprocver/{suffix}' )
@@ -133,7 +139,8 @@ def test_countthings( set_of_lightcurves, test_user, fastdb_client ):
         fastdb_client.retries = 0
         with pytest.raises( RuntimeError, match='Got status 500 trying to connect' ):
             res = fastdb_client.post( '/count/diaobject/this_processing_version_does_not_exist' )
-        with pytest.raises( RuntimeError, match='Got status 500 trying to connect' ):
+        with pytest.raises( RuntimeError, match=( 'Error response from server, status 422: '
+                                                  'Unknown thing to count: this_table_does_not_exist' ) ):
             res = fastdb_client.post( '/count/this_table_does_not_exist' )
     finally:
         fastdb_client.retries = orig_retries
@@ -147,9 +154,15 @@ def test_getdiaobjectinfo( fastdb_client, procver_collection, set_of_lightcurves
     fastdb_client.retries = 0
 
     try:
-        with pytest.raises( RuntimeError ):
+        with pytest.raises( RuntimeError, match=( 'Error response from server, status 422: '
+                                                  'must pass either objids or objids_table' ) ):
             res = fastdb_client.post( '/getdiaobjectinfo' )
-        with pytest.raises( RuntimeError ):
+        with pytest.raises( RuntimeError, match=( 'Error response from server, status 422: '
+                                                  'Conflicting processing versions; .* specified in the URL, '
+                                                  'but .* passed in the body' ) ):
+            res = fastdb_client.post( '/getdiaobjectinfo/realtime', json={ 'processing_version': 'pvc_pv2' } )
+        with pytest.raises( RuntimeError, match=( 'Error response from server, status 422: '
+                                                  'must pass either objids or objids_table' ) ):
             res = fastdb_client.post( '/getdiaobjectinfo/realtime' )
 
         res = fastdb_client.post( f"/getdiaobjectinfo/pvc_pv2/{str(roots[0]['root'].id)}" )
@@ -162,24 +175,29 @@ def test_getdiaobjectinfo( fastdb_client, procver_collection, set_of_lightcurves
                                                                'objectids': [ str(roots[0]['root'].id) ] } )
         assert res2 == res
 
-        # BROKEN.  Right now the set_of_lightcurves doesn't have objects inthe
+        # BROKEN.  Right now the set_of_lightcurves doesn't have objects in the
         #   default processing version.  Issue #70
         # res = fasdtb_client.post( "/getdiaobjectinfo", json={ 'objectids': [ str(roots[0]['root'].id) ] } )
+        # res = fastdb_client.post( "/getdiaobjectinfo", json={ 'objectids': [ 200, 201, 202 ] } )
+        # assert res['diaobjectid'] == [ 200, 201, 202 ]
+        # assert res['rootid'] == [ str(roots[0]['root'].id), str(roots[1]['root'].id), str(roots[2]['root'].id) ]
 
-        res = fastdb_client.post( "/getdiaobjectinfo", json={ 'objectids': [ 200, 201, 202 ] } )
-        assert res['diaobjectid'] == [ 200, 201, 202 ]
-        assert res['rootid'] == [ str(roots[0]['root'].id), str(roots[1]['root'].id), str(roots[2]['root'].id) ]
-        assert set( res.keys() ) == { 'diaobjectid', 'rootid', 'base_procver_id', 'validitystartmjdtai',
-                                      'ra', 'raerr', 'dec', 'decerr', 'ra_dec_cov',
-                                      'nearbyextobj1', 'nearbyextobj1id', 'nearbyextobj1sep',
-                                      'nearbyextobj2', 'nearbyextobj2id', 'nearbyextobj2sep',
-                                      'nearbyextobj3', 'nearbyextobj3id', 'nearbyextobj3sep',
-                                      'nearbylowzgal', 'nearbylowzgalsep' }
+        res = fastdb_client.post( "/getdiaobjectinfo/pvc_pv2", json={ 'objectids': [ 200, 201 ] } )
+        assert res['diaobjectid'] == [ 200, 201 ]
+        assert res['rootid'] == [ str(roots[i]['root'].id) for i in [ 0, 1 ] ]
+        assert set( res.keys() ) == { 'diaobjectid', 'rootid', 'obj_base_procver_id', 'pos_base_procver_id',
+                                      'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' }
 
-        res = fastdb_client.post( "/getdiaobjectinfo", json={ 'objectids': [ 200, 201, 202 ],
-                                                              'columns': [ 'diaobjectid', 'ra', 'dec' ] } )
+        res = fastdb_client.post( "/getdiaobjectinfo/pvc_pv2", json={ 'objectids': [ 200, 201, 202 ],
+                                                                      'columns': [ 'diaobjectid', 'ra', 'dec' ] } )
         assert res['diaobjectid'] == [ 200, 201, 202 ]
         assert set( res.keys() ) == { 'diaobjectid', 'ra', 'dec' }
 
+
     finally:
         fastdb_client.retries = orig_retries
+
+
+@pytest.mark.skip( reason="NEED TO WRITE THIS TEST" )
+def test_objectsearch( fastdb_client, procver_collection, set_of_lightcurves ):
+    assert False

@@ -109,8 +109,10 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None,
                 obj_is_root = False
             else:
                 raise RuntimeError( f"Could not find column diaobjectid nor rootid in table {objids_table}" )
+    elif objids is None:
+        raise ValueError( "must pass either objids or objids_table" )
     else:
-        if ( objids is not None ) and ( not util.isSequence( objids ) ):
+        if not util.isSequence( objids ):
             objids = [ objids ]
         if all( isinstance( o, numbers.Integral ) for o in objids ):
             # Make sure they're int, because if it's something like np.int64, postgres may choke
