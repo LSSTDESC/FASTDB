@@ -286,6 +286,15 @@ class GetHotTransients( BaseView ):
          Specifies the format of the data returned; see below.  If not given,
          assumes 0.
 
+       include_ids : bool, default False
+         See Returns below
+
+       include_object_positions : bool, default False
+         See Returns below
+
+       include_source_positions : bool, default False
+         See Returns below
+
        detected_since_mjd : float
          If given, gets all transients detected since this mjd.
 
@@ -317,15 +326,20 @@ class GetHotTransients( BaseView ):
 
          return_format = 0:
             Returns a list of dictionaries.  Each row corresponds to a single
-            detected transients, and will have keys:
-               diaobjectid : bigint
-               rootid : string UUID
-               ra : float, ra of the object
-               dec : float, dec of the object
+            detected transient, and will have keys:
+               rootid : string UUID.  This is the thing you should use to keep
+                        track of the object.
+               diaobjectid : list of bigint; diaobjectids in the desired
+                             processing version associated with this rootid.
+                             There may be multiple
+               ra : float (*see below)
+               dec : float (*see below)
+               ra_err: float (*see below)
+               dec_err: float (*see below)
+               ra_dec_cov: float (*see below)
                zp : float, always 31.4
                redshift : float, currently always -99  (not implemented!)
-               sncode : int, currently always -99  (not implemented!)
-               photometry : dict with four keys, each of which is a list
+               photometry : dict with several keys, the value of each of which is a list
                     mjd : float, mjd of point
                     band : str, one if u, g, r, i, z, or Y
                     flux : float, psf flux in nJy

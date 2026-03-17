@@ -64,7 +64,7 @@ def procver_collection( procver_postimes, procver_bases ):
     #     pvc_pv2 : pvc_bpv2a, pvc_bpv2
     #     pvc_pv3 : pvc_bpv3
     #     realtime : realtime
-    #   A processing version alias default pointing at pvc_pv3
+    #   A processing version alias default pointing at pvc_pv2
     #
     # (The fallbacks of pvc_pv2 and pvc_pv3 to the earlier bpvs are for Object handing in set_of_lightcurves)
     #
@@ -73,10 +73,8 @@ def procver_collection( procver_postimes, procver_bases ):
     # Keys for the processing versions are pv1, pv2, pv3, and realtime
     # Keys for the base processing versions are {name} or {name}_{table},
     #   where {name} is one of bpv1, bpv1a, bpv1b, bpv2, bpv2a, bpv3, realtime
-    #   and {table} is one of diaobject_position, diasource, diaforcedsource
-    #   (The bpvs for the diaboject table are named with just {name} for
-    #   backwards compatibility with tests written before _table was
-    #   included in base processing versions.
+    #   and {table} is one of diaobject, diasource, diaforcedsource
+    # Base processing versions also have {name}_diaoject_position_{mjd} for diaobject_position
 
     bpvs = {}
     pvs = {}
@@ -179,7 +177,7 @@ def procver_collection( procver_postimes, procver_bases ):
                             bpvs[key] = BaseProcessingVersion( id=uuidbatch[uuiddex], _table=table, description=desc )
                     else:
                         uuiddex += 1
-                        key = base if table == 'diaobject' else f'{base}_{table}'
+                        key = f'{base}_{table}'
                         desc = base if base == 'realtime' else f'pvc_{base}'
                         bpvs[key] = BaseProcessingVersion( id=uuidbatch[uuiddex], _table=table, description=desc )
 
@@ -211,7 +209,7 @@ def procver_collection( procver_postimes, procver_bases ):
                                                      { 'pv': pvs[pv].id, 'bpv': bpvs[bpvkey].id,
                                                        'tab': table, 'prio': subprio } )
                         else:
-                            bpvkey = bpv if table == 'diaobject' else f'{bpv}_{table}'
+                            bpvkey = f'{bpv}_{table}'
                             con.execute_nofetch( "INSERT INTO base_procver_of_procver(procver_id,base_procver_id,"
                                                  "                                    _table,priority) "
                                                  "VALUES (%(pv)s,%(bpv)s,%(tab)s,%(prio)s)",
@@ -219,7 +217,7 @@ def procver_collection( procver_postimes, procver_bases ):
                                                    'tab': table, 'prio': prio } )
 
             con.execute_nofetch( "INSERT INTO processing_version_alias(description,procver_id) "
-                                 "VALUES ('default',%(pvid)s)", { 'pvid': pvs['pv3'].id } )
+                                 "VALUES ('default',%(pvid)s)", { 'pvid': pvs['pv2'].id } )
 
             con.commit()
 
@@ -244,32 +242,52 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
     #   2: 1 20" away
     #   3: 1 much further away
     #
-    # The first root object has three diaobjects associated with it, under bpv1, bpv2, and realtime
-    # The others only have diaobjects in bpv2 and realtime
+    # Objects 0 through 2 are in realtime as [ 0, 1, 2 ]
+    # Object 0 is in bpv1 as 101
+    # All objects are in bpv2 as [ 200, 201, 202, 203 ]
+    #   BUT object 1 is also in bpv2 as 2011
+    #
+    # Positions are stored at procver_postimes *if* the object still has a detection by the time
+    #   (diaobjects 203 and 2011 have no positions stored)
     #
     # Objects have lightcurves:
     #     object 0 : first detection mjd 60000, last detection mjd 60030, peak 60010, mag 24
     #     object 1 : first detection mjd 60020, last detection mjd 60060, peak 60035, mag 22
     #     object 2 : first detection mjd 60040, last detection mjd 60080, peak 60050, mag 23
     #     object 3 : first detection mjd 60050, last detection mjd 60060, peak 60055, mag 25
-    # All objects are in bpv2
-    # Object 0 only is in bpv1
-    # Objects 0 through 2 are in realtime
     #
-    # Objects have positions stored for every bpv the object is defined at the times in procver_postimes
+    # All lightcurves have a candence of 2.5 days.  (I'm counting on
+    #   floats being perfectly representable in these ranges at
+    #   increments of 2.5, which I believe is true.)
     #
-    # Forced photometry starts 10 days before first detection and goes through 20 days after last detection.
+    # Full lightcurves are in bpv2 and bpv3
+    # Times [ 60020, 60030 ] have forcedsources in bpv2a
+    # Times [ 60020, 60025 ] have sources in bpv2a
+    # FOR OBJECT 1 IN bpv2 ONLY:
+    #    if mjd = floor(mjd), diasource and diaforcedsource are associated with object 201
+    #       otherwise diasource and diaforcedsource are associated with object 2011
     #
-    # DiaSource and DiaForcedSource have Extra entries for mjd <= 60050
+    # Photometry through 60060 and forced through 60055 is in realtime for objects 0 through 2
     #
-    # (I'm counting on floats being perfectly representable in these ranges at increments of 2.5.)
+    # Object 0:
+    #    photometry through 60015 and forced through 60010 in bpv1a
+    #    photometry through 60030 and forced through 60025 in bpv1
     #
-    # Object 0 is complicated.  The first diaboject will only have detections through
-    #     60015 and forced photometry through 60010 in bpv1a.
-    #     It will have detections through 60030 and forced photometry through 60025 in bpv1
-    # All objects have full lightcurves in bpv2, bpv2a, bpv3
-    # Objects 0-2 have photometry through 60060 and forced through 60055 in realtime
-    # All lightcurves are at a 2.5 day cadence, alternating bands r and i.
+    # RETURN STRUCTURE:
+    # [
+    #    { 'root':  RootDiaObject,
+    #      'obj':   { diaobjectid: DiaObject for all relevant object base processing versions },
+    #      'pos':   { (diaobjectid, bpv): DiaObjectPosition for all relevant position base processing versions },
+    #      'src':   { bpv: [ list of DiaSource ] },
+    #      'srcex': { bpv: [ list of DiaSourceExtra ] },
+    #      'frc':   { bpv: [ list of DiaForcedSource ] },
+    #      'frcex'  { bpv: [ list of DiaForcedSourceExtra ] }
+    #    }
+    # ]
+    #
+    # Ordered for object 0, 1, 2, 3
+    #
+    # all bpv keys are keys into the bpvs dictionary of the procver_collection fixture
 
     roots = []
     rootobjs = []
@@ -339,7 +357,12 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
 
             # In rootdict, objs[0] is in realtime, objs[1] is in bpv2, and objs[2] is in bpv1
             rootdict = { 'root': robj,
-                         'objs': []
+                         'obj': {},
+                         'pos': {},
+                         'src': {},
+                         'srcex': {},
+                         'frc': {},
+                         'frcex': {}
                         }
             roots.append( rootdict )
 
@@ -353,45 +376,41 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
 
             # diaobjects
             if i < 3:
-                objr = DiaObject( diaobjectid=i, rootid=robj.id, base_procver_id=bpvs['realtime'].id )
+                objr = DiaObject( diaobjectid=i, rootid=robj.id, base_procver_id=bpvs['realtime_diaobject'].id )
                 objobjs.append( objr )
-                rootdict['objs'].append( { 'obj': objr, 'pos': {}, 'src': {}, 'srcex': {}, 'frc': {}, 'frcex': {} } )
-            else:
-                objr = None
-                rootdict['objs'].append( None )
+                rootdict['obj'][i] = objr
 
-            obj = DiaObject( diaobjectid=200+i, rootid=robj.id, base_procver_id=bpvs['bpv2'].id )
+            obj = DiaObject( diaobjectid=200+i, rootid=robj.id, base_procver_id=bpvs['bpv2_diaobject'].id )
             objobjs.append( obj )
-            rootdict['objs'].append( { 'obj': obj, 'pos':{}, 'src': {}, 'srcex': {}, 'frc': {}, 'frcex': {} } )
+            rootdict['obj'][200+i] = obj
+
+            if i == 1:
+                obj2011 = DiaObject( diaobjectid=2011, rootid=robj.id, base_procver_id=bpvs['bpv2_diaobject'].id )
+                objobjs.append( obj2011 )
+                rootdict['obj'][2011] = obj2011
 
             if i == 0:
-                obj1 = DiaObject( diaobjectid=100, rootid=robj.id, base_procver_id=bpvs['bpv1'].id )
+                obj1 = DiaObject( diaobjectid=100, rootid=robj.id, base_procver_id=bpvs['bpv1_diaobject'].id )
                 objobjs.append( obj1 )
-                rootdict['objs'].append( { 'obj': obj1, 'pos': {}, 'src': {}, 'srcex': {}, 'frc': {}, 'frcex': {} } )
-            else:
-                obj1 = None
-                rootdict['objs'].append( None )
+                rootdict['obj'][100] = obj1
 
             # build the rest of the rootdict dicts
             if objr is not None:
-                rootdict['objs'][0]['pos']['realtime'] = []
-                rootdict['objs'][0]['src']['realtime'] = []
-                rootdict['objs'][0]['srcex']['realtime'] = []
-                rootdict['objs'][0]['frc']['realtime'] = []
-                rootdict['objs'][0]['frcex']['realtime'] = []
+                rootdict['src']['realtime_diasource'] = []
+                rootdict['srcex']['realtime_diasource'] = []
+                rootdict['frc']['realtime_diaforcedsource'] = []
+                rootdict['frcex']['realtime_diaforcedsource'] = []
             for bpv in [ 'bpv2', 'bpv2a', 'bpv3' ]:
-                rootdict['objs'][1]['pos'][bpv] = []
-                rootdict['objs'][1]['src'][bpv] = []
-                rootdict['objs'][1]['srcex'][bpv] = []
-                rootdict['objs'][1]['frc'][bpv] = []
-                rootdict['objs'][1]['frcex'][bpv] = []
+                rootdict['src'][f'{bpv}_diasource'] = []
+                rootdict['srcex'][f'{bpv}_diasource'] = []
+                rootdict['frc'][f'{bpv}_diaforcedsource'] = []
+                rootdict['frcex'][f'{bpv}_diaforcedsource'] = []
             if obj1 is not None:
                 for bpv in [ 'bpv1', 'bpv1a' ]:
-                    rootdict['objs'][2]['pos'][bpv] = []
-                    rootdict['objs'][2]['src'][bpv] = []
-                    rootdict['objs'][2]['srcex'][bpv] = []
-                    rootdict['objs'][2]['frc'][bpv] = []
-                    rootdict['objs'][2]['frcex'][bpv] = []
+                    rootdict['src'][f'{bpv}_diasource'] = []
+                    rootdict['srcex'][f'{bpv}_diasource'] = []
+                    rootdict['frc'][f'{bpv}_diaforcedsource'] = []
+                    rootdict['frcex'][f'{bpv}_diaforcedsource'] = []
 
             # Detections
             nextposdex = 0
@@ -431,7 +450,7 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
 
                 # realtime sources
                 if ( i < 3 ) and ( sourcemjd <= 60060. ):
-                    src = DiaSource( diasourceid=objr.diaobjectid * 100000 + int(sourcemjd),
+                    src = DiaSource( diasourceid=objr.diaobjectid * 1000000 + int(sourcemjd),
                                      base_procver_id=bpvs['realtime_diasource'].id,
                                      diaobjectid=objr.diaobjectid,
                                      visit=visit,
@@ -440,7 +459,7 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
                                      psfflux=psfflux, psffluxerr=psffluxerr,
                                      ra=ra['realtime'], dec=dec['realtime'] )
                     srcobjs.append( src )
-                    rootdict['objs'][0]['src']['realtime'].append( src )
+                    rootdict['src']['realtime_diasource'].append( src )
 
                     if sourcemjd < 60050.:
                         srcex = DiaSourceExtra( diasourceid=src.diasourceid,
@@ -449,11 +468,11 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
                                                 x=1,
                                                 y=1 )
                         srcexobjs.append( srcex )
-                        rootdict['objs'][0]['srcex']['realtime'].append( srcex )
+                        rootdict['srcex']['realtime_diasource'].append( srcex )
                     else:
-                        rootdict['objs'][0]['srcex']['realtime'].append( None )
+                        rootdict['srcex']['realtime_diasource'].append( None )
 
-                    if dopos:
+                    if dopos and ( i < 3 ):
                         pos = DiaObjectPosition( diaobjectid=objr.diaobjectid,
                                                  base_procver_id=bpvs[f'realtime_diaobject_position_{postime}'].id,
                                                  ra=ratot['realtime'] / npos,
@@ -462,11 +481,11 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
                                                  decerr=0.2 / np.sqrt(npos),
                                                  ra_dec_cov=0.05 ** 2 / npos )
                         posobjs.append( pos )
-                        rootdict['objs'][0]['pos']['realtime'].append( pos )
+                        rootdict['pos'][(objr.diaobjectid, f'realtime_diaobject_position_{postime}')] = pos
 
                 # realtime forced sources
                 if ( i < 3 ) and ( sourcemjd <= 60055. ):
-                    frc = DiaForcedSource( diaforcedsourceid=objr.diaobjectid * 100000 + int(sourcemjd),
+                    frc = DiaForcedSource( diaforcedsourceid=objr.diaobjectid * 1000000 + int(sourcemjd),
                                            base_procver_id=bpvs['realtime_diaforcedsource'].id,
                                            diaobjectid=objr.diaobjectid,
                                            visit=visit,
@@ -478,27 +497,37 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
                                            dec=forceddec['realtime']
                                           )
                     frcobjs.append( frc )
-                    rootdict['objs'][0]['frc']['realtime'].append( frc )
+                    rootdict['frc']['realtime_diaforcedsource'].append( frc )
 
                     if sourcemjd < 60050.:
-                        frcex = DiaForcedSourceExtra( diaforcedsourceid=objr.diaobjectid * 100000 + int(sourcemjd),
-                                                      base_procver_id=bpvs['realtime_diaforcedsource'].id,
+                        frcex = DiaForcedSourceExtra( diaforcedsourceid=objr.diaobjectid * 1000000 + int(sourcemjd),
+                                                      base_procver_id=frc.base_procver_id,
                                                       detector=0,
                                                       scienceflux=1.1*psfflux,
                                                       sciencefluxerr=psffluxerr,
                                                       timeprocessedmjdtai=60365.,
                                                       timewithdrawnmjdtai=None )
                         frcexobjs.append( frcex )
-                        rootdict['objs'][0]['frcex']['realtime'].append( frcex )
+                        rootdict['frcex']['realtime_diaforcedsource'].append( frcex )
                     else:
-                        rootdict['objs'][0]['frcex']['realtime'].append( None )
-
+                        rootdict['frcex']['realtime_diaforcedsource'].append( None )
 
                 # everything is in bpv2, bpv2a, bp3
                 for bpv in [ 'bpv2', 'bpv2a', 'bpv3' ]:
-                    src = DiaSource( diasourceid=obj.diaobjectid * 100000 + int(sourcemjd),
+                    # bpv2a only has sources for [ 60020, 60030 ] and forced sources for [ 60020, 60025 ]
+                    if ( bpv == 'bpv2a' ) and ( ( sourcemjd < 60020. ) or ( sourcemjd > 60030. ) ):
+                        continue
+
+                    if ( i == 1 ) and ( bpv == 'bpv2' ):
+                        # Special case handling for object1 in bpv2, because there are
+                        #   two different diaobjects associated with the root object
+                        objtouse = obj if sourcemjd == np.floor(sourcemjd) else obj2011
+                    else:
+                        objtouse = obj
+
+                    src = DiaSource( diasourceid=objtouse.diaobjectid * 1000000 + int(sourcemjd),
                                      base_procver_id=bpvs[f'{bpv}_diasource'].id,
-                                     diaobjectid=obj.diaobjectid,
+                                     diaobjectid=objtouse.diaobjectid,
                                      visit=visit,
                                      band=('r' if visit%2==0 else 'i'),
                                      midpointmjdtai=sourcemjd,
@@ -507,20 +536,7 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
                                      ra=ra[bpv],
                                      dec=dec[bpv] )
                     srcobjs.append( src )
-                    rootdict['objs'][1]['src'][bpv].append( src )
-
-                    frc = DiaForcedSource( diaforcedsourceid=obj.diaobjectid * 100000 + int(sourcemjd),
-                                           base_procver_id=bpvs[f'{bpv}_diaforcedsource'].id,
-                                           diaobjectid=obj.diaobjectid,
-                                           visit=visit,
-                                           band=('r' if visit%2==0 else 'i'),
-                                           midpointmjdtai=sourcemjd,
-                                           psfflux=psfflux,
-                                           psffluxerr=psffluxerr,
-                                           ra=forcedra[bpv],
-                                           dec=forceddec[bpv] )
-                    frcobjs.append( frc )
-                    rootdict['objs'][1]['frc'][bpv].append( frc )
+                    rootdict['src'][f'{bpv}_diasource'].append( src )
 
                     if sourcemjd < 60050.:
                         srcex = DiaSourceExtra( diasourceid=src.diasourceid,
@@ -529,21 +545,38 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
                                                 x=1,
                                                 y=1 )
                         srcexobjs.append( srcex )
-                        rootdict['objs'][1]['srcex'][bpv].append( srcex )
-                        frcex = DiaForcedSourceExtra( diaforcedsourceid=obj.diaobjectid * 100000 + int(sourcemjd),
-                                                      base_procver_id=frc.base_procver_id,
-                                                      detector=0,
-                                                      scienceflux=1.1*psfflux,
-                                                      sciencefluxerr=psffluxerr,
-                                                      timeprocessedmjdtai=60365.,
-                                                      timewithdrawnmjdtai=None )
-                        frcexobjs.append( frcex )
-                        rootdict['objs'][1]['frcex'][bpv].append( frcex )
+                        rootdict['srcex'][f'{bpv}_diasource'].append( srcex )
                     else:
-                        rootdict['objs'][1]['srcex'][bpv].append( None )
-                        rootdict['objs'][1]['frcex'][bpv].append( None )
+                        rootdict['srcex'][f'{bpv}_diasource'].append( srcex )
 
-                    if dopos:
+                    if ( bpv != 'bpv2a' ) or ( sourcemjd <= 60025 ):
+                        frc = DiaForcedSource( diaforcedsourceid=objtouse.diaobjectid * 1000000 + int(sourcemjd),
+                                               base_procver_id=bpvs[f'{bpv}_diaforcedsource'].id,
+                                               diaobjectid=objtouse.diaobjectid,
+                                               visit=visit,
+                                               band=('r' if visit%2==0 else 'i'),
+                                               midpointmjdtai=sourcemjd,
+                                               psfflux=psfflux,
+                                               psffluxerr=psffluxerr,
+                                               ra=forcedra[bpv],
+                                               dec=forceddec[bpv] )
+                        frcobjs.append( frc )
+                        rootdict['frc'][f'{bpv}_diaforcedsource'].append( frc )
+
+                        if sourcemjd < 60050.:
+                            frcex = DiaForcedSourceExtra( diaforcedsourceid=frc.diaforcedsourceid,
+                                                          base_procver_id=frc.base_procver_id,
+                                                          detector=0,
+                                                          scienceflux=1.1*psfflux,
+                                                          sciencefluxerr=psffluxerr,
+                                                          timeprocessedmjdtai=60365.,
+                                                          timewithdrawnmjdtai=None )
+                            frcexobjs.append( frcex )
+                            rootdict['frcex'][f'{bpv}_diaforcedsource'].append( frcex )
+                        else:
+                            rootdict['frcex'][f'{bpv}_diaforcedsource'].append( None )
+
+                    if dopos and ( i < 3 ):
                         pos = DiaObjectPosition( diaobjectid=obj.diaobjectid,
                                                  base_procver_id=bpvs[f'{bpv}_diaobject_position_{postime}'].id,
                                                  ra=ratot[bpv] / npos,
@@ -552,7 +585,7 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
                                                  decerr=0.2 / np.sqrt(npos),
                                                  ra_dec_cov=0.05 **2 / npos )
                         posobjs.append( pos )
-                        rootdict['objs'][1]['pos'][bpv].append( pos )
+                        rootdict['pos'][(obj.diaobjectid, f'{bpv}_diaobject_position_{postime}')] = pos
 
                 # first object is in bpv1 and bpv1a
                 if i == 0:
@@ -560,7 +593,7 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
                         if ( ( ( bpv == 'bpv1a' ) and ( sourcemjd > 60015 ) ) or
                              ( ( bpv == 'bpv1' ) and ( sourcemjd > 60030 ) ) ):
                             continue
-                        src = DiaSource( diasourceid=obj1.diaobjectid * 100000 + int(sourcemjd),
+                        src = DiaSource( diasourceid=obj1.diaobjectid * 1000000 + int(sourcemjd),
                                          base_procver_id=bpvs[f'{bpv}_diasource'].id,
                                          diaobjectid=obj1.diaobjectid,
                                          visit=visit,
@@ -571,7 +604,7 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
                                          ra=ra[bpv],
                                          dec=dec[bpv] )
                         srcobjs.append( src )
-                        rootdict['objs'][2]['src'][bpv].append( src )
+                        rootdict['src'][f'{bpv}_diasource'].append( src )
 
                         if sourcemjd < 60050.:
                             srcex = DiaSourceExtra( diasourceid=src.diasourceid,
@@ -580,14 +613,14 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
                                                     x=1,
                                                     y=1 )
                             srcexobjs.append( srcex )
-                            rootdict['objs'][2]['srcex'][bpv].append( srcex )
+                            rootdict['srcex'][f'{bpv}_diasource'].append( srcex )
                         else:
-                            rootdict['objs'][2]['srcex'][bpv].append( None )
+                            rootdict['srcex'][f'{bpv}_diasource'].append( None )
 
                         if ( ( ( bpv == 'bpv1a' ) and ( sourcemjd > 60010 ) ) or
                              ( ( bpv == 'bpv1' ) and ( sourcemjd > 60025 ) ) ):
                             continue
-                        frc = DiaForcedSource( diaforcedsourceid=obj1.diaobjectid * 100000 + int(sourcemjd),
+                        frc = DiaForcedSource( diaforcedsourceid=obj1.diaobjectid * 1000000 + int(sourcemjd),
                                                base_procver_id=bpvs[f'{bpv}_diaforcedsource'].id,
                                                diaobjectid=obj1.diaobjectid,
                                                visit=visit,
@@ -598,10 +631,10 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
                                                ra=rootobj['dec'],
                                                dec=rootobj['dec'] )
                         frcobjs.append( frc )
-                        rootdict['objs'][2]['frc'][bpv].append( frc )
+                        rootdict['frc'][f'{bpv}_diaforcedsource'].append( frc )
 
                         if sourcemjd < 60050.:
-                            frcex = DiaForcedSourceExtra( diaforcedsourceid=obj1.diaobjectid * 100000 + int(sourcemjd),
+                            frcex = DiaForcedSourceExtra( diaforcedsourceid=obj1.diaobjectid * 1000000 + int(sourcemjd),
                                                           base_procver_id=frc.base_procver_id,
                                                           detector=0,
                                                           scienceflux=1.1*psfflux,
@@ -609,11 +642,11 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
                                                           timeprocessedmjdtai=60365.,
                                                           timewithdrawnmjdtai=None )
                             frcexobjs.append( frcex )
-                            rootdict['objs'][2]['frcex'][bpv].append( frcex )
+                            rootdict['frcex'][f'{bpv}_diaforcedsource'].append( frcex )
                         else:
-                            rootdict['objs'][2]['frcex'][bpv].append( None )
+                            rootdict['frcex'][f'{bpv}_diaforcedsource'].append( None )
 
-                        if dopos:
+                        if dopos and ( i < 3 ):
                             pos = DiaObjectPosition( diaobjectid=obj1.diaobjectid,
                                                      base_procver_id=bpvs[f'{bpv}_diaobject_position_{postime}'].id,
                                                      ra=ratot[bpv] / npos,
@@ -622,7 +655,7 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
                                                      decerr=0.2 / np.sqrt(npos),
                                                      ra_dec_cov=0.05 **2 / npos )
                             posobjs.append( pos )
-                            rootdict['objs'][2]['pos'][bpv].append( pos )
+                            rootdict['pos'][(obj1.diaobjectid, f'{bpv}_diaobject_position_{postime}')] = pos
 
 
             # Nondetections
@@ -639,7 +672,7 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
                     psffluxerr = 0.5 * psfflux
 
                 if ( i < 3 ) and ( sourcemjd <= 60055. ):
-                    frc = DiaForcedSource( diaforcedsourceid=objr.diaobjectid * 100000 + int(sourcemjd),
+                    frc = DiaForcedSource( diaforcedsourceid=objr.diaobjectid * 1000000 + int(sourcemjd),
                                            base_procver_id=bpvs['realtime_diaforcedsource'].id,
                                            diaobjectid=objr.diaobjectid,
                                            visit=visit,
@@ -650,10 +683,10 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
                                            ra=forcedra['realtime'],
                                            dec=forceddec['realtime'] )
                     frcobjs.append( frc )
-                    rootdict['objs'][0]['frc']['realtime'].append( frc )
+                    rootdict['frc']['realtime_diaforcedsource'].append( frc )
 
                     if sourcemjd < 60050.:
-                        frcex = DiaForcedSourceExtra( diaforcedsourceid=objr.diaobjectid * 100000 + int(sourcemjd),
+                        frcex = DiaForcedSourceExtra( diaforcedsourceid=objr.diaobjectid * 1000000 + int(sourcemjd),
                                                       base_procver_id=frc.base_procver_id,
                                                       detector=0,
                                                       scienceflux=1.1*psfflux,
@@ -661,12 +694,25 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
                                                       timeprocessedmjdtai=60365.,
                                                       timewithdrawnmjdtai=None )
                         frcexobjs.append( frcex )
-                        rootdict['objs'][0]['frcex']['realtime'].append( frcex )
+                        rootdict['frcex']['realtime_diaforcedsource'].append( frcex )
+                    else:
+                        rootdict['frcex']['realtime_diaforcedsource'].append( None )
 
                 for bpv in [ 'bpv2', 'bpv2a', 'bpv3' ]:
-                    frc = DiaForcedSource( diaforcedsourceid=obj.diaobjectid * 100000 + int(sourcemjd),
+                    # bpv2a only has sources for [ 60020, 60030 ] and forced sources for [ 60020, 60025 ]
+                    if ( bpv == 'bpv2a' ) and ( ( sourcemjd < 60020. ) or ( sourcemjd > 60025. ) ):
+                        continue
+
+                    if ( i == 1 ) and ( bpv == 'bpv2' ):
+                        # Special case handling for object1 in bpv2, because there are
+                        #   two different diaobjects associated with the root object
+                        objtouse = obj if sourcemjd == np.floor(sourcemjd) else obj2011
+                    else:
+                        objtouse = obj
+
+                    frc = DiaForcedSource( diaforcedsourceid=objtouse.diaobjectid * 1000000 + int(sourcemjd),
                                            base_procver_id=bpvs[f'{bpv}_diaforcedsource'].id,
-                                           diaobjectid=obj.diaobjectid,
+                                           diaobjectid=objtouse.diaobjectid,
                                            visit=visit,
                                            band=('r' if visit%2==0 else 'i'),
                                            midpointmjdtai=sourcemjd,
@@ -675,10 +721,10 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
                                            ra=forcedra[bpv],
                                            dec=forceddec[bpv] )
                     frcobjs.append( frc )
-                    rootdict['objs'][1]['frc'][bpv].append( frc )
+                    rootdict['frc'][f'{bpv}_diaforcedsource'].append( frc )
 
                     if sourcemjd < 60050.:
-                        frcex = DiaForcedSourceExtra( diaforcedsourceid=obj.diaobjectid * 100000 + int(sourcemjd),
+                        frcex = DiaForcedSourceExtra( diaforcedsourceid=objtouse.diaobjectid * 1000000 + int(sourcemjd),
                                                       base_procver_id=frc.base_procver_id,
                                                       detector=0,
                                                       scienceflux=1.1*psfflux,
@@ -686,14 +732,16 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
                                                       timeprocessedmjdtai=60365.,
                                                       timewithdrawnmjdtai=None )
                         frcexobjs.append( frcex )
-                        rootdict['objs'][1]['frcex'][bpv].append( frcex )
+                        rootdict['frcex'][f'{bpv}_diaforcedsource'].append( frcex )
+                    else:
+                        rootdict['frcex'][f'{bpv}_diaforcedsource'].append( None )
 
                 if i == 0:
                     for bpv in [ 'bpv1', 'bpv1a' ]:
                         if ( ( ( bpv == 'bpv1a' ) and ( sourcemjd > 60015. ) ) or
                              ( ( bpv == 'bpv1' ) and ( sourcemjd > 60025. ) ) ):
                             continue
-                        frc = DiaForcedSource( diaforcedsourceid=obj.diaobjectid * 100000 + int(sourcemjd),
+                        frc = DiaForcedSource( diaforcedsourceid=obj.diaobjectid * 1000000 + int(sourcemjd),
                                                base_procver_id=bpvs[f'{bpv}_diaforcedsource'].id,
                                                diaobjectid=obj1.diaobjectid,
                                                visit=visit,
@@ -704,10 +752,10 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
                                                ra=forcedra[bpv],
                                                dec=forceddec[bpv] )
                         frcobjs.append( frc )
-                        rootdict['objs'][2]['frc'][bpv].append( frc )
+                        rootdict['frc'][f'{bpv}_diaforcedsource'].append( frc )
 
                         if sourcemjd < 60050.:
-                            frcex = DiaForcedSourceExtra( diaforcedsourceid=obj.diaobjectid * 100000 + int(sourcemjd),
+                            frcex = DiaForcedSourceExtra( diaforcedsourceid=obj.diaobjectid * 1000000 + int(sourcemjd),
                                                           base_procver_id=frc.base_procver_id,
                                                           detector=0,
                                                           scienceflux=1.1*psfflux,
@@ -715,7 +763,9 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
                                                           timeprocessedmjdtai=60365.,
                                                           timewithdrawnmjdtai=None )
                             frcexobjs.append( frcex )
-                            rootdict['objs'][2]['frcex'][bpv].append( frcex )
+                            rootdict['frcex'][f'{bpv}_diaforcedsource'].append( frcex )
+                        else:
+                            rootdict['frcex'][f'{bpv}_diaforcedsource'].append( None )
 
             # OMG HOST GALAXIES... TODO
 
@@ -729,15 +779,24 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
             DiaForcedSourceExtra.bulk_insert_or_upsert( frcexobjs, dbcon=con )
 
         # For usage convenience, sort all the sources and forced sources by mjd
-        # TODO : need to sort srcex and frcex to go with this!!!!
         for rootdict in roots:
-            for obj in rootdict['objs']:
-                if obj is None:
-                    continue
-                for src in obj['src'].values():
-                    src.sort( key=lambda x: x.midpointmjdtai )
-                for frc in obj['frc'].values():
-                    frc.sort( key=lambda x: x.midpointmjdtai )
+            for bpv in rootdict['src'].keys():
+                assert len( rootdict['src'][bpv] ) == len( rootdict['srcex'][bpv] )
+                srces = rootdict['src'][bpv]
+                srcexes = rootdict['srcex'][bpv]
+                dexen = list( range( len(srces) ) )
+                dexen.sort( key=lambda x: srces[x].midpointmjdtai )
+                rootdict['src'][bpv] = [ srces[i] for i in dexen ]
+                rootdict['srcex'][bpv] = [ srcexes[i] for i in dexen ]
+
+            for bpv in rootdict['frc'].keys():
+                assert len( rootdict['frc'][bpv] ) == len( rootdict['frcex'][bpv] )
+                frces = rootdict['frc'][bpv]
+                frcexes = rootdict['frcex'][bpv]
+                dexen = list( range( len(frces) ) )
+                dexen.sort( key=lambda x: frces[x].midpointmjdtai )
+                rootdict['frc'][bpv] = [ frces[i] for i in dexen ]
+                rootdict['frcex'][bpv] = [ frcexes[i] for i in dexen ]
 
         yield roots
 

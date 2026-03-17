@@ -252,6 +252,9 @@ def test_getltcv( test_user, fastdb_client, set_of_lightcurves, procver_collecti
 
 
 # TODO : test getrandomltcv ; that might require the ability to pass a random seed for a reproducible test.
+@pytest.mark.skip( reason="This test needs to be written" )
+def test_getrandomltcv( test_user, fastdb_client, procver_collection, set_of_lightcurves ):
+    assert False
 
 
 def test_gethottransients( test_user, fastdb_client, procver_collection, set_of_lightcurves ):

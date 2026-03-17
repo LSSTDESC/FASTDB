@@ -30,8 +30,8 @@ def test_get_object_infos( set_of_lightcurves, procver_collection ):
     assert all( all( ( i is not None ) and ( not pandas.isna(i) ) for i in info[col] )
                 for col in ['pos_base_procver_id', 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov'] )
     assert info.loc[ 200, 'pos_base_procver_id'] == bpvs['bpv2a_diaobject_position_60030'].id
-    assert info.loc[ 201, 'pos_base_procver_id'] == bpvs['bpv2a_diaobject_position_60060'].id
-    assert info.loc[ 202, 'pos_base_procver_id'] == bpvs['bpv2a_diaobject_position_60080'].id
+    assert info.loc[ 201, 'pos_base_procver_id'] == bpvs['bpv2a_diaobject_position_60030'].id
+    assert info.loc[ 202, 'pos_base_procver_id'] == bpvs['bpv2_diaobject_position_60080'].id
     info2 = ltcv.get_object_infos( [ 200, 201, 202 ], return_format='pandas', processing_version='pvc_pv2',
                                    position_processing_version='pvc_pv2' )
     assert info2.equals( info )
@@ -47,15 +47,22 @@ def test_get_object_infos( set_of_lightcurves, procver_collection ):
             assert ( np.array( info.loc[:, col].values ) == np.array( jsinfo[col] ) ).all()
 
     # TODO : right now there are no diaobjects in the default processing version!  Fix that in Issue #70.
-    info = ltcv.get_object_infos( [ roots[i]['root'].id for i in [0, 1, 2] ] )
-    assert info['diaobjectid'] == []
-
-    info = ltcv.get_object_infos( [ roots[i]['root'].id for i in [0, 1, 2] ], processing_version='pvc_pv2',
-                                  return_format='pandas' )
-    assert all( b == bpvs['bpv2'].id for b in info['obj_base_procver_id'] )
+    info = ltcv.get_object_infos( [ roots[i]['root'].id for i in [0, 1, 2] ], return_format='pandas' )
+    assert list( info.index.values ) == [ 200, 201, 202, 2011 ]
+    assert all( b == bpvs['bpv2_diaobject'].id for b in info['obj_base_procver_id'] )
     assert info.loc[ 200, 'pos_base_procver_id' ] == bpvs['bpv2a_diaobject_position_60030'].id
-    assert info.loc[ 201, 'pos_base_procver_id' ] == bpvs['bpv2a_diaobject_position_60060'].id
-    assert info.loc[ 202, 'pos_base_procver_id' ] == bpvs['bpv2a_diaobject_position_60080'].id
+    assert info.loc[ 201, 'pos_base_procver_id' ] == bpvs['bpv2a_diaobject_position_60030'].id
+    assert info.loc[ 2011, 'pos_base_procver_id' ] is None
+    assert info.loc[ 202, 'pos_base_procver_id' ] == bpvs['bpv2_diaobject_position_60080'].id
+
+    info2 = ltcv.get_object_infos( [ roots[i]['root'].id for i in [0, 1, 2] ], processing_version='pvc_pv2',
+                                   return_format='pandas' )
+    assert ( info2.rootid == info.rootid ).all()
+    assert ( info2.obj_base_procver_id == info.obj_base_procver_id ).all()
+    # The None/<NA> values aren't comparing as equal, probably because of the whole "all nan tests are False" thing
+    assert ( info2.loc[ [ 200, 201, 202 ], : ] == info.loc[ [ 200, 201, 202], : ] ).all().all()
+
+
 
     info = ltcv.get_object_infos( [ 200, 201, 202 ], columns=['ra', 'dec'], processing_version='pvc_pv2',
                                   return_format='pandas' )
@@ -83,7 +90,7 @@ def test_get_object_infos( set_of_lightcurves, procver_collection ):
         dbcon.execute( "INSERT INTO tempthing(rootid) VALUES (%(id)s)", { 'id': roots[3]['root'].id } )
         info = ltcv.get_object_infos( objids_table='tempthing', dbcon=dbcon, processing_version='pvc_pv2',
                                       return_format='pandas' )
-        assert info.index.values.tolist() == [ 201, 203 ]
+        assert info.index.values.tolist() == [ 201, 203, 2011 ]
         info = ltcv.get_object_infos( objids_table='tempthing', dbcon=dbcon, processing_version='realtime',
                                       return_format='pandas' )
         assert info.index.values.tolist() == [ 1 ]
@@ -98,7 +105,7 @@ def test_get_object_infos( set_of_lightcurves, procver_collection ):
         dbcon.execute( "INSERT INTO tempthing VALUES (%(id)s, 202)", { 'id': roots[3]['root'].id } )
         info = ltcv.get_object_infos( objids_table='tempthing', dbcon=dbcon, processing_version='pvc_pv2',
                                      return_format='pandas' )
-        assert info.index.values.tolist() == [ 201, 203 ]
+        assert info.index.values.tolist() == [ 201, 203, 2011 ]
 
         # Check failures
         with pytest.raises( ValueError, match='objids_table requires dbcon' ):
@@ -122,38 +129,39 @@ def test_object_ltcv( procver_collection, set_of_lightcurves ):
 
     # The fixture loads up lightcurves every 2.5 days
 
-    # Try to get the object lightcurve for the third object (diaobjectid 100) of roots[0] using pv1
+    # Try to get the object lightcurve for diaobjectid 100 using pv1
     # Should get detections starting 60000, forced starting 59990,
     # sources through 60015 and forced through 60010 in bpv1a,
     # sources through 60030 and forced through 60025 in bpv1
 
-    sources = ltcv.object_ltcv( pvs['pv1'].id, roots[0]['objs'][2]['obj'].diaobjectid,
-                                return_format='pandas', which='detections', include_base_procver=True )
-    forced = ltcv.object_ltcv( pvs['pv1'].id, roots[0]['objs'][2]['obj'].diaobjectid,
-                               return_format='pandas', which='forced', include_base_procver=True )
-    df = ltcv.object_ltcv( pvs['pv1'].id, roots[0]['objs'][2]['obj'].diaobjectid,
-                           return_format='pandas', which='patch', include_base_procver=True )
+    srcs = ltcv.object_ltcv( pvs['pv1'].id, 100, return_format='pandas', which='detections', include_base_procver=True )
+    forced = ltcv.object_ltcv( pvs['pv1'].id, 100, return_format='pandas', which='forced', include_base_procver=True )
+    df = ltcv.object_ltcv( pvs['pv1'].id, 100, return_format='pandas', which='patch', include_base_procver=True )
 
-    assert len(sources) == 13
+    assert len(srcs) == 13
     assert len(forced) == 15
     assert len(df) == 17
 
-    assert np.all( ( sources.mjd >= 60000 ) & ( sources.mjd <= 60030 ) )
-    assert np.all( sources[ sources.mjd <= 60015 ].base_procver == 'pvc_bpv1a' )
-    assert np.all( sources[ sources.mjd > 60015 ].base_procver == 'pvc_bpv1' )
-    assert np.all( sources.isdet )
-    assert np.all( forced[ forced.mjd <= 60010 ].base_procver == 'pvc_bpv1a' )
-    assert np.all( forced[ forced.mjd > 60010 ].base_procver == 'pvc_bpv1' )
+    assert np.all( ( srcs.mjd >= 60000 ) & ( srcs.mjd <= 60030 ) )
+    assert np.all( srcs[ srcs.mjd <= 60015 ].base_procver_s == 'pvc_bpv1a' )
+    assert np.all( srcs[ srcs.mjd > 60015 ].base_procver_s == 'pvc_bpv1' )
+    assert np.all( srcs.isdet )
+    assert np.all( forced[ forced.mjd <= 60010 ].base_procver_f == 'pvc_bpv1a' )
+    assert np.all( forced[ forced.mjd > 60010 ].base_procver_f == 'pvc_bpv1' )
     assert np.all( forced[ ( forced.mjd >= 60000 ) & ( forced.mjd <= 60030 ) ].isdet )
     assert np.all( ~forced[ ( forced.mjd < 60000 ) | ( forced.mjd > 60030 ) ].isdet )
-    assert np.all( df[ df.mjd <= 60010 ].base_procver == 'pvc_bpv1a' )
-    assert np.all( df[ df.mjd > 60010 ].base_procver == 'pvc_bpv1' )
+    assert np.all( pandas.isna( df[ df.mjd < 60000 ].base_procver_s ) )
+    assert np.all( df[ ( df.mjd >= 60000 ) & ( df.mjd <= 60015 ) ].base_procver_s == 'pvc_bpv1a' )
+    assert np.all( df[ df.mjd > 60015 ].base_procver_s == 'pvc_bpv1' )
+    assert np.all( df[ df.mjd <= 60010 ].base_procver_f == 'pvc_bpv1a' )
+    assert np.all( df[ ( df.mjd > 60010 ) & ( df.mjd <= 60025 ) ].base_procver_f == 'pvc_bpv1' )
+    assert np.all( pandas.isna( df[ df.mjd > 60025 ].base_procver_f ) )
     assert np.all( df[ df.mjd > 60025 ].ispatch )
     assert np.all( ~df[ df.mjd <= 60025 ].ispatch )
     assert np.all( df[ ( df.mjd >= 60000 ) & ( df.mjd <= 60030 ) ].isdet )
     assert np.all( ~df[ ( df.mjd < 60000 ) | ( df.mjd > 60030 ) ].isdet )
     # Because we didn't say include_source_positions, there should be no source columns
-    for f in [ df, forced, sources ]:
+    for f in [ df, forced, srcs ]:
         for c in [ 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ]:
             assert c not in f.columns
 
@@ -165,40 +173,67 @@ def test_object_ltcv( procver_collection, set_of_lightcurves ):
                                include_base_procver=True )
 
     # But if we ask for roots[1] from pv2, we should get stuff.  In this case, patch and forced
-    # should be the same
+    # should be the same (except for patch having the ispatch column)
 
-    sources = ltcv.object_ltcv( pvs['pv2'].id, roots[1]['root'].id, return_format='pandas',
-                                which='detections', include_base_procver=True )
+    srcs = ltcv.object_ltcv( pvs['pv2'].id, roots[1]['root'].id, return_format='pandas',
+                             which='detections', include_base_procver=True )
     forced = ltcv.object_ltcv( pvs['pv2'].id, roots[1]['root'].id, return_format='pandas',
                                which='forced', include_base_procver=True )
     df = ltcv.object_ltcv( pvs['pv2'].id, roots[1]['root'].id, return_format='pandas',
                            which='patch', include_base_procver=True )
-    assert ( df.loc[ :, [ c for c in df.columns if c!='ispatch'] ] == forced ).all().all()
     assert ( df.ispatch == 0 ).all()
-    assert len( df[ df.isdet == 1 ] ) == len( sources )
+    assert len( df[ df.isdet == 1 ] ) == len( srcs )
     assert df[ df.isdet == 1 ].isdet.all()
     assert ( df[ df.ispatch == 1 ].ispatch ).all()
-    assert ( df.base_procver == 'pvc_bpv2a' ).all()
+    assert all( pandas.isna( df[ df.mjd < 60020 ].base_procver_s ) )
+    assert all( pandas.isna( df[ df.mjd > 60060 ].base_procver_s ) )
+    assert all( df[ (df.mjd >= 60020) & (df.mjd <= 60030) ] == 'pvc_bpv2a' )
+    assert all( df[ (df.mjd > 60030) & (df.mjd <= 60060) ] == 'pvc_bpv2' )
+    assert all( df[ (df.mjd < 60020) | (df.mjd >60025) ].base_procver_f == 'pvc_bpv2' )
+    assert all( df[ (df.mjd >= 60020) & (df.mjd <= 60025) ].base_procver_f == 'pvc_bpv2a' )
+    # df and forced should match, only doing a straight comparison doesn't work again
+    #   because of the whole (na == na) being false thing.
+    assert ( df[ ~pandas.isna( df.base_procver_s ) ].loc[ :, [c for c in df.columns if c != 'ispatch'] ]
+             == forced[ ~pandas.isna( forced.base_procver_s ) ]
+            ).all().all()
+    # Look at just the columns that have no nulls
+    assert ( df.loc[ :, [c for c in df.columns if c not in [ 'ispatch', 'diasourceid', 'base_procver_s' ] ] ]
+             == forced.loc[ :, [c for c in forced.columns if c not in [ 'diasourceid', 'base_procver_s' ] ] ]
+            ).all().all()
+
+
+
 
     # Make sure json output is consistent
 
-    j_sources = ltcv.object_ltcv( pvs['pv2'].id, roots[1]['root'].id, return_format='json',
-                                  which='detections', include_base_procver=True )
+    j_srcs = ltcv.object_ltcv( pvs['pv2'].id, roots[1]['root'].id, return_format='json',
+                               which='detections', include_base_procver=True )
     j_forced = ltcv.object_ltcv( pvs['pv2'].id, roots[1]['root'].id, return_format='json',
                                  which='forced', include_base_procver=True )
     j_df = ltcv.object_ltcv( pvs['pv2'].id, roots[1]['root'].id, return_format='json',
                              which='patch', include_base_procver=True )
 
-    for js, pd in zip( [ j_sources, j_forced, j_df ], [ sources, forced, df ] ):
+    for js, pd in zip( [ j_srcs, j_forced, j_df ], [ srcs, forced, df ] ):
         assert isinstance( js, dict )
+        assert all( pd.rootid == js['rootid'] )
         for col in pd.columns:
-            assert ( pd[col] == np.array( js[col] ) ).all()
+            if col == 'rootid':
+                continue
+            wnonnull = np.where( ~pandas.isna( pd[col] ) )[0]
+            assert ( pd[col][wnonnull] == np.array( js[col] )[wnonnull] ).all()
+            wnull = np.where( pandas.isna( pd[col] ) )[0]
+            # pandas.isna catches both pandas-specific <NA> and None
+            assert all( pandas.isna( np.array( js[col] )[wnull] ) )
 
     # Make sure we can pass a string processing version
 
     df2 = ltcv.object_ltcv( 'pvc_pv2', roots[1]['root'].id, return_format='pandas',
                             which='patch', include_base_procver=True )
-    assert ( df == df2 ).all().all()
+    assert len(df) == len(df2)
+    assert ( df[ ~pandas.isna(df.diasourceid) ] == df2[ ~pandas.isna(df2.diasourceid) ] ).all().all()
+    assert ( df.loc[ :, [ c for c in df.columns if c not in [ 'diasourceid', 'base_procver_s' ] ] ] ==
+             df2.loc[ :, [ c for c in df2.columns if c not in [ 'diasourceid', 'base_procver_s' ] ] ]
+            ).all().all()
 
     # Test mjd_now
     df = ltcv.object_ltcv( pvs['pv2'].id, roots[1]['root'].id, return_format='pandas',
@@ -208,17 +243,14 @@ def test_object_ltcv( procver_collection, set_of_lightcurves ):
 
     # Test include_source_positions
 
-    sources = ltcv.object_ltcv( pvs['pv1'].id, roots[0]['objs'][2]['obj'].diaobjectid,
-                                return_format='pandas', which='detections',
-                                include_base_procver=True, include_source_positions=True )
-    forced = ltcv.object_ltcv( pvs['pv1'].id, roots[0]['objs'][2]['obj'].diaobjectid,
-                               return_format='pandas', which='forced',
+    srcs = ltcv.object_ltcv( pvs['pv2'].id, 200, return_format='pandas', which='detections',
+                             include_base_procver=True, include_source_positions=True )
+    forced = ltcv.object_ltcv( pvs['pv2'].id, 200, return_format='pandas', which='forced',
                                include_base_procver=True, include_source_positions=True )
-    df = ltcv.object_ltcv( pvs['pv1'].id, roots[0]['objs'][2]['obj'].diaobjectid,
-                           return_format='pandas', which='patch',
+    df = ltcv.object_ltcv( pvs['pv2'].id, 200, return_format='pandas', which='patch',
                            include_base_procver=True, include_source_positions=True )
     for field in [ 'det_ra', 'det_dec' ]:
-        assert not any( sources[field].isna() )
+        assert not any( srcs[field].isna() )
         assert not any( forced[ forced.isdet == True ][field].isna() )
         assert all( forced[ forced.isdet == False ][field].isna() )
         assert not any( df[ df.isdet == True ][field].isna() )
@@ -233,33 +265,33 @@ def test_many_object_ltcvs( procver_collection, set_of_lightcurves ):
     # First, reproduce the tests from test_object_ltcv.  We'll ask for two lightcurves,
     #   but only one is going to be present.
 
-    sources = ltcv.many_object_ltcvs( pvs['pv1'].id, [ roots[i]['root'].id for i in [0,1] ],
-                                      return_format='pandas', which='detections', include_base_procver=True )
+    srcs = ltcv.many_object_ltcvs( pvs['pv1'].id, [ roots[i]['root'].id for i in [0,1] ],
+                                   return_format='pandas', which='detections', include_base_procver=True )
     forced = ltcv.many_object_ltcvs( pvs['pv1'].id, [ roots[i]['root'].id for i in [0,1] ],
                                      return_format='pandas', which='forced', include_base_procver=True )
     df = ltcv.many_object_ltcvs( pvs['pv1'].id, [ roots[i]['root'].id for i in [0,1] ],
                                  return_format='pandas', which='patch', include_base_procver=True )
 
-    assert set( sources.index.get_level_values( 'rootid' ).unique().values ) == { roots[0]['root'].id }
+    assert set( srcs.index.get_level_values( 'rootid' ).unique().values ) == { roots[0]['root'].id }
     assert set( forced.index.get_level_values( 'rootid' ).unique().values ) == { roots[0]['root'].id }
     assert set( df.index.get_level_values( 'rootid' ).unique().values ) == { roots[0]['root'].id }
 
-    sources.reset_index( inplace=True )
-    sources.drop( 'rootid', axis='columns', inplace=True )
+    srcs.reset_index( inplace=True )
+    srcs.drop( 'rootid', axis='columns', inplace=True )
     forced.reset_index( inplace=True )
     forced.drop( 'rootid', axis='columns', inplace=True )
     df.reset_index( inplace=True )
     df.drop( 'rootid', axis='columns', inplace=True )
 
     # These checks are (sorta) copied from test_object_ltcv
-    assert len(sources) == 13
+    assert len(srcs) == 13
     assert len(forced) == 15
     assert len(df) == 17
 
-    assert np.all( ( sources.mjd >= 60000 ) & ( sources.mjd <= 60030 ) )
-    assert np.all( sources[ sources.mjd <= 60015 ].base_procver == 'pvc_bpv1a' )
-    assert np.all( sources[ sources.mjd > 60015 ].base_procver == 'pvc_bpv1' )
-    assert np.all( sources.isdet )
+    assert np.all( ( srcs.mjd >= 60000 ) & ( srcs.mjd <= 60030 ) )
+    assert np.all( srcs[ srcs.mjd <= 60015 ].base_procver == 'pvc_bpv1a' )
+    assert np.all( srcs[ srcs.mjd > 60015 ].base_procver == 'pvc_bpv1' )
+    assert np.all( srcs.isdet )
     assert np.all( forced[ forced.mjd <= 60010 ].base_procver == 'pvc_bpv1a' )
     assert np.all( forced[ forced.mjd > 60010 ].base_procver == 'pvc_bpv1' )
     assert np.all( forced[ ( forced.mjd >= 60000 ) & ( forced.mjd <= 60030 ) ].isdet )
@@ -271,26 +303,26 @@ def test_many_object_ltcvs( procver_collection, set_of_lightcurves ):
     assert np.all( df[ ( df.mjd >= 60000 ) & ( df.mjd <= 60030 ) ].isdet )
     assert np.all( ~df[ ( df.mjd < 60000 ) | ( df.mjd > 60030 ) ].isdet )
     # Because we didn't say include_source_positions, there should be no source columns
-    for f in [ df, forced, sources ]:
+    for f in [ df, forced, srcs ]:
         for c in [ 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ]:
             assert c not in f.columns
 
     # Now ask for two lightcurves where we expect to get two lightcurves
-    sources = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['root'].id for i in [0,2] ],
-                                      return_format='pandas', which='detections', include_base_procver=True )
+    srcs = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['root'].id for i in [0,2] ],
+                                   return_format='pandas', which='detections', include_base_procver=True )
     forced = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['root'].id for i in [0,2] ],
                                      return_format='pandas', which='forced', include_base_procver=True )
     df = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['root'].id for i in [0,2] ],
                                  return_format='pandas', which='patch', include_base_procver=True )
-    assert ( set( sources.index.get_level_values( 'rootid' ).unique().values )
+    assert ( set( srcs.index.get_level_values( 'rootid' ).unique().values )
              == { roots[0]['root'].id, roots[2]['root'].id } )
     assert ( set( forced.index.get_level_values( 'rootid' ).unique().values )
              == { roots[0]['root'].id, roots[2]['root'].id } )
     assert ( set( df.index.get_level_values( 'rootid' ).unique().values )
              == { roots[0]['root'].id, roots[2]['root'].id } )
-    assert len( sources ) == 30
-    assert len( sources.xs( roots[0]['root'].id, level='rootid' ) ) == 13
-    assert len( sources.xs( roots[2]['root'].id, level='rootid' ) ) == 17
+    assert len( srcs ) == 30
+    assert len( srcs.xs( roots[0]['root'].id, level='rootid' ) ) == 13
+    assert len( srcs.xs( roots[2]['root'].id, level='rootid' ) ) == 17
     assert len( forced ) == 54
     assert len( forced.xs( roots[0]['root'].id, level='rootid' ) ) == 25
     assert len( forced.xs( roots[2]['root'].id, level='rootid' ) ) == 29
@@ -301,16 +333,16 @@ def test_many_object_ltcvs( procver_collection, set_of_lightcurves ):
     assert ( tmp == forced ).all().all()
 
     # Make sure the dict returns are consistent
-    sourcesjs = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['root'].id for i in [0,2] ],
-                                        return_format='json', which='detections', include_base_procver=True )
+    srcsjs = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['root'].id for i in [0,2] ],
+                                     return_format='json', which='detections', include_base_procver=True )
     forcedjs = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['root'].id for i in [0,2] ],
                                        return_format='json', which='forced', include_base_procver=True )
     dfjs = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['root'].id for i in [0,2] ],
                                    return_format='json', which='patch', include_base_procver=True )
-    assert set( [ r['rootid'] for r in sourcesjs ] ) == { roots[0]['root'].id, roots[2]['root'].id }
+    assert set( [ r['rootid'] for r in srcsjs ] ) == { roots[0]['root'].id, roots[2]['root'].id }
     assert set( [ r['rootid'] for r in forcedjs ] ) == { roots[0]['root'].id, roots[2]['root'].id }
     assert set( [ r['rootid'] for r in dfjs ] ) == { roots[0]['root'].id, roots[2]['root'].id }
-    for js, pd in zip( [ sourcesjs, forcedjs, dfjs ], [ sources, forced, df ] ):
+    for js, pd in zip( [ srcsjs, forcedjs, dfjs ], [ srcs, forced, df ] ):
         for subjs in js:
             subpd = pd.xs( subjs['rootid'], level='rootid' ).reset_index()
             for col in subpd.columns:
@@ -319,20 +351,20 @@ def test_many_object_ltcvs( procver_collection, set_of_lightcurves ):
     # Make sure the lightcurves are actually right
     for rootid in df.index.get_level_values( 'rootid' ).unique():
         rdex = [ roots[i]['root'].id for i in range(len(roots)) ].index( rootid )
-        tmpsources = sources.xs( rootid, level='rootid' ).reset_index()
+        tmpsrcs = srcs.xs( rootid, level='rootid' ).reset_index()
         tmpforced = forced.xs( rootid, level='rootid' ).reset_index()
         tmpdf = df.xs( rootid, level='rootid' ).reset_index()
 
         assert all( s.mjd == pytest.approx( roots[rdex]['objs'][1]['src']['bpv2'][j].midpointmjdtai, abs=1./3600./24. )
-                    for j, s in enumerate( tmpsources.itertuples() ) )
+                    for j, s in enumerate( tmpsrcs.itertuples() ) )
         assert all( s.band == roots[rdex]['objs'][1]['src']['bpv2'][j].band
-                    for j, s in enumerate( tmpsources.itertuples() ) )
+                    for j, s in enumerate( tmpsrcs.itertuples() ) )
         assert all( s.flux == pytest.approx( roots[rdex]['objs'][1]['src']['bpv2'][j].psfflux, rel=1e-6 )
-                    for j, s in enumerate( tmpsources.itertuples() ) )
+                    for j, s in enumerate( tmpsrcs.itertuples() ) )
         assert all( s.fluxerr == pytest.approx( roots[rdex]['objs'][1]['src']['bpv2'][j].psffluxerr, rel=1e-6 )
-                    for j, s in enumerate( tmpsources.itertuples() ) )
-        assert all( tmpsources.isdet )
-        assert all( tmpsources.base_procver == 'pvc_bpv2a' )
+                    for j, s in enumerate( tmpsrcs.itertuples() ) )
+        assert all( tmpsrcs.isdet )
+        assert all( tmpsrcs.base_procver == 'pvc_bpv2a' )
 
         assert all( s.mjd == pytest.approx( roots[rdex]['objs'][1]['frc']['bpv2'][j].midpointmjdtai, abs=1./3600./24. )
                     for j, s in enumerate( tmpforced.itertuples() ) )
@@ -342,8 +374,8 @@ def test_many_object_ltcvs( procver_collection, set_of_lightcurves ):
                     for j, s in enumerate( tmpforced.itertuples() ) )
         assert all( s.fluxerr == pytest.approx( roots[rdex]['objs'][1]['frc']['bpv2'][j].psffluxerr, rel=1e-6 )
                     for j, s in enumerate( tmpforced.itertuples() ) )
-        assert all( tmpforced.isdet[j] if ( tmpforced.mjd[j] >= tmpsources.mjd.min() and
-                                            tmpforced.mjd[j] <= tmpsources.mjd.max() )
+        assert all( tmpforced.isdet[j] if ( tmpforced.mjd[j] >= tmpsrcs.mjd.min() and
+                                            tmpforced.mjd[j] <= tmpsrcs.mjd.max() )
                     else not tmpforced.isdet[j]
                     for j in range( len(tmpforced) ) )
         assert all( tmpforced.base_procver == 'pvc_bpv2a' )
@@ -356,8 +388,8 @@ def test_many_object_ltcvs( procver_collection, set_of_lightcurves ):
                     for j, s in enumerate( tmpdf.itertuples() ) )
         assert all( s.fluxerr == pytest.approx( roots[rdex]['objs'][1]['frc']['bpv2'][j].psffluxerr, rel=1e-6 )
                     for j, s in enumerate( tmpdf.itertuples() ) )
-        assert all( tmpdf.isdet[j] if ( tmpdf.mjd[j] >= tmpsources.mjd.min() and
-                                        tmpdf.mjd[j] <= tmpsources.mjd.max() )
+        assert all( tmpdf.isdet[j] if ( tmpdf.mjd[j] >= tmpsrcs.mjd.min() and
+                                        tmpdf.mjd[j] <= tmpsrcs.mjd.max() )
                     else not tmpdf.isdet[j]
                     for j in range( len(tmpdf) ) )
         assert all( ~tmpdf.ispatch )
@@ -365,59 +397,59 @@ def test_many_object_ltcvs( procver_collection, set_of_lightcurves ):
 
 
     # make sure that if we ask using the right diaobjectid, we get the same things back
-    sources2 = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['objs'][1]['obj'].diaobjectid for i in [0,2] ],
-                                       return_format='pandas', which='detections', include_base_procver=True )
+    srcs2 = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['objs'][1]['obj'].diaobjectid for i in [0,2] ],
+                                    return_format='pandas', which='detections', include_base_procver=True )
     forced2 = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['objs'][1]['obj'].diaobjectid for i in [0,2] ],
                                       return_format='pandas', which='forced', include_base_procver=True )
     df2 = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['objs'][1]['obj'].diaobjectid for i in [0,2] ],
                                   return_format='pandas', which='patch', include_base_procver=True )
-    assert ( sources == sources2 ).all().all()
+    assert ( srcs == srcs2 ).all().all()
     assert ( forced == forced2 ).all().all()
     assert ( df == df2 ).all().all()
 
     # But we get nothing back if we ask for the wrong diaobjectid
-    sources2 = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['objs'][0]['obj'].diaobjectid for i in [0,2] ],
-                                       return_format='pandas', which='detections', include_base_procver=True )
+    srcs2 = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['objs'][0]['obj'].diaobjectid for i in [0,2] ],
+                                    return_format='pandas', which='detections', include_base_procver=True )
     forced2 = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['objs'][0]['obj'].diaobjectid for i in [0,2] ],
                                       return_format='pandas', which='forced', include_base_procver=True )
     df2 = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['objs'][0]['obj'].diaobjectid for i in [0,2] ],
                                   return_format='pandas', which='patch', include_base_procver=True )
-    assert len(sources2) == 0
+    assert len(srcs2) == 0
     assert len(forced2) == 0
     assert len(df2) == 0
 
     # test mjd_now
-    assert not ( sources.index.get_level_values( level='mjd' ) <= 60041. ).all()
+    assert not ( srcs.index.get_level_values( level='mjd' ) <= 60041. ).all()
     assert not ( forced.index.get_level_values( level='mjd' ) <= 60041. ).all()
     assert not ( df.index.get_level_values( level='mjd' ) <= 60041. ).all()
-    sources = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['root'].id for i in [0,2] ],
-                                      return_format='pandas', which='detections', include_base_procver=True,
-                                      mjd_now=60041. )
+    srcs = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['root'].id for i in [0,2] ],
+                                   return_format='pandas', which='detections', include_base_procver=True,
+                                   mjd_now=60041. )
     forced = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['root'].id for i in [0,2] ],
                                      return_format='pandas', which='forced', include_base_procver=True,
                                      mjd_now=60041. )
     df = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['root'].id for i in [0,2] ],
                                  return_format='pandas', which='patch', include_base_procver=True,
                                  mjd_now=60041. )
-    assert ( sources.index.get_level_values( level='mjd' ) <= 60041. ).all()
+    assert ( srcs.index.get_level_values( level='mjd' ) <= 60041. ).all()
     assert ( forced.index.get_level_values( level='mjd' ) <= 60041. ).all()
     assert ( df.index.get_level_values( level='mjd' ) <= 60041. ).all()
 
 
     # Make sure bands works
-    sources = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['root'].id for i in [0,2] ],
-                                      return_format='pandas', which='detections', include_base_procver=True,
-                                      bands='r' )
+    srcs = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['root'].id for i in [0,2] ],
+                                   return_format='pandas', which='detections', include_base_procver=True,
+                                   bands='r' )
     forced = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['root'].id for i in [0,2] ],
                                      return_format='pandas', which='forced', include_base_procver=True,
                                      bands=[ 'r' ] )
     df = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['root'].id for i in [0,2] ],
                                  return_format='pandas', which='patch', include_base_procver=True,
                                  bands='r' )
-    assert len(sources) == 14
+    assert len(srcs) == 14
     assert len(forced) == 26
     assert len(df) == 26
-    assert ( sources.band == 'r' ).all()
+    assert ( srcs.band == 'r' ).all()
     assert ( forced.band == 'r' ).all()
     assert ( df.band == 'r' ).all()
     tmp = df.drop( 'ispatch', axis='columns' )
@@ -425,9 +457,9 @@ def test_many_object_ltcvs( procver_collection, set_of_lightcurves ):
 
     # Test include_source_positions
 
-    sources = ltcv.many_object_ltcvs( pvs['pv1'].id, [ roots[i]['root'].id for i in [0,1] ],
-                                      return_format='pandas', which='detections',
-                                      include_base_procver=True, include_source_positions=True )
+    srcs = ltcv.many_object_ltcvs( pvs['pv1'].id, [ roots[i]['root'].id for i in [0,1] ],
+                                   return_format='pandas', which='detections',
+                                   include_base_procver=True, include_source_positions=True )
     forced = ltcv.many_object_ltcvs( pvs['pv1'].id, [ roots[i]['root'].id for i in [0,1] ],
                                      return_format='pandas', which='forced',
                                      include_base_procver=True, include_source_positions=True )
@@ -435,7 +467,7 @@ def test_many_object_ltcvs( procver_collection, set_of_lightcurves ):
                                  return_format='pandas', which='patch',
                                  include_base_procver=True, include_source_positions=True )
     for field in [ 'det_ra', 'det_dec' ]:
-        assert not any( sources[field].isna() )
+        assert not any( srcs[field].isna() )
         assert not any( forced[ forced.isdet == True ][field].isna() )
         assert all( forced[ forced.isdet == False ][field].isna() )
         assert not any( df[ df.isdet == True ][field].isna() )

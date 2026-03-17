@@ -93,13 +93,25 @@ class TestProcessingVersion( BaseTestDB ):
         with pytest.raises( ValueError, match="Unknown processing version foo" ):
             ProcessingVersion.procver_id( 'foo' )
 
-    # This is basically a test of the base_procver_of_procver table.
-    # Probably more tests should be written.
     # THIS TEST HAS TO GO LAST because it runs the procver_collection fixture that's module scope
-    def test_highest_prio_base_procver( self, procver_collection ):
-        bpv, pv = procver_collection
-        assert pv['pv1'].highest_prio_base_procver('diaobject').id == bpv['bpv1b'].id
-        assert pv['pv2'].highest_prio_base_procver('diaobject').id == bpv['bpv2a'].id
-        assert pv['pv3'].highest_prio_base_procver('diaobject').id == bpv['bpv3'].id
-        assert pv['realtime'].highest_prio_base_procver('diaobject').id == bpv['realtime'].id
-        assert pv['realtime'].highest_prio_base_procver('diasource').id == bpv['realtime_diasource'].id
+    def test_procver_functions( self, procver_collection ):
+        bpvs, pvs = procver_collection
+
+        for pv in pvs.values():
+            assert ProcessingVersion.procver_id( pv.description ) == pv.id
+            assert ProcessingVersion.procver_id( pv.id ) == pv.id
+        assert ProcessingVersion.procver_id( 'default' ) == pvs['pv2'].id
+
+        for bpv in bpvs.values():
+            with pytest.raises( ValueError, match="table is required when base_processing_version is not a uuid" ):
+                _ = BaseProcessingVersion.base_procver_id( bpv.description )
+            assert BaseProcessingVersion.base_procver_id( bpv.description, bpv._table ) == bpv.id
+            assert BaseProcessingVersion.base_procver_id( bpv.id ) == bpv.id
+
+        assert pvs['pv1'].highest_prio_base_procver('diaobject').id == bpvs['bpv1b_diaobject'].id
+        assert pvs['pv2'].highest_prio_base_procver('diaobject').id == bpvs['bpv2a_diaobject'].id
+        assert pvs['pv3'].highest_prio_base_procver('diaobject').id == bpvs['bpv3_diaobject'].id
+        assert pvs['realtime'].highest_prio_base_procver('diaobject').id == bpvs['realtime_diaobject'].id
+        assert pvs['realtime'].highest_prio_base_procver('diasource').id == bpvs['realtime_diasource'].id
+        assert ( pvs['realtime'].highest_prio_base_procver('diaobject_position').id
+                 == bpvs['realtime_diaobject_position_60080'].id )
