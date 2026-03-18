@@ -344,6 +344,11 @@ def test_fink():
     groupid = f'rknop-fastdb-test-{barf}'
     brokertopic = 'fink_sn_near_galaxy_candidate_lsst'
 
+    expectedcollections = [ f'fastdb_fink_test_{s}' for s in
+                            [ 'diaobject', 'diasource', 'diasource_extra',
+                              'diaforcedsource', 'diaforcedsource_extra',
+                              'thumbnails', 'brokerinfo', 'alertcache' ] ]
+
     try:
         t0 = time.perf_counter()
         fc = FinkConsumer( groupid=groupid, topics=brokertopic, mongodb_collection_base='fastdb_fink_test',
@@ -352,10 +357,6 @@ def test_fink():
         t1 = time.perf_counter()
         FDBLogger.info( f"Fink poll finished in {t1-t0} seconds." )
 
-        expectedcollections = [ f'fastdb_fink_test_{s}' for s in
-                                [ 'diaobject', 'diasource', 'diasource_extra',
-                                  'diaforcedsource', 'diaforcedsource_extra',
-                                  'thumbnails', 'brokerinfo', 'alertcache' ] ]
         with db.MGCon() as mg:
             assert all( i in mg.db.list_collection_names() for i in expectedcollections )
             nalerts = mg.collection( 'fastdb_fink_test_alertcache' ).count_documents({})
@@ -394,9 +395,15 @@ def test_pittgoogle():
     os.environ['GOOGLE_CLOUD_PROJECT'] = 'fastdb-test-20251103'
     os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = '/secrets/fastdb-test-20251103-5a0f5182da01.json'
 
+    expectedcollections = [ f'fastdb_test_pittgoogle_{s}' for s in
+                            [ 'diaobject', 'diasource', 'diasource_extra',
+                              'diaforcedsource', 'diaforcedsource_extra',
+                              'thumbnails', 'brokerinfo', 'alertcache' ] ]
+
     try:
         t0 = time.perf_counter()
-        pgb = PittGoogleConsumer( groupid=groupid, max_workers=2, batch_maxn=10, batch_maxwait=5,
+        pgb = PittGoogleConsumer( groupid=groupid, max_workers=2, batch_maxn=10, batch_maxwait=5, cache_alerts=True,
+                                  schemafile='/fastdb/share/avsc/lsst.v10_0.alert.avsc',
                                   mongodb_collection_base='fastdb_test_pittgoogle', extraconfig=extraconfig )
         FDBLogger.info( "Running PittGoogleBroker.poll() for 10s...." )
         pgb.poll( restart_time=datetime.timedelta( seconds=10 ), max_restarts=1 )
@@ -404,8 +411,28 @@ def test_pittgoogle():
         FDBLogger.info( f"Returned from PittGoogleBroker.poll(), it handled {pgb.tot_n_messages_consumed} messages.  "
                         f"Creation plus poll time: {dt:.2f} sec." )
 
+        with db.MGCon() as mg:
+            assert all( i in mg.db.list_collection_names() for i in expectedcollections )
+            nalerts = mg.collection( 'fastdb_test_pittgoogle_alertcache' ).count_documents({})
+            assert nalerts == pgb.tot_n_messages_consumed
+            assert nalerts > 3
+            col = mg.collection( 'fastdb_test_pittgoogle_brokerinfo' )
+            assert col.count_documents({}) == nalerts
+            srcids = set()
+            for doc in col.find( {} ):
+                assert doc['brokername'] == 'Pitt-Google'
+                assert doc['topic'] == f'lsst-{brokertopic}'
+                srcids.add( doc['diasourceid'] )
+
+            col = mg.collection( 'fastdb_test_pittgoogle_diasource' )
+            assert srcids.issubset( set( c['diasourceid'] for c in col.find({}) ) )
+
+            # Check other stuff?
+
     finally:
-        pass
+        with db.MGCon() as mg:
+            for col in expectedcollections:
+                mg.collection( col ).drop()
 
 
 @pytest.mark.skipif( not env_as_bool('RUN_AMPEL_TESTS'), reason='RUN_AMPEL_TESTS is not set' )

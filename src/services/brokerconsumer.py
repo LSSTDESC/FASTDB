@@ -634,6 +634,16 @@ class BrokerConsumer:
     def mongodb_store( self, objects=[], sources=[], sources_extra=[],
                        forcedsources=[], forcedsources_extra=[],
                        thumbnailses=[], brokerinfos=[], messagebatch=[] ):
+        # ****
+        self.logger.debug( f"mongodb_store called with:\n"
+                           f"    ....{len(objects)} objects\n"
+                           f"    ....{len(sources)} sources\n"
+                           f"    ....{len(sources_extra)} sources_extra\n"
+                           f"    ....{len(forcedsources)} forcedsources\n"
+                           f"    ....{len(forcedsources_extra)} forcedsources_extra\n"
+                           f"    ....{len(brokerinfos)} brokerinfos\n"
+                           f"    ....{len(messagebatch)} messagebatch\n" )
+        # ****
         inserted = {}
         with db.MGCon() as mg:
             for arr, suffix in zip( [ objects, sources, sources_extra,
@@ -642,16 +652,24 @@ class BrokerConsumer:
                                     [ 'diaobject', 'diasource', 'diasource_extra',
                                       'diaforcedsource', 'diaforcedsource_extra',
                                       'thumbnails', 'brokerinfo' ] ):
-                if self.no_wrangle:
-                    inserted[suffix] = 0
-                else:
-                    col = mg.collection( f'{self.mongodb_collection_base}_{suffix}' )
-                    results = col.insert_many( arr, ordered=False )
-                    inserted[suffix] = len( results.inserted_ids )
-            if self.cache_alerts:
+                if len( arr ) > 0:
+                    if self.no_wrangle:
+                        inserted[suffix] = 0
+                    else:
+                        col = mg.collection( f'{self.mongodb_collection_base}_{suffix}' )
+                        results = col.insert_many( arr, ordered=False )
+                        inserted[suffix] = len( results.inserted_ids )
+            if self.cache_alerts and ( len(messagebatch) > 0 ):
                 col = mg.collection( f'{self.mongodb_collection_base}_alertcache' )
                 results = col.insert_many( messagebatch, ordered=False )
                 inserted['alertcache'] = len( results.inserted_ids )
+        # ****
+        import pprint
+        strio = io.StringIO()
+        strio.write( "mongodb_store returning:\n" )
+        pprint.pp( inserted, stream=strio )
+        self.logger.debug( strio.getvalue() )
+        # ****
         return inserted
 
 
@@ -943,55 +961,63 @@ class PittGoogleConsumer(BrokerConsumer):
 
     def worker_init(self):
         """Initializer for the ThreadPoolExecutor."""
-        self.logger.info( "In worker_init" )
+        self.logger.info( "PittGoogleConsumer starting a new ThreadPoolExecutor worker to handle messages" )
 
     def handle_message(self, alert: pittgoogle.pubsub.Alert) -> pittgoogle.pubsub.Response:
         """Callback that will process a single message. This will run in a background thread."""
 
-        self.logger.info( "In handle_message" )
+        self.logger.debug( "In handle_message" )
 
-        # ...this makes me a little queasy because of the
-        #    ThreadPoolExectutor thing.  However, I'm not sure that this
-        #    is actually called from one of those threads (dunno!), but
-        #    also I think that the threads all share the same pointer to
-        #    self.tot_n_messages_consumed, so this will work.
-        self.tot_n_messages_consumed += 1
+        # NOTE -- start reading alert.msg.data at byte 5 because the first 4 bytes
+        #   are a schema ID of some sort.
+        parsedalert = fastavro.schemaless_reader(io.BytesIO(alert.msg.data[5:]), self.schema)
 
-        self.logger.warning( f"alert is a {type(alert)}, alert.msg is a {type(alert.msg)} and is {alert.msg}" )
-        import remote_pdb; remote_pdb.RemotePdb('127.0.0.1', 4444).set_trace()
+        if self.brokername_for_alerts is not None:
+            bname = self.brokername_for_alerts
+        elif self.brokername_key is not None:
+            bname = parsedalert[ self.brokername_key ]
+        else:
+            bname = self._brokername
+
         message = {
-            # NOTE -- start reading alert.msg.data at byte 5 because the first 4 bytes
-            #   are a schema ID of some sort.
-            "msg": fastavro.schemaless_reader(io.BytesIO(alert.msg.data[5:]), self.schema),
+            "brokername": bname,
             "topic": self.topic,
-            # this is a DatetimeWithNanoseconds, a subclass of datetime.datetime
-            # https://googleapis.dev/python/google-api-core/latest/helpers.html
-            "timestamp": alert.msg.publish_time.astimezone(datetime.UTC),
             # there is no offset in pubsub
             # if this cannot be null, perhaps the message id would work?
             "msgoffset": alert.msg.message_id,
-            "savetime": datetime.datetime.now( tz=datetime.UTC )
+            # this is a DatetimeWithNanoseconds, a subclass of datetime.datetime
+            # https://googleapis.dev/python/google-api-core/latest/helpers.html
+            "timestamp": alert.msg.publish_time.astimezone(datetime.UTC),
+            "savetime": datetime.datetime.now( tz=datetime.UTC ),
+            "msg": parsedalert
         }
 
+        self.logger.debug( "Returning from handle_message" )
         return pittgoogle.pubsub.Response(result=message, ack=True)
 
+
     def handle_message_batch(self, messagebatch: list) -> None:
-        """Callback that will process a batch of messages. This will run in the main thread.
-
-        I don't fully understand how pubsub works, but I *think* that this is called *after*
-        handle_message on each message, which kind of violates the principle of least surprise
-        for me.  But maybe I'm wrong.
-
-        I really don't understand how this all works.
-        """
+        """Callback that will process a batch of messages. This will run in the main thread."""
 
         self.logger.info( f"In handle_message_batch, received {len(messagebatch)} messages" )
-
-        # self.tot_n_messages_consumed += len(messagebatch)
-
-        # nadded = self.mongodb_store( messagebatch )
-        # self.countlogger.info( f"...added {nadded} messages to mongodb {self.mongodb_dbname} "
-        #                        f"collection {self.mongodb_collection}" )
+        t0 = time.perf_counter()
+        if self.no_wrangle:
+            wrangled = {}
+        else:
+            wrangled = self.alert_wrangler( messagebatch )
+        t1 = time.perf_counter()
+        nadded = self.mongodb_store( messagebatch=messagebatch, **wrangled )
+        t2 = time.perf_counter()
+        self.tot_n_messages_consumed += len(messagebatch)
+        self.countlogger.info( f"...added {nadded} messages to mongodb collections {self.mongodb_collection_base}*\n"
+                               f"    ...wrangle time: {t1-t0:.3f}\n"
+                               f"    ...store time: {t2-t1:.3f}\n" )
+        # ****
+        self.logger.info( f"...added {nadded} messages to mongodb collections {self.mongodb_collection_base}*\n"
+                          f"    ...wrangle time: {t1-t0:.3f}\n"
+                          f"    ...store time: {t2-t1:.3f}\n" )
+        self.logger.info( f"Total handled: {self.tot_n_messages_consumed}" )
+        # ****
 
 
     def poll(self, reset=None, restart_time=None, max_restarts=None, max_msgs=None, **kwargs ):
@@ -1041,11 +1067,10 @@ class PittGoogleConsumer(BrokerConsumer):
 
             nconsumed = self.consumer.stream( pipe=self.pipe, heartbeat=60,
                                               max_runtime=restart_time, max_nmsgs=max_msgs )
+            currenttotconsumed += nconsumed
             self.countlogger.info( f"...pittgoogle stream consumed {nconsumed} messages; "
                                    f"this call to poll consumed {currenttotconsumed} messages, "
                                    f"overall {self.tot_n_messages_consumed} messages." )
-            currenttotconsumed += nconsumed
-            self.tot_n_messages_consumed += nconsumed
             if ( max_restarts is not None ) and ( restarts >= max_restarts ):
                 self.countlogger.info( f"Exiting after {restarts} restarts." )
                 return

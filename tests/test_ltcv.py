@@ -292,7 +292,7 @@ def test_object_ltcv( procver_collection, set_of_lightcurves ):
         assert ( olddf.loc[ :, [ c for c in olddf.columns if c not in scarycolumns ] ] ==
                  newdf.loc[ :, [ c for c in newdf.columns if c not in scarycolumns ] ]
                 ).all().all()
-        
+
     # return_object_info and json
 
     jsrc2, jsrcinfo = ltcv.object_ltcv( pvs['pv2'].id, 200, return_format='json', which='detections',
@@ -318,7 +318,7 @@ def test_object_ltcv( procver_collection, set_of_lightcurves ):
             wnull = np.where( pandas.isna( pd[col] ) )[0]
             # pandas.isna catches both pandas-specific <NA> and None
             assert all( pandas.isna( np.array( js[col] )[wnull] ) )
-    
+
     # test use_weighted_source_position; diaobject 203 has no positions.
     # First, make sure we see that
     src, srcinfo = ltcv.object_ltcv( pvs['pv2'].id, 203, return_format='pandas', which='detections',
@@ -332,10 +332,12 @@ def test_object_ltcv( procver_collection, set_of_lightcurves ):
 
     # # Now check positions
 
+    raise RuntimeError( """
     TODO : fix this next functon so that you pass a list of keys, and it will then go through
       and find sources from the priority list.  That lets us compare to something where we'll
       get a mix of base processing versions.
-    
+    """ )
+
     def check_pos( infodf, srces ):
         srcra = np.array( [ i.ra for i in srces ] )
         srcdec = np.array( [ i.dec for i in srces ] )
@@ -358,7 +360,7 @@ def test_object_ltcv( procver_collection, set_of_lightcurves ):
         # assert list( infodf.ra_dec_cov )[0] == pytest.approx( ra_dec_cov, rel=1e-6 )
         assert list( infodf.ra_dec_cov )[0] == pytest.approx( 0., abs=1e-10 )
         assert ra_dec_cov == pytest.approx( 0., abs=1e-10 )
-        
+
     # src, srcinfo = ltcv.object_ltcv( pvs['pv2'].id, 203, return_format='pandas', which='detections',
     #                                  return_object_info=True, use_weighted_source_positions=True )
     # frc, frcinfo = ltcv.object_ltcv( pvs['pv2'].id, 203, return_format='pandas', which='forced',
@@ -392,7 +394,7 @@ def test_object_ltcv( procver_collection, set_of_lightcurves ):
         assert info.ra_dec_cov.iloc[0] == pytest.approx( roots[0]['pos'][dex].ra_dec_cov, rel=1e-6 )
 
     # Now put in always_....
-    
+
     src, srcinfo = ltcv.object_ltcv( pvs['pv1'].id, 200, return_format='pandas', which='detections',
                                      return_object_info=True, always_use_weighted_source_positions=True,
                                      include_base_procver=True )
@@ -414,13 +416,13 @@ def test_object_ltcv( procver_collection, set_of_lightcurves ):
     check_pos( srcinfo, roots[2]['src']['bpv2_diasource'] )
     check_pos( frcinfo, roots[2]['src']['bpv2_diasource'] )
     check_pos( patinfo, roots[2]['src']['bpv2_diasource'] )
-    
-    
-    
+
+
+
     import pdb; pdb.set_trace()
     pass
 
-        
+
 
 def test_many_object_ltcvs( procver_collection, set_of_lightcurves ):
     roots = set_of_lightcurves
