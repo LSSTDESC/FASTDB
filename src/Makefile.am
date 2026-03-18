@@ -8,6 +8,7 @@ install_DATA = __init__.py config.py db.py kafka_consumer.py ltcv.py spectrum.py
 	../extern/rkwebutil/rkwebutil/rkwebutil.py
 
 services_DATA = services/__init__.py \
+        services/all_alerts_importer.py \
 	services/brokerconsumer.py \
 	services/dr_importer.py \
 	services/long_query_runner.py \
