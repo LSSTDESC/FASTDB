@@ -45,7 +45,7 @@ declare -A cols=( ["source_thumbnails"]="diasourceid,base_procver_id", \
                   ["all_alerts_diasource_extra"]="diasourceid;savetime", \
                   ["all_alerts_diaforcedsource"]="diaforcedsourceid;diaobjectid;savetime", \
                   ["all_alerts_diaforcedsource_extra"]="diaforcedsourceid;savetime", \
-                  ["all_alerts_brokerinfo"]="diasourceid,brokername,topic;savetime", \
+                  ["all_alerts_brokerinfo"]="diasourceid,brokername,topic;savetime;diasourceid", \
                   ["all_alerts_thumbnails"]="diasourceid;savetime" )
 
 for col in "${!cols[@]}"; do

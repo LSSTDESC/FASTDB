@@ -118,7 +118,8 @@ def all_alerts_imported_30days( alerts_30days_sent_and_brokermessage_consumed ):
             for col in allalertcollections:
                 mg.collection( col ).delete_many( {} )
         with db.DBCon() as con:
-            con.execute( "DELETE FROM all_alerts_import_time" )
+            con.execute( "DELETE FROM all_alerts_import_time WHERE collection=%(c)s",
+                         { 'c': 'fastdb_alertcycle_test' } )
             con.commit()
 
 
@@ -160,7 +161,8 @@ def test_all_alerts_importer_30days( all_alerts_imported_30days ):
     firstsentids = all_alerts_imported_30days['alertids']
 
     with db.DBCon() as con:
-        rows, _cols = con.execute( "SELECT t FROM all_alerts_import_time" )
+        rows, _cols = con.execute( "SELECT t FROM all_alerts_import_time WHERE collection=%(c)s",
+                                   { 'c': 'fastdb_alertcycle_test' } )
         tfirstimport = rows[0][0]
         assert tfirstimport > tsent
         assert tfirstimport < tdone
@@ -197,7 +199,8 @@ def test_all_alerts_importer_next60days( all_alerts_imported_30days, all_alerts_
     allalertids = all_alerts_imported_next60days['allalertids']
 
     with db.DBCon() as con:
-        rows, _cols = con.execute( "SELECT t FROM all_alerts_import_time" )
+        rows, _cols = con.execute( "SELECT t FROM all_alerts_import_time WHERE collection=%(c)s",
+                                   { 'c': 'fastdb_alertcycle_test' } )
         timport = rows[0][0]
         assert tdone30 < tsent60
         assert timport > tsent60
@@ -236,127 +239,3 @@ def test_all_alerts_importer_next60days( all_alerts_imported_30days, all_alerts_
         assert mess['acsrcids'].issubset( mess['full_allsrcids'] )
         assert mess['acfrcids'].issubset( mess['full_allfrcids'] )
         assert mess['acobjids'].issubset( mess['full_allobjids'] )
-
-
-# Right now, I'm anticipating that we're going to do our "save all the alerts" from
-#   Pitt-Google, so here's a test based on that.
-# ...right now the loop filter is sending the same alert over and over again,
-#    so this test doesn't fully work
-# @pytest.mark.skipif( not env_as_bool('RUN_PITTGOOGLE_TESTS'), reason='RUN_PITTGOOGLE_TESTS is not set' )
-# def test_pittgoogle_all_alerts_importer():
-#     barf = "".join( random.choices( 'abcdefghijklmnopqrstuvwxyz', k=6 ) )
-#     brokertopic = 'loop'
-#     groupid = f'fastdb-test-{barf}'
-#     extraconfig = { 'survey': 'lsst',
-#                     'name': brokertopic
-#                    }
-#     os.environ['GOOGLE_CLOUD_PROJECT'] = 'fastdb-test-20251103'
-#     os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = '/secrets/fastdb-test-20251103-5a0f5182da01.json'
-
-#     tables =  [ 'diaobject', 'diasource', 'diasource_extra',
-#                 'diaforcedsource', 'diaforcedsource_extra',
-#                 'thumbnails', 'brokerinfo', 'alertcache' ]
-#     expectedcollections = [ f'fastdb_test_pittgoogle_{s}' for s in tables ]
-#     allalertcollections = [ f'all_alerts_{s}' for s in tables if s != 'alertcache' ]
-
-#     try:
-#         importer = AllAlertsImporter( collection_base_name='fastdb_test_pittgogole' )
-#         pgb = PittGoogleConsumer( groupid=groupid, max_workers=2, batch_maxn=10, batch_maxwait=5, cache_alerts=True,
-#                                   schemafile='/fastdb/share/avsc/lsst.v10_0.alert.avsc',
-#                                   mongodb_collection_base='fastdb_test_pittgoogle', extraconfig=extraconfig )
-
-#         # First poll
-#         FDBLogger.info( "Running PittGoogleBroker.poll() for 10s...." )
-#         pgb.poll( restart_time=datetime.timedelta( seconds=10 ), max_restarts=0 )
-#         nfirstpoll = pgb.tot_n_messages_consumed
-#         FDBLogger.info( f"...got {nfirstpoll} messages.  Importing to all_alerts*" )
-#         t0 = datetime.datetime.now( tz=datetime.UTC )
-#         importer()
-#         t1 = datetime.datetime.now( tz=datetime.UTC )
-#         with db.DBCon() as con:
-#             rows, _cols = con.execute( "SELECT t FROM all_alerts_import_time" )
-#             tfirstimport = rows[0][0]
-#             assert tfirstimport > t0
-#             assert tfirstimport < t1
-#         import pdb; pdb.set_trace()
-
-#         def _extract( mg ):
-#             pgsrcids = set( x['diasourceid'] for x in ( mg.collection( 'fastdb_test_pittgoogle_diasource' )
-#                                                         .find( {}, projection={ 'diasourceid': 1 } ) ) )
-#             pgsrcexids = set( x['diasourceid'] for x in ( mg.collection( 'fastdb_test_pittgoogle_diasource_extra' )
-#                                                           .find( {}, projection={ 'diasourceid': 1 } ) ) )
-#             pgbiids = set( ( x['diasourceid'] , x['brokername'], x['topic'] )
-#                            for x in ( mg.collection( 'fastdb_test_pittgoogle_brokerinfo' )
-#                                       .find( {}, projection={ 'diasourceid': 1,
-#                                                               'brokername': 1,
-#                                                               'topic': 1 } ) ) )
-#             pgfrcids = set( x['diaforcedsourceid'] for x in (mg.collection('fastdb_test_pittgoogle_diaforcedsource')
-#                                                              .find( {}, projection={ 'diaforcedsourceid': 1 } ) ) )
-#             pgfrcexids = set( x['diaforcedsourceid']
-#                               for x in ( mg.collection( 'fastdb_test_pittgoogle_diaforcedsource_extra' )
-#                                          .find( {}, projection={ 'diaforcedsourceid': 1 } ) ) )
-#             pgobjids = set( x['diaobjectid'] for x in ( mg.collection( 'fastdb_test_pittgoogle_diaobject' )
-#                                                         .find( {}, projection={ 'diaobjectid': 1 } ) ) )
-#             pgthumbids = set( x['diasourceid'] for x in ( mg.collection( 'fastdb_test_pittgoogle_thumbnails' )
-#                                                           .find( {}, projection={ 'diasourceid': 1 } ) ) )
-
-#             allsrcids = set( x['diasourceid'] for x in ( mg.collection( 'all_alerts_diasource' )
-#                                                          .find( {}, projection={ 'diasourceid': 1 } ) ) )
-#             allsrcexids = set( x['diasourceid'] for x in ( mg.collection( 'all_alerts_diasource_extra' )
-#                                                            .find( {}, projection={ 'diasourceid': 1 } ) ) )
-#             allbiids = set( ( x['diasourceid'] , x['brokername'], x['topic'] )
-#                             for x in ( mg.collection( 'all_alerts_brokerinfo' )
-#                                        .find( {}, projection={ 'diasourceid': 1,
-#                                                                'brokername': 1,
-#                                                                'topic': 1 } ) ) )
-#             allfrcids = set( x['diaforcedsourceid'] for x in ( mg.collection( 'all_alerts_diaforcedsource' )
-#                                                                .find( {}, projection={ 'diaforcedsourceid': 1 } ) ) )
-#             allfrcexids = set( x['diaforcedsourceid']
-#                                for x in ( mg.collection( 'all_alerts_diaforcedsource_extra' )
-#                                           .find( {}, projection={ 'diaforcedsourceid': 1 } ) ) )
-#             allobjids = set( x['diaobjectid'] for x in ( mg.collection( 'all_alerts_diaobject' )
-#                                                          .find( {}, projection={ 'diaobjectid': 1 } ) ) )
-#             allthumbids = set( x['diasourceid'] for x in ( mg.collection( 'all_alerts_thumbnails' )
-#                                                            .find( {}, projection={ 'diasourceid': 1 } ) ) )
-
-#             return { 'pgsrcids': pgsrcids,
-#                      'pgsrcexids': pgsrcexids,
-#                      'pgfrcids': pgfrcids,
-#                      'pgfrcexids': pgfrcexids,
-#                      'pgobjids': pgobjids,
-#                      'pgthumbids': pgthumbids,
-#                      'pgbiids': pgbiids,
-#                      'allsrcids': allsrcids,
-#                      'allsrcexids': allsrcexids,
-#                      'allfrcids': allfrcids,
-#                      'allfrcexids': allfrcexids,
-#                      'allobjids': allobjids,
-#                      'allthumbids': allthumbids,
-#                      'allbiids': allbiids }
-
-#         with db.MGCon() as mg:
-#             mess = _extract( mg )
-#             assert mess['allobjids'] == mess['pgobjids']
-#             assert mess['allsrcids'] == mess['pgsrcids']
-#             assert mess['pgsrcexids'] == mess['pgsrcids']
-#             assert mess['allsrcexids'] == mess['pgsrcids']
-#             assert mess['allfrcids'] == mess['pgfrcids']
-#             assert mess['pgfrcexids'] == mess['pgfrcids']
-#             assert mess['allfrcexids'] == mess['pgfrcids']
-#             assert mess['pgthumbids'].issubset( mess['pgsrcids'] )
-#             assert len( mess['pgthumbids'] ) == nfirstpoll
-#             assert mess['allthumbids'] == mess['pgthumbids']
-#             assert len( mess['pgbiids'] ) == len( mess['pgsrcids'] )
-#             assert mess['allbiids'] == mess['pgbiids']
-
-
-
-#     finally:
-#         with db.MGCon() as mg:
-#             for col in expectedcollections:
-#                 mg.collection( col ).drop()
-#             for col in allalertcollections:
-#                 mg.collection( col ).delete_many( {} )
-#         with db.DBCon() as con:
-#             con.execute( "DELETE FROM all_alerts_import_time" )
-#             con.commit()

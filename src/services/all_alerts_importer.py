@@ -51,7 +51,8 @@ class AllAlertsImporter:
         with db.DBCon() as dbcon:
             timestampexists= False
             t0 = None
-            rows, _cols = dbcon.execute( "SELECT t FROM all_alerts_import_time" )
+            rows, _cols = dbcon.execute( "SELECT t FROM all_alerts_import_time WHERE collection=%(c)s",
+                                         { 'c': self.collection_base_name } )
             if len(rows) > 0:
                 timestampexists = True
                 t0 = util.datetime_to_utc( rows[0][0], with_tz=True, now_on_none=False )
@@ -94,9 +95,12 @@ class AllAlertsImporter:
                     FDBLogger.info( f"...done aggregating {colsuffix}" )
 
                 if timestampexists:
-                    dbcon.execute( "UPDATE all_alerts_import_time SET t=%(t)s", {'t': t1} )
+                    dbcon.execute( "UPDATE all_alerts_import_time SET t=%(t)s WHERE collection=%(c)s",
+                                   {'t': t1, 'c': self.collection_base_name} )
                 else:
-                    dbcon.execute( "INSERT INTO all_alerts_import_time(t) VALUES (%(t)s)", {'t': t1} )
+                    dbcon.execute( "INSERT INTO all_alerts_import_time(t,collection) "
+                                   "VALUES (%(t)s, %(c)s)",
+                                   {'t': t1, 'c': self.collection_base_name} )
 
                 if commit:
                     mongosession.commit_transaction()
