@@ -306,6 +306,15 @@ def test_BrokerConsumerLauncher( barf, alerts_30_to_90_sent_and_classified ):
                                           logtag='BrokerConsumerLauncher', verbose=True )
             bcl()
 
+        # Yes, we're doing processes within processes
+        # (BrokerConsumerLauncher launches its own subprocesses).  We're
+        # doing this because the prodution working mode is going to be
+        # BrokerConsumerLauncher running on a server somewhere, and we
+        # need to be able to send it a TERM (or INT or whatever) signal
+        # and have it shut down cleanly (including a clean shutdown of
+        # all its subprocesses).  So, set up the same structure here.
+        # (Really need more robust testing to make sure the clean
+        # shutdown happened, other than just looking at logs....)
         proc = multiprocessing.Process( target=launch_launcher )
         proc.start()
         # Give it 10 seconds to do its stuff
@@ -384,14 +393,63 @@ def test_fink():
                 mg.collection( col ).drop()
 
 
+@pytest.mark.skipif( not env_as_bool('RUN_FINK_TESTS'), reason='RUN_FINK_TESTS is not set' )
+def test_fink_launcher():
+    barf = "".join( random.choices( 'abcdefghijklmnopqrstuvwxyz', k=6 ) )
+
+    expectedcollections = [ f'fastdb_fink_launcher_test_{s}' for s in
+                            [ 'diaobject', 'diasource', 'diasource_extra',
+                              'diaforcedsource', 'diaforcedsource_extra',
+                              'thumbnails', 'brokerinfo', 'alertcache' ] ]
+
+    proc = None
+    try:
+        def launch_broker():
+            bcl = BrokerConsumerLauncher( '/code/tests/services/brokerconsumer_fink.yaml', barf=barf,
+                                          logtag='FinkBrokerConsumerLauncher', verbose=True )
+            bcl()
+
+        proc = multiprocessing.Process( target=launch_broker )
+        proc.start()
+        FDBLogger.info( "Sleeping 10s for BrokerConsumerLauncher to do its thing" )
+        time.sleep( 10 )
+        FDBLogger.info( "Sending TERM to BrokerConsumerLauncher" )
+        proc.terminate()
+        proc.join()
+        FDBLogger.info( "Closing BrokerConsumerLauncher" )
+        proc.close()
+        proc = None
+
+        with db.MGCon() as mg:
+            assert all( i in mg.db.list_collection_names() for i in expectedcollections )
+            nalerts = mg.collection( 'fastdb_fink_launcher_test_alertcache' ).count_documents({})
+            assert nalerts >= 10
+            col = mg.collection( 'fastdb_fink_launcher_test_brokerinfo' )
+            assert col.count_documents({}) == nalerts
+            srcids = set()
+            for doc in col.find({}):
+                assert doc['brokername'] == "LaunchedFink"
+                assert doc['topic'] == 'fink_sn_near_galaxy_candidate_lsst'
+                srcids.add( doc['diasourceid'] )
+
+            col = mg.collection( 'fastdb_fink_launcher_test_diasource' )
+            assert srcids.issubset( set( c['diasourceid'] for c in col.find({}) ) )
+
+    finally:
+        if proc is not None:
+            proc.kill()
+        with db.MGCon() as mg:
+            for col in expectedcollections:
+                mg.collection( col ).drop()
+
+
+
+
 @pytest.mark.skipif( not env_as_bool('RUN_PITTGOOGLE_TESTS'), reason='RUN_PITTGOOGLE_TESTS is not set' )
 def test_pittgoogle():
     barf = "".join( random.choices( 'abcdefghijklmnopqrstuvwxyz', k=6 ) )
     brokertopic = 'loop'
     groupid = f'fastdb-test-{barf}'
-    extraconfig = { 'survey': 'lsst',
-                    'name': brokertopic
-                   }
     os.environ['GOOGLE_CLOUD_PROJECT'] = 'fastdb-test-20251103'
     os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = '/secrets/fastdb-test-20251103-5a0f5182da01.json'
 
@@ -402,9 +460,10 @@ def test_pittgoogle():
 
     try:
         t0 = time.perf_counter()
-        pgb = PittGoogleConsumer( groupid=groupid, max_workers=2, batch_maxn=10, batch_maxwait=5, cache_alerts=True,
+        pgb = PittGoogleConsumer( groupid=groupid, max_workers=2, batch_size=10, consume_timeout=2,
+                                  survey='lsst', topic_name=brokertopic, cache_alerts=True,
                                   schemafile='/fastdb/share/avsc/lsst.v10_0.alert.avsc',
-                                  mongodb_collection_base='fastdb_test_pittgoogle', extraconfig=extraconfig )
+                                  mongodb_collection_base='fastdb_test_pittgoogle' )
         FDBLogger.info( "Running PittGoogleBroker.poll() for 10s...." )
         pgb.poll( restart_time=datetime.timedelta( seconds=10 ), max_restarts=1 )
         dt = time.perf_counter() - t0
@@ -433,6 +492,59 @@ def test_pittgoogle():
         with db.MGCon() as mg:
             for col in expectedcollections:
                 mg.collection( col ).drop()
+
+
+@pytest.mark.skipif( not env_as_bool('RUN_PITTGOOGLE_TESTS'), reason='RUN_PITTGOOGLE_TESTS is not set' )
+def test_pittgoogle_launcher():
+    os.environ['GOOGLE_CLOUD_PROJECT'] = 'fastdb-test-20251103'
+    os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = '/secrets/fastdb-test-20251103-5a0f5182da01.json'
+
+    barf = "".join( random.choices( 'abcdefghijklmnopqrstuvwxyz', k=6 ) )
+    expectedcollections = [ f'pittgoogle_launcher_test_{s}' for s in
+                            [ 'diaobject', 'diasource', 'diasource_extra',
+                              'diaforcedsource', 'diaforcedsource_extra',
+                              'thumbnails', 'brokerinfo', 'alertcache' ] ]
+    proc = None
+
+    try:
+        def launch_broker():
+            bcl = BrokerConsumerLauncher( '/code/tests/services/brokerconsumer_pittgoogle.yaml', barf=barf,
+                                          logtag='PittGoogleConsumerLauncher', verbose=True )
+            bcl()
+
+        proc = multiprocessing.Process( target=launch_broker )
+        proc.start()
+        FDBLogger.info( "Sleeping 10s for BrokerConsumerLauncher to do its thing" )
+        time.sleep( 10 )
+        FDBLogger.info( "Sending TERM to BrokerConsumerLauncher" )
+        proc.terminate()
+        proc.join()
+        FDBLogger.info( "Closing BrokerConsumerLauncher" )
+        proc.close()
+        proc = None
+
+        with db.MGCon() as mg:
+            assert all( i in mg.db.list_collection_names() for i in expectedcollections )
+            nalerts = mg.collection( 'pittgoogle_launcher_test_alertcache' ).count_documents({})
+            assert nalerts >= 3
+            col = mg.collection( 'pittgoogle_launcher_test_brokerinfo' )
+            assert col.count_documents({}) == nalerts
+            srcids = set()
+            for doc in col.find({}):
+                assert doc['brokername'] == "Pitt-Google"
+                assert doc['topic'] == 'lsst-loop'
+                srcids.add( doc['diasourceid'] )
+
+            col = mg.collection( 'pittgoogle_launcher_test_diasource' )
+            assert srcids.issubset( set( c['diasourceid'] for c in col.find({}) ) )
+
+    finally:
+        if proc is not None:
+            proc.kill()
+        with db.MGCon() as mg:
+            for col in expectedcollections:
+                mg.collection( col ).drop()
+
 
 
 @pytest.mark.skipif( not env_as_bool('RUN_AMPEL_TESTS'), reason='RUN_AMPEL_TESTS is not set' )

@@ -2,14 +2,21 @@ brokers:
   - name: "fink"
     class: FinkConsumer
     server: kafka-lsst.fink-broker.org:24499
-    topics: [ 'fink_sn_near_galaxy_candidate_lsst' ]
     groupid: rknop-fastdb-test-{barf}
-    collection: fink_{barf}
+    topics: [ 'fink_sn_near_galaxy_candidate_lsst' ]
+    updatetopics: false
+    brokername_for_alerts: "LaunchedFink"
+    mongodb_collection_base: fastdb_fink_launcher_test
+    cache_alerts: true
     loggername: FINK
     loggername_prefix: ""
-    updatetopics: false
-    restart_time_min: 0.1
-    max_restarts: null
-    notopic_sleeptime_sec: 5
+    batch_size: 10
+    consume_timeout: 1
+    nomsg_sleeptime: 1
+    batch_size: 10
     extraconfig: null
     extraconfigjson: null
+    pollkwargs:
+      restart_time_min: 0.1
+      notopic_sleeptime: 300
+      max_restarts: null

@@ -421,6 +421,8 @@ class BrokerConsumer:
     @classmethod
     def _wrangle_diasource( cls, submsg, metamsg, msg ):
         out = cls._filter_dict_to_table( submsg, db.DiaSource.tablemeta() )
+        # This next field is used in one of our tests....
+        out['msg_diasourceid'] = msg['diaSourceId']
         out['savetime'] = metamsg['savetime']
         return out
 
@@ -925,6 +927,13 @@ class PittGoogleConsumer(BrokerConsumer):
 
     cf: https://mwvgroup.github.io/pittgoogle-client/api-reference/pubsub.html
 
+    Known topic names:
+       'alerts' : full lsst alert stream
+       'loop' : the same alert repeated every second, for testing
+       'supernnoa'
+       'upsilon'
+       'variability'
+
     """
 
     _brokername = 'pitt-google'
@@ -933,18 +942,24 @@ class PittGoogleConsumer(BrokerConsumer):
         self,
         server_not_used: str = "",
         groupid: str = "default_pittgooglebroker_fastdb_groupid",
+        survey: str = "lsst",
+        topic_name: str = None,
+        testid: bool | str = False,
         max_workers: int = 8,  # max number of ThreadPoolExecutor workers
-        batch_maxn: int = 1000,  # max number of messages in a batch
-        batch_maxwait: int = 5,  # max seconds to wait between messages before processing a batch
         loggername: str = "PITTGOOGLE",
         **kwargs
     ):
-        super().__init__(server=None, groupid='not_used', brokername_for_alerts="Pitt-Google",
-                         loggername=loggername, **kwargs)
+        if 'brokername_for_alerts' in kwargs:
+            brokername_for_alerts = kwargs['brokername_for_alerts']
+            del kwargs['brokername_for_alerts']
+        else:
+            brokername_for_alerts = 'Pitt-Google'
 
-        neededconfig = [ 'name', 'survey' ] # , 'google_cloud_project', 'google_cloud_key_file' ]
-        if any( i not in self.extraconfig for i in neededconfig ):
-            raise ValueError( f"need in extraconfig: {neededconfig}" )
+        if topic_name is None:
+            raise ValueError( "Need to pass topic_name" )
+
+        super().__init__(server=None, groupid='not_used', brokername_for_alerts=brokername_for_alerts,
+                         loggername=loggername, **kwargs)
 
         # I would prefer it if I could pass the arguments explicitly as function arguments, but
         #  I haven't figured out how ot get that to work, and it may not work with
@@ -954,9 +969,10 @@ class PittGoogleConsumer(BrokerConsumer):
             ):
             raise ValueError( "Need to set env vars GOOGLE_CLOUD_PROJECT and GOOGLE_APPLICATION_CREDENTIALS" )
 
+        self._survey = survey
+        self._name = topic_name
+        self._testid = testid
         self._max_workers = max_workers
-        self._batch_maxn = batch_maxn
-        self._batch_maxwait = batch_maxwait
         self._groupid = groupid
 
     def worker_init(self):
@@ -1029,11 +1045,9 @@ class PittGoogleConsumer(BrokerConsumer):
         currenttotconsumed = 0
         restarts = 0
         while True:
-            testid = self.extraconfig['testid'] if 'testid' in self.extraconfig else False
-
-            topic = pittgoogle.Topic.from_cloud( name=self.extraconfig['name'],
-                                                 survey=self.extraconfig['survey'],
-                                                 testid=testid,
+            topic = pittgoogle.Topic.from_cloud( name=self._name,
+                                                 survey=self._survey,
+                                                 testid=self._testid,
                                                  projectid='pitt-alert-broker' )
             subscription = pittgoogle.Subscription( name=self._groupid,
                                                     topic=topic,
@@ -1047,8 +1061,9 @@ class PittGoogleConsumer(BrokerConsumer):
                 subscription=subscription,
                 msg_callback=self.handle_message,
                 batch_callback=self.handle_message_batch,
-                batch_maxn=self._batch_maxn,
-                batch_max_wait_between_messages=self._batch_maxwait,
+                batch_maxn=self.batch_size,
+                batch_max_wait_between_messages=self.consume_timeout,
+                logger=self.countlogger,
                 executor=ThreadPoolExecutor(
                     max_workers=self._max_workers,
                     initializer=self.worker_init,
@@ -1065,17 +1080,21 @@ class PittGoogleConsumer(BrokerConsumer):
 
             self.countlogger.info( f"Launching a pittgoogle stream, topic={self.topic}..." )
 
-            nconsumed = self.consumer.stream( pipe=self.pipe, heartbeat=60,
+            result = self.consumer.stream( pipe=self.pipe, heartbeat=60,
                                               max_runtime=restart_time, max_nmsgs=max_msgs )
-            currenttotconsumed += nconsumed
-            self.countlogger.info( f"...pittgoogle stream consumed {nconsumed} messages; "
+            currenttotconsumed += result['totprocessed']
+            self.countlogger.info( f"...pittgoogle stream consumed {result['totprocessed']} messages; "
                                    f"this call to poll consumed {currenttotconsumed} messages, "
                                    f"overall {self.tot_n_messages_consumed} messages." )
-            if ( max_restarts is not None ) and ( restarts >= max_restarts ):
-                self.countlogger.info( f"Exiting after {restarts} restarts." )
+            if result[ "status" ] == "die":
+                self.countlogger.info( f"PittGoogleConsumer.poll exiting becasue of die command." )
+                return
+            elif ( max_restarts is not None ) and ( restarts >= max_restarts ):
+                self.countlogger.info( f"PittGoogleConsumer.poll exiting after {restarts} restarts." )
                 return
             else:
-                self.countlogger.info( f"Restarting the stream after {restarts} previous restarts..." )
+                self.countlogger.info( f"PittGoogleConsumer.poll restarting the stream "
+                                       f"after {restarts} previous restarts..." )
             restarts += 1
 
 
@@ -1150,35 +1169,14 @@ class BrokerConsumerLauncher:
         self.shutdown_graceperiod=20
 
 
-    def _launch_broker( self, brokerinfo ):
+    @classmethod
+    def _launch_broker( cls, brokerinfo ):
         # Ignore signals; the main process will tell us to die when we need to
         signal.signal( signal.SIGTERM, lambda sig, stack: True )
         signal.signal( signal.SIGINT, lambda sig, stack: True )
 
-        if 'extraconfig' in brokerinfo and brokerinfo['extraconfig'] is not None:
-            extraconfig = brokerinfo['extraconfig']
-        elif 'extraconfigjson' in brokerinfo and brokerinfo['extraconfigjson'] is not None:
-            extraconfig = simplejson.loads( brokerinfo['extraconfigjson'] )
-        else:
-            extraconfig = {}
-
-        bc = brokerinfo['class']( brokerinfo['server'],
-                                  brokerinfo['groupid'],
-                                  topics=brokerinfo['topics'],
-                                  updatetopics=brokerinfo['updatetopics'],
-                                  extraconfig=extraconfig,
-                                  schemafile=brokerinfo['schemafile'],
-                                  brokername_for_alerts=brokerinfo['brokername'],
-                                  brokername_key=brokerinfo['brokername_key'],
-                                  pipe=brokerinfo['childpipe'],
-                                  loggername=brokerinfo['loggername'],
-                                  loggername_prefix=brokerinfo['loggername_prefix'],
-                                  mongodb_collection_base=brokerinfo['collection']
-                                 )
-        bc.poll( restart_time=brokerinfo['restart_time'],
-                 max_restarts=brokerinfo['max_restarts'],
-                 notopic_sleeptime=brokerinfo['notopic_sleeptime']
-                )
+        bc = brokerinfo['class']( **brokerinfo['kwargs'] )
+        bc.poll( **brokerinfo['pollkwargs'] )
 
 
     def __call__( self ):
@@ -1202,73 +1200,101 @@ class BrokerConsumerLauncher:
             logger.warning( "I am surprised, I already have handlers.  Logger is mysterious." )
         logger.setLevel( logging.DEBUG if self.verbose else logging.INFO )
 
-        config = yaml.safe_load( open( self.config ) )
-        # ****
-        # logger.debug( f"Loaded config: {config}" )
-        # ****
-
-        schemafile = config[ 'schemafile' ] if 'schemafile' in config else _default_brokermessage_schemafile
-
         brokers = []
         clsmap = { 'BrokerConsumer': BrokerConsumer,
                    'FinkConsumer': FinkConsumer,
                    'PittGoogleConsumer': PittGoogleConsumer }
 
-        # WARNING -- this code may not work as is for the PittGoogleConsumer, look into that
+        config = yaml.safe_load( open( self.config ) )
+        # ****
+        # logger.debug( f"Loaded config: {config}" )
+        # ****
+        if ( ( not isinstance( config, dict ) ) or
+             ( 'brokers' not in config ) or
+             ( not isinstance( config['brokers'], list ) )
+            ):
+            raise ValueError( "Config must be a dictionary with key brokers, and config['brokers'] must be a list." )
+        missing = set( config.keys() ) - { 'brokers' }
+        if len(missing) > 0:
+            logger.warning( f"Unparsed root-level keys in config: {missing}" )
 
-        # Parse the config for all brokers before launching anything, so that if we get an exception
-        #   we won't have started subprocesses.
         for broker in config[ 'brokers' ]:
+            if not isinstance( broker, dict ):
+                raise ValueError( "Each element of the brokers list must be a dict" )
+
+            # There is some parsing we have to do the yaml. *Most* of
+            #   the keys are things that are passed in the kwargs to the
+            #   broker class constructor, but there are a handful of
+            #   things that need to be pulled out for editing, and we
+            #   need to substitute {barf} for the barf passed to the
+            #   BrokerConsumerLauncher constructor (needed for tests,
+            #   might also sometimes be useful in production).
+
             cls = clsmap[ broker['class'] ]
             name = broker['name']
-            brokername = broker['brokername'] if 'brokername' in broker else None
-            brokername_key = broker['brokername_key'] if 'brokername_key' in broker else None
-            server = broker['server'].replace( "{barf}", self.barf )
-            topics = [ t.replace("{barf}", self.barf) for t in broker['topics'] ]
-            groupid = broker['groupid'].replace( "{barf}", self.barf )
-            collection = broker['collection'].replace( "{barf}", self.barf ) if 'collection' in broker else None
-            loggername = broker['loggername'].replace( "{barf}", self.barf )
-            loggername_prefix = broker['loggername_prefix'].replace( "{barf}", self.barf )
-            schm = schemafile if 'schemafile' not in broker else broker['schemafile']
-            updatetopics = False if 'updatetopics' not in broker else broker['updatetopics']
-            batch_size = 1000 if 'batch_size' not in broker else broker['batch_size']
-            consume_timeout = 1 if 'consume_timeout' not in broker else broker['consume_timeout']
-            restart_time = datetime.timedelta( minutes=(broker['restart_time_min'] if 'restart_time_min' in broker
-                                                        else 30 ) )
-            max_restarts = broker['max_restarts'] if 'max_restarts' in broker else None
-            notopic_sleeptime = broker['notopic_sleeptime_sec'] if 'notopic_sleeptime_sec' in broker else 10
-            extraconfig = None if 'extraconfig' not in broker else broker['extraconfig']
-            extraconfigjson = None if 'extraconfigjson' not in broker else broker['extraconfigjson']
-            brokerinfo = { 'class': cls,
-                           'name': name,
-                           'brokername': brokername,
-                           'brokername_key': brokername_key,
-                           'server': server,
-                           'topics': topics,
-                           'groupid': groupid,
-                           'schemafile': schm,
-                           'updatetopics': updatetopics,
-                           'restart_time': restart_time,
-                           'batch_size': batch_size,
-                           'consume_timeout': consume_timeout,
-                           'max_restarts': max_restarts,
-                           'notopic_sleeptime': notopic_sleeptime,
-                           'extraconfig': extraconfig,
-                           'extraconfigjson': extraconfigjson,
-                           'collection': collection,
-                           'loggername': loggername,
-                           'loggername_prefix': loggername_prefix }
-            brokers.append( brokerinfo )
+
+            if 'mongodb_collection_base' not in broker:
+                raise ValueError( "Every broker must have a mongodb_collection_base" )
+
+            if ( 'extraconfigjson' in broker ) and ( broker['extraconfigjson'] is not None ):
+                if ( 'extraconfig' in broker ) and ( broker['extraconfig'] is not None ):
+                    raise ValueError( "Can't have non-null for both extraconfig and extraconfigjson" )
+                broker['extraconfiog'] = simplejson.loads( broker['extraconfigjson'] )
+                del broker['extraconfigjson']
+
+            if ( 'extraconfig' in broker ) and ( broker['extraconfig'] is None ):
+                del broker['extraconfig']
+
+            pollkwargs = {}
+            if ( 'pollkwargs' in broker ) and ( broker['pollkwargs'] is not None ):
+                for k, v in broker['pollkwargs'].items():
+                    if isinstance( v, str ):
+                        pollkwargs[k] = v.replace( "{barf}", self.barf )
+                    elif isinstance( v, list ):
+                        pollkwargs[k] = [ i.replace("{barf}", self.barf)
+                                          if isinstance(i, str) else i
+                                          for i in v ]
+                    else:
+                        pollkwargs[k] = v
+                if 'restart_time_min' in pollkwargs:
+                    if pollkwargs['restart_time_min'] is not None:
+                        pollkwargs['restart_time'] = datetime.timedelta( minutes=pollkwargs['restart_time_min'] )
+                    del pollkwargs['restart_time_min']
+
+            kwargs = {}
+            for k, v in broker.items():
+                if k in [ 'class', 'name', 'pollkwargs']:
+                    continue
+                if isinstance( v, str ):
+                    kwargs[k] = v.replace( "{barf}", self.barf )
+                elif isinstance( v, list ):
+                    kwargs[k] = [ i.replace("{barf}", self.barf)
+                                  if isinstance(i, str) else i
+                                  for i in v ]
+                else:
+                    kwargs[k] = v
+
+            brokers.append( { 'class': cls,
+                              'name': name,
+                              'kwargs': kwargs,
+                              'pollkwargs': pollkwargs
+                             } )
 
         for broker in brokers:
-            logger.info( f"Launching a {broker['class']} looking at server {broker['server']} "
-                         f"with group id {broker['groupid']} listening to topics {broker['topics']}"
-                         f"{' (will be updated)' if updatetopics else ''}, "
-                         f"saving to collections {broker['collection']}*" )
+            strio = io.StringIO()
+            strio.write( f"Launching a {broker['class']}" )
+            if 'server' in broker['kwargs']:
+                strio.write( f" looking at server {broker['kwargs']['server']}" )
+            if 'topics' in broker['kwargs']:
+                strio.write( f" listening to topics {broker['kwargs']['topics']}" )
+                if ( 'updatetopics' in broker['kwargs'] ) and broker['kwargs']['updatetopics']:
+                    strio.write( " (will be updated)" )
+            strio.write( f" saving to collections {broker['kwargs']['mongodb_collection_base']}*" )
+            logger.info( strio.getvalue() )
             parentconn, childconn = multiprocessing.Pipe()
             broker['pipe'] = parentconn
-            broker['childpipe'] = childconn
-            proc = multiprocessing.Process( target=lambda: self._launch_broker( brokerinfo ) )
+            broker['kwargs']['pipe'] = childconn
+            proc = multiprocessing.Process( target=self._launch_broker, args=[broker] )
             broker['process'] = proc
             broker['lastheartbeat'] = time.monotonic()
             proc.start()
@@ -1332,8 +1358,8 @@ class BrokerConsumerLauncher:
                     del broker['process']
                     parentconn, childconn = multiprocessing.Pipe()
                     broker['pipe'] = parentconn
-                    broker['childpipe'] = childconn
-                    proc = multiprocessing.Process( target=lambda: self._launch_broker( broker ) )
+                    broker['kwargs']['pipe'] = childconn
+                    proc = multiprocessing.Process( target=self._launch_broker, args=[broker] )
                     broker['process'] = proc
                     broker['lastheartbeat'] = time.monotonic()
                     proc.start()
