@@ -673,10 +673,12 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
                 visit += 1
                 if sourcemjd < tpeak[i]:
                     mag = firstmag[i] + ( detrange[i][0] - sourcemjd ) * ( zeromag - firstmag[i] ) / 10.
+                    mag = min( mag, zeromag )
                 else:
                     mag = lastmag[i] + ( sourcemjd - detrange[i][0] ) * ( zeromag - lastmag[i] ) / 20.
-                    psfflux = flux( mag )
-                    psffluxerr = 0.5 * psfflux
+                    mag = min( mag, zeromag )
+                psfflux = flux( mag )
+                psffluxerr = 0.5 * psfflux
 
                 if ( i < 3 ) and ( sourcemjd <= 60055. ):
                     frc = DiaForcedSource( diaforcedsourceid=objr.diaobjectid * 1000000 + int(sourcemjd),

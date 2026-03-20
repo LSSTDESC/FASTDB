@@ -1,3 +1,5 @@
+import itertools
+
 import pytest
 import numpy as np
 import pandas
@@ -330,15 +332,28 @@ def test_object_ltcv( procver_collection, set_of_lightcurves ):
     for info in [ srcinfo, frcinfo, patinfo ]:
         assert all( pandas.isna( info.loc[ :, [ 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ] ] ) )
 
-    # # Now check positions
-
-    raise RuntimeError( """
-    TODO : fix this next functon so that you pass a list of keys, and it will then go through
-      and find sources from the priority list.  That lets us compare to something where we'll
-      get a mix of base processing versions.
-    """ )
-
-    def check_pos( infodf, srces ):
+    def check_pos( infodf, srces, bpvkeys ):
+        # OK, we have sources from a bunch of different base processing versions,
+        #   and not all visits will be present in all the processing versions.
+        #   Our goal is to extract, for each visit, the source that is from
+        #   the base processing version earliest in the bpvkeys array.
+        
+        # First, make an array indexed by bpv and visits
+        reindexed_srces = { k: { s.visit: s for s in srces[k] } for k in bpvkeys }
+        import pdb; pdb.set_trace()
+        allvisits = set( itertools.chain( *[ list(x.keys()) for x in reindexed_srces.values() ] ) )
+        # Hell with it, I'm going to use for loops.
+        srces = []
+        for visit in allvisits:
+            gotit = False
+            for k in bpvkeys:
+                if visit in reindexed_srces[k].keys():
+                    srces.append( reindexed_srces[k][visit] )
+                    gotit = True
+                    # break
+            if not gotit:
+                raise RuntimeError( "OMG this shouldn't happen" )
+            
         srcra = np.array( [ i.ra for i in srces ] )
         srcdec = np.array( [ i.dec for i in srces ] )
         sn = np.array( [ i.psfflux / i.psffluxerr for i in srces ] )
@@ -373,50 +388,49 @@ def test_object_ltcv( procver_collection, set_of_lightcurves ):
 
     # Next, check always_use_source_positions by passing object 200, which does have positions
 
-    # First, if we use use_weighted_source_positions but no always, we should get the
+    # First, if we use use_weighted_source_positions but not always, we should get the
     #   diaobject_position position back
-    src, srcinfo = ltcv.object_ltcv( pvs['pv2'].id, 200, return_format='pandas', which='detections',
+    src, srcinfo = ltcv.object_ltcv( pvs['pv2'].id, 201, return_format='pandas', which='detections',
                                      return_object_info=True, use_weighted_source_positions=True,
                                      include_base_procver=True )
-    frc, frcinfo = ltcv.object_ltcv( pvs['pv2'].id, 200, return_format='pandas', which='forced',
+    frc, frcinfo = ltcv.object_ltcv( pvs['pv2'].id, 201, return_format='pandas', which='forced',
                                      return_object_info=True, use_weighted_source_positions=True,
                                      include_base_procver=True )
-    pat, patinfo = ltcv.object_ltcv( pvs['pv2'].id, 200, return_format='pandas', which='patch',
+    pat, patinfo = ltcv.object_ltcv( pvs['pv2'].id, 201, return_format='pandas', which='patch',
                                      return_object_info=True, use_weighted_source_positions=True,
                                      include_base_procver=True )
     for info in [ srcinfo, frcinfo, patinfo ]:
-        assert info.pos_base_procver.iloc[0] == 'pvc_bpv2a_60030'
-        dex = ( 200, 'bpv2a_diaobject_position_60030' )
-        assert info.ra.iloc[0] == pytest.approx( roots[0]['pos'][dex].ra, rel=1e-14 )
-        assert info.dec.iloc[0] == pytest.approx( roots[0]['pos'][dex].dec, rel=1e-14 )
-        assert info.raerr.iloc[0] == pytest.approx( roots[0]['pos'][dex].raerr, rel=1e-6 )
-        assert info.decerr.iloc[0] == pytest.approx( roots[0]['pos'][dex].decerr, rel=1e-6 )
-        assert info.ra_dec_cov.iloc[0] == pytest.approx( roots[0]['pos'][dex].ra_dec_cov, rel=1e-6 )
+        assert info.pos_base_procver.iloc[0] == 'pvc_bpv2_60060'
+        dex = ( 201, 'bpv2_diaobject_position_60060' )
+        assert info.ra.iloc[0] == pytest.approx( roots[1]['pos'][dex].ra, rel=1e-14 )
+        assert info.dec.iloc[0] == pytest.approx( roots[1]['pos'][dex].dec, rel=1e-14 )
+        assert info.raerr.iloc[0] == pytest.approx( roots[1]['pos'][dex].raerr, rel=1e-6 )
+        assert info.decerr.iloc[0] == pytest.approx( roots[1]['pos'][dex].decerr, rel=1e-6 )
+        assert info.ra_dec_cov.iloc[0] == pytest.approx( roots[1]['pos'][dex].ra_dec_cov, rel=1e-6 )
 
     # Now put in always_....
 
-    src, srcinfo = ltcv.object_ltcv( pvs['pv1'].id, 200, return_format='pandas', which='detections',
+    src, srcinfo = ltcv.object_ltcv( pvs['pv2'].id, 201, return_format='pandas', which='detections',
                                      return_object_info=True, always_use_weighted_source_positions=True,
                                      include_base_procver=True )
-    frc, frcinfo = ltcv.object_ltcv( pvs['pv1'].id, 200, return_format='pandas', which='forced',
+    frc, frcinfo = ltcv.object_ltcv( pvs['pv2'].id, 201, return_format='pandas', which='forced',
                                      return_object_info=True, always_use_weighted_source_positions=True,
                                      include_base_procver=True )
-    pat, patinfo = ltcv.object_ltcv( pvs['pv2'].id, 200, return_format='pandas', which='patch',
+    pat, patinfo = ltcv.object_ltcv( pvs['pv2'].id, 201, return_format='pandas', which='patch',
                                      return_object_info=True, always_use_weighted_source_positions=True,
                                      include_base_procver=True )
     for info in [ srcinfo, frcinfo, patinfo ]:
         # Should *not* match the diaobject_position value
         assert all( pandas.isna( info.pos_base_procver ) )
-        dex = ( 200, 'bpv2a_diaobject_position_60030' )
-        assert info.ra.iloc[0] != pytest.approx( roots[0]['pos'][dex].ra, abs=0.01/3600 )
-        assert info.dec.iloc[0] != pytest.approx( roots[0]['pos'][dex].dec, abs=0.01/3600 )
+        dex = ( 201, 'bpv2_diaobject_position_60060' )
+        assert info.ra.iloc[0] != pytest.approx( roots[1]['pos'][dex].ra, abs=0.01/3600 )
+        assert info.dec.iloc[0] != pytest.approx( roots[1]['pos'][dex].dec, abs=0.01/3600 )
+        # (...but make sure we got the right object!)
+        assert info.ra.iloc[0] == pytest.approx( roots[1]['pos'][dex].ra, abs=1./3600 )
+        assert info.dec.iloc[0] == pytest.approx( roots[1]['pos'][dex].dec, abs=1./3600 )
 
-    # But should match the mean source position
-    import pdb; pdb.set_trace()
-    check_pos( srcinfo, roots[2]['src']['bpv2_diasource'] )
-    check_pos( frcinfo, roots[2]['src']['bpv2_diasource'] )
-    check_pos( patinfo, roots[2]['src']['bpv2_diasource'] )
-
+        # But should match the mean source position
+        check_pos( info, roots[0]['src'], ['bpv2a_diasource', 'bpv2_diasource'] )
 
 
     import pdb; pdb.set_trace()
