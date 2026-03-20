@@ -1,5 +1,5 @@
 --- venv/lib/python3.13/site-packages/pittgoogle/pubsub.py	2026-03-18 06:53:09.896979079 -0700
-+++ pubsub.py	2026-03-19 11:52:45.640566393 -0700
++++ pubsub.py	2026-03-19 12:56:06.555862516 -0700
 @@ -1,4 +1,4 @@
 -# -*- coding: UTF-8 -*-
 +# -*- coding: utf-8 -*-
@@ -41,11 +41,11 @@
 +               heartbeat: int = 60,
 +               max_runtime: datetime.timedelta = None,
 +               max_nmsgs: int = None
-+               ) -> int:
++               ) -> dict:
          """Open the stream in a background thread and process messages through the callbacks.
  
          Recommended for long-running listeners.
-@@ -588,19 +597,36 @@
+@@ -588,19 +597,43 @@
                  Whether to block the main thread while the stream is open. If `True`, block
                  indefinitely (use `Ctrl-C` to close the stream and unblock). If `False`, open the
                  stream and then return (use :meth:`~Consumer.stop()` to close the stream).
@@ -63,6 +63,13 @@
 +                If not None, stop after running this long.
 +            max_nmsgs : int, default None
 +                If not None, stop after receiving this many messages.
++
++        Returns:
++            dict:
++                Dictionary with two keys, "status" and "totprocessed".
++                status will be "max_runtime", "max_nmsgs", or "die".
++                totprocessed is the number of messages that got processed
++                sent to the batch_callback.
 +
          """
 +        if ( not block ) and any( i is not None for i in [ pipe, max_runtime, max_nmsgs ] ):
@@ -87,7 +94,7 @@
  
          # catch all exceptions and attempt to close the stream before raising
          except (KeyboardInterrupt, Exception):
-@@ -609,7 +635,7 @@
+@@ -609,7 +642,7 @@
  
      def _open_stream(self) -> None:
          """Open a streaming pull and process messages in the background."""
@@ -96,7 +103,7 @@
          self.streaming_pull_future = self.subscription.client.subscribe(
              self.subscription.path,
              self._callback,
-@@ -622,9 +648,9 @@
+@@ -622,9 +655,9 @@
  
      def _callback(self, message: google.cloud.pubsub_v1.types.PubsubMessage) -> None:
          """Unpack the message, run the :attr:`~Consumer.msg_callback` and handle the response."""
@@ -108,7 +115,7 @@
  
          if response.result is not None:
              self._queue.put(response.result)
-@@ -634,45 +660,121 @@
+@@ -634,45 +667,125 @@
          else:
              message.nack()
  
@@ -127,7 +134,7 @@
 +                         heartbeat: int = 60,
 +                         max_runtime: datetime.timedelta = None,
 +                         max_nmsgs: int = None
-+                         ) -> int:
++                         ) -> dict:
          """Run the batch callback if provided, otherwise just sleep.
  
 -        This never returns -- it runs until it encounters an error.
@@ -150,9 +157,10 @@
 +                        msg = pipe.recv()
 +                        if ( 'command' in msg ) and ( msg['command'] == 'die' ):
 +                            self.stop()
-+                            return 0
++                            return { "status": "die", "nconsumed": 0 }
 +                    pipe.send( { "message": "ok", "nconsumed": 0, "runtime": datetime.datetime.now() - t0 } )
-+            return
++            # This next line should never actually be run
++            return { "status": "unknown", "nconsumed": 0 }
  
          batch, count = [], 0
 +        totprocessed = 0
@@ -215,7 +223,10 @@
 +                totprocessed += self._drain_queue( batch )
 +                batch = []
 +                self.logger.info( f"...processed {totprocessed} messages, exiting." )
-+                return totprocessed
++                return { "status": ( "max_nmsgs"
++                                     if ( max_nmsgs is not None ) and ( totprocessed >= max_nmsgs )
++                                     else "max_runtime" ),
++                         "totprocessed": totprocessed }
 +
 +            # Listen for a die command, and send the heartbeat
 +            if pipe is not None:
@@ -227,7 +238,7 @@
 +                        totprocessed += self._drain_queue( batch )
 +                        batch = []
 +                        self.logger.info( f"...processed {totprocessed} messages, exiting." )
-+                        return totprocessed
++                        return { "status": "die", "totprocessed": totprocessed }
 +                if ( datetime.datetime.now() - lastheartbeat ).total_seconds() > heartbeat:
 +                    lastheartbeat = datetime.datetime.now()
 +                    pipe.send( { "message": "ok", "nconsumed": totprocessed,
