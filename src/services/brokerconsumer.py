@@ -301,8 +301,6 @@ class BrokerConsumer:
             self.schemafile = schemafile
             self.schema = fastavro.schema.load_schema( self.schemafile )
 
-        self.tot_n_messages_consumed = 0
-
         if ( not isinstance( mongodb_collection_base, str ) ) or ( len(mongodb_collection_base) == 0 ):
             raise ValueError( "Must pass a non-0 length string as mongdb_collection_base" )
         self.mongodb_collection_base = urllib.parse.quote_plus( mongodb_collection_base )
@@ -367,8 +365,11 @@ class BrokerConsumer:
         self.countlogger.info( "**************** Consumer connection opened *****************" )
 
     def close_connection( self ):
-        self.countlogger.info( "**************** Closing consumer connection ******************" )
-        self.consumer.close()
+        try:
+            self.countlogger.info( "**************** Closing consumer connection ******************" )
+            self.consumer.close()
+        except Exception as ex:
+            self.countlogger.error( f"Got exception trying to close consumer, ignoring it: {str(ex)}" )
         self.consumer = None
 
     def update_topics( self, *args, **kwargs ):
@@ -714,71 +715,100 @@ class BrokerConsumer:
 
         """
 
+        tstart = datetime.datetime.now()
+        try:
+            self.create_connection( reset )
+            n_restarts = 0
+            max_exceptions = 5
+            num_exceptions = 0
+            while True:
+                if self._updatetopics:
+                    self.update_topics()
+                strio = io.StringIO("")
+                if len(self.consumer.topics) == 0:
+                    self.logger.info( f"No topics, will wait {notopic_sleeptime}s and reconnect." )
+                    time.sleep( notopic_sleeptime )
+                else:
+                    self.logger.info( f"Subscribed to topics: {self.consumer.topics}; starting poll loop." )
+                    self.countlogger.info( f"Subscribed to topics: {self.consumer.topics}; starting poll loop." )
+                    try:
+                        happy = self.consumer.poll_loop( handler=self.handle_message_batch, pipe=self.pipe,
+                                                         stopafter=restart_time,
+                                                         stopafternmessages=max_msgs,
+                                                         stopafternsleeps=None )
+                        if happy:
+                            strio.write( f"Reached poll timeout and/or message limit for {self.server}; "
+                                         f"handled {self.consumer.tot_handled} messages.  " )
+                        else:
+                            strio.write( f"Poll loop received die command after handling "
+                                         f"{self.consumer.tot_handled} messages.  Exiting.  " )
+                            self.logger.info( strio.getvalue() )
+                            self.countlogger.info( strio.getvalue() )
+                            tot_handled = self.consumer.tot_handled
+                            self.close_connection()
+                            if self.pipe is not None:
+                                self.pipe.send( { "message": "died", "nconsumed": -1,
+                                                  "tot_handled": tot_handled,
+                                                  "runtime": datetime.datetime.now() - tstart } )
+                            return
 
-        self.create_connection( reset )
-        n_restarts = 0
-        while True:
-            if self._updatetopics:
-                self.update_topics()
-            strio = io.StringIO("")
-            if len(self.consumer.topics) == 0:
-                self.logger.info( f"No topics, will wait {notopic_sleeptime}s and reconnect." )
-                time.sleep( notopic_sleeptime )
-            else:
-                self.logger.info( f"Subscribed to topics: {self.consumer.topics}; starting poll loop." )
-                self.countlogger.info( f"Subscribed to topics: {self.consumer.topics}; starting poll loop." )
-                try:
-                    happy = self.consumer.poll_loop( handler=self.handle_message_batch, pipe=self.pipe,
-                                                     stopafter=restart_time,
-                                                     stopafternmessages=max_msgs,
-                                                     stopafternsleeps=None )
-                    if happy:
-                        strio.write( f"Reached poll timeout and/or message limit for {self.server}; "
-                                     f"handled {self.consumer.tot_handled} messages. " )
-                    else:
-                        strio.write( f"Poll loop received die command after handling "
-                                     f"{self.consumer.tot_handled} messages.  Exiting." )
-                        self.logger.info( strio.getvalue() )
-                        self.countlogger.info( strio.getvalue() )
-                        self.close_connection()
-                        return
+                    except Exception as e:
+                        otherstrio = io.StringIO("")
+                        traceback.print_exc( file=otherstrio )
+                        num_exceptions += 1
+                        if num_exceptions >= max_exceptions:
+                            self.close_connection()
+                            strio.write( f"Exception polling: {str(e)}.  Exiting after {num_exceptions} exceptions.\n"
+                                         f"{otherstrio.getValue()}" )
+                            self.logger.error( strio.getvalue() )
+                            tot_handled = self.consumer.tot_handled
+                            self.close_connection()
+                            if self.pipe is not None:
+                                self.pipe.send( { "message": "too many exceptions", "nconsumed": -1,
+                                                  "tot_handled": tot_handled,
+                                                  "runtime": datetime.datetime.now() - tstart } )
+                            return
+                        else:
+                            strio.write( f"Exception polling: {str(e)}; will restart consumer.\n"
+                                         f"{otherstrio.getvalue()}" )
+                            self.logger.warning( strio.getvalue() )
 
-                except Exception as e:
-                    otherstrio = io.StringIO("")
-                    traceback.print_exc( file=otherstrio )
-                    self.logger.warning( otherstrio.getvalue() )
-                    strio.write( f"Exception polling: {str(e)}. " )
-
-            if ( self.pipe is not None ) and ( self.pipe.poll() ):
-                msg = self.pipe.recv()
-                if ( 'command' in msg ) and ( msg['command'] == 'die' ):
-                    if len( strio.getvalue() ) > 0:
-                        self.logger.info( strio.getvalue() )
-                        self.countlogger.info( strio.getvalue() )
-                    self.logger.info( "Exiting broker poll due to die command." )
-                    self.countlogger.info( "Exiting broker poll due to die command." )
+                if ( max_restarts is not None ) and ( n_restarts >= max_restarts ):
+                    strio.write( f"Exiting after {n_restarts} restarts." )
+                    self.logger.info( strio.getvalue() )
+                    self.countlogger.info( strio.getvalue() )
+                    tot_handled = self.consumer.tot_handled
                     self.close_connection()
+                    if self.pipe is not None:
+                        self.pipe.send( { "message": "exited", "nconsumed": -1,
+                                          "tot_handled": tot_handled,
+                                          "runtime": datetime.datetime.now() - tstart } )
                     return
 
-            if ( max_restarts is not None ) and ( n_restarts >= max_restarts ):
-                strio.write( f"Exiting after {n_restarts} restarts." )
+                strio.write( "Reconnecting to server.\n" )
                 self.logger.info( strio.getvalue() )
                 self.countlogger.info( strio.getvalue() )
                 self.close_connection()
-                return
+                # TODO : think about automatic topic updating
+                # if self._updatetopics:
+                #     self.consumer.topics = None
+                # Only want to reset the at most first time we connect!
+                # If we disconnect and reconnect in the loop, we want to
+                # pick up where we left off.
+                self.create_connection( reset=False )
+                n_restarts += 1
 
-            strio.write( "Reconnecting to server.\n" )
-            self.logger.info( strio.getvalue() )
-            self.countlogger.info( strio.getvalue() )
+        except Exception as ex:
+            self.logger.error( f"Unhandled exception in BrokerConsumer.poll: {ex}" )
+            self.countlogger.error( f"Unhandled exception in BrokerConsumer.poll: {ex}" )
             self.close_connection()
-            # TODO : think about automatic topic updating
-            # if self._updatetopics:
-            #     self.consumer.topics = None
-            # Only want to reset the at most first time we connect!  If
-            # we disconnect and reconnect in the loop below, we want to
-            # pick up where we left off.
-            self.create_connection( reset=False )
-            n_restarts += 1
+            if self.pipe is not None:
+                self.pipe.send( { "message": "unhandled exception", "nconsumed": -1,
+                                  "exception": str(ex),
+                                  "tot_handled": self.consumer.tot_handled,
+                                  "runtime": datetime.datetime.now() - tstart } )
+            return
+
 
 
 # ======================================================================
@@ -974,6 +1004,7 @@ class PittGoogleConsumer(BrokerConsumer):
         self._testid = testid
         self._max_workers = max_workers
         self._groupid = groupid
+        self.tot_n_messages_consumed = 0
 
     def worker_init(self):
         """Initializer for the ThreadPoolExecutor."""
@@ -1040,62 +1071,84 @@ class PittGoogleConsumer(BrokerConsumer):
         if len(kwargs) > 0:
             raise RuntimeError( f"Parameters unknown to PittGoogleConsumer.poll: {list(kwargs.keys())}" )
         if reset is not None:
-            self.logger.warning( "reset is not known by PittGoogleConsumer.poll" )
+            self.logger.warning( "reset is not known by PittGoogleConsumer.poll, ignorig it" )
 
         currenttotconsumed = 0
         restarts = 0
-        while True:
-            topic = pittgoogle.Topic.from_cloud( name=self._name,
-                                                 survey=self._survey,
-                                                 testid=self._testid,
-                                                 projectid='pitt-alert-broker' )
-            subscription = pittgoogle.Subscription( name=self._groupid,
-                                                    topic=topic,
-                                                    schema_name="lsst" )
-            self.topic = subscription.topic.name
+        tstart = datetime.datetime.now()
+        try:
+            while True:
+                topic = pittgoogle.Topic.from_cloud( name=self._name,
+                                                     survey=self._survey,
+                                                     testid=self._testid,
+                                                     projectid='pitt-alert-broker' )
+                subscription = pittgoogle.Subscription( name=self._groupid,
+                                                        topic=topic,
+                                                        schema_name="lsst" )
+                self.topic = subscription.topic.name
 
-            # if the subscription doesn't already exist, this will create one
-            subscription.touch()
+                # if the subscription doesn't already exist, this will create one
+                subscription.touch()
 
-            self.consumer = pittgoogle.pubsub.Consumer(
-                subscription=subscription,
-                msg_callback=self.handle_message,
-                batch_callback=self.handle_message_batch,
-                batch_maxn=self.batch_size,
-                batch_max_wait_between_messages=self.consume_timeout,
-                logger=self.countlogger,
-                executor=ThreadPoolExecutor(
-                    max_workers=self._max_workers,
-                    initializer=self.worker_init,
-                    initargs=(),
-                    # initargs=(
-                    #     self,
-                    #     self.schema,
-                    #     subscription.topic.name,
-                    #     self.logger,
-                    #     self.countlogger
-                    # ),
-                ),
-            )
+                self.consumer = pittgoogle.pubsub.Consumer(
+                    subscription=subscription,
+                    msg_callback=self.handle_message,
+                    batch_callback=self.handle_message_batch,
+                    batch_maxn=self.batch_size,
+                    batch_max_wait_between_messages=self.consume_timeout,
+                    logger=self.countlogger,
+                    executor=ThreadPoolExecutor(
+                        max_workers=self._max_workers,
+                        initializer=self.worker_init,
+                        initargs=(),
+                        # initargs=(
+                        #     self,
+                        #     self.schema,
+                        #     subscription.topic.name,
+                        #     self.logger,
+                        #     self.countlogger
+                        # ),
+                    ),
+                )
 
-            self.countlogger.info( f"Launching a pittgoogle stream, topic={self.topic}..." )
+                self.countlogger.info( f"Launching a pittgoogle stream, topic={self.topic}..." )
 
-            result = self.consumer.stream( pipe=self.pipe, heartbeat=60,
-                                              max_runtime=restart_time, max_nmsgs=max_msgs )
-            currenttotconsumed += result['totprocessed']
-            self.countlogger.info( f"...pittgoogle stream consumed {result['totprocessed']} messages; "
-                                   f"this call to poll consumed {currenttotconsumed} messages, "
-                                   f"overall {self.tot_n_messages_consumed} messages." )
-            if result[ "status" ] == "die":
-                self.countlogger.info( f"PittGoogleConsumer.poll exiting becasue of die command." )
-                return
-            elif ( max_restarts is not None ) and ( restarts >= max_restarts ):
-                self.countlogger.info( f"PittGoogleConsumer.poll exiting after {restarts} restarts." )
-                return
-            else:
-                self.countlogger.info( f"PittGoogleConsumer.poll restarting the stream "
-                                       f"after {restarts} previous restarts..." )
-            restarts += 1
+                result = self.consumer.stream( pipe=self.pipe, heartbeat=60,
+                                                  max_runtime=restart_time, max_nmsgs=max_msgs )
+                currenttotconsumed += result['totprocessed']
+                self.countlogger.info( f"...pittgoogle stream consumed {result['totprocessed']} messages; "
+                                       f"this call to poll consumed {currenttotconsumed} messages, "
+                                       f"overall {self.tot_n_messages_consumed} messages." )
+                if result[ "status" ] == "die":
+                    self.ogger.info( "PittGoogleConsumer.poll exiting becasue of die command." )
+                    self.countlogger.info( "PittGoogleConsumer.poll exiting becasue of die command." )
+                    if self.pipe is not None:
+                        self.pipe.send( { "message": "died", "nconsumed": -1,
+                                          "tot_handled": self.tot_n_messages_consumed,
+                                          "runtime": datetime.datetime.now() - tstart } )
+                    return
+                elif ( max_restarts is not None ) and ( restarts >= max_restarts ):
+                    self.countlogger.info( f"PittGoogleConsumer.poll exiting after {restarts} restarts." )
+                    self.logger.info( f"PittGoogleConsumer.poll exiting after {restarts} restarts." )
+                    if self.pipe is not None:
+                        self.pipe.send( { "message": "existed", "nconsumed": -1,
+                                          "tot_handled": self.tot_n_messages_consumed,
+                                          "runtime": datetime.datetime.now() - tstart } )
+                    return
+                else:
+                    self.countlogger.info( f"PittGoogleConsumer.poll restarting the stream "
+                                           f"after {restarts} previous restarts..." )
+                restarts += 1
+
+        except Exception as ex:
+            self.logger.error( f"Unhandled exception in PittGoogleConsumer.poll: {ex}" )
+            self.countlogger.error( f"Unhandled exception in PittGoogleConsumer.poll: {ex}" )
+            if self.pipe is not None:
+                self.pipe.send( { "message": "unhandled exception", "nconsumed": -1,
+                                  "exception": str(ex),
+                                  "tot_handled": self.tot_n_messages_consumed,
+                                  "runtime": datetime.datetime.now() - tstart } )
+            return
 
 
 class BrokerConsumerLauncher:
@@ -1118,7 +1171,7 @@ class BrokerConsumerLauncher:
 
     """
 
-    def __init__( self, configfile, barf='', verbose=False, logtag=None, shutdown_graceperiod=20 ):
+    def __init__( self, configfile, barf='', barf2=None, verbose=False, logtag=None, shutdown_graceperiod=20 ):
         """Create a BrokerConsumerLauncher.
 
         Parmaeters
@@ -1160,6 +1213,7 @@ class BrokerConsumerLauncher:
 
         self.config = configfile
         self.barf = barf
+        self.barf2 = barf if barf2 is None else barf2
         self.verbose = verbose
         self.logtag = logtag
 
@@ -1200,7 +1254,7 @@ class BrokerConsumerLauncher:
             logger.warning( "I am surprised, I already have handlers.  Logger is mysterious." )
         logger.setLevel( logging.DEBUG if self.verbose else logging.INFO )
 
-        brokers = []
+        brokers = {}
         clsmap = { 'BrokerConsumer': BrokerConsumer,
                    'FinkConsumer': FinkConsumer,
                    'PittGoogleConsumer': PittGoogleConsumer }
@@ -1211,47 +1265,48 @@ class BrokerConsumerLauncher:
         # ****
         if ( ( not isinstance( config, dict ) ) or
              ( 'brokers' not in config ) or
-             ( not isinstance( config['brokers'], list ) )
+             ( not isinstance( config['brokers'], dict ) )
             ):
-            raise ValueError( "Config must be a dictionary with key brokers, and config['brokers'] must be a list." )
+            raise ValueError( "Config must be a dictionary with key brokers, and config['brokers'] must be a dict." )
         missing = set( config.keys() ) - { 'brokers' }
         if len(missing) > 0:
             logger.warning( f"Unparsed root-level keys in config: {missing}" )
 
-        for broker in config[ 'brokers' ]:
-            if not isinstance( broker, dict ):
-                raise ValueError( "Each element of the brokers list must be a dict" )
+        for brokername, brokerinfo in config[ 'brokers' ].items():
+            if not isinstance( brokerinfo, dict ):
+                raise ValueError( "Each value of the brokers dict must itself be a dict" )
 
             # There is some parsing we have to do the yaml. *Most* of
             #   the keys are things that are passed in the kwargs to the
             #   broker class constructor, but there are a handful of
             #   things that need to be pulled out for editing, and we
-            #   need to substitute {barf} for the barf passed to the
-            #   BrokerConsumerLauncher constructor (needed for tests,
-            #   might also sometimes be useful in production).
+            #   need to substitute {barf} and {barf2} for the barf(s)
+            #   passed to the BrokerConsumerLauncher constructor (needed
+            #   for tests, might also sometimes be useful in
+            #   production).
 
-            cls = clsmap[ broker['class'] ]
-            name = broker['name']
+            cls = clsmap[ brokerinfo['class'] ]
+            name = brokername
 
-            if 'mongodb_collection_base' not in broker:
+            if 'mongodb_collection_base' not in brokerinfo:
                 raise ValueError( "Every broker must have a mongodb_collection_base" )
 
-            if ( 'extraconfigjson' in broker ) and ( broker['extraconfigjson'] is not None ):
-                if ( 'extraconfig' in broker ) and ( broker['extraconfig'] is not None ):
+            if ( 'extraconfigjson' in brokerinfo ) and ( brokerinfo['extraconfigjson'] is not None ):
+                if ( 'extraconfig' in brokerinfo ) and ( brokerinfo['extraconfig'] is not None ):
                     raise ValueError( "Can't have non-null for both extraconfig and extraconfigjson" )
-                broker['extraconfiog'] = simplejson.loads( broker['extraconfigjson'] )
-                del broker['extraconfigjson']
+                brokerinfo['extraconfiog'] = simplejson.loads( brokerinfo['extraconfigjson'] )
+                del brokerinfo['extraconfigjson']
 
-            if ( 'extraconfig' in broker ) and ( broker['extraconfig'] is None ):
-                del broker['extraconfig']
+            if ( 'extraconfig' in brokerinfo ) and ( brokerinfo['extraconfig'] is None ):
+                del brokerinfo['extraconfig']
 
             pollkwargs = {}
-            if ( 'pollkwargs' in broker ) and ( broker['pollkwargs'] is not None ):
-                for k, v in broker['pollkwargs'].items():
+            if ( 'pollkwargs' in brokerinfo ) and ( brokerinfo['pollkwargs'] is not None ):
+                for k, v in brokerinfo['pollkwargs'].items():
                     if isinstance( v, str ):
-                        pollkwargs[k] = v.replace( "{barf}", self.barf )
+                        pollkwargs[k] = v.replace( "{barf}", self.barf ).replace( "{barf2}", self.barf2 )
                     elif isinstance( v, list ):
-                        pollkwargs[k] = [ i.replace("{barf}", self.barf)
+                        pollkwargs[k] = [ i.replace("{barf}", self.barf).replace( "{barf2}", self.barf2 )
                                           if isinstance(i, str) else i
                                           for i in v ]
                     else:
@@ -1262,29 +1317,32 @@ class BrokerConsumerLauncher:
                     del pollkwargs['restart_time_min']
 
             kwargs = {}
-            for k, v in broker.items():
-                if k in [ 'class', 'name', 'pollkwargs']:
+            for k, v in brokerinfo.items():
+                if k in [ 'class', 'pollkwargs']:
                     continue
                 if isinstance( v, str ):
-                    kwargs[k] = v.replace( "{barf}", self.barf )
+                    kwargs[k] = v.replace( "{barf}", self.barf ).replace( "{barf2}", self.barf2 )
                 elif isinstance( v, list ):
-                    kwargs[k] = [ i.replace("{barf}", self.barf)
+                    kwargs[k] = [ i.replace("{barf}", self.barf).replace( "{barf2}", self.barf2 )
                                   if isinstance(i, str) else i
                                   for i in v ]
                 else:
                     kwargs[k] = v
 
-            brokers.append( { 'class': cls,
+            brokers[name] = { 'class': cls,
                               'name': name,
                               'kwargs': kwargs,
-                              'pollkwargs': pollkwargs
-                             } )
+                              'pollkwargs': pollkwargs,
+                              'nfails': 0
+                             }
 
-        for broker in brokers:
+        for broker in brokers.values():
             strio = io.StringIO()
             strio.write( f"Launching a {broker['class']}" )
             if 'server' in broker['kwargs']:
                 strio.write( f" looking at server {broker['kwargs']['server']}" )
+            if 'groupid' in broker['kwargs']:
+                strio.write( f" with group id {broker['kwargs']['groupid']}" )
             if 'topics' in broker['kwargs']:
                 strio.write( f" listening to topics {broker['kwargs']['topics']}" )
                 if ( 'updatetopics' in broker['kwargs'] ) and broker['kwargs']['updatetopics']:
@@ -1296,8 +1354,8 @@ class BrokerConsumerLauncher:
             broker['kwargs']['pipe'] = childconn
             proc = multiprocessing.Process( target=self._launch_broker, args=[broker] )
             broker['process'] = proc
-            broker['lastheartbeat'] = time.monotonic()
             proc.start()
+            broker['lastheartbeat'] = time.monotonic()
 
         # Catch INT and TERM signals so we can try to shut down cleanly.
         self.mustdie = False
@@ -1315,65 +1373,177 @@ class BrokerConsumerLauncher:
 
         heartbeatwait = 2
         toolongsilent = 300
+        max_n_fails = 5
         while not self.mustdie:
             try:
-                pipelist = [ b['pipe'] for b in brokers ]
+                pipelist = [ b['pipe'] for b in brokers.values() ]
                 _whichpipe = multiprocessing.connection.wait( pipelist, timeout=heartbeatwait )
                 # ****
                 # logger.debug( f"broker pipe wait timed out, got: {_whichpipe}" )
                 # ****
 
                 brokerstorestart = set()
-                for broker in brokers:
+                brokerstodelete = set()
+                for brokername, broker in brokers.items():
                     try:
                         while broker['pipe'].poll():
                             msg = broker['pipe'].recv()
-                            if ( 'message' not in msg ) or ( msg['message'] != 'ok' ):
-                                logger.error( f"Got unexpected message from {broker['name']}, will restart. "
-                                              f"(Message={msg}" )
-                                brokerstorestart.add( broker )
-                            else:
-                                logger.debug( f"Got heartbeat from {broker['name']}" )
+                            if ( not isinstance( msg, dict ) ) or ( 'message' not in msg ):
+                                logger.error( f"Got unexpected message from {brokername}, marking it for restart." )
+                                logger.debug( str(msg) )
+                                broker['nfails'] += 1
+                                brokerstorestart.add( brokername )
+
+                            elif msg['message'] == 'ok':
                                 broker['lastheartbeat'] = time.monotonic()
+                                logger.debug( f"Got heartbeat from {brokername}; it claims to have handled "
+                                              f"a total of {msg['tot_handled']} messages "
+                                              f"over {str(msg['runtime'])}" )
+
+                            elif msg['message'] == 'too many exceptions':
+                                logger.error( f"Too many exceptions for {brokername}, going to give up on it. "
+                                              f"It claims to have handled {msg['tot_handled']} messages "
+                                              f"over {str(msg['runtime'])}" )
+                                brokerstodelete.add( brokername )
+
+                            elif msg['message'] == 'died':
+                                logger.warning( f"Consumer {brokername} claims to have received the die command.  "
+                                                f"This surprises me, because I was supposed to send it, and didn't. "
+                                                f"But, OK, whatever.  Removing it from the list of broker "
+                                                f"consumers I'm tracking." )
+                                brokerstodelete.add( brokername )
+
+                            elif msg['message'] == 'exited':
+                                logger.info( f"Consumer {brokername} exited cleanly, probably because it hit "
+                                             f"the configured number of maximum internal restarts.  Remove it "
+                                             f"from the list of broker consumers I'm tracking." )
+                                brokerstodelete.add( brokername )
+
+                            elif msg['messge'] == 'unhandled exception':
+                                logger.error( f"Consumer {brokername} got an unhandled exception: {msg['exception']}. "
+                                              f"Marking it for restart." )
+                                broker['nfails'] += 1
+                                brokerstorestart.add( brokername )
+
+                            else:
+                                logger.error( f"Got message '{msg['message']}' from {name}, which probably means "
+                                              f"there's a coding error, because I don't undertanding it. Marking "
+                                              f"the consumer for restart." )
+                                broker['nfails'] += 1
+                                brokerstorestart.add( brokername )
+
                     except Exception as ex:
-                        logger.error( f"Got exception listening for heartbeat from {broker['name']}; will restart." )
+                        logger.error( f"Got exception listening for heartbeat from {brokername}; will restart." )
                         logger.debug( str(ex) )
                         brokerstorestart.add( broker )
 
-                for broker in brokers:
+                for brokername, broker in brokers.items():
                     # ****
-                    # logger.debug( f"At {time.monotonic()} broker {broker['name']} "
+                    # logger.debug( f"At {time.monotonic()} broker {brokername} "
                     #               f"heartbeat = {broker['lastheartbeat']}" )
                     # ****
-                    dt = time.monotonic() - broker['lastheartbeat']
-                    if dt > toolongsilent:
-                        logger.error( f"It's been {dt:.0f} seconds since last heartbeat from {broker['name']}; "
-                                      f"will restart." )
-                        brokerstorestart.add( broker )
+                    if brokername not in brokerstodelete:
+                        dt = time.monotonic() - broker['lastheartbeat']
+                        if dt > toolongsilent:
+                            logger.error( f"It's been {dt:.0f} seconds since last heartbeat from {brokername}; "
+                                          f"will restart." )
+                            brokerstorestart.add( brokername )
 
-                for broker in brokerstorestart:
-                    logger.warning( f"Killing and restarting process for {broker['name']}" )
-                    broker['process'].kill()
-                    broker['pipe'].close()
-                    del broker['process']
-                    parentconn, childconn = multiprocessing.Pipe()
-                    broker['pipe'] = parentconn
-                    broker['kwargs']['pipe'] = childconn
-                    proc = multiprocessing.Process( target=self._launch_broker, args=[broker] )
-                    broker['process'] = proc
-                    broker['lastheartbeat'] = time.monotonic()
-                    proc.start()
+                for todel in brokerstodelete:
+                    if todel in brokers:
+                        try:
+                            brokers[todel]['process'].terminate()
+                            brokers[todel]['process'].kill()
+                            brokers[todel]['process'].close()
+                            brokers[todel]['pipe'].close()
+                        except Exception as ex:
+                            logger.error( f"Exception trying to kill the process: {ex}" )
+                        del brokers[todel]
+                    if todel in brokerstorestart:
+                        brokerstorestart.discard( todel )
+
+                for brokername in brokerstorestart:
+                    broker = brokers[brokername]
+                    if broker['nfails'] >= max_n_fails:
+                        logger.error( f"Consumer {brokername} has had {broker['nfails']} failures, "
+                                      f"killing it and giving up on it instead of restarting it." )
+                        try:
+                            broker['process'].terminate()
+                            broker['process'].kill()
+                            broker['process'].close()
+                            broker['pipe'].close()
+                        except Exception as ex:
+                            logger.error( f"Exception trying to kill the process: {ex}" )
+                        del brokers[brokername]
+                    else:
+                        logger.warning( f"Killing and restarting process for {brokername}" )
+                        try:
+                            broker['process'].terminate()
+                            broker['process'].kill()
+                            broker['process'].close()
+                            broker['pipe'].close()
+                        except Exception as ex:
+                            logger.error( f"Exception trying to kill the process: {ex}" )
+                        parentconn, childconn = multiprocessing.Pipe()
+                        broker['pipe'] = parentconn
+                        broker['kwargs']['pipe'] = childconn
+                        proc = multiprocessing.Process( target=self._launch_broker, args=[broker] )
+                        broker['process'] = proc
+                        broker['lastheartbeat'] = time.monotonic()
+                        proc.start()
+
+                if len( brokers ) == 0:
+                    logger.info( "All broker consumers have exited one way or another; shutting down." )
+                    self.mustdie = True
 
             except Exception as ex:
                 logger.exception( ex )
                 logger.error( "brokerconsumer main process got an exception, going to shut down" )
                 self.mustdie = True
 
-        logger.warning( f"Shutting down.  Sending die to all processes and waiting {self.shutdown_graceperiod}s" )
-        for broker in brokers:
-            broker['pipe'].send( { "command": "die" } )
-        time.sleep( self.shutdown_graceperiod )
-        logger.warning( "Exiting" )
+        if len(brokers) > 0:
+            logger.warning( f"Shutting down.  Sending die to all remaining consumer processes and "
+                            f"giving them {self.shutdown_graceperiod}s to acknowledge." )
+            for broker in brokers.values():
+                broker['pipe'].send( { "command": "die" } )
+
+            tstartshutdown = time.monotonic()
+            while ( len(brokers) > 0 ) and ( time.monotonic() - tstartshutdown <= self.shutdown_graceperiod ):
+                pipelist = [ b['pipe'] for b in brokers.values() ]
+                _whichpipe = multiprocessing.connection.wait( pipelist, 1 )
+                brokerstodel = set()
+                for brokername, broker in brokers.items():
+                    if broker['pipe'].poll():
+                        msg = broker['pipe'].recv()
+                        if isinstance(msg, dict) and ( 'message' in msg ) and ( msg['message'] == 'died' ):
+                            brokerstodel.add( brokername )
+                        else:
+                            logger.warning( f"Got a message other than 'died' from {brokername} while waiting for "
+                                            f"them all to shut down; continuing to listen for 'died'." )
+                for brokername in brokerstodel:
+                    broker['process'].join()
+                    broker['process'].close()
+                    broker['pipe'].close()
+                    del brokers[brokername]
+
+            if len( brokers ) > 0:
+                logger.warning( f'{len(brokers)} consumers never responded to the die command.  Killing them and '
+                                f'waiting {self.shutdown_graceperiod}s to give them one last chance to clean up' )
+                for brokername, broker in brokers.items():
+                    try:
+                        broker['process'].terminate()
+                        broker['process'].kill()
+                    except Exception as ex:
+                        logger.error( f"Exception trying to kill the process for {brokername}: {ex}" )
+                time.sleep( self.shutdown_graceperiod )
+                for broker in brokers.values():
+                    try:
+                        broker['process'].close()
+                        broker['pipe'].close()
+                    except Exception as ex:
+                        logger.error( f"Exception trying to clean up after {brokername}: {ex}" )
+
+        logger.info( "Exiting BrokerConsumerLauncher." )
         return
 
 

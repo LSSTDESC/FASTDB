@@ -1,5 +1,5 @@
---- venv/lib/python3.13/site-packages/pittgoogle/pubsub.py	2026-03-18 06:53:09.896979079 -0700
-+++ pubsub.py	2026-03-19 12:56:06.555862516 -0700
+--- venv/lib/python3.13/site-packages/pittgoogle/pubsub.py	2026-03-20 06:50:28.724878784 -0700
++++ pubsub.py	2026-03-20 07:51:51.842574447 -0700
 @@ -1,4 +1,4 @@
 -# -*- coding: UTF-8 -*-
 +# -*- coding: utf-8 -*-
@@ -115,7 +115,7 @@
  
          if response.result is not None:
              self._queue.put(response.result)
-@@ -634,45 +667,125 @@
+@@ -634,45 +667,139 @@
          else:
              message.nack()
  
@@ -163,87 +163,119 @@
 +            return { "status": "unknown", "nconsumed": 0 }
  
          batch, count = [], 0
+-        while True:
+-            try:
+-                batch.append(
+-                    self._queue.get(block=True, timeout=self.batch_max_wait_between_messages)
+-                )
+-
+-            except queue.Empty:
+-                # hit the max wait. process the batch
+-                self.batch_callback(batch)
+-                batch, count = [], 0
+-
+-            # catch anything else and try to process the batch before raising
+-            except (KeyboardInterrupt, Exception):
+-                self.batch_callback(batch)
+-                raise
+-
+-            else:
+-                self._queue.task_done()
+-                count += 1
+-
+-            if count == self.batch_maxn:
+-                # hit the max number of results. process the batch
+-                self.batch_callback(batch)
+-                batch, count = [], 0
 +        totprocessed = 0
 +        tstart = time.monotonic()
 +        t0 = tstart
 +        max_runtime = max_runtime.total_seconds() if max_runtime is not None else None
 +        firstheartbeat = datetime.datetime.now()
 +        lastheartbeat = firstheartbeat
-         while True:
-+            t1 = time.monotonic()
-+            waittime = max( min( self.batch_max_wait_between_messages, heartbeat ) - (t1-t0), 0 )
-             try:
-                 batch.append(
--                    self._queue.get(block=True, timeout=self.batch_max_wait_between_messages)
-+                    self._queue.get(block=True, timeout=waittime)
-                 )
++        try:
++            while True:
++                t1 = time.monotonic()
++                waittime = max( min( self.batch_max_wait_between_messages, heartbeat ) - (t1-t0), 0 )
++                try:
++                    batch.append(
++                        self._queue.get(block=True, timeout=waittime)
++                    )
++
++                except queue.Empty:
++                    # hit the max wait. process the batch
++                    t0 = t1
++                    if len(batch) > 0:
++                        self.batch_callback(batch)
++                    totprocessed += len(batch)
++                    batch, count = [], 0
++
++                # catch anything else and try to process the batch before raising
++                except (KeyboardInterrupt, Exception):
++                    self.logger.error( f"Got some kind of exception that stopped us after {time.monotonic()-t0} "
++                                       f"seconds...")
++                    self.stop()
++                    totprocessed += self._drain_queue( batch )
++                    batch = []
++                    self.logger.error( f"...processed {totprocessed} messages, raising an exception." )
++                    raise
++
++                else:
++                    self._queue.task_done()
++                    count += 1
++
++                if ( (t1-t0) > self.batch_max_wait_between_messages ) or ( count >= self.batch_maxn ):
++                    # Even if the queue was never empty, we want to processes batches at least
++                    #   every batch_max_wait_between_messages seconds, or at lest every batch_maxn messages.
++                    t0 = t1
++                    if len(batch) > 0:
++                        self.batch_callback(batch)
++                    totprocessed += len(batch)
++                    batch, count = [], 0
++
++                if ( ( ( max_runtime is not None ) and ( t1 - tstart >= max_runtime ) )
++                     or
++                     ( ( max_nmsgs is not None ) and ( totprocessed >= max_nmsgs ) )
++                    ):
++                    self.logger.info( f"Stopping streaming after {t1-tstart:.1f} sec..." )
++                    self.stop()
++                    totprocessed += self._drain_queue( batch )
++                    self.logger.info( f"...processed {totprocessed} messages, exiting." )
++                    return { "status": ( "max_nmsgs"
++                                         if ( max_nmsgs is not None ) and ( totprocessed >= max_nmsgs )
++                                         else "max_runtime" ),
++                             "totprocessed": totprocessed }
++
++                # Listen for a die command, and send the heartbeat
++                if pipe is not None:
++                    if pipe.poll():
++                        msg = pipe.recv()
++                        if ( 'command' in msg ) and ( msg['command'] == 'die' ):
++                            self.logger.info( f"Received die command after {t1-tstart:.1f} sec..." )
++                            self.stop()
++                            totprocessed += self._drain_queue( batch )
++                            self.logger.info( f"...processed {totprocessed} messages, exiting." )
++                            return { "status": "die", "totprocessed": totprocessed }
++                    if ( datetime.datetime.now() - lastheartbeat ).total_seconds() > heartbeat:
++                        lastheartbeat = datetime.datetime.now()
++                        pipe.send( { "message": "ok", "nconsumed": totprocessed,
++                                     "tot_handled": totprocessed,
++                                     "runtime": lastheartbeat - firstheartbeat } )
  
-             except queue.Empty:
-                 # hit the max wait. process the batch
--                self.batch_callback(batch)
-+                t0 = t1
-+                if len(batch) > 0:
-+                    self.batch_callback(batch)
-+                totprocessed += len(batch)
-                 batch, count = [], 0
- 
-             # catch anything else and try to process the batch before raising
-             except (KeyboardInterrupt, Exception):
--                self.batch_callback(batch)
-+                self.logger.error( f"Got some kind of exception that stopped us after {time.monotonic()-t0} "
-+                                   f"seconds...")
++        except (KeyboardInterrupt, Exception):
++            # If we get an exception anywhere, we should make sure to try to drain the queue
++            #   before raising it, in hopes that we won't lose messages.  Of course, if there's
++            #   an exception drainig the queue, we're just SOL.
++            try:
++                self.logger.error( f"Got some kind of exception that stopped us after a total runtime "
++                                   f"of {time.monotonic()-start:.2f} seconds" )
 +                self.stop()
 +                totprocessed += self._drain_queue( batch )
-+                batch = []
-+                self.logger.error( f"...processed {totprocessed} messages, raising an exception." )
-                 raise
- 
-             else:
-                 self._queue.task_done()
-                 count += 1
- 
--            if count == self.batch_maxn:
--                # hit the max number of results. process the batch
--                self.batch_callback(batch)
-+            if ( (t1-t0) > self.batch_max_wait_between_messages ) or ( count >= self.batch_maxn ):
-+                # Even if the queue was never empty, we want to processes batches at least
-+                #   every batch_max_wait_between_messages seconds, or at lest every batch_maxn messages.
-+                t0 = t1
-+                if len(batch) > 0:
-+                    self.batch_callback(batch)
-+                totprocessed += len(batch)
-                 batch, count = [], 0
- 
-+            if ( ( ( max_runtime is not None ) and ( t1 - tstart >= max_runtime ) )
-+                 or
-+                 ( ( max_nmsgs is not None ) and ( totprocessed >= max_nmsgs ) )
-+                ):
-+                self.logger.info( f"Stopping streaming after {t1-tstart:.1f} sec..." )
-+                self.stop()
-+                totprocessed += self._drain_queue( batch )
-+                batch = []
-+                self.logger.info( f"...processed {totprocessed} messages, exiting." )
-+                return { "status": ( "max_nmsgs"
-+                                     if ( max_nmsgs is not None ) and ( totprocessed >= max_nmsgs )
-+                                     else "max_runtime" ),
-+                         "totprocessed": totprocessed }
-+
-+            # Listen for a die command, and send the heartbeat
-+            if pipe is not None:
-+                if pipe.poll():
-+                    msg = pipe.recv()
-+                    if ( 'command' in msg ) and ( msg['command'] == 'die' ):
-+                        self.logger.info( f"Received die command after {t1-tstart:.1f} sec..." )
-+                        self.stop()
-+                        totprocessed += self._drain_queue( batch )
-+                        batch = []
-+                        self.logger.info( f"...processed {totprocessed} messages, exiting." )
-+                        return { "status": "die", "totprocessed": totprocessed }
-+                if ( datetime.datetime.now() - lastheartbeat ).total_seconds() > heartbeat:
-+                    lastheartbeat = datetime.datetime.now()
-+                    pipe.send( { "message": "ok", "nconsumed": totprocessed,
-+                                 "runtime": lastheartbeat - firstheartbeat } )
-+
++                self.logger.error( f"...processed {totprocessed} messages, reraising the exception." )
++            except Exception:
++                self.logger.error( f"May have failed to stop or drain the queue handling this exception." )
++            raise
++                        
      def stop(self) -> None:
          """Attempt to shutdown the streaming pull and exit the background threads gracefully."""
 -        LOGGER.info("closing the stream")

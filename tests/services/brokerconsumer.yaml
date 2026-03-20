@@ -1,8 +1,8 @@
 brokers:
-  - name: "test broker"
+  test_broker:
     class: BrokerConsumer
     server: kafka-server
-    groupid: test-{barf}
+    groupid: test-{barf2}
     topics: [ "classifications-{barf}" ]
     updatetopics: false
     brokername_for_alerts: null
@@ -10,8 +10,10 @@ brokers:
     mongodb_collection_base: fastdb_test
     loggername: TEST
     loggername_prefix: ""
+    consume_timeout: 1
+    nomsg_sleeptime: 1
     extraconfig: {}
     pollkwargs:
-      restart_time_min: 0.1
+      restart_time_min: 0.1666667
       notopic_sleeptime: 1
-      max_restarts: null
+      max_restarts: 1
