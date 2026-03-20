@@ -97,7 +97,7 @@ def procver_collection( procver_postimes, procver_bases ):
                 raise RuntimeError( "procver_collection fixture can't proceed, default processing version "
                                     "alias already exists" )
 
-            tables = [ 'diaobject', 'diaobject_position', 'diasource', 'diaforcedsource' ]
+            tables = [ 'diaobject', 'diaobject_position', 'diasource', 'diaforcedsource', 'host_galaxy' ]
             bases = procver_bases
 
             # Gotta hardcode the uuids so that they will match when we do a pg_restore
@@ -161,7 +161,14 @@ def procver_collection( procver_postimes, procver_bases ):
                 asUUID('aeb7def7-e6ad-4856-934d-f87cf8d4ee96'),
                 asUUID('22121e3e-21ff-4486-b6b2-795df70b65f7'),
                 asUUID('9b8c728c-a8ea-4c18-be93-e4731fbdcea1'),
-                asUUID('1959c4ea-11f5-4a94-bc35-cdad9e222641')
+                asUUID('1959c4ea-11f5-4a94-bc35-cdad9e222641'),
+                asUUID('798591a2-548f-4733-bd7a-db9e688b13f7'),
+                asUUID('0d34e1b5-ba4a-42ab-8946-947cf6171211'),
+                asUUID('cb53beac-bbd9-40e9-a374-1f7895c43603'),
+                asUUID('2cfdce23-448f-4e3c-92b5-56c8b285d25a'),
+                asUUID('2210759c-996f-4519-9985-e160516bd88d'),
+                asUUID('2d66e355-c2eb-40e0-b738-460e2e399e8b'),
+                asUUID('0ff513de-a421-4022-9a9e-c57de08373cf'),
             ]
             # Just check that the hardcoding has kept up with everything else
             assert len(uuidbatch) == len(bases) * ( len(tables)-1 + len(procver_postimes) )

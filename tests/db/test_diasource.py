@@ -9,7 +9,8 @@ from basetest import BaseTestDB
 class TestDiaSource( BaseTestDB ):
 
     @pytest.fixture
-    def basetest_setup( self, obj1 ):
+    def basetest_setup( self, procver_collection, obj1 ):
+        bpv, _pv = procver_collection
         self.cls = DiaSource
         self.columns = {
             "diasourceid",
@@ -40,7 +41,7 @@ class TestDiaSource( BaseTestDB ):
         ]
         self.uniques = []
 
-        self.obj1 = DiaSource( base_procver_id=obj1.base_procver_id,
+        self.obj1 = DiaSource( base_procver_id=bpv['bpv1_diasource'].id,
                                diaobjectid=obj1.diaobjectid,
                                diasourceid=1,
                                visit=1,
@@ -52,7 +53,7 @@ class TestDiaSource( BaseTestDB ):
                                psffluxerr=5.6
                               )
         self.dict1 = { k: getattr( self.obj1, k ) for k in self.columns }
-        self.obj2 = DiaSource( base_procver_id=obj1.base_procver_id,
+        self.obj2 = DiaSource( base_procver_id=bpv['bpv1_diasource'].id,
                                diaobjectid=obj1.diaobjectid,
                                diasourceid=2,
                                visit=2,
@@ -64,7 +65,7 @@ class TestDiaSource( BaseTestDB ):
                                psffluxerr=8.0
                               )
         self.dict2 = { k: getattr( self.obj2, k ) for k in self.columns }
-        self.dict3 = { 'base_procver_id': obj1.base_procver_id,
+        self.dict3 = { 'base_procver_id': bpv['bpv1_diasource'].id,
                        'diaobjectid': obj1.diaobjectid,
                        'diasourceid': 3,
                        'visit': 3,

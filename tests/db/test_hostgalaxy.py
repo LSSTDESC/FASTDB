@@ -29,7 +29,7 @@ class TestHostGalaxy( BaseTestDB ):
         self.uniques = []
 
         self.obj1 = HostGalaxy( id=uuid.uuid4(),
-                                base_procver_id=bpv['bpv1'].id,
+                                base_procver_id=bpv['bpv1_host_galaxy'].id,
                                 host_id='fred',
                                 host_catalog='some survey',
                                 ra=128.,
@@ -38,7 +38,7 @@ class TestHostGalaxy( BaseTestDB ):
                                )
         self.dict1 = { k: getattr( self.obj1, k ) for k in self.columns }
         self.obj2 = HostGalaxy( id=uuid.uuid4(),
-                                base_procver_id=bpv['bpv1'].id,
+                                base_procver_id=bpv['bpv1_host_galaxy'].id,
                                 host_id='george',
                                 host_catalog='some survey',
                                 ra=137.,
@@ -47,7 +47,7 @@ class TestHostGalaxy( BaseTestDB ):
                                )
         self.dict2 = { k: getattr( self.obj2, k ) for k in self.columns }
         self.dict3 = { 'id': uuid.uuid4(),
-                       'base_procver_id': bpv['bpv1'].id,
+                       'base_procver_id': bpv['bpv1_host_galaxy'].id,
                        'host_id': 'ginny',
                        'host_catalog': 'a much better survey',
                        'ra': 0.,
@@ -73,15 +73,15 @@ class TestDiaObjectHostMatch( BaseTestDB ):
 
         self.obj1 = DiaObjectHostMatch( diaobjectid=obj1.diaobjectid,
                                         host_galaxy_id=host1.id,
-                                        base_procver_id=bpv['bpv3'].id,
+                                        base_procver_id=bpv['bpv3_host_galaxy'].id,
                                         prio=1 )
         self.dict1 = { k: getattr( self.obj1, k ) for k in self.columns }
         self.obj2 = DiaObjectHostMatch( diaobjectid=obj1.diaobjectid,
                                         host_galaxy_id=host2.id,
-                                        base_procver_id=bpv['bpv3'].id,
+                                        base_procver_id=bpv['bpv3_host_galaxy'].id,
                                         prio=2 )
         self.dict2 = { k: getattr( self.obj2, k ) for k in self.columns }
         self.dict3 = { 'diaobjectid': obj2.diaobjectid,
                        'host_galaxy_id': host1.id,
-                       'base_procver_id': bpv['bpv3'].id,
+                       'base_procver_id': bpv['bpv3_host_galaxy'].id,
                        'prio': 3 }

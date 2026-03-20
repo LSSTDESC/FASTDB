@@ -35,7 +35,7 @@ class TestDiaForcedSource( BaseTestDB ):
         ]
         self.uniques = []
 
-        self.obj1 = DiaForcedSource( base_procver_id=bpv['bpv1'].id,
+        self.obj1 = DiaForcedSource( base_procver_id=bpv['bpv1_diaforcedsource'].id,
                                      diaobjectid=obj1.diaobjectid,
                                      visit=1,
                                      diaforcedsourceid=1,
@@ -47,7 +47,7 @@ class TestDiaForcedSource( BaseTestDB ):
                                      dec=13.
                                     )
         self.dict1 = { k: getattr( self.obj1, k ) for k in self.columns }
-        self.obj2 = DiaForcedSource( base_procver_id=bpv['bpv1'].id,
+        self.obj2 = DiaForcedSource( base_procver_id=bpv['bpv1_diaforcedsource'].id,
                                      diaobjectid=obj1.diaobjectid,
                                      visit=2,
                                      diaforcedsourceid=2,
@@ -59,7 +59,7 @@ class TestDiaForcedSource( BaseTestDB ):
                                      dec=13.0001
                                     )
         self.dict2 = { k: getattr( self.obj2, k ) for k in self.columns }
-        self.dict3 = { 'base_procver_id': bpv['bpv1'].id,
+        self.dict3 = { 'base_procver_id': bpv['bpv1_diaforcedsource'].id,
                        'diaobjectid': obj1.diaobjectid,
                        'visit': 3,
                        'diaforcedsourceid': 3,

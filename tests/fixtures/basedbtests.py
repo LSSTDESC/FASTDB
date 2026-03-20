@@ -56,7 +56,7 @@ def rootobj3():
 @pytest.fixture
 def obj1( procver_collection, rootobj1 ):
     bpvs, _pvs = procver_collection
-    obj = DiaObject( diaobjectid=42, base_procver_id=bpvs['bpv1'].id, rootid=rootobj1.id )
+    obj = DiaObject( diaobjectid=42, base_procver_id=bpvs['bpv1_diaobject'].id, rootid=rootobj1.id )
     obj.insert()
 
     yield obj
@@ -70,7 +70,7 @@ def obj1( procver_collection, rootobj1 ):
 @pytest.fixture
 def obj2( procver_collection, rootobj2 ):
     bpvs, _pvs = procver_collection
-    obj = DiaObject( diaobjectid=64, base_procver_id=bpvs['bpv1'].id, rootid=rootobj2.id )
+    obj = DiaObject( diaobjectid=64, base_procver_id=bpvs['bpv1_diaobject'].id, rootid=rootobj2.id )
     obj.insert()
 
     yield obj
@@ -84,7 +84,7 @@ def obj2( procver_collection, rootobj2 ):
 @pytest.fixture
 def obj3( procver_collection, rootobj3 ):
     bpvs, _pvs = procver_collection
-    obj = DiaObject( diaobjectid=137, base_procver_id=bpvs['bpv1'].id, rootid=rootobj3.id )
+    obj = DiaObject( diaobjectid=137, base_procver_id=bpvs['bpv1_diaobject'].id, rootid=rootobj3.id )
     obj.insert()
 
     yield obj
@@ -286,7 +286,7 @@ def host1( procver_collection ):
     host = HostGalaxy( id=uuid.uuid4(),
                        host_catalog='foo',
                        host_id='bar',
-                       base_procver_id=bpvs['bpv1'].id,
+                       base_procver_id=bpvs['bpv1_host_galaxy'].id,
                        ra=1.,
                        dec=-2.,
                        info={} )
@@ -305,7 +305,7 @@ def host2( procver_collection ):
     host = HostGalaxy( id=uuid.uuid4(),
                        host_catalog='foo',
                        host_id='smol',
-                       base_procver_id=bpvs['bpv1'].id,
+                       base_procver_id=bpvs['bpv1_host_galaxy'].id,
                        ra=48.,
                        dec=-89.,
                        info={} )

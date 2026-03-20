@@ -21,15 +21,15 @@ class TestDiaObject( BaseTestDB ):
         self.uniques = []
 
         self.obj1 = DiaObject( diaobjectid=1,
-                               base_procver_id=bpv['bpv1'].id,
+                               base_procver_id=bpv['bpv1_diaobject'].id,
                                rootid=rootobj1.id )
         self.dict1 = { k: getattr( self.obj1, k ) for k in self.columns }
         self.obj2 = DiaObject( diaobjectid=2,
-                               base_procver_id=bpv['bpv1'].id,
+                               base_procver_id=bpv['bpv1_diaobject'].id,
                                rootid=rootobj2.id )
         self.dict2 = { k: getattr( self.obj2, k ) for k in self.columns }
         self.dict3 = { 'diaobjectid': 3,
-                       'base_procver_id': bpv['bpv1'].id,
+                       'base_procver_id': bpv['bpv1_diaobject'].id,
                        'rootid': rootobj3.id }
 
 
