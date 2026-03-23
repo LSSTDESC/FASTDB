@@ -1476,6 +1476,22 @@ class ProcessingVersion( DBBase ):
             return BaseProcessingVersion( **bpv, noconvert=False )
 
 
+    def base_procvers( self, table, dbcon=None ):
+        """Return list BaseProcessingVersions sorted from high to low for this processing version and table."""
+
+        with DBCon( dbcon, dictcursor=True ) as con:
+            bpv = con.execute( "SELECT b.* FROM base_processing_version b\n"
+                               "INNER JOIN base_procver_of_procver j ON j.base_procver_id=b.id\n"
+                               "WHERE j.procver_id=%(pv)s\n"
+                               "  AND j._table=%(tab)s\n"
+                               "ORDER BY j.priority DESC",
+                               { 'pv': self.id, 'tab': table } )
+            if len(bpv) == 0:
+                return []
+            else:
+                return [ BaseProcessingVersion( **r, noconvert=False ) for r in bpv ]
+
+
 # ======================================================================
 
 class ProcessingVersionAlias( DBBase ):
