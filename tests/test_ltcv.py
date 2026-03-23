@@ -122,10 +122,7 @@ def test_get_object_infos( set_of_lightcurves, procver_collection ):
                                    processing_version='pvc_pv2' )
 
 
-def check_ltcv_pos( infodf, srcdf, srces, bpvkeys ):
-    # The thing that called us should have xs'ed out infodf so that only one row was left
-    assert isinstance( infodf, pandas.Series )
-
+def list_of_fixture_srcs_for_position_purposes( srcs, bpvkeys ):
     # OK, we have sources from a bunch of different base processing versions,
     #   and not all visits will be present in all the processing versions.
     #   Our goal is to extract, for each visit, the source that is from
@@ -147,6 +144,15 @@ def check_ltcv_pos( infodf, srcdf, srces, bpvkeys ):
             raise RuntimeError( "OMG this shouldn't happen" )
     srces.sort( key=lambda s: s.midpointmjdtai )
 
+    return srces
+            
+def check_ltcv_pos( infodf, srcdf, srces, bpvkeys ):
+    # The thing that called us should have xs'ed out infodf so that only one row was left
+    assert isinstance( infodf, pandas.Series )
+
+    # Extract the expected soources from srces (which is a part of the set_of_lightcurve fixtures)
+    srces = list_of_fixture_srcs_for_position_purposes( srces, bpvkeys )
+    
     # Make sure we got the sources we expected
     assert len( srces ) == len( srcdf )
     assert all( s.diasourceid == d for s, d in zip( srces, srcdf.diasourceid ) )
@@ -189,24 +195,11 @@ def check_ltcv_pos( infodf, srcdf, srces, bpvkeys ):
     assert ra_dec_cov == pytest.approx( 0., abs=1e-9 )
 
 
-def test_object_ltcv( procver_collection, set_of_lightcurves ):
-    # TODO : write a test for the case where there are multiple objects within the
-    #   same processing version that point to the same root object!
-
-    roots = set_of_lightcurves
-    _bpvs, pvs = procver_collection
-
-    # The fixture loads up lightcurves every 2.5 days
-
-    # Try to get the object lightcurve for diaobjectid 100 using pv1
-    # Should get detections starting 60000, forced starting 59990,
-    # sources through 60015 and forced through 60010 in bpv1a,
-    # sources through 60030 and forced through 60025 in bpv1
-
-    srcs = ltcv.object_ltcv( pvs['pv1'].id, 100, return_format='pandas', which='detections', include_base_procver=True )
-    forced = ltcv.object_ltcv( pvs['pv1'].id, 100, return_format='pandas', which='forced', include_base_procver=True )
-    df = ltcv.object_ltcv( pvs['pv1'].id, 100, return_format='pandas', which='patch', include_base_procver=True )
-
+def check_obj_100_in_pv1( fixturesrcs, srcs, forced, df, include_source_positions=False ):
+    import pdb; pdb.set_trace()
+    assert all( srcs.diaobjectid == 100 )
+    assert all( forced.diaobjectid == 100 )
+    assert all( df.diaobjectid == 100 )
     assert len(srcs) == 13
     assert len(forced) == 15
     assert len(df) == 17
@@ -229,11 +222,61 @@ def test_object_ltcv( procver_collection, set_of_lightcurves ):
     assert np.all( ~df[ df.mjd <= 60025 ].ispatch )
     assert np.all( df[ ( df.mjd >= 60000 ) & ( df.mjd <= 60030 ) ].isdet )
     assert np.all( ~df[ ( df.mjd < 60000 ) | ( df.mjd > 60030 ) ].isdet )
-    # Because we didn't say include_source_positions, there should be no source columns
-    for f in [ df, forced, srcs ]:
-        for c in [ 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ]:
-            assert c not in f.columns
 
+    if not include_source_positions:
+        for f in [ df, forced, srcs ]:
+            for c in [ 'det_ra', 'det_dec', 'det_raerr', 'det_decerr', 'det_ra_dec_cov' ]:
+                assert c not in f.columns
+    else:
+        fixturesrces == list_of_fixture_srcs_for_position_purposes( fixturesrcs, ['bpv1b_diasource',
+                                                                                  'bpv1a_diasource',
+                                                                                  'bpv1_diasource'] )
+        for field in [ 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ]:
+            if field in [ 'ra', 'dec' ]:
+                abscond = 0.01/3600.
+                relcond = None
+            elif field == 'ra_dec_cov':
+                abscond = 1e-9
+                relcond = None
+            else:
+                abscond = None
+                relcond = 1e-6
+        assert all( s == pytest.approx( f, abs=abscond, rel=relcond )
+                    for s, f in zip( srcs[f'det_{field}'], getattr( fixturesrcs, field ) ) )
+        assert all( s == pytest.approx( f, abs=abscond, rel=relcond )
+                    for s, f in zip( forced[f'det_{field}'], getattr( fixturesrcs, field ) ) )
+        assert all( s == pytest.approx( f, abs=abscond, rel=relcond )
+                    for s, f in zip( df[f'det_{field}'], getattr( df, field ) ) )
+    
+
+    
+def test_object_ltcv( procver_collection, set_of_lightcurves ):
+    # TODO : write a test for the case where there are multiple objects within the
+    #   same processing version that point to the same root object!
+
+    roots = set_of_lightcurves
+    _bpvs, pvs = procver_collection
+
+    # The fixture loads up lightcurves every 2.5 days
+
+    # Try to get the object lightcurve for diaobjectid 100 using pv1
+    # Should get detections starting 60000, forced starting 59990,
+    # sources through 60015 and forced through 60010 in bpv1a,
+    # sources through 60030 and forced through 60025 in bpv1
+
+    srcs = ltcv.object_ltcv( pvs['pv1'].id, 100, return_format='pandas', which='detections', include_base_procver=True )
+    forced = ltcv.object_ltcv( pvs['pv1'].id, 100, return_format='pandas', which='forced', include_base_procver=True )
+    df = ltcv.object_ltcv( pvs['pv1'].id, 100, return_format='pandas', which='patch', include_base_procver=True )
+    check_obj_100_in_pv1( roots[0]['src'], srcs, forced, df )
+    
+    srcs = ltcv.object_ltcv( pvs['pv1'].id, 100, return_format='pandas', which='detections',
+                             include_base_procver=True, include_source_positions=True )
+    forced = ltcv.object_ltcv( pvs['pv1'].id, 100, return_forpomat='pandas', which='forced',
+                               include_base_procver=True, include_source_positions=True )
+    df = ltcv.object_ltcv( pvs['pv1'].id, 100, return_format='pandas', which='patch',
+                           include_base_procver=True, include_source_positions=True )
+    check_obj_100_in_pv1( roots[0]['src'], srcs, forced, df )
+    
     # If we ask for roots[1] from pv1, we shouldn't get anything.
     # (Also trying using the root object this time.)
 
@@ -499,15 +542,15 @@ def test_many_object_ltcvs( procver_collection, set_of_lightcurves ):
     roots = set_of_lightcurves
     _bpvs, pvs = procver_collection
 
-    # First, reproduce the tests from test_object_ltcv.  We'll ask for two lightcurves,
-    #   but only one is going to be present.
+    # Only object 0 is in pv1, so if we ask for both objects 0 and 1, we should only get one object back
 
-    srcs = ltcv.many_object_ltcvs( pvs['pv1'].id, [ roots[i]['root'].id for i in [0,1] ],
-                                   return_format='pandas', which='detections', include_base_procver=True )
-    forced = ltcv.many_object_ltcvs( pvs['pv1'].id, [ roots[i]['root'].id for i in [0,1] ],
-                                     return_format='pandas', which='forced', include_base_procver=True )
-    df = ltcv.many_object_ltcvs( pvs['pv1'].id, [ roots[i]['root'].id for i in [0,1] ],
-                                 return_format='pandas', which='patch', include_base_procver=True )
+    for searchfor in ( [ roots[i]['root'].id for i in [0, 1] ], [ 100, 101 ] ):
+        srcs = ltcv.many_object_ltcvs( pvs['pv1'].id, searchfor,
+                                       return_format='pandas', which='detections', include_base_procver=True )
+        forced = ltcv.many_object_ltcvs( pvs['pv1'].id, searchfor,
+                                         return_format='pandas', which='forced', include_base_procver=True )
+        df = ltcv.many_object_ltcvs( pvs['pv1'].id, searchfor,
+                                     return_format='pandas', which='patch', include_base_procver=True )
 
     assert set( srcs.index.get_level_values( 'rootid' ).unique().values ) == { roots[0]['root'].id }
     assert set( forced.index.get_level_values( 'rootid' ).unique().values ) == { roots[0]['root'].id }

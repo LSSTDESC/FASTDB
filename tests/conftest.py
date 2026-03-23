@@ -250,7 +250,7 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
     #   3: 1 much further away
     #
     # Objects 0 through 2 are in realtime as [ 0, 1, 2 ]
-    # Object 0 is in bpv1 as 101
+    # Object 0 is in bpv1 as 100
     # All objects are in bpv2 as [ 200, 201, 202, 203 ]
     #   BUT object 1 is also in bpv2 as 2011
     #
