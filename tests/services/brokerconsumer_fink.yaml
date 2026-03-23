@@ -1,12 +1,13 @@
 brokers:
-  - name: "fink"
+  fink:
     class: FinkConsumer
     server: kafka-lsst.fink-broker.org:24499
     groupid: rknop-fastdb-test-{barf}
     # topics: [ 'fink_sn_near_galaxy_candidate_lsst' ]
+    # schemaless: False
     topics: [ "ftransfer_lsst_2026-03-20_872471" ]
     schema_topic: "ftransfer_lsst_2026-03-20_872471_schema"
-    schemaless: False
+    schemaless: True
     schema_in_key: True
     updatetopics: false
     brokername_for_alerts: "LaunchedFink"
@@ -22,5 +23,5 @@ brokers:
     extraconfigjson: null
     pollkwargs:
       restart_time_min: 0.1
-      notopic_sleeptime: 300
+      notopic_sleeptime: 2
       max_restarts: null

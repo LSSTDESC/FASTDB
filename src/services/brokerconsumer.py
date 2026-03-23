@@ -402,8 +402,8 @@ class BrokerConsumer:
 
             msg = None
             countdown = 5
-            while ( msg is not None ) and ( countdown > 0 ):
-                msg = consumer.consume_one_msg( handler=None )
+            while ( msg is None ) and ( countdown > 0 ):
+                msg = consumer.consume_one_message( handler=None )
                 if msg is None:
                     time.sleep( 1 )
                 countdown -= 1
@@ -433,7 +433,8 @@ class BrokerConsumer:
     def close_connection( self ):
         try:
             self.countlogger.info( "**************** Closing consumer connection ******************" )
-            self.consumer.close()
+            if self.consumer is not None:
+                self.consumer.close()
         except Exception as ex:
             self.countlogger.error( f"Got exception trying to close consumer, ignoring it: {str(ex)}" )
         self.consumer = None
@@ -728,10 +729,15 @@ class BrokerConsumer:
                         col = mg.collection( f'{self.mongodb_collection_base}_{suffix}' )
                         results = col.insert_many( arr, ordered=False )
                         inserted[suffix] = len( results.inserted_ids )
-            if self.cache_alerts and ( len(messagebatch) > 0 ):
-                col = mg.collection( f'{self.mongodb_collection_base}_alertcache' )
-                results = col.insert_many( messagebatch, ordered=False )
-                inserted['alertcache'] = len( results.inserted_ids )
+                else:
+                    inserted[suffix] = 0
+            if self.cache_alerts:
+                if len(messagebatch) > 0:
+                    col = mg.collection( f'{self.mongodb_collection_base}_alertcache' )
+                    results = col.insert_many( messagebatch, ordered=False )
+                    inserted['alertcache'] = len( results.inserted_ids )
+                else:
+                    inserted['alertcache'] = 0
         # ****
         import pprint
         strio = io.StringIO()
@@ -871,7 +877,7 @@ class BrokerConsumer:
             if self.pipe is not None:
                 self.pipe.send( { "message": "unhandled exception", "nconsumed": -1,
                                   "exception": str(ex),
-                                  "tot_handled": self.consumer.tot_handled,
+                                  "tot_handled": self.consumer.tot_handled if self.consumer is not None else "n/a",
                                   "runtime": datetime.datetime.now() - tstart } )
             return
 
@@ -1363,10 +1369,11 @@ class BrokerConsumerLauncher:
             if 'mongodb_collection_base' not in brokerinfo:
                 raise ValueError( "Every broker must have a mongodb_collection_base" )
 
-            if ( 'extraconfigjson' in brokerinfo ) and ( brokerinfo['extraconfigjson'] is not None ):
-                if ( 'extraconfig' in brokerinfo ) and ( brokerinfo['extraconfig'] is not None ):
-                    raise ValueError( "Can't have non-null for both extraconfig and extraconfigjson" )
-                brokerinfo['extraconfiog'] = simplejson.loads( brokerinfo['extraconfigjson'] )
+            if 'extraconfigjson' in brokerinfo:
+                if brokerinfo['extraconfigjson'] is not None:
+                    if ( 'extraconfig' in brokerinfo ) and ( brokerinfo['extraconfig'] is not None ):
+                        raise ValueError( "Can't have non-null for both extraconfig and extraconfigjson" )
+                    brokerinfo['extraconfig'] = simplejson.loads( brokerinfo['extraconfigjson'] )
                 del brokerinfo['extraconfigjson']
 
             if ( 'extraconfig' in brokerinfo ) and ( brokerinfo['extraconfig'] is None ):
@@ -1491,7 +1498,7 @@ class BrokerConsumerLauncher:
                                              f"from the list of broker consumers I'm tracking." )
                                 brokerstodelete.add( brokername )
 
-                            elif msg['messge'] == 'unhandled exception':
+                            elif msg['message'] == 'unhandled exception':
                                 logger.error( f"Consumer {brokername} got an unhandled exception: {msg['exception']}. "
                                               f"Marking it for restart." )
                                 broker['nfails'] += 1

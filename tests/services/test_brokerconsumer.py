@@ -391,7 +391,7 @@ def test_fink():
     # schema_in_key = True
     brokertopic = 'ftransfer_lsst_2026-03-20_872471'
     schema_topic = 'ftransfer_lsst_2026-03-20_872471_schema'
-    schemaless = False
+    schemaless = True
     schema_in_key = True
 
     expectedcollections = [ f'fastdb_fink_test_{s}' for s in
@@ -428,8 +428,8 @@ def test_fink():
             # Check other stuff?
 
         # Uncomment these next two to manually inspect the saved mongo collections
-        import pdb; pdb.set_trace()
-        pass
+        # import pdb; pdb.set_trace()
+        # pass
 
     finally:
         with db.MGCon() as mg:
@@ -445,6 +445,7 @@ def test_fink_launcher():
                             [ 'diaobject', 'diasource', 'diasource_extra',
                               'diaforcedsource', 'diaforcedsource_extra',
                               'thumbnails', 'brokerinfo', 'alertcache' ] ]
+    topic_in_brokerconsumer_fink_yaml = "ftransfer_lsst_2026-03-20_872471"
 
     proc = None
     try:
@@ -455,8 +456,9 @@ def test_fink_launcher():
 
         proc = multiprocessing.Process( target=launch_broker )
         proc.start()
-        FDBLogger.info( "Sleeping 10s for BrokerConsumerLauncher to do its thing" )
-        time.sleep( 10 )
+        # 10s wasn't enough when having to poll the schema topic in addition to the regular topic
+        FDBLogger.info( "Sleeping 20s for BrokerConsumerLauncher to do its thing" )
+        time.sleep( 20 )
         FDBLogger.info( "Sending TERM to BrokerConsumerLauncher" )
         proc.terminate()
         proc.join()
@@ -473,7 +475,7 @@ def test_fink_launcher():
             srcids = set()
             for doc in col.find({}):
                 assert doc['brokername'] == "LaunchedFink"
-                assert doc['topic'] == 'fink_sn_near_galaxy_candidate_lsst'
+                assert doc['topic'] == topic_in_brokerconsumer_fink_yaml
                 srcids.add( doc['diasourceid'] )
 
             col = mg.collection( 'fastdb_fink_launcher_test_diasource' )
