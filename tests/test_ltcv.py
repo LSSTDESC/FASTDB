@@ -337,7 +337,7 @@ def test_object_ltcv( procver_collection, set_of_lightcurves ):
         #   and not all visits will be present in all the processing versions.
         #   Our goal is to extract, for each visit, the source that is from
         #   the base processing version earliest in the bpvkeys array.
-        
+
         # First, make an array indexed by bpv and visits
         reindexed_srces = { k: { s.visit: s for s in srces[k] } for k in bpvkeys }
         import pdb; pdb.set_trace()
@@ -353,7 +353,7 @@ def test_object_ltcv( procver_collection, set_of_lightcurves ):
                     # break
             if not gotit:
                 raise RuntimeError( "OMG this shouldn't happen" )
-            
+
         srcra = np.array( [ i.ra for i in srces ] )
         srcdec = np.array( [ i.dec for i in srces ] )
         sn = np.array( [ i.psfflux / i.psffluxerr for i in srces ] )

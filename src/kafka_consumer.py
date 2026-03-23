@@ -49,11 +49,13 @@ class KafkaConsumer:
 
           schemaless : bool, default False
             Are messages consumed with embedded schema or without?
-            Ignored if you aren't using the echoing message handler.
+            Ignored if you aren't using the echoing message handler; you
+            deal with parsing schema and messages in your own handler.
 
           schema : str or Path, or None
             Path to the avro schema to load.  Only needed if you
-            use the echoing message handler.
+            use the echoing message handler; otherwise, your own
+            handler deals with the schema itself.
 
           topics : list of str, default None
             Topics to subscribe to; if [] or None, does no initial subscription.

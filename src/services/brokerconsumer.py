@@ -2,6 +2,7 @@ import sys
 import os
 import io
 import re
+import random
 import collections
 import time
 import yaml
@@ -125,7 +126,8 @@ class BrokerConsumer:
                                     'diaObject', 'ssSource', 'mpc_orbits',
                                     'cutoutDifference', 'cutoutScience', 'cutoutTemplate' ]
 
-    def __init__( self, server, groupid, topics=None, updatetopics=False, extraconfig={},
+    def __init__( self, server, groupid, topics=None, schema_topic=None,
+                  updatetopics=False, extraconfig={},
                   schemaless=False, schema_in_key=False, schemafile=None,
                   brokername_for_alerts=None, brokername_key=None,
                   mongodb_collection_base=None, cache_alerts=False, no_wrangle=False,
@@ -146,6 +148,12 @@ class BrokerConsumer:
           topics : list, str, or None
             Topics to subscribe to.  If None, won't subscribe on object
             construction.
+
+          schema_topcis : list, str, or None
+            If not None, must be a list of the same length as topics (or
+            a str if topics is a str).  This is a topic that holds the
+            schema for the messages.  Doesn't make sense unless
+            schemaless is True.
 
           updatetopics : bool, default False
             True if topic list needs to be updated dynamically.  This is
@@ -277,20 +285,6 @@ class BrokerConsumer:
         self.groupid = groupid
         if self.groupid is None:
             raise ValueError( "groupid is required" )
-        if isinstance( topics, str ):
-            self.topics = [ topics ]
-        elif isinstance( topics, collections.abc.Sequence ):
-            self.topics = list( topics )
-        elif topics is not None:
-            raise TypeError( f"topics must be a str or a list of str, got a {type(topics)}" )
-        self.topics = topics
-        self._updatetopics = updatetopics
-        self.extraconfig = extraconfig
-        self.nomsg_sleeptime = nomsg_sleeptime
-        self.batch_size = batch_size
-        self.consume_timeout = consume_timeout
-        self.brokername_for_alerts = brokername_for_alerts
-        self.brokername_key = brokername_key
 
         self.schemaless = schemaless
         self.schema_in_key=schema_in_key
@@ -300,6 +294,35 @@ class BrokerConsumer:
         else:
             self.schemafile = schemafile
             self.schema = fastavro.schema.load_schema( self.schemafile )
+
+        if isinstance( topics, str ):
+            self.topics = [ topics ]
+        elif isinstance( topics, collections.abc.Sequence ):
+            self.topics = list( topics )
+        elif topics is not None:
+            raise TypeError( f"topics must be a str or a list of str, got a {type(topics)}" )
+        self.topics = topics
+
+        if isinstance( schema_topic, str ):
+            if not self.schemaless:
+                raise ValueError( "Non-none schema_topic only makes sense for schemaless=True" )
+            self.schema_topic = schema_topic
+        elif schema_topic is None:
+            self.schema_topic = None
+        else:
+            raise TypeError( f"schema_topic must be str or None, got a {type(topics)}" )
+
+        self._updatetopics = updatetopics
+        if self._updatetopics:
+            raise NotImplementedError( "updatetopics not implemented" )
+
+        self.extraconfig = extraconfig
+        self.nomsg_sleeptime = nomsg_sleeptime
+        self.batch_size = batch_size
+        self.consume_timeout = consume_timeout
+        self.brokername_for_alerts = brokername_for_alerts
+        self.brokername_key = brokername_key
+
 
         if ( not isinstance( mongodb_collection_base, str ) ) or ( len(mongodb_collection_base) == 0 ):
             raise ValueError( "Must pass a non-0 length string as mongdb_collection_base" )
@@ -332,21 +355,12 @@ class BrokerConsumer:
                     if wantedindex not in [ list( i['key'].keys() ) for i in col.list_indexes() ]:
                         col.create_index( [ (i, pymongo.ASCENDING) for i in wantedindex ] )
 
-    def create_connection( self, reset=False ):
+
+    def _actually_create_connection( self, *args, **kwargs ):
         countdown = 5
-        if reset:
-            self.countlogger.info( "*************** Resetting to start of broker kafka stream ***************" )
-        else:
-            self.countlogger.info( "*************** Connecting to kafka stream without reset  ***************" )
         while countdown >= 0:
             try:
-                self.consumer = KafkaConsumer( self.server, self.groupid,
-                                               schema=self.schemafile, schemaless=self.schemaless,
-                                               topics=self.topics, reset=reset,
-                                               extraconsumerconfig=self.extraconfig,
-                                               consume_nmsgs=self.batch_size, consume_timeout=self.consume_timeout,
-                                               nomsg_sleeptime=self.nomsg_sleeptime,
-                                               logger=self.logger, countlogger=self.countlogger )
+                consumer = KafkaConsumer( *args, **kwargs )
                 countdown = -1
             except Exception as e:
                 countdown -= 1
@@ -361,6 +375,58 @@ class BrokerConsumer:
                     self.logger.error( "Repeated exceptions connecting to broker, punting." )
                     self.countlogger.error( "Repeated exceptions connecting to broker, punting." )
                     raise RuntimeError( "Failed to connect to broker" )
+        return consumer
+
+
+    def create_connection( self, reset=False ):
+        if reset:
+            self.countlogger.info( "*************** Resetting to start of broker kafka stream ***************" )
+        else:
+            self.countlogger.info( "*************** Connecting to kafka stream without reset  ***************" )
+
+        if self.schema_topic is not None:
+            # Be paranoid that reset=True isn't really going to work, and put in a random group id so we'rea
+            #  always reading from the beginning of the stream.
+            barf = "".join( random.choices( 'abcdefghijlkmnopqrstuvwxyz', k=6 ) )
+            self.countlogger.info( "*************** Tryihng to get schema from schema topic   ***************" )
+            countdown = 5
+            consumer = self._actually_create_connection( self.server, f"{self.groupid}-schemapull-{barf}",
+                                                         topics=[ self.schema_topic ],
+                                                         reset=True,
+                                                         extraconsumerconfig=self.extraconfig,
+                                                         consume_nmsgs=1,
+                                                         consume_timeout=self.consume_timeout,
+                                                         nomsg_sleeptime=self.nomsg_sleeptime,
+                                                         logger=self.logger,
+                                                         countlogger=self.countlogger )
+
+            msg = None
+            countdown = 5
+            while ( msg is not None ) and ( countdown > 0 ):
+                msg = consumer.consume_one_msg( handler=None )
+                if msg is None:
+                    time.sleep( 1 )
+                countdown -= 1
+            if msg is None:
+                raise RuntimeError( f"Failed to get a message from schema topic {self.schema_topic}" )
+            if self.schema_in_key:
+                key = msg.key()
+                if isinstance( key, bytes ):
+                    key = key.decode( "utf-8" )
+                self.schema = fastavro.schema.parse_schema( simplejson.loads( key ) )
+            else:
+                raise RuntimeError( "ROB FIGURE OUT WHAT TO DO HERE" )
+            self.countlogger.info( f"Parsed schema from {self.schema_topic}" )
+
+        self.consumer = self._actually_create_connection( self.server, self.groupid,
+                                                          topics=self.topics,
+                                                          reset=reset,
+                                                          extraconsumerconfig=self.extraconfig,
+                                                          consume_nmsgs=self.batch_size,
+                                                          consume_timeout=self.consume_timeout,
+                                                          nomsg_sleeptime=self.nomsg_sleeptime,
+                                                          logger=self.logger,
+                                                          countlogger=self.countlogger )
 
         self.countlogger.info( "**************** Consumer connection opened *****************" )
 
@@ -817,7 +883,13 @@ class FinkConsumer(BrokerConsumer):
     _brokername = 'Fink'
 
     def __init__( self, server='kafka-lsst.fink-broker.org:24499', groupid=None, **kwargs ):
-        super().__init__( server, groupid, schemaless=False, schema_in_key=True, **kwargs )
+        if 'schemaless' not in kwargs:
+            kwargs['schemaless'] = False
+            if ( 'schema_in_key' in kwargs ) and ( kwargs['schema_in_key'] ):
+                raise ValueError( "schema_in_key True is inconsistent with schemaless=True" )
+        if 'schema_in_key' not in kwargs:
+            kwargs['schema_in_key'] = True
+        super().__init__( server, groupid, **kwargs )
         self.logger.info( f"Fink group id is {groupid}" )
 
 

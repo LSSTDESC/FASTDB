@@ -3,7 +3,11 @@ brokers:
     class: FinkConsumer
     server: kafka-lsst.fink-broker.org:24499
     groupid: rknop-fastdb-test-{barf}
-    topics: [ 'fink_sn_near_galaxy_candidate_lsst' ]
+    # topics: [ 'fink_sn_near_galaxy_candidate_lsst' ]
+    topics: [ "ftransfer_lsst_2026-03-20_872471" ]
+    schema_topic: "ftransfer_lsst_2026-03-20_872471_schema"
+    schemaless: False
+    schema_in_key: True
     updatetopics: false
     brokername_for_alerts: "LaunchedFink"
     mongodb_collection_base: fastdb_fink_launcher_test

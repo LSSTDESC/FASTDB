@@ -383,7 +383,16 @@ def test_BrokerConsumerLauncher( barf, alerts_30_to_90_sent_and_classified ):
 def test_fink():
     barf = "".join( random.choices( 'abcdefghijklmnopqrstuvwxyz', k=6 ) )
     groupid = f'rknop-fastdb-test-{barf}'
-    brokertopic = 'fink_sn_near_galaxy_candidate_lsst'
+    # 'fink_sn_near_galaxy_candidate_lsst' is a live topic
+    # 'ftransfer_lsst_2026-03-20_872471' is a topic Mohammed made that will only live through Mar 27
+    # brokertopic = 'fink_sn_near_galaxy_candidate_lsst'
+    # schema_topic = None
+    # schemaless = False
+    # schema_in_key = True
+    brokertopic = 'ftransfer_lsst_2026-03-20_872471'
+    schema_topic = 'ftransfer_lsst_2026-03-20_872471_schema'
+    schemaless = False
+    schema_in_key = True
 
     expectedcollections = [ f'fastdb_fink_test_{s}' for s in
                             [ 'diaobject', 'diasource', 'diasource_extra',
@@ -392,8 +401,11 @@ def test_fink():
 
     try:
         t0 = time.perf_counter()
-        fc = FinkConsumer( groupid=groupid, topics=brokertopic, mongodb_collection_base='fastdb_fink_test',
-                           consume_timeout=1, nomsg_sleeptime=1, batch_size=10, cache_alerts=True )
+        fc = FinkConsumer( groupid=groupid, topics=brokertopic, schema_topic=schema_topic,
+                           schemaless=schemaless, schema_in_key=schema_in_key,
+                           mongodb_collection_base='fastdb_fink_test',
+                           consume_timeout=1, nomsg_sleeptime=1, batch_size=10,
+                           cache_alerts=True )
         fc.poll( restart_time=datetime.timedelta(seconds=10), max_restarts=0, notopic_sleeptime=2, max_msgs=10 )
         t1 = time.perf_counter()
         FDBLogger.info( f"Fink poll finished in {t1-t0} seconds." )
@@ -416,8 +428,8 @@ def test_fink():
             # Check other stuff?
 
         # Uncomment these next two to manually inspect the saved mongo collections
-        # import pdb; pdb.set_trace()
-        # pass
+        import pdb; pdb.set_trace()
+        pass
 
     finally:
         with db.MGCon() as mg:
