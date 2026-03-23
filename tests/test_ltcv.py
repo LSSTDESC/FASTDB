@@ -122,7 +122,7 @@ def test_get_object_infos( set_of_lightcurves, procver_collection ):
                                    processing_version='pvc_pv2' )
 
 
-def list_of_fixture_srcs_for_position_purposes( srcs, bpvkeys ):
+def list_of_fixture_srcs_for_position_purposes( srces, bpvkeys ):
     # OK, we have sources from a bunch of different base processing versions,
     #   and not all visits will be present in all the processing versions.
     #   Our goal is to extract, for each visit, the source that is from
@@ -145,14 +145,15 @@ def list_of_fixture_srcs_for_position_purposes( srcs, bpvkeys ):
     srces.sort( key=lambda s: s.midpointmjdtai )
 
     return srces
-            
+
+
 def check_ltcv_pos( infodf, srcdf, srces, bpvkeys ):
     # The thing that called us should have xs'ed out infodf so that only one row was left
     assert isinstance( infodf, pandas.Series )
 
     # Extract the expected soources from srces (which is a part of the set_of_lightcurve fixtures)
     srces = list_of_fixture_srcs_for_position_purposes( srces, bpvkeys )
-    
+
     # Make sure we got the sources we expected
     assert len( srces ) == len( srcdf )
     assert all( s.diasourceid == d for s, d in zip( srces, srcdf.diasourceid ) )
@@ -228,9 +229,9 @@ def check_obj_100_in_pv1( fixturesrcs, srcs, forced, df, include_source_position
             for c in [ 'det_ra', 'det_dec', 'det_raerr', 'det_decerr', 'det_ra_dec_cov' ]:
                 assert c not in f.columns
     else:
-        fixturesrces == list_of_fixture_srcs_for_position_purposes( fixturesrcs, ['bpv1b_diasource',
-                                                                                  'bpv1a_diasource',
-                                                                                  'bpv1_diasource'] )
+        fixturesrcs = list_of_fixture_srcs_for_position_purposes( fixturesrcs, ['bpv1b_diasource',
+                                                                                'bpv1a_diasource',
+                                                                                'bpv1_diasource'] )
         for field in [ 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ]:
             if field in [ 'ra', 'dec' ]:
                 abscond = 0.01/3600.
@@ -247,9 +248,9 @@ def check_obj_100_in_pv1( fixturesrcs, srcs, forced, df, include_source_position
                     for s, f in zip( forced[f'det_{field}'], getattr( fixturesrcs, field ) ) )
         assert all( s == pytest.approx( f, abs=abscond, rel=relcond )
                     for s, f in zip( df[f'det_{field}'], getattr( df, field ) ) )
-    
 
-    
+
+
 def test_object_ltcv( procver_collection, set_of_lightcurves ):
     # TODO : write a test for the case where there are multiple objects within the
     #   same processing version that point to the same root object!
@@ -268,7 +269,7 @@ def test_object_ltcv( procver_collection, set_of_lightcurves ):
     forced = ltcv.object_ltcv( pvs['pv1'].id, 100, return_format='pandas', which='forced', include_base_procver=True )
     df = ltcv.object_ltcv( pvs['pv1'].id, 100, return_format='pandas', which='patch', include_base_procver=True )
     check_obj_100_in_pv1( roots[0]['src'], srcs, forced, df )
-    
+
     srcs = ltcv.object_ltcv( pvs['pv1'].id, 100, return_format='pandas', which='detections',
                              include_base_procver=True, include_source_positions=True )
     forced = ltcv.object_ltcv( pvs['pv1'].id, 100, return_forpomat='pandas', which='forced',
@@ -276,7 +277,7 @@ def test_object_ltcv( procver_collection, set_of_lightcurves ):
     df = ltcv.object_ltcv( pvs['pv1'].id, 100, return_format='pandas', which='patch',
                            include_base_procver=True, include_source_positions=True )
     check_obj_100_in_pv1( roots[0]['src'], srcs, forced, df )
-    
+
     # If we ask for roots[1] from pv1, we shouldn't get anything.
     # (Also trying using the root object this time.)
 
