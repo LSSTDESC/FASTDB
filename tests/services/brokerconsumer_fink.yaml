@@ -22,6 +22,6 @@ brokers:
     extraconfig: null
     extraconfigjson: null
     pollkwargs:
-      restart_time_min: 0.1
+      restart_time_min: 0.1666667
       notopic_sleeptime: 2
       max_restarts: null

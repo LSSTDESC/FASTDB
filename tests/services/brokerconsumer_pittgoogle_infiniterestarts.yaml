@@ -17,4 +17,4 @@ brokers:
     max_workers: 2
     pollkwargs:
       restart_time_min: 0.16667
-      max_restarts: 1
+      max_restarts: null

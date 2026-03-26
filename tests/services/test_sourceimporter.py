@@ -40,7 +40,7 @@ def test_fink( procver_collection ):
         t1 = time.perf_counter()
         FDBLogger.info( f"Fink poll finished in {t1-t0} seconds." )
 
-        si = SourceImporter( object_base_processing_version=bpv['realtime'].id,
+        si = SourceImporter( object_base_processing_version=bpv['realtime_diaobject'].id,
                              object_position_base_processing_version=bpv['realtime_diaobject_position_60000'].id,
                              source_base_processing_version=bpv['realtime_diasource'].id,
                              forcedsource_base_processing_version=bpv['realtime_diaforcedsource'].id,
@@ -108,7 +108,7 @@ def test_fink( procver_collection ):
 @pytest.fixture( scope='module' )
 def sourceimporter_args( procver_collection ):
     bpv, _pv = procver_collection
-    return { 'object_base_processing_version': bpv['realtime'].id,
+    return { 'object_base_processing_version': bpv['realtime_diaobject'].id,
              'object_position_base_processing_version': bpv['realtime_diaobject_position_60000'].id,
              'source_base_processing_version': bpv['realtime_diasource'].id,
              'forcedsource_base_processing_version': bpv['realtime_diaforcedsource'].id,

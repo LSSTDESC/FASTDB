@@ -457,8 +457,8 @@ def test_fink_launcher():
         proc = multiprocessing.Process( target=launch_broker )
         proc.start()
         # 10s wasn't enough when having to poll the schema topic in addition to the regular topic
-        FDBLogger.info( "Sleeping 20s for BrokerConsumerLauncher to do its thing" )
-        time.sleep( 20 )
+        FDBLogger.info( "Sleeping 30s for BrokerConsumerLauncher to do its thing" )
+        time.sleep( 30 )
         FDBLogger.info( "Sending TERM to BrokerConsumerLauncher" )
         proc.terminate()
         proc.join()
@@ -555,7 +555,12 @@ def test_pittgoogle_launcher():
     try:
         def check_pittgoogle_mongodb():
             with db.MGCon() as mg:
-                assert all( i in mg.db.list_collection_names() for i in expectedcollections )
+                allcols = set( mg.db.list_collection_names() )
+                expcols = set( expectedcollections )
+                if not expcols.issubset( allcols ):
+                    FDBLogger.error( f"Missing collections: {expcols-allcols}" )
+                    import pdb; pdb.set_trace()
+                    assert False
                 nalerts = mg.collection( 'pittgoogle_launcher_test_alertcache' ).count_documents({})
                 assert nalerts >= 3
                 col = mg.collection( 'pittgoogle_launcher_test_brokerinfo' )
@@ -569,20 +574,20 @@ def test_pittgoogle_launcher():
                 col = mg.collection( 'pittgoogle_launcher_test_diasource' )
                 assert srcids.issubset( set( c['diasourceid'] for c in col.find({}) ) )
 
-        def launch_broker( barf2=None ):
-            bcl = BrokerConsumerLauncher( '/code/tests/services/brokerconsumer_pittgoogle.yaml',
+        def launch_broker( configfile, barf2=None ):
+            bcl = BrokerConsumerLauncher( configfile,
                                           logtag='PittGoogleConsumerLauncher',
                                           barf=barf, barf2=barf2, verbose=True )
             bcl()
 
         # First, test, allowing the broker to run through 2 10s restarts
         #   (configured in brokerconsumer_pittgoogle.yaml) and exit
-        #   itself.  It should run for ~40s : the 2 10s restarts,
+        #   itself.  It should run for ~20s : the 2 10s restarts,
         #   (though they may be 12s because it only check the clock
-        #   every 2s, so it might just miss something), plus the 20s
-        #   grace period it gives subprocesses to shut down.
+        #   every 2s, so it might just miss something), plus overhead.
 
-        proc = multiprocessing.Process( target=launch_broker )
+        proc = multiprocessing.Process( target=launch_broker,
+                                        args=['/code/tests/services/brokerconsumer_pittgoogle.yaml'] )
         t0 = time.perf_counter()
         proc.start()
         FDBLogger.info( "Waiting for BrokerConsumerLauncher to exit." )
@@ -591,20 +596,26 @@ def test_pittgoogle_launcher():
         FDBLogger.info( f"BrokerConsumerLauncher exited after {dt:.2f} seconds" )
         proc.close()
         proc = None
-        assert dt > 38
-        assert dt < 44
+        assert dt > 20
+        assert dt < 26
         check_pittgoogle_mongodb()
 
-        # Now, tell BrokerConsumerLauncher to die after 10s.  The main
+        cleanup_mongodb( 'pittgoogle_launcher_test' )
+
+        # Now, tell BrokerConsumerLauncher to die after 30s.  The main
         #   process has a loop inside that waits 2s between polling to
         #   see if there are heartbeats from the processes that actually
         #   listen to the brokers.  It catches SIGINT and SIGTERM to
         #   just set a flag, and it also checks that flag during the
-        #   same ever-2-second timeout.  So, it should run at most 14+20
-        #   seconds (allowing for slop on both sides, and the 20s grace
-        #   period it gives for all subprocesses to cleanly exit).
+        #   same every-2-second timeout.  All processes ought to shut
+        #   down cleanly, so we expect the runtime to be pretty close to
+        #   30-36 seconds; the 6s is the worst case of bad timing
+        #   between being told to die and actually getting the message.
 
-        proc = multiprocessing.Process( target=launch_broker, args=[f'{barf}-1'] )
+
+        proc = multiprocessing.Process( target=launch_broker,
+                                        args=['/code/tests/services/brokerconsumer_pittgoogle_infiniterestarts.yaml',
+                                              f'{barf}-1'] )
         t0 = time.perf_counter()
         proc.start()
         FDBLogger.info( "Sleeping 30s for BrokerConsumerLauncher to do its thing" )
@@ -612,12 +623,12 @@ def test_pittgoogle_launcher():
         FDBLogger.info( "Sending TERM to BrokerConsumerLauncher" )
         proc.terminate()
         proc.join()
-        dt = time.perf_counter - t0
-        FDBLogger.info( "Closing BrokerConsumerLauncher" )
+        dt = time.perf_counter() - t0
+        FDBLogger.info( f"Closing BrokerConsumerLauncher process; it ran {dt} seconds" )
         proc.close()
         proc = None
         assert dt > 30
-        assert dt < 35
+        assert dt < 38
         check_pittgoogle_mongodb()
 
     finally:

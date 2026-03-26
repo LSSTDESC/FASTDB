@@ -131,6 +131,7 @@ def find_bpv_key( bpvs, bpvid ):
 
 def compare_ltcv_to_expected( srcdf, frcdf, patdf,
                               srcinfo=None, frcinfo=None, patinfo=None,
+                              bands=None,
                               expected_roots=[],
                               expected_diaobjectids=None,
                               include_source_positions=False,
@@ -140,6 +141,8 @@ def compare_ltcv_to_expected( srcdf, frcdf, patdf,
                               procver=None,
                               set_of_lightcurves=None,
                               procver_collection=None,
+                              all_roots_in_srcdf=False,
+                              all_roots_in_frcdf=False,
                               mjdnow=None ):
     bpvcol, _pvs = procver_collection
     roots = set_of_lightcurves
@@ -155,10 +158,15 @@ def compare_ltcv_to_expected( srcdf, frcdf, patdf,
     patdf = patdf.reset_index()
 
     if 'rootid' in srcdf.columns:
-        import pdb; pdb.set_trace()
         assert set( patdf.rootid ) == set( expected_root_ids )
-        assert set( srcdf.rootid ).issubset( set( expected_root_ids ) )
-        assert set( frcdf.rootid ).issubset( set( expected_root_ids ) )
+        if all_roots_in_srcdf:
+            assert set( srcdf.rootid ) == set( expected_root_ids )
+        else:
+            assert set( srcdf.rootid ).issubset( set( expected_root_ids ) )
+        if all_roots_in_frcdf:
+            assert set( frcdf.rootid ) == set( expected_root_ids )
+        else:
+            assert set( frcdf.rootid ).issubset( set( expected_root_ids ) )
     else:
         assert len(expected_root_ids) == 1
 
@@ -746,6 +754,7 @@ def test_object_ltcv( procver_collection, set_of_lightcurves ):
 
 
 def test_many_object_ltcvs( procver_collection, set_of_lightcurves ):
+    # TODO : beef up these tests, think about more edge cases
     roots = set_of_lightcurves
     _bpvs, pvs = procver_collection
 
@@ -762,40 +771,10 @@ def test_many_object_ltcvs( procver_collection, set_of_lightcurves ):
     assert set( srcs.index.get_level_values( 'rootid' ).unique().values ) == { roots[0]['root'].id }
     assert set( forced.index.get_level_values( 'rootid' ).unique().values ) == { roots[0]['root'].id }
     assert set( df.index.get_level_values( 'rootid' ).unique().values ) == { roots[0]['root'].id }
-
-    srcs.reset_index( inplace=True )
-    srcs.drop( 'rootid', axis='columns', inplace=True )
-    forced.reset_index( inplace=True )
-    forced.drop( 'rootid', axis='columns', inplace=True )
-    df.reset_index( inplace=True )
-    df.drop( 'rootid', axis='columns', inplace=True )
-
-    assert len(srcs) == 13
-    assert len(forced) == 15
-    assert len(df) == 17
-
-    assert np.all( ( srcs.mjd >= 60000 ) & ( srcs.mjd <= 60030 ) )
-    assert np.all( srcs[ srcs.mjd <= 60015 ].base_procver_s == 'pvc_bpv1a' )
-    assert np.all( srcs[ srcs.mjd > 60015 ].base_procver_s == 'pvc_bpv1' )
-    assert np.all( srcs.isdet )
-    assert np.all( forced[ forced.mjd <= 60010 ].base_procver_f == 'pvc_bpv1a' )
-    assert np.all( forced[ forced.mjd > 60010 ].base_procver_f == 'pvc_bpv1' )
-    assert np.all( forced[ ( forced.mjd >= 60000 ) & ( forced.mjd <= 60030 ) ].isdet )
-    assert np.all( ~forced[ ( forced.mjd < 60000 ) | ( forced.mjd > 60030 ) ].isdet )
-    assert np.all( pandas.isna( df[ df.mjd < 60000 ].base_procver_s ) )
-    assert np.all( df[ ( df.mjd >= 60000 ) & ( df.mjd <= 60015 ) ].base_procver_s == 'pvc_bpv1a' )
-    assert np.all( df[ ( df.mjd > 60015 ) & ( df.mjd <= 60030 ) ].base_procver_s == 'pvc_bpv1' )
-    assert np.all( pandas.isna( df[ df.mjd > 60030 ] ).base_procver_s )
-    assert np.all( df[ df.mjd <= 60010 ].base_procver_f == 'pvc_bpv1a' )
-    assert np.all( df[ ( df.mjd > 60010 ) & ( df.mjd <= 60025 ) ].base_procver_f == 'pvc_bpv1' )
-    assert np.all( pandas.isna( df[ df.mjd > 60025 ] ).base_procver_f )
-    assert np.all( ~df[ df.mjd <= 60025 ].ispatch )
-    assert np.all( df[ ( df.mjd >= 60000 ) & ( df.mjd <= 60030 ) ].isdet )
-    assert np.all( ~df[ ( df.mjd < 60000 ) | ( df.mjd > 60030 ) ].isdet )
-    # Because we didn't say include_source_positions, there should be no source columns
-    for f in [ df, forced, srcs ]:
-        for c in [ 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ]:
-            assert c not in f.columns
+    compare_ltcv_to_expected( srcs, forced, df, expected_roots=[0], expected_diaobjectids=[100],
+                              procver=pvs['pv1'], include_base_procver=True,
+                              all_roots_in_srcdf=True, all_roots_in_frcdf=True,
+                              set_of_lightcurves=roots, procver_collection=procver_collection )
 
     # Now ask for two lightcurves where we expect to get two lightcurves
     srcs = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['root'].id for i in [0,2] ],
@@ -804,30 +783,10 @@ def test_many_object_ltcvs( procver_collection, set_of_lightcurves ):
                                      return_format='pandas', which='forced', include_base_procver=True )
     df = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['root'].id for i in [0,2] ],
                                  return_format='pandas', which='patch', include_base_procver=True )
-    assert ( set( srcs.index.get_level_values( 'rootid' ).unique().values )
-             == { roots[0]['root'].id, roots[2]['root'].id } )
-    assert ( set( forced.index.get_level_values( 'rootid' ).unique().values )
-             == { roots[0]['root'].id, roots[2]['root'].id } )
-    assert ( set( df.index.get_level_values( 'rootid' ).unique().values )
-             == { roots[0]['root'].id, roots[2]['root'].id } )
-    assert len( srcs ) == 30
-    assert len( srcs.xs( roots[0]['root'].id, level='rootid' ) ) == 13
-    assert len( srcs.xs( roots[2]['root'].id, level='rootid' ) ) == 17
-    assert len( forced ) == 54
-    assert len( forced.xs( roots[0]['root'].id, level='rootid' ) ) == 25
-    assert len( forced.xs( roots[2]['root'].id, level='rootid' ) ) == 29
-    assert len( df ) == 54
-    assert len( df.xs( roots[0]['root'].id, level='rootid' ) ) == 25
-    assert len( df.xs( roots[2]['root'].id, level='rootid' ) ) == 29
-    tmp = df.drop( 'ispatch', axis='columns' )
-    # Because <NA> != <NA>, we can't just assert ( tmp == forced ).all().all()
-    for tmprow, forcedrow in zip( tmp.itertuples(), forced.itertuples() ):
-        # ...what's the right way to get the fields from one of these itertuples things?
-        # Empirically this works, but it's an underscore property, so I'm afraid of it.
-        for field in tmprow._fields:
-            assert ( ( pandas.isna( getattr(tmprow, field) ) and pandas.isna( getattr( forcedrow, field ) ) )
-                     or
-                     ( getattr(tmprow, field) == getattr( forcedrow, field ) ) )
+    compare_ltcv_to_expected( srcs, forced, df, expected_roots=[0, 2], expected_diaobjectids=[200, 202],
+                              procver=pvs['pv2'], include_base_procver=True,
+                              all_roots_in_srcdf=True, all_roots_in_frcdf=True,
+                              set_of_lightcurves=roots, procver_collection=procver_collection )
 
     # Make sure the dict returns are consistent
     srcsjs = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['root'].id for i in [0,2] ],
@@ -849,74 +808,18 @@ def test_many_object_ltcvs( procver_collection, set_of_lightcurves ):
                          ( pandas.isna( subpd[col] ) &
                            np.array( [ i is None for i in subjs[col] ] ) ) ).all()
 
-    # Make sure the lightcurves are actually right
-    for rootid in df.index.get_level_values( 'rootid' ).unique():
-        rdex = [ roots[i]['root'].id for i in range(len(roots)) ].index( rootid )
-        tmpsrcs = srcs.xs( rootid, level='rootid' ).reset_index()
-        tmpforced = forced.xs( rootid, level='rootid' ).reset_index()
-        tmpdf = df.xs( rootid, level='rootid' ).reset_index()
-
-        #### srcs = list_of_fixture_srces_for_comparison_purposes( roots[rdex]['src'],
-        ####                                                       [ 'bpv2a_diasource', 'bpv2_diasource' ],
-        ####                                                       procver_collection )
-        srcs = None
-
-        assert all( s.mjd == pytest.approx( srcs[j].midpointmjdtai, abs=1./3600./24. )
-                    for j, s in enumerate( tmpsrcs.itertuples() ) )
-        assert all( s.band == srcs[j].band
-                    for j, s in enumerate( tmpsrcs.itertuples() ) )
-        assert all( s.flux == pytest.approx( srcs[j].psfflux, rel=1e-6 )
-                    for j, s in enumerate( tmpsrcs.itertuples() ) )
-        assert all( s.fluxerr == pytest.approx( srcs[j].psffluxerr, rel=1e-6 )
-                    for j, s in enumerate( tmpsrcs.itertuples() ) )
-        assert all( tmpsrcs.isdet )
-        assert all( tmpsrcs.base_procver_s == np.array( [ i._base_procver for i in srcs ] ) )
-
-        #### frcd = list_of_fixture_srces_for_comparison_purposes( roots[rdex]['frc'],
-        ####                                                       [ 'bpv2a_diasource', 'bpv2_diasource' ],
-        ####                                                       procver_collection )
-        frcd = None
-
-        assert all( s.mjd == pytest.approx( frcd[j].midpointmjdtai, abs=1./3600./24. )
-                    for j, s in enumerate( tmpforced.itertuples() ) )
-        assert all( s.band == frcd[j].band
-                    for j, s in enumerate( tmpforced.itertuples() ) )
-        assert all( s.flux == pytest.approx( frcd[j].psfflux, rel=1e-6 )
-                    for j, s in enumerate( tmpforced.itertuples() ) )
-        assert all( s.fluxerr == pytest.approx( frcd[j].psffluxerr, rel=1e-6 )
-                    for j, s in enumerate( tmpforced.itertuples() ) )
-        assert all( tmpforced.isdet[j] if ( tmpforced.mjd[j] >= tmpsrcs.mjd.min() and
-                                            tmpforced.mjd[j] <= tmpsrcs.mjd.max() )
-                    else not tmpforced.isdet[j]
-                    for j in range( len(tmpforced) ) )
-        assert all( tmpforced.base_procver_f == np.array( [ i._base_procver for i in srcs ] ) )
-
-        assert all( s.mjd == pytest.approx( roots[rdex]['objs'][1]['frc']['bpv2'][j].midpointmjdtai, abs=1./3600./24. )
-                    for j, s in enumerate( tmpdf.itertuples() ) )
-        assert all( s.band == roots[rdex]['objs'][1]['frc']['bpv2'][j].band
-                    for j, s in enumerate( tmpdf.itertuples() ) )
-        assert all( s.flux == pytest.approx( roots[rdex]['objs'][1]['frc']['bpv2'][j].psfflux, rel=1e-6 )
-                    for j, s in enumerate( tmpdf.itertuples() ) )
-        assert all( s.fluxerr == pytest.approx( roots[rdex]['objs'][1]['frc']['bpv2'][j].psffluxerr, rel=1e-6 )
-                    for j, s in enumerate( tmpdf.itertuples() ) )
-        assert all( tmpdf.isdet[j] if ( tmpdf.mjd[j] >= tmpsrcs.mjd.min() and
-                                        tmpdf.mjd[j] <= tmpsrcs.mjd.max() )
-                    else not tmpdf.isdet[j]
-                    for j in range( len(tmpdf) ) )
-        assert all( ~tmpdf.ispatch )
-        assert all( tmpdf.base_procver == 'pvc_bpv2a' )
-
-
     # make sure that if we ask using the right diaobjectid, we get the same things back
-    srcs2 = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['objs'][1]['obj'].diaobjectid for i in [0,2] ],
-                                    return_format='pandas', which='detections', include_base_procver=True )
-    forced2 = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['objs'][1]['obj'].diaobjectid for i in [0,2] ],
-                                      return_format='pandas', which='forced', include_base_procver=True )
-    df2 = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['objs'][1]['obj'].diaobjectid for i in [0,2] ],
-                                  return_format='pandas', which='patch', include_base_procver=True )
-    assert ( srcs == srcs2 ).all().all()
-    assert ( forced == forced2 ).all().all()
-    assert ( df == df2 ).all().all()
+    srcs = ltcv.many_object_ltcvs( pvs['pv2'].id, [200, 202], return_format='pandas', which='detections',
+                                   include_base_procver=True )
+    forced = ltcv.many_object_ltcvs( pvs['pv2'].id, [200, 202], return_format='pandas', which='forced',
+                                     include_base_procver=True )
+    df = ltcv.many_object_ltcvs( pvs['pv2'].id, [200, 202], return_format='pandas', which='patch',
+                                 include_base_procver=True )
+    compare_ltcv_to_expected( srcs, forced, df, expected_roots=[0, 2], expected_diaobjectids=[200, 202],
+                              procver=pvs['pv2'], include_base_procver=True,
+                              all_roots_in_srcdf=True, all_roots_in_frcdf=True,
+                              set_of_lightcurves=roots, procver_collection=procver_collection )
+
 
     # But we get nothing back if we ask for the wrong diaobjectid
     srcs2 = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['objs'][0]['obj'].diaobjectid for i in [0,2] ],
@@ -929,7 +832,7 @@ def test_many_object_ltcvs( procver_collection, set_of_lightcurves ):
     assert len(forced2) == 0
     assert len(df2) == 0
 
-    # test mjd_now
+    # test mjd_now; first, make sure that the current dataframes have things later than the mjd_now we're going to test
     assert not ( srcs.index.get_level_values( level='mjd' ) <= 60041. ).all()
     assert not ( forced.index.get_level_values( level='mjd' ) <= 60041. ).all()
     assert not ( df.index.get_level_values( level='mjd' ) <= 60041. ).all()
@@ -945,7 +848,10 @@ def test_many_object_ltcvs( procver_collection, set_of_lightcurves ):
     assert ( srcs.index.get_level_values( level='mjd' ) <= 60041. ).all()
     assert ( forced.index.get_level_values( level='mjd' ) <= 60041. ).all()
     assert ( df.index.get_level_values( level='mjd' ) <= 60041. ).all()
-
+    compare_ltcv_to_expected( srcs, forced, df, expected_roots=[0,2], expected_diaobjecids=[200, 202],
+                              procver=pvs['pv2'], include_base_procver=True, mjdnow=60041.,
+                              all_roots_in_srcdf=True, all_roots_in_frcdf=True,
+                              set_of_lightcurves=roots, procver_collection=procver_collection )
 
     # Make sure bands works
     srcs = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['root'].id for i in [0,2] ],

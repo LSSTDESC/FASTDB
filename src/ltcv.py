@@ -2022,7 +2022,8 @@ def get_hot_ltcvs( processing_version, object_processing_version=None, position_
               "WHERE s.midpointmjdtai>=%(t0)s\n" )
         if mjd_now is not None:
             q += "  AND s.midpointmjdtai<=%(t1)s\n"
-        q += "ORDER BY s.rootid\n"
+        # ...any reason to order?
+        # q += "ORDER BY o.rootid\n"
         con.execute_nofetch( q, { 'procver': procver, 't0': mjd0, 't1': mjd_now } )
 
         # Second: pull out the object info for these objects

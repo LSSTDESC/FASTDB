@@ -30,8 +30,8 @@ _fastdb_schema_namespace = 'fastdb.v10_0_0'
 _lsst_schema_namespace = 'lsst.v10_0'
 
 _default_datefmt = '%Y-%m-%d %H:%M:%S'
-_default_log_level = logging.DEBUG
-# _default_log_level = logging.INFO
+# _default_log_level = logging.DEBUG
+_default_log_level = logging.INFO
 # Normally you don't want to show milliseconds, because it's additional gratuitous information
 #  that makes log output lines longer.  But, if you're debugging timing stuff, you might want
 #  temporarily to set this to True.

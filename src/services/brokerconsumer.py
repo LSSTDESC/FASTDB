@@ -270,8 +270,8 @@ class BrokerConsumer:
                                              datefmt='%Y-%m-%d %H:%M:%S' )
         _countlogout.setFormatter( _countformatter )
         self.countlogger.addHandler( _countlogout )
-        self.countlogger.setLevel( logging.INFO )
-        # self.countlogger.setLevel( logging.DEBUG )
+        # self.countlogger.setLevel( logging.INFO )
+        self.countlogger.setLevel( logging.DEBUG )
 
         if schemafile is None:
             # This is where the schema lives inside our docker images...
@@ -1198,7 +1198,7 @@ class PittGoogleConsumer(BrokerConsumer):
                                        f"this call to poll consumed {currenttotconsumed} messages, "
                                        f"overall {self.tot_n_messages_consumed} messages." )
                 if result[ "status" ] == "die":
-                    self.ogger.info( "PittGoogleConsumer.poll exiting becasue of die command." )
+                    self.logger.info( "PittGoogleConsumer.poll exiting becasue of die command." )
                     self.countlogger.info( "PittGoogleConsumer.poll exiting becasue of die command." )
                     if self.pipe is not None:
                         self.pipe.send( { "message": "died", "nconsumed": -1,
@@ -1209,7 +1209,7 @@ class PittGoogleConsumer(BrokerConsumer):
                     self.countlogger.info( f"PittGoogleConsumer.poll exiting after {restarts} restarts." )
                     self.logger.info( f"PittGoogleConsumer.poll exiting after {restarts} restarts." )
                     if self.pipe is not None:
-                        self.pipe.send( { "message": "existed", "nconsumed": -1,
+                        self.pipe.send( { "message": "exited", "nconsumed": -1,
                                           "tot_handled": self.tot_n_messages_consumed,
                                           "runtime": datetime.datetime.now() - tstart } )
                     return
@@ -1506,7 +1506,7 @@ class BrokerConsumerLauncher:
 
                             else:
                                 logger.error( f"Got message '{msg['message']}' from {name}, which probably means "
-                                              f"there's a coding error, because I don't undertanding it. Marking "
+                                              f"there's a coding error, because I don't understand it. Marking "
                                               f"the consumer for restart." )
                                 broker['nfails'] += 1
                                 brokerstorestart.add( brokername )
