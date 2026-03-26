@@ -1,11 +1,13 @@
 import itertools
-
+import io
 import pytest
+
 import numpy as np
 import pandas
 
 import db
 import ltcv
+from util import FDBLogger
 
 
 def test_get_object_infos( set_of_lightcurves, procver_collection ):
@@ -953,7 +955,8 @@ def test_object_search( set_of_lightcurves ):
             assert all( n is None for n in j[col] )
             assert all( n is None for n in df[col].values )
         else:
-            assert ( df[col] == np.array( j[col] ) ).all()
+            # Convert the pandas column to np.array so None=None will be true
+            assert ( np.array( df[col] ) == np.array( j[col] ) ).all()
 
     # Quick check that just_objids works
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
@@ -1156,14 +1159,14 @@ def test_object_search( set_of_lightcurves ):
     assert len(df) == 3
     assert set( df.rootid ) == { roots[i]['root'].id for i in [ 0, 2, 3 ] }
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
-                             maxmag_maxdetection=24.5, ignore_object_processing_version=True )
+                             maxmag_maxdetection=23.8, ignore_object_processing_version=True )
     assert len(df) == 3
-    assert set( df.rootid ) == { roots[i]['root'].id for i in [ 0,  1, 2 ] }
+    assert set( df.rootid ) == { roots[i]['root'].id for i in [ 1, 2, 3 ] }
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
-                             minmag_maxdetection=22.5, maxmag_maxdetection=24.5,
+                             minmag_maxdetection=22.5, maxmag_maxdetection=23.8,
                              ignore_object_processing_version=True )
     assert len(df) == 2
-    assert set( df.rootid ) == { roots[i]['root'].id for i in [ 0, 2 ] }
+    assert set( df.rootid ) == { roots[i]['root'].id for i in [ 2, 3 ] }
 
     # To filter on lastmag, we need to use mjd_now, because the fixture filled out
     #   forced photometry all down to mag 32.
@@ -1174,17 +1177,23 @@ def test_object_search( set_of_lightcurves ):
     assert list( df.loc[ dexen, 'lastforcedmjd' ] ) == [ 60050., 60055., 60055., 60055. ]
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas', mjd_now=60056.,
                              min_lastmag=24., ignore_object_processing_version=True )
-    assert len(df) == 3
-    assert set( df.rootid ) == { roots[i]['root'].id for i in [ 0, 1, 3 ] }
+    assert len(df) == 2
+    assert set( df.rootid ) == { roots[i]['root'].id for i in [ 0, 1 ] }
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas', mjd_now=60056.,
                              max_lastmag=24.8, ignore_object_processing_version=True )
-    assert len(df) == 2
-    assert set( df.rootid ) == { roots[i]['root'].id for i in [ 1, 2 ] }
+    assert len(df) == 3
+    assert set( df.rootid ) == { roots[i]['root'].id for i in [ 1, 2, 3 ] }
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas', mjd_now=60056.,
                              min_lastmag= 24., max_lastmag=24.8, ignore_object_processing_version=True )
     assert len(df) == 1
     assert set( df.rootid ) == { roots[1]['root'].id }
 
+    strio = io.StringIO()
+    strio.write( "Average timings:" )
+    for k, v in ltcv._object_search_timings.items():
+        n = ltcv._object_search_timings_count[ k ]
+        strio.write( f"    {k:>34s} : {v/n:8.5f}\n" )
+    FDBLogger.debug( strio.getvalue() )
 
     # TODO : test statbands.  (It is tested in test_ltcv_object_search.py)
     # (...and a good thing too, becasue it was broken.)
