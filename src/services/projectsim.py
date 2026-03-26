@@ -118,7 +118,7 @@ class AlertReconstructor:
                      'parentDiaSourceId', 'midpointMjdTai', 'ra', 'raErr', 'dec', 'decErr', 'ra_dec_Cov',
                      'x', 'xErr', 'y', 'yErr', 'apFlux', 'apFluxErr', 'snr',
                      'psfFlux', 'psfFluxErr', 'psfFluxLnL', 'psfChi2', 'psfNdata',
-                     'scienceflux', 'scienceFluxErr', 'templateFlux', 'templateFluxErr',
+                     'scienceFlux', 'scienceFluxErr', 'templateFlux', 'templateFluxErr',
                      'ixx', 'iyy', 'ixy', 'ixxPSF', 'iyyPSF', 'ixyPSF',
                      'extendedness', 'realibility', 'band',
                      'timeProcessedMjdTai', 'timeWithddrawnMjdTai', 'bboxSize' }

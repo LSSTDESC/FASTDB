@@ -3,7 +3,9 @@ import datetime
 import time
 import numbers
 import random
+import textwrap
 import psycopg.errors
+import itertools
 from psycopg import sql
 
 import db
@@ -176,7 +178,7 @@ def import_30days_prvforcedsources( import_first30days_sources, sourceimporter_a
 # This next one is messy because it should *only* be used in:
 #   * test_import_30days
 #   * import_30days_60days
-#   * test_import_30days_50days
+#   * test_import_30days_60days
 #
 # Reason: the import_30days_60days fixture will do a cleanup that is going to destroy
 #   everything that's set up in this fixture, even though this is a module fixture!
@@ -325,6 +327,182 @@ def import_only_30days_after_90days_consumed( sourceimporter_args,
         with db.MG() as mg:
             col = db.get_mongo_collection( mg, 'source_thumbnails' )
             col.delete_many({})
+
+
+# **********************************************************************
+
+def check_database_contents( lastdayoffset, firstdayoffset=None, dbcon=None ):
+    with db.DBCon( dbcon ) as conn:
+        try:
+            # Figure out the last ay of alerts that should have been sent, classified, consumed, and imported
+            rows, _cols = conn.execute( "SELECT MIN(midpointmjdtai) FROM diasource" )
+            throughday = rows[0][0] + lastdayoffset
+            startday = rows[0][0] + firstdayoffset if firstdayoffset is not None else None
+
+            # Select out all the sources, objects, and forced soruces that should be included
+            q = sql.SQL( textwrap.dedent(
+                """
+                SELECT diaobjectid, diasourceid, midpointmjdtai INTO TEMP TABLE tmp_expected_sources
+                FROM ppdb_diasource
+                WHERE midpointmjdtai<={throughday}
+                """
+            ) ).format( throughday=throughday )
+            if startday is not None:
+                q += sql.SQL( "  AND midpointmjdtai>={startday}" ).format( startday=startday )
+            conn.execute( q )
+
+            q = sql.SQL( textwrap.dedent(
+                """
+                SELECT DISTINCT ON(diaobjectid) diaobjectid
+                INTO TEMP TABLE tmp_expected_objects
+                FROM tmp_expected_sources
+                ORDER BY diaobjectid
+                """ ) )
+            conn.execute( q )
+
+            q = sql.SQL( textwrap.dedent(
+                """
+                SELECT DISTINCT ON (f.diaforcedsourceid) f.diaobjectid, f.diaforcedsourceid
+                INTO TEMP TABLE tmp_expected_forcedsources
+                FROM ppdb_diaforcedsource f
+                INNER JOIN tmp_expected_sources t ON t.diaobjectid=f.diaobjectid
+                WHERE f.midpointmjdtai<=t.midpointmjdtai-1
+                ORDER BY f.diaforcedsourceid
+                """
+            ) )
+            conn.execute( q )
+
+            rows, _cols = conn.execute( "SELECT diaobjectid FROM tmp_expected_objects" )
+            expected_objects = set( r[0] for r in rows )
+
+            rows, _cols = conn.execute( "SELECT diasourceid FROM tmp_expected_sources" )
+            expected_sources = set( r[0] for r in rows )
+            expected_brokerinfos = set(
+                itertools.chain( *[ [ ( r[0], b ) for b in [ 'FakeBroker-Nugent', 'FakeBroker-Random' ]
+                                     ] for r in rows  ] )
+            )
+
+            rows, _cols = conn.execute( "SELECT diaforcedsourceid FROM tmp_expected_forcedsources" )
+            expected_forcedsources = set( r[0] for r in rows )
+
+            # Make soure we found the right objects
+
+            rows, _cols = conn.execute( "SELECT DISTINCT ON (diaobjectid) diaobjectid "
+                                        "FROM diasource ORDER BY diaobjectid" )
+            found_objects = set( r[0] for r in rows )
+            assert found_objects == expected_objects
+
+            rows, _cols = conn.execute( "SELECT diaobjectid FROM diaobject" )
+            found_objects = set( r[0] for r in rows )
+            assert found_objects == expected_objects
+
+            rows, _cols = conn.execute( "SELECT diasourceid FROM diasource" )
+            found_sources = set( r[0] for r in rows )
+            if firstdayoffset is None:
+                assert found_sources == expected_sources
+            else:
+                # There will be extra sources because of the previous array
+                assert expected_sources.issubset( found_sources )
+
+            rows, _cols = conn.execute( "SELECT diasourceid FROM diasource_extra" )
+            found_sources_extra = set( r[0] for r in rows )
+            assert found_sources_extra == found_sources
+
+            rows, _cols = conn.execute( "SELECT diaforcedsourceid FROM diaforcedsource" )
+            found_forcedsources = set( r[0] for r in rows )
+            assert found_forcedsources == expected_forcedsources
+
+            rows, _cols = conn.execute( "SELECT diaforcedsourceid FROM diaforcedsource_extra" )
+            found_forcedsources_extra = set( r[0] for r in rows )
+            assert found_forcedsources_extra == expected_forcedsources
+
+            rows, _cols = conn.execute( "SELECT diasourceid, brokername FROM diasource_brokerinfo" )
+            found_brokerinfos = set( (r[0], r[1]) for r in rows )
+            assert found_brokerinfos == expected_brokerinfos
+
+            # ... it will be a miracle if this works for all the float and double fileds, because things
+            #   have been sent via kafka and imported to mongo and gone through json and all the rest.
+            #   I guess it's possible all of that could happen without floating point roundoff
+            #   changing things slightly....   I think mongo uses bjson, and avro is binary.
+            #   The real key is going to be what happened in sourceimporter when things were
+            #   copied up to postscript.  I *think* we used binary there too.  We'll see.
+            #   ...looks like it works.  Guess it was all binary and no floating roundoff happened.
+            srccols = sql.SQL(',').join( sql.SQL("( ( {s} IS NULL AND {p} IS NULL ) or ( {s}={p} ) ) AS {c}")
+                                         .format( s=sql.Identifier("s", c), p=sql.Identifier("p", c),
+                                                  c=sql.Identifier(c) )
+                                         for c in [ 'visit', 'band', 'midpointmjdtai',
+                                                    'psfflux', 'psffluxerr',
+                                                    'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ] )
+            srcexcols = sql.SQL(',').join( sql.SQL("( ( {s} IS NULL AND {p} IS NULL ) or ( {s}={p} ) ) AS {c}")
+                                           .format( s=sql.Identifier("s", c), p=sql.Identifier("p", c),
+                                                    c=sql.Identifier(c) )
+                                           for c in [ 'detector', 'x', 'y', 'xerr', 'yerr',
+                                                      'x_y_cov', 'psflnl', 'psfchi2', 'psfndata', 'snr',
+                                                      # 'scienceflux', 'sciencefluxerr',
+                                                      'templateflux', 'templatefluxerr',
+                                                      'reliability', 'ixx', 'iyy', 'ixxpsf', 'iyypsf',
+                                                      'ixypsf', 'flags', 'pixelflags',
+                                                      'apflux', 'apfluxerr', 'bboxsize',
+                                                      'parentdiasourceid' ] )
+            frccols = sql.SQL(',').join( sql.SQL("( ( {s} IS NULL AND {p} IS NULL ) or ( {s}={p} ) ) AS {c}")
+                                         .format( s=sql.Identifier("s", c), p=sql.Identifier("p", c),
+                                                  c=sql.Identifier(c) )
+                                         for c in [ 'visit', 'band', 'midpointmjdtai',
+                                                    'psfflux', 'psffluxerr', 'ra', 'dec' ] )
+            frcexcols = sql.SQL(',').join( sql.SQL("( ( {s} IS NULL AND {p} IS NULL ) or ( {s}={p} ) ) AS {c}")
+                                           .format( s=sql.Identifier("s", c), p=sql.Identifier("p", c),
+                                                    c=sql.Identifier(c) )
+                                           for c in [ 'detector',
+                                                      'scienceflux', 'sciencefluxerr' ] )
+
+            rows, _cols = conn.execute( sql.SQL( "SELECT s.diasourceid, {cols} FROM diasource s "
+                                                 "INNER JOIN ppdb_diasource p ON s.diasourceid=p.diasourceid"
+                                                ).format( cols=srccols ) )
+            assert all( all( r ) for r in rows )
+
+            rows, _cols = conn.execute( sql.SQL( "SELECT s.diasourceid, {cols} FROM diasource_extra s "
+                                                 "INNER JOIN ppdb_diasource p ON s.diasourceid=p.diasourceid"
+                                                ).format( cols=srcexcols ) )
+            assert all( all( r ) for r in rows )
+
+            rows, _cols = conn.execute( sql.SQL( "SELECT s.diaforcedsourceid, {cols} FROM diaforcedsource s "
+                                                 "INNER JOIN ppdb_diaforcedsource p "
+                                                 "  ON s.diaforcedsourceid=p.diaforcedsourceid"
+                                                ).format( cols=frccols ) )
+            # NOTE : we have a special case here, because the fakebroker set psfflux to None for
+            #   the first prvDiaForcedSource of diaSource 198154000011.  Depending on the order in
+            #   which alerts arrived, that means that psfflux *may* have been loaded in as null
+            #   instead of the ppdb value.
+            assert all( all( r ) for r in rows if r[0] != 198154000000 )
+
+            rows, _cols = conn.execute( sql.SQL( "SELECT s.diaforcedsourceid, {cols} FROM diaforcedsource_extra s "
+                                                 "INNER JOIN ppdb_diaforcedsource p "
+                                                 "  ON s.diaforcedsourceid=p.diaforcedsourceid"
+                                                ).format( cols=frcexcols ) )
+            assert all( all( r ) for r in rows )
+
+
+            cols = sql.SQL(",").join( sql.SQL("( ( {o} IS NULL and {p} IS NULL ) OR ( {o}={p} ) ) AS {c}")
+                                      .format( o=sql.Identifier("o", c), p=sql.Identifier("p", c),
+                                               c=sql.Identifier(c) )
+                                      for c in [ 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ] )
+            rows, _cols = conn.execute( sql.SQL( "SELECT o.diaobjectid, {cols} FROM diaobject_position o "
+                                                 "INNER JOIN ppdb_diaobject p ON p.diaobjectid=o.diaobjectid"
+                                                ).format( cols=cols ) )
+            assert all( all( r ) for r in rows )
+
+
+        finally:
+            conn.execute( "DROP TABLE IF EXISTS tmp_expected_objects" )
+            conn.execute( "DROP TABLE IF EXISTS tmp_expected_sources" )
+            conn.execute( "DROP TABLE IF EXISTS tmp_expected_diaforcedsources" )
+            # I don't think this commit is necessary.  If sombody who
+            #   called us keeps using the database connection, then the
+            #   tables will be dropped for them because... well, because
+            #   we just dropped them in this connection.  Otherwise,
+            #   when the database connection closes, the temp tables
+            #   will go away automatically, even if nobody commits.
+            #   conn.commit()
 
 
 
@@ -488,11 +666,14 @@ def test_import_sources( import_first30days_sources ):
         extras = conn.execute( "SELECT * FROM diasource_extra" )
         brokerinfos = conn.execute( "SELECT * FROM diasource_brokerinfo" )
 
+    # Some hardcoded numbers because we know what's in the test set of SNANA-imported PPDB tables
     assert len( sources ) == 77
     assert len( extras ) == len( sources )
     assert set( [ e['diasourceid'] for e in extras ] ) == set( [ s['diasourceid'] for s in sources ] )
     assert min( s['midpointmjdtai'] for s in sources ) == pytest.approx( 60278.029, abs=0.01 )
     assert max( s['midpointmjdtai'] for s in sources ) ==  pytest.approx( 60303.211, abs=0.01 )
+
+    # Compare what's in mongo to what's in postgres
 
     with db.MGCon() as mg:
         assert mg.collection( "source_thumbnails" ).count_documents({}) == nsrc
@@ -560,6 +741,8 @@ def test_import_30days( messy_import_30days, alerts_30days_sent_and_brokermessag
     assert nfrc == 148
 
     with db.DBCon( dictcursor=True) as pqconn:
+        check_database_contents( 30, dbcon=pqconn )
+        # Check the hardcoded numbers we have because we know what's in the SNANA-loaded test PPDB
         tablecounts = { 'diaobject': nobj,
                         'root_diaobject': nroot,
                         'diaobject_position': nobj,
@@ -594,6 +777,7 @@ def test_import_30days_60days( messy_import_30days, import_30days_60days, test_u
     assert ninfo60 == 208
 
     with db.DBCon( dictcursor=True ) as pqconn:
+        check_database_contents( 90, dbcon=pqconn )
         tablecounts = { 'diaobject': nobj30 + nobj60,
                         'root_diaobject': nroot30 + nroot60,
                         'diaobject_position': npos30 + npos60,
@@ -635,6 +819,7 @@ def test_import_only_next60days( import_only_next60days ):
     assert ninfo == 208
 
     with db.DBCon( dictcursor=True ) as pqconn:
+        check_database_contents( 90, 30, dbcon=pqconn )
         tablecounts = { 'diaobject': nobj,
                         'root_diaobject': nobj,
                         'diaobject_position': nobj,
@@ -685,6 +870,7 @@ def test_import_only_30days_after_90days_consumed( import_only_30days_after_90da
         assert mg.collection( 'fastdb_alertcycle_test_brokerinfo' ).count_documents( {} ) == 362
 
     with db.DBCon() as pqconn:
+        check_database_contents( 30, dbcon=pqconn )
         tablecounts = { 'diaobject': nobj,
                         'root_diaobject': nroot,
                         'diaobject_position': nobj,
@@ -725,6 +911,8 @@ def test_full90days_fast( alerts_90days_sent_received_and_imported ):
         collection = db.get_mongo_collection( mongoclient, "source_thumbnails" )
         assert collection.count_documents( {} ) == nsrc
 
+    check_database_contents( 90 )
+
 
 @pytest.mark.skipif( not env_as_bool('RUN_FULL90DAYS'), reason='RUN_FULL90DAYS is not set' )
 def test_full90days( fully_do_alerts_90days_sent_received_and_imported ):
@@ -749,3 +937,5 @@ def test_full90days( fully_do_alerts_90days_sent_received_and_imported ):
     with db.MG() as mongoclient:
         collection = db.get_mongo_collection( mongoclient, "source_thumbnails" )
         assert collection.count_documents( {} ) == nsrc
+
+    check_database_contents( 90 )

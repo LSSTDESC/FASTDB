@@ -991,7 +991,9 @@ def object_search( processing_version='default', ignore_object_processing_versio
 
       position_processing_version : UUID or str, default None
           The processing version of diaobject positions.  If None, will
-          use the same as processing_version.
+          use the same as processing_version.  IMPORTANT.  This one
+          is easy to get wrong.  Make sure you know what processing
+          versions are in the database and what to do with them.
 
       return_format : string
          Either "json" or "pandas".  (TODO: pyarrow? polars?)  See "Results" below.
