@@ -644,7 +644,6 @@ class ColumnMeta:
 
         return pgobj
 
-
     def __repr__( self ):
         if self.data_type == 'ARRAY':
             return f"ColumnMeta({self.column_name} [ARRAY({self.element_type})]"
@@ -889,6 +888,49 @@ class DBBase:
                     subdict[ col ] = self.tablemeta()[ col ].py_to_pg( val )
 
         return subdict
+
+
+    # def type_normalize_dict( self, row, fields=None, inplace=False ):
+    #     """Convert fields in a dictionary to the expected python types."""
+
+    #     if not isinstance( row, dict ):
+    #         raise TypeError( f"row must be a dict, not a {type(row)}" )
+
+    #     tablemeta = self.tablemeta
+    #     typedict = ColumnMeta.typedict
+
+    #     outrow = row if inplace else {}
+
+    #     if fields is None:
+    #         fields = list( row.keys() )
+
+    #     for field in fields:
+    #         if field not in tablemeta.keys():
+    #             raise ValueError( f"Unknown column {field} for table {self.__tablename__}" )
+
+    #         elif row['field'] is None:
+    #             if not tablemeta[field].is_nullable():
+    #                 raise ValueError( f"Got None for column {field} of table {self.__tablename__}, "
+    #                                   f"but this column is not nullable." )
+    #             outrow['field'] = None
+
+    #         elif tablemeta[field].data_type == "ARRAY":
+    #             if tablemeta[field].element_type not in typedict:
+    #                 raise ValueError( f"Table {self.__tablename__} column {field} is an array of type "
+    #                                   f"{tablemeta[field].element_type}, but I don't know how to deal with that." )
+    #             if not util.isSequence( row[field] ):
+    #                 raise TypeError( f"Table {self.__tablename__} column {field} is an array, but got "
+    #                                  f"a {type(row[field])}" )
+    #             outrow[field] = [ typedict[field]( r ) for r in row[field] )
+
+    #         elif tablemeta[field].data_type not in typedict:
+    #             raise ValueError( f"Table {self.__tablename__} column {field} has data type "
+    #                               f"{tablemeta[field].data_type} that I don't know how to handle" )
+
+    #         else:
+    #             outrow[field] = typedict[field]( row[field] )
+
+    #     return outrow
 
 
     @classmethod

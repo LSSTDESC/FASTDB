@@ -16,6 +16,7 @@ import multiprocessing
 import signal
 import simplejson
 
+import numpy as np
 import confluent_kafka
 import fastavro
 import pymongo
@@ -260,8 +261,8 @@ class BrokerConsumer:
                                          f'%(levelname)s] - %(message)s' ),
                                        datefmt='%Y-%m-%d %H:%M:%S' )
         logout.setFormatter( formatter )
-        # self.logger.setLevel( logging.INFO )
-        self.logger.setLevel( logging.DEBUG )
+        self.logger.setLevel( logging.INFO )
+        # self.logger.setLevel( logging.DEBUG )
 
         self.countlogger = logging.getLogger( f"countlogger_{loggername_prefix}{loggername}" )
         self.countlogger.propagate = False
@@ -270,8 +271,8 @@ class BrokerConsumer:
                                              datefmt='%Y-%m-%d %H:%M:%S' )
         _countlogout.setFormatter( _countformatter )
         self.countlogger.addHandler( _countlogout )
-        # self.countlogger.setLevel( logging.INFO )
-        self.countlogger.setLevel( logging.DEBUG )
+        self.countlogger.setLevel( logging.INFO )
+        # self.countlogger.setLevel( logging.DEBUG )
 
         if schemafile is None:
             # This is where the schema lives inside our docker images...
@@ -524,25 +525,34 @@ class BrokerConsumer:
         out['savetime'] = metamsg['savetime']
         return out
 
-    @classmethod
-    def _wrangle_all_standard_lsst_fields( cls, metamsg, msg ):
-        obj = cls._wrangle_object( msg, metamsg )
+    def _wrangle_all_standard_lsst_fields( self, metamsg, msg ):
+        obj = self._wrangle_object( msg, metamsg )
+        # Basic sanity check
+        try:
+            np.int64( obj['diaobjectid'] )
+        except Exception as ex:
+            self.countlogger.error( f"Got an alert with diaObject.diaObjectId={obj['diaobjectid']} "
+                                    f"(type {type(obj['diaobjectid'])}), which isn't "
+                                    f"a 64-bit integer.  Skipping this alert!  Exception: {ex}" )
+            return None
 
-        sources = [ cls._wrangle_diasource( msg['diaSource'], metamsg, msg ) ]
-        ext = cls._wrangle_diasource_extra( msg['diaSource'], metamsg, msg )
+        # TODO : more sanity checks.
+        
+        sources = [ self._wrangle_diasource( msg['diaSource'], metamsg, msg ) ]
+        ext = self._wrangle_diasource_extra( msg['diaSource'], metamsg, msg )
         sources_extra = [] if ext is None else [ ext ]
 
         if ( 'prvDiaSources' in msg ) and ( msg['prvDiaSources'] is not None ):
-            sources.extend( [ cls._wrangle_diasource( p, metamsg, msg ) for p in msg['prvDiaSources'] ] )
-            sources_extra.extend( [ cls._wrangle_diasource_extra( p, metamsg, msg )
+            sources.extend( [ self._wrangle_diasource( p, metamsg, msg ) for p in msg['prvDiaSources'] ] )
+            sources_extra.extend( [ self._wrangle_diasource_extra( p, metamsg, msg )
                                     for p in msg['prvDiaSources'] if p is not None ] )
 
         forcedsources = []
         forcedsources_extra = []
         if ( 'prvDiaForcedSources' in msg ) and ( msg['prvDiaForcedSources'] is not None ):
-            forcedsources.extend( [ cls._wrangle_diaforcedsource( p, metamsg, msg )
+            forcedsources.extend( [ self._wrangle_diaforcedsource( p, metamsg, msg )
                                     for p in msg['prvDiaForcedSources'] ] )
-            forcedsources_extra.extend( [ cls._wrangle_diaforcedsource_extra( p, metamsg, msg )
+            forcedsources_extra.extend( [ self._wrangle_diaforcedsource_extra( p, metamsg, msg )
                                           for p in msg['prvDiaForcedSources'] if p is not None ] )
 
         if any( ( f in msg and f is not None ) for f in [ 'cutoutDifference', 'cutoutScience', 'cutoutTemplate' ] ):
@@ -595,6 +605,9 @@ class BrokerConsumer:
             metamsg = messagebatch[i]
             msg = metamsg['msg']
             stuff = self._wrangle_all_standard_lsst_fields( metamsg, msg )
+            if stuff is None:
+                # It was a bad alert that we're going to skip
+                continue
             if stuff['object'] is not None:
                 objects.append( stuff['object'] )
             sources.extend( stuff['sources'] )

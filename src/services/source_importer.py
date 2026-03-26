@@ -277,8 +277,6 @@ class SourceImporter:
         else:
             with dbcon.cursor.copy( f"COPY {temptable}({','.join(writefields)}) FROM STDIN" ) as pgcopy:
                 for row in mongocursor:
-                    # This is probably inefficient.  Generator to list to tuple.  python makes
-                    #   writing this easy, but it's probably doing multiple gratuitous memory copies
                     # ****
                     if 'psfflux' in fields:
                         if ( ( row['psfflux'] is None ) or
@@ -292,6 +290,8 @@ class SourceImporter:
                             jsondump = simplejson.dumps( row['psfflux'], allow_nan=True )
                             strio.write( f"simplejson: {jsondump}" )
                     # ****
+                    # This is probably inefficient.  Generator to list to tuple.  python makes
+                    #   writing this easy, but it's probably doing multiple gratuitous memory copies
                     data = [ None if row[f] is None
                              else simplejson.dumps(row[f], ignore_nan=True) if isinstance( row[f], dict )
                              else row[f]
