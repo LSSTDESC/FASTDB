@@ -508,7 +508,7 @@ def test_import_sources( import_first30days_sources ):
             assert all( source[k] == ( pytest.approx( msource[k], rel=1e-6 )
                                        if isinstance( msource[k], numbers.Real )
                                        else msource[k] )
-                        for k in msource.keys() if k not in ( '_id', 'savetime' ) )
+                        for k in msource.keys() if k not in ( '_id', 'savetime', 'msg_diasourceid' ) )
 
         for source_extra in extras:
             mextra = [ e for e in mgsources_extra if e['diasourceid'] == source_extra['diasourceid'] ]

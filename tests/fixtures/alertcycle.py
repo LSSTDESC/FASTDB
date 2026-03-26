@@ -308,7 +308,7 @@ def fully_do_alerts_90days_sent_received_and_imported( barf, procver_collection,
     from services.source_importer import SourceImporter
     mongodb_collection_base = 'fastdb_alertcycle_test'
     try:
-        si = SourceImporter( object_base_processing_version=bpv['realtime'].id,
+        si = SourceImporter( object_base_processing_version=bpv['realtime_diaobject'].id,
                              object_position_base_processing_version=bpv['realtime_diaobject_position_60000'].id,
                              source_base_processing_version=bpv['realtime_diasource'].id,
                              forcedsource_base_processing_version=bpv['realtime_diaforcedsource'].id,

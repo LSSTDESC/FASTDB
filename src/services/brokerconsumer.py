@@ -537,7 +537,7 @@ class BrokerConsumer:
             return None
 
         # TODO : more sanity checks.
-        
+
         sources = [ self._wrangle_diasource( msg['diaSource'], metamsg, msg ) ]
         ext = self._wrangle_diasource_extra( msg['diaSource'], metamsg, msg )
         sources_extra = [] if ext is None else [ ext ]
