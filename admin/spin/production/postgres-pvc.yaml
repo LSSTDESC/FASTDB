@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: desc-fastdb-postgres-pvc-20260224
+  name: desc-fastdb-postgres-pvc-20260319a
   namespace: desc-fastdb
 spec:
   accessModes:

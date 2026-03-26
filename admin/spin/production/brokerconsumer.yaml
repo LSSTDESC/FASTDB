@@ -33,7 +33,7 @@ spec:
       affinity: {}
       containers:
       - name: brokerconsumer
-        image: registry.nersc.gov/m1727/raknop/fastdb-shell:20260225b
+        image: registry.nersc.gov/m1727/raknop/fastdb-shell:20260325
         env:
         - name: MONGODB_HOST
           value: mongodb
@@ -77,6 +77,10 @@ spec:
               key: mongodb_alert_reader_password
               name: secrets
               optional: false
+        - name: GOOGLE_CLOUD_PROJECT
+          value: fastdb-ingest
+        - name: GOOGLE_APPLICATION_CREDENTIALS
+          value: /secrets/pittgooglekey.json
         imagePullPolicy: IfNotPresent
         resources: {}
         securityContext:

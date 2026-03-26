@@ -43,7 +43,7 @@ spec:
       - env:
         - name: POSTGRES_DATA_DIR
           value: /var/lib/postgresql/data
-        image: registry.nersc.gov/m1727/raknop/fastdb-postgres:20260224
+        image: registry.nersc.gov/m1727/raknop/fastdb-postgres:20260319
         imagePullPolicy: IfNotPresent
         name: postgres
         resources: {}
@@ -82,7 +82,7 @@ spec:
       volumes:
       - name: postgres
         persistentVolumeClaim:
-          claimName: desc-fastdb-postgres-pvc-20260224
+          claimName: desc-fastdb-postgres-pvc-20260319a
       - name: secrets
         secret:
           defaultMode: 292

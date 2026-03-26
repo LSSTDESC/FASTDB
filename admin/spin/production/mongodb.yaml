@@ -49,7 +49,8 @@ spec:
           name: mongodb-datadir
       containers:
       - name: mongodb
-        image: registry.nersc.gov/m1727/raknop/fastdb-mongodb:20260224
+        image: registry.nersc.gov/m1727/raknop/fastdb-mongodb:20260319
+        imagePullPolicy: IfNotPresent
         env:
         - name: MONGODB_HOST
           value: mongodb
@@ -93,7 +94,6 @@ spec:
               key: mongodb_alert_reader_password
               name: secrets
               optional: false
-        imagePullPolicy: Always
         resources: {}
         securityContext:
           allowPrivilegeEscalation: false
