@@ -112,7 +112,7 @@ RUN cd /etc/postgresql/15/main \
  && mv postgresql.conf.new postgresql.conf
  
 
-ENV POSTGRES_DATA_DIR=/var/lib/postgresql/data
+ENV POSTGRES_DATA_DIR=/var/lib/postgresql/data/pgdata
 
 # ======================================================================
 FROM conf AS postgres

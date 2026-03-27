@@ -4,10 +4,10 @@
 pgbackrest --stanza=fastdb restore --delta
 
 # Create standby signal file
-touch /var/lib/postgresql/data/standby.signal
+touch /var/lib/postgresql/data/pgdata/standby.signal
 
 # Configure restore_command
-cat >> /var/lib/postgresql/data/postgresql.auto.conf <<EOF
+cat >> /var/lib/postgresql/data/pgdata/postgresql.auto.conf <<EOF
 restore_command = 'pgbackrest --stanza=fastdb archive-get %f %p'
 recovery_target_timeline = 'latest'
 EOF

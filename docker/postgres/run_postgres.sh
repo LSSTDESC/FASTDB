@@ -1,14 +1,13 @@
 #!/bin/bash
-
 if [ ! -f $POSTGRES_DATA_DIR/PG_VERSION ]; then
     echo "Running initdb in $POSTGRES_DATA_DIR"
     /usr/lib/postgresql/15/bin/initdb -U postgres --pwfile=/secrets/pgpasswd $POSTGRES_DATA_DIR
-    if [ "$FASTDB_ARCHIVE_ENABLED" = "true" ]; then
-        /usr/lib/postgresql/15/bin/pg_ctl -o "-c listen_addresses='' -c wal_level=replica -c archive_mode=on -c archive_timeout=300 -c archive_command='pgbackrest --stanza=fastdb archive-push \"%p\"'" -D $POSTGRES_DATA_DIR start
-    else
-        /usr/lib/postgresql/15/bin/pg_ctl -o "-c listen_addresses=''" -D $POSTGRES_DATA_DIR start
-    fi
-
+    # if [ "$FASTDB_ARCHIVE_ENABLED" = "true" ]; then
+    #     /usr/lib/postgresql/15/bin/pg_ctl -o "-c listen_addresses='' -c wal_level=replica -c archive_mode=on -c archive_timeout=300 -c archive_command='pgbackrest --stanza=fastdb archive-push \"%p\"'" -D $POSTGRES_DATA_DIR start
+    # else
+    #     /usr/lib/postgresql/15/bin/pg_ctl -o "-c listen_addresses=''" -D $POSTGRES_DATA_DIR start
+    # fi
+    /usr/lib/postgresql/15/bin/pg_ctl -o "-c listen_addresses=''" -D $POSTGRES_DATA_DIR start
     psql --command "CREATE DATABASE fastdb OWNER postgres"
     psql --command "CREATE EXTENSION q3c" fastdb
     psql --command "CREATE EXTENSION pgcrypto" fastdb
@@ -22,9 +21,9 @@ if [ ! -f $POSTGRES_DATA_DIR/PG_VERSION ]; then
     /usr/lib/postgresql/15/bin/pg_ctl -D $POSTGRES_DATA_DIR stop
 
     # pgBackRest stanza creation and initial base backup (first init only)
+    echo "current $FASTDB_ARCHIVE_ENABLED"
     if [ "$FASTDB_ARCHIVE_ENABLED" = "true" ]; then
         /usr/lib/postgresql/15/bin/pg_ctl -o "-c listen_addresses='' -c wal_level=replica -c archive_mode=on -c archive_timeout=300 -c archive_command='pgbackrest --stanza=fastdb archive-push \"%p\"'" -D $POSTGRES_DATA_DIR start
-
         # Wait for S3 buckets to be ready (created by create-buckets job)
         echo "Waiting for S3 buckets to be ready..."
         for i in $(seq 1 60); do

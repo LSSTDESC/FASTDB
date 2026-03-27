@@ -2,12 +2,12 @@
 # Usage: helm install fastdb ./helm/fastdb -f ./helm/fastdb/values-slac.yaml --set global.namespace=your-namespace
 
 global:
-  namespace: fastdb-slac  # Override with --set global.namespace=ccosta-dev
+  namespace: rearmstr-dev  # Override with --set global.namespace=ccosta-dev
   environment: dev
 
   # GitHub Container Registry
-  imageRegistry: "ghcr.io/fifteen3"
-  imageTag: "latest"
+  imageRegistry: "ghcr.io/rearmstr"
+  imageTag: "test20251201"
   imagePullPolicy: Always
   imagePullSecrets:
     - name: ghcr-secret
@@ -24,18 +24,18 @@ volumes:
 # Secrets - should be overridden or managed externally
 secrets:
   postgres:
-    password: "changeme"
-    roPassword: "changeme"
-    replicatorPassword: "changeme"
-  secretKey: "changeme"
+    password: "fragile"
+    roPassword: "readonly1234"
+    replicatorPassword: "repl1c4t0r"
+  secretKey: "fragilesecretkey"
 
   mongodb:
     adminUser: "admin"
-    adminPassword: "changeme"
+    adminPassword: "fragile"
     readerUser: "alertreader"
-    readerPassword: "changeme"
+    readerPassword: "reader"
     writerUser: "alertwriter"
-    writerPassword: "changeme"
+    writerPassword: "writer"
 
 # PostgreSQL with WAL archiving and LoadBalancer
 postgres:
@@ -55,16 +55,18 @@ postgres:
     type: LoadBalancer
     annotations:
       metallb.io/address-pool: sdf-services
-
-  # WAL archiving for replication
-  walArchive:
+  
+  pgbackrest:
     enabled: true
-    size: 20Gi
-    accessMode: ReadWriteMany
+    repo1:
+      endpoint: minio-site1
+    repo2:
+      enabled: true
+      endpoint: minio-site2
 
 # Standby not enabled by default for SLAC
 postgresStandby:
-  enabled: false
+  enabled: true
 
 # MongoDB disabled for SLAC (postgres-only setup)
 mongodb:
@@ -88,19 +90,10 @@ mailhog:
 
 # Database migrations
 createdb:
-  enabled: true
+  enabled: false
 
-# WAL webserver for replication
-walWebserver:
-  enabled: true
-  replicas: 1
-
-  ingress:
-    enabled: true
-    host: desc-fastdb.slac.stanford.edu
-    path: /fastdb-wal
-    annotations:
-      nginx.ingress.kubernetes.io/proxy-body-size: "100m"
-    tls:
-      - hosts:
-          - desc-fastdb.slac.stanford.edu
+minio:
+  enabled: true  
+  credentials:
+    accessKey: minioadmin
+    secretKey: minioadmin

@@ -23,7 +23,13 @@ spec:
       initContainers:
       - name: volume-mount-hack
         image: busybox
-        command: ["sh", "-c", "chown 100:108 /pgdata"]
+        command:
+          - sh
+          - -c
+          - |
+            mkdir -p /pgdata/pgdata
+            chown -R 100:108 /pgdata
+            chmod 700 /pgdata/pgdata
         securityContext:
           runAsUser: 0
         volumeMounts:
@@ -46,7 +52,7 @@ spec:
         {{- end }}
         env:
         - name: POSTGRES_DATA_DIR
-          value: /var/lib/postgresql/data
+          value: /var/lib/postgresql/data/pgdata
         {{- if .Values.postgres.pgbackrest.enabled }}
         - name: FASTDB_ARCHIVE_ENABLED
           value: "true"

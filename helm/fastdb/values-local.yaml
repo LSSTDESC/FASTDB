@@ -2,7 +2,7 @@
 # Usage: helm install fastdb ./helm/fastdb -f ./helm/fastdb/values-local.yaml
 
 global:
-  namespace: fastdb-local
+  namespace: rearmstr-dev
   environment: local
 
   # Images built by docker-compose and loaded into Kind via kind load.
