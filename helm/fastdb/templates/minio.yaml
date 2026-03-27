@@ -6,7 +6,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: minio-site1
-  namespace: {{ .Values.global.namespace }}
+  namespace: {{ include "fastdb.namespace" . }}
   labels:
     app: minio-site1
 spec:
@@ -65,7 +65,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: minio-site1
-  namespace: {{ .Values.global.namespace }}
+  namespace: {{ include "fastdb.namespace" . }}
 spec:
   type: {{ .Values.minio.site1.service.type }}
   selector:
@@ -89,7 +89,7 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: minio-site1-data
-  namespace: {{ .Values.global.namespace }}
+  namespace: {{ include "fastdb.namespace" . }}
 spec:
   accessModes: [ReadWriteOnce]
   {{- if .Values.volumes.storageClass }}
@@ -107,7 +107,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: minio-site2
-  namespace: {{ .Values.global.namespace }}
+  namespace: {{ include "fastdb.namespace" . }}
   labels:
     app: minio-site2
 spec:
@@ -166,7 +166,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: minio-site2
-  namespace: {{ .Values.global.namespace }}
+  namespace: {{ include "fastdb.namespace" . }}
 spec:
   type: {{ .Values.minio.site2.service.type }}
   selector:
@@ -190,7 +190,7 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: minio-site2-data
-  namespace: {{ .Values.global.namespace }}
+  namespace: {{ include "fastdb.namespace" . }}
 spec:
   accessModes: [ReadWriteOnce]
   {{- if .Values.volumes.storageClass }}
@@ -209,7 +209,7 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: create-buckets
-  namespace: {{ .Values.global.namespace }}
+  namespace: {{ include "fastdb.namespace" . }}
 spec:
   backoffLimit: 10
   template:
