@@ -758,7 +758,9 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
     # ltcvsdf = pandas.DataFrame( rows, columns=cols )
 
     #   Because pandas.DataFrame only allows a single dtype in the constructor,
-    #   we have to do it the long way.
+    #   we can't just pass a list or dictionary of types, and instead have
+    #   to go from what we have to pandas Serieses, and the paste those
+    #   Serieses into a DataFrame.  This function does that.
 
     ltcvsdf = laboriously_construct_pandas( rows, cols,
                                             int64cols=['diaforcedsourceid', 'diasourceid', 'visit',
