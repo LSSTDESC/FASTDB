@@ -71,7 +71,7 @@ def test_get_object_infos( set_of_lightcurves, procver_collection ):
     assert info.index.values.tolist() == [ 200, 201, 202 ]
     assert set( info.keys() ) == { 'ra', 'dec' }
 
-    # Test passing base_procver_ids
+    # Test passing base_procvers
     with pytest.raises( ValueError, match="Must supply a position processing.version with base_procvers" ):
         info  = ltcv.get_object_infos( [ roots[i]['root'].id for i in [0, 1, 2] ], return_format='pandas',
                                        base_procvers=[ bpvs[i].id
@@ -199,10 +199,18 @@ def compare_ltcv_to_expected( srcdf, frcdf, patdf,
     else:
         assert len(expected_root_ids) == 1
 
+    assert 'forced_diaobjectid' not in srcdf.columns
     if expected_diaobjectids is not None:
-        assert set( patdf.diaobjectid.values ) == set( expected_diaobjectids )
-        assert set( srcdf.diaobjectid.values ).issubset( set( expected_diaobjectids ) )
-        assert set( frcdf.diaobjectid.values ).issubset( set( expected_diaobjectids ) )
+        assert ( set( patdf[ ~pandas.isna( patdf.source_diaobjectid) ].source_diaobjectid.values )
+                      == set( expected_diaobjectids ) )
+        assert ( set( patdf[ ~pandas.isna( patdf.forced_diaobjectid) ].forced_diaobjectid.values )
+                      == set( expected_diaobjectids ) )
+        assert ( set( srcdf[ ~pandas.isna( srcdf.source_diaobjectid) ].source_diaobjectid.values )
+                      == set( expected_diaobjectids ) )
+        assert ( set( frcdf[ ~pandas.isna( frcdf.source_diaobjectid) ].source_diaobjectid.values )
+                 .issubset( expected_diaobjectids ) )
+        assert ( set( frcdf[ ~pandas.isna( frcdf.forced_diaobjectid) ].forced_diaobjectid.values )
+                 .issubset( expected_diaobjectids ) )
 
     src_bpvs = procver.base_procvers( 'diasource' )
     frc_bpvs = procver.base_procvers( 'diaforcedsource' )
@@ -302,7 +310,7 @@ def compare_ltcv_to_expected( srcdf, frcdf, patdf,
             assert row.diasourceid == dat['src'].diasourceid
             assert 'diaforcedsourceid' not in dir(row)
             assert row.visit == dat['src'].visit
-            assert row.diaobjectid == dat['src'].diaobjectid
+            assert row.source_diaobjectid == dat['src'].diaobjectid
             assert row.band == dat['src'].band
             assert row.isdet == 1
             assert row.flux == pytest.approx( dat['src'].psfflux, rel=1e-6 )
@@ -331,7 +339,7 @@ def compare_ltcv_to_expected( srcdf, frcdf, patdf,
                      else ( row.diasourceid == dat['src'].diasourceid ) )
             assert row.diaforcedsourceid == dat['frc'].diaforcedsourceid
             assert row.visit == dat['frc'].visit
-            assert row.diaobjectid == dat['frc'].diaobjectid
+            assert row.forced_diaobjectid == dat['frc'].diaobjectid
             assert row.isdet == ( 1 if dat['src'] is not None else 0 )
             assert row.flux == pytest.approx( dat['frc'].psfflux, rel=1e-6 )
             assert row.fluxerr == pytest.approx( dat['frc'].psffluxerr, rel=1e-6 )
@@ -367,8 +375,7 @@ def compare_ltcv_to_expected( srcdf, frcdf, patdf,
                      else ( row.diaforcedsourceid == dat['frc'].diaforcedsourceid ) )
             if dat['src'] is not None:
                 assert row.isdet == 1
-                assert row.diaobjectid == ( dat['src'].diaobjectid if dat['frc'] is None
-                                            else dat['frc'].diaobjectid )
+                assert row.source_diaobjectid == dat['src'].diaobjectid
                 assert row.visit == dat['src'].visit
                 assert row.band == dat['src'].band
                 if include_base_procver:
@@ -399,7 +406,7 @@ def compare_ltcv_to_expected( srcdf, frcdf, patdf,
 
             if dat['frc'] is not None:
                 assert row.ispatch == 0
-                assert row.diaobjectid == dat['frc'].diaobjectid
+                assert row.forced_diaobjectid == dat['frc'].diaobjectid
                 assert row.visit == dat['frc'].visit
                 assert row.band == dat['frc'].band
                 assert row.flux == pytest.approx( dat['frc'].psfflux, rel=1e-6 )
@@ -838,8 +845,8 @@ def test_many_object_ltcvs( procver_collection, set_of_lightcurves ):
                 # Again, the <NA> vs. None thing makes this more complicated
                 assert ( ( subpd[col] == np.array( subjs[col] ) )
                          |
-                         ( pandas.isna( subpd[col] ) &
-                           np.array( [ i is None for i in subjs[col] ] ) ) ).all()
+                         ( pandas.isna( subpd[col] ) & np.array( [ i is None  for i in subjs[col] ] ) )
+                        ).all()
 
     # make sure that if we ask using the right diaobjectid, we get the same things back
     srcs = ltcv.many_object_ltcvs( pvs['pv2'].id, [200, 202], return_format='pandas', which='detections',
@@ -854,16 +861,18 @@ def test_many_object_ltcvs( procver_collection, set_of_lightcurves ):
                               set_of_lightcurves=roots, procver_collection=procver_collection )
 
 
-    # But we get nothing back if we ask for the wrong diaobjectid
-    srcs2 = ltcv.many_object_ltcvs( pvs['pv2'].id, [0, 2 ], return_format='pandas', which='detections',
+    # If we ask for a diaobjectid from a different processing version, we'll get
+    #   back the ones that match the processing version we asked for
+    srcs2 = ltcv.many_object_ltcvs( pvs['pv2'].id, [0, 2], return_format='pandas', which='detections',
                                     include_base_procver=True )
     forced2 = ltcv.many_object_ltcvs( pvs['pv2'].id, [0, 2], return_format='pandas', which='forced',
                                       include_base_procver=True )
     df2 = ltcv.many_object_ltcvs( pvs['pv2'].id, [0, 2], return_format='pandas', which='patch',
                                   include_base_procver=True )
-    assert len(srcs2) == 0
-    assert len(forced2) == 0
-    assert len(df2) == 0
+    compare_ltcv_to_expected( srcs2, forced2, df2, expected_roots=[0, 2], expected_diaobjectids=[200, 202],
+                              procver=pvs['pv2'], include_base_procver=True,
+                              all_roots_in_srcdf=True, all_roots_in_frcdf=True,
+                              set_of_lightcurves=roots, procver_collection=procver_collection )
 
     # test mjd_now; first, make sure that the current dataframes have things later than the mjd_now we're going to test
     assert not ( srcs.index.get_level_values( level='mjd' ) <= 60041. ).all()
@@ -930,6 +939,40 @@ def test_many_object_ltcvs( procver_collection, set_of_lightcurves ):
                               procver=pvs['pv2'], include_base_procver=True, include_source_positions=True,
                               all_roots_in_srcdf=True, all_roots_in_frcdf=True,
                               set_of_lightcurves=roots, procver_collection=procver_collection )
+
+
+    # Test passing a table
+    with db.DBCon() as dbcon:
+        for isroot in [ False, True ]:
+            dbcon.execute( "DROP TABLE IF EXISTS tmp_test_ltcv" )
+            if isroot:
+                dbcon.execute( "CREATE TEMPORARY TABLE tmp_test_ltcv( rootid uuid )" )
+                dbcon.execute( "INSERT INTO tmp_test_ltcv VALUES(%(r)s)", { 'r': roots[0]['root'].id } )
+                dbcon.execute( "INSERT INTO tmp_test_ltcv VALUES(%(r)s)", { 'r': roots[1]['root'].id } )
+            else:
+                dbcon.execute( "CREATE TEMPORARY TABLE tmp_test_ltcv( diaobjectid bigint )" )
+                dbcon.execute( "INSERT INTO tmp_test_ltcv VALUES(200)" )
+                dbcon.execute( "INSERT INTO tmp_test_ltcv VALUES(201)" )
+
+        srcs = ltcv.many_object_ltcvs( pvs['pv2'].id, objids_table='tmp_test_ltcv', dbcon=dbcon,
+                                       return_format='pandas', which='detections',
+                                       include_base_procver=True, include_source_positions=True )
+        forced = ltcv.many_object_ltcvs( pvs['pv2'].id, objids_table='tmp_test_ltcv', dbcon=dbcon,
+                                         return_format='pandas', which='forced',
+                                         include_base_procver=True, include_source_positions=True )
+        df = ltcv.many_object_ltcvs( pvs['pv2'].id, objids_table='tmp_test_ltcv', dbcon=dbcon,
+                                     return_format='pandas', which='patch',
+                                     include_base_procver=True, include_source_positions=True )
+        for field in [ 'det_ra', 'det_dec' ]:
+            assert not any( srcs[field].isna() )
+            assert not any( forced[ forced.isdet == True ][field].isna() )
+            assert all( forced[ forced.isdet == False ][field].isna() )
+            assert not any( df[ df.isdet == True ][field].isna() )
+            assert all( df[ df.isdet == False ][field].isna() )
+        compare_ltcv_to_expected( srcs, forced, df, expected_roots=[0, 1], expected_diaobjectids=[200, 201, 2011],
+                                  procver=pvs['pv2'], include_base_procver=True, include_source_positions=True,
+                                  all_roots_in_srcdf=True, all_roots_in_frcdf=True,
+                                  set_of_lightcurves=roots, procver_collection=procver_collection )
 
 
 # There is another test of ltcv_object_search that uses loaded SNANA data

@@ -17,6 +17,25 @@ import util
 from util import FDBLogger, laboriously_construct_pandas
 
 
+def _is_objids_table_rootid( objids_table, dbcon ):
+    q = sql.SQL( "SELECT column_name FROM information_schema.columns "
+                 "WHERE table_name={table_name}" ).format( table_name=objids_table )
+    rows, _cols = dbcon.execute( q )
+    if len(rows) == 0:
+        raise RuntimeError( f"Could not find objids table {objids_table}" )
+    cols = { r[0] for r in rows }
+    if 'rootid' in cols:
+        if 'diaobjectid' in cols:
+            FDBLogger.warning( f"Both rootid and diaobjectid are in {objids_table}, using rootid" )
+        obj_is_root = True
+    elif 'diaobjectid' in cols:
+        obj_is_root = False
+    else:
+        raise RuntimeError( f"Could not find column diaobjectid nor rootid in table {objids_table}" )
+
+    return obj_is_root
+
+
 def get_object_infos( objids=None, objids_table=None, processing_version=None, position_processing_version=None,
                       base_procvers=None, columns=None, return_format='json', dbcon=None ):
     """Get information from the diaobject table.
@@ -115,21 +134,7 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None, p
             raise ValueError( "objids_table requires dbcon" )
         if objids is not None:
             raise ValueError( "objids_table and objids cannot be used together" )
-        with db.DBCon( dbcon ) as con:
-            q = sql.SQL( "SELECT column_name FROM information_schema.columns "
-                         "WHERE table_name={table_name}" ).format( table_name=objids_table )
-            rows, _cols = con.execute( q )
-            if len(rows) == 0:
-                raise RuntimeError( f"Could not find objids table {objids_table}" )
-            cols = { r[0] for r in rows }
-            if 'rootid' in cols:
-                if 'diaobjectid' in cols:
-                    FDBLogger.warning( f"Both rootid and diaobjectid are in {objids_table}, using rootid" )
-                obj_is_root = True
-            elif 'diaobjectid' in cols:
-                obj_is_root = False
-            else:
-                raise RuntimeError( f"Could not find column diaobjectid nor rootid in table {objids_table}" )
+        obj_is_root = _is_objids_table_rootid( objids_table, dbcon )
     elif objids is None:
         raise ValueError( "must pass either objids or objids_table" )
     else:
@@ -284,10 +289,10 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None, p
 
 
 def many_object_ltcvs( processing_version='default', objids=None, objids_table=None,
-                       bands=None, which='patch', include_base_procver=False, include_source_positions=False,
+                       bands=None, which='patch', include_base_procver=False, include_obj_base_procver_id=False,
+                       include_source_positions=False,
                        use_weighted_source_positions=False, always_use_weighted_source_positions=False,
-                       return_format='json',
-                       return_object_info=False, object_processing_version=None, position_processing_version=None,
+                       return_format='json', return_object_info=False, position_processing_version=None,
                        mjd_now=None, dbcon=None ):
     """Get lightcurves for objects.
 
@@ -307,7 +312,7 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
          found.  If uuids, then the diaobjectids found will be the ones
          that match the photometry with the right processing_version.
 
-      objid_table : str, default None
+      objids_table : str, default None
          If not None, then this is the name of a table (probably a
          temporary table) that has the object ids and/or root object ids
          already loaded into it in the columns "diaobjectid" or
@@ -337,6 +342,14 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
          of the base processing versions of the object for sources and
          forced sources respectively (or NaN if not defined).
 
+      include_base_procver_id : bool, default False
+         Two more columns.
+
+      include_obj_base_procver_id : bool, default False
+         Probably don't use this.  (It's used internally by
+         many_object_ltcvs.  Only use this if you really know what
+         you're doing, and Rob isn't even sure that he does.)
+
       include_source_positions : bool, default False
          If True, there will be additional columns (ra, dec, raerr,
          decerr, ra_dec_cov) that have the positions that were found for
@@ -348,16 +361,12 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
       return_object_info : bool, default False
          If True, you get a second return.  See Returns below
 
-      object_processing_version : str or uuid, default None
-         The processing version for getting object info.  YOU REALLY
-         WANT TO GET THIS RIGHT, otherwise the object info table won't
-         have what you expect in it.  Defaults to the same as
-         processing_version, which is often what you want, but not
-         always.  Ignored if return_object_info is False.
-
       position_processing_version : str or uuid, default None
-         The processing version for getting object position info.
-         Defaults to the same as object_processing_version.
+         The processing version for getting object position info.  Not
+         used if return_object_info is False, or if
+         always_use_weighted_source_positions is True.  Defaults to the
+         same as processing_version.  WARNING: just... worry.  If
+         processing versions get complicated, this gets hard.
 
       use_weighted_source_positions : bool, default False
          See Returns below
@@ -395,10 +404,10 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
         return_format is 'pandas', then you get back a DataFrame with
         indexes (rootid, mjd).  The columns are:
 
-            diaobjectid : bigint, the diaObjectId associated with this diasource
-                          or diaforcedsource (*see below)
             diasourceid : bigint, the diaSoruceId, or null
             [ diafordedsourceid : bigint or null; only included if which isn't 'detections' ]
+            source_diaobjectid : bigint or None, the diaObjectId associated with this diasource
+            [ forced_diaobjectid : bigint or None, the diaObjectId associated with this forcedsource ]
             visit : bigint
             band : str
             flux : float
@@ -483,8 +492,8 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
             raise ValueError( "objids_table requires dbcon" )
         if objids is not None:
             raise ValueError( "objids_table and objids cannot be used together" )
+        objids_are_root = _is_objids_table_rootid( objids_table, dbcon )
     else:
-        objids_table = 'tmp_objids'
         if objids is None:
             raise ValueError( "objids is required" )
         if not util.isSequence( objids ):
@@ -528,31 +537,35 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
 
     with db.DBCon( dbcon ) as dbcon:
         pvid = db.ProcessingVersion.procver_id( processing_version, dbcon=dbcon )
-        if return_object_info:
-            objpvid = ( db.ProcessingVersion.procver_id( object_processing_version, dbcon=dbcon )
-                        if object_processing_version is not None else pvid )
+        pospvid = None
+        if return_object_info and ( not always_use_weighted_source_positions ):
             pospvid = ( db.ProcessingVersion.procver_id( position_processing_version, dbcon=dbcon )
-                        if position_processing_version is not None else objpvid )
+                        if position_processing_version is not None else pvid )
 
+        # Make a first pass and extract ALL diaobjectids from all base
+        #   processing versions that share the same roots as the
+        #   requested objects. Even *within* a base processing version
+        #   there are multiple diaOjbects in the lsst alert stream, and
+        #   what's more, the same diaSource will at different time
+        #   (original alert, previous soruces in later alerts) be
+        #   associated with different diaObjects.
+        # However, also, we can't really be sure the actual processing
+        #   versions of objects for the diasources in the processing
+        #   version the user asked for, so just yank them all, and then
+        #   trust the join to the source table to filter out the
+        #   irrelevant ones.
         if objids is not None:
-            # For efficiency, we're going to make a first pass and extract just the object ids.
-            # If these are root ids, then we can't be sure which diaobjectid will correspond
-            # to them, so we will pull the *all* out.  (Think about this.  It's possible we
-            # could be doing something with the object's processing version, but consisder
-            # all the complicated messy cases.)
-
-            q = sql.SQL( "CREATE TEMP TABLE tmp_objids( diaobjectid bigint, rootid uuid )" )
-            dbcon.execute( q, explain=False )
+            objids_table = 'tmp_objids'
             if objids_are_root:
                 q = sql.SQL( textwrap.dedent(
                     """\
-                    INSERT INTO tmp_objids (
-                    SELECT diaobjectid, rootid FROM diaobject
+                    SELECT diaobjectid, rootid
+                    INTO TEMP TABLE tmp_objids
+                    FROM diaobject
                     WHERE rootid=ANY(%(roots)s)
-                    )
                     """
-                ) )
-                dbcon.execute_nofetch( q, { 'roots': objids } )
+                ) ).format()
+                dbcon.execute_nofetch( q, {'roots': objids} )
             else:
                 q = sql.SQL( "CREATE TEMP TABLE temp_input_diaobject( diaobjectid bigint )" )
                 dbcon.execute( q, explain=False )
@@ -561,61 +574,66 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                 with dbcon.cursor.copy( q ) as copier:
                     for objid in objids:
                         copier.write_row( [ objid ] )
-                # Join all other objectids that are from the same roots
-                #   and base processing verson as these.  Frustratingly,
-                #   in the LSST alert stream, there were cases where the
-                #   same physical object had different diaObjectIds.
-                #   There were even cases, in previous source arrays,
-                #   where the same diaSource was associated with
-                #   different values of diaObjectId at different times.
-                #   (Not within the same alert, but in different alerts
-                #   that had the same diaSourceId in the previous
-                #   sources array.)
+
                 q = sql.SQL( textwrap.dedent(
                     """\
-                    INSERT INTO tmp_objids( diaobjectid, rootid ) (
-                      SELECT o.diaobjectid, o.rootid FROM temp_input_diaobject t
-                      INNER JOIN diaobject ot ON ot.diaobjectid=t.diaobjectid
-                      INNER JOIN diaobject o ON ot.rootid=o.rootid
-                                            AND ot.base_procver_id=o.base_procver_id
-                    )
+                    SELECT o.diaobjectid, o.rootid
+                    INTO TEMP TABLE tmp_objids
+                    FROM temp_input_diaobject t
+                    INNER JOIN diaobject ot ON t.diaobjectid=ot.diaobjectid
+                    INNER JOIN diaobject o ON ot.rootid=o.rootid
                     """ ) )
                 dbcon.execute( q )
+        else:
+            actual_objids_table = f'{objids_table}_withboth'
+            dbcon.execute( sql.SQL( "DROP TABLE IF EXISTS {t}" ).format( t=sql.Identifier(actual_objids_table) ) )
+            if objids_are_root:
+                q = sql.SQL( textwrap.dedent(
+                    """\
+                    SELECT o.diaobjectid, o.rootid
+                    INTO TEMP TABLE {desttable}
+                    FROM {sourcetable} x
+                    INNER JOIN diaobject o ON x.rootid=o.rootid
+                    """ ) ).format( desttable=sql.Identifier( actual_objids_table ),
+                                    sourcetable=sql.Identifier( objids_table ) )
+                dbcon.execute( q )
+            else:
+                q = sql.SQL( textwrap.dedent(
+                    """\
+                    SELECT o.diaobjectid, o.rootid
+                    INTO TEMP TABLE {desttable}
+                    FROM {sourcetable} x
+                    INNER JOIN diaobject ot ON t.diaobjectid=x.diaobjectid
+                    INNER JOIN diaobject o ON t.rootid=o.rootid
+                    """ ) ).format( desttable=sql.Identifier(actual_objids_table),
+                                    sourcetable=sql.Identifier(objids_table) )
+                dbcon.execute( q )
+            objids_table = actual_objids_table
 
         # Extract detections
-        pos_fields = sql.SQL( "det_ra double precision, det_dec double precision, "
-                              "det_raerr real, det_decerr real, det_ra_dec_cov real,"
-                              if must_get_source_positions
-                              else "" )
-        procver_fields = sql.SQL( "base_procver_s text, " if include_base_procver else "" )
-        q = sql.SQL( textwrap.dedent(
-            """\
-            CREATE TEMP TABLE tmp_sources( rootid uuid, diasourceid bigint, diaobjectid bigint, visit bigint,
-                                           mjd double precision, band text, flux real, fluxerr real,
-                                           {pos_fields} {procver_fields}
-                                           isdet bool )
-            """
-        ) ).format( pos_fields=pos_fields, procver_fields=procver_fields )
-        dbcon.execute( q, explain=False )
-
         pos_fields = sql.SQL( "ra AS det_ra, dec AS det_dec, raerr AS det_raerr, "
                               "decerr AS det_decerr, ra_dec_cov AS det_ra_dec_cov, "
                               if must_get_source_positions
                               else "" )
         procver_fields = sql.SQL( "p.description AS base_procver_s, " if include_base_procver else "" )
+        dbcon.execute( "DROP TABLE IF EXISTS tmp_sources" )
         q = sql.SQL( textwrap.dedent(
             """\
-            /*+ IndexScan(s idx_diasource_diaobjectid) */
-            INSERT INTO tmp_sources
+            /*+ IndexScan(s idx_diasource_diaobjectid)
+                IndexScan(ot idx_diaobject_rootid)
+            */
             SELECT DISTINCT ON (t.rootid, s.visit)
-              t.rootid, s.diasourceid, s.diaobjectid, s.visit, s.midpointmjdtai AS mjd,
-              s.band, s.psfflux AS flux, s.psffluxerr AS fluxerr, {pos_fields} {procver_fields}
-              TRUE as isdet
+              t.rootid, s.diasourceid, s.diaobjectid AS source_diaobjectid, s.visit, s.midpointmjdtai AS mjd,
+              s.band, s.psfflux AS flux, s.psffluxerr AS fluxerr, o.base_procver_id AS source_obj_bpv,
+              {pos_fields} {procver_fields} TRUE as isdet
+            INTO tmp_sources
             FROM {objids_table} t
-            INNER JOIN diasource s ON s.diaobjectid=t.diaobjectid
+            INNER JOIN diaobject ot ON t.rootid=ot.rootid
+            INNER JOIN diasource s ON s.diaobjectid=ot.diaobjectid
             INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id
                                                  AND pv._table='diasource'
                                                  AND pv.procver_id={procver}
+            INNER JOIN diaobject o ON s.diaobjectid=o.diaobjectid
             """
         ) ).format( procver=pvid, objids_table=sql.Identifier(objids_table),
                     pos_fields=pos_fields, procver_fields=procver_fields )
@@ -637,31 +655,25 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
 
         else:
             # Extract forced photometry if necessary
-            procver_fields = sql.SQL( "base_procver_f text, " if include_base_procver else "" )
-            q = sql.SQL( textwrap.dedent(
-                """\
-                CREATE TEMP TABLE tmp_forced( rootid uuid, diaforcedsourceid bigint,
-                                              diaobjectid bigint, visit bigint,
-                                              mjd double precision, band text,
-                                              flux real, fluxerr real, {procver_fields}
-                                              isdet bool )
-                """
-            ) ).format( procver_fields=procver_fields )
-            dbcon.execute( q, explain=False )
             procver_fields = sql.SQL( "p.description as base_procver_f, " if include_base_procver else "" )
+            dbcon.execute( "DROP TABLE IF EXISTS tmp_forced" )
             q = sql.SQL( textwrap.dedent(
                 """\
-                /*+ IndexScan(s idx_diaforcedsource_diaobjectid) */
-                INSERT INTO tmp_forced
+                /*+ IndexScan(s idx_diaforcedsource_diaobjectid)
+                    IndexScan(ot idx_diaobject_rootid)
+                */
                 SELECT DISTINCT ON (t.rootid, s.visit)
-                  t.rootid, s.diaforcedsourceid, s.diaobjectid, s.visit, s.midpointmjdtai AS mjd,
-                  s.band, s.psfflux AS flux, s.psffluxerr AS fluxerr, {procver_fields}
-                  FALSE as isdet
+                  t.rootid, s.diaforcedsourceid, s.diaobjectid AS forced_diaobjectid, s.visit, s.midpointmjdtai AS mjd,
+                  s.band, s.psfflux AS flux, s.psffluxerr AS fluxerr, o.base_procver_id AS forced_obj_bpv,
+                  {procver_fields} FALSE as isdet
+                INTO tmp_forced
                 FROM {objids_table} t
-                INNER JOIN diaforcedsource s ON s.diaobjectid=t.diaobjectid
+                INNER JOIN diaobject ot ON t.rootid=ot.rootid
+                INNER JOIN diaforcedsource s ON s.diaobjectid=ot.diaobjectid
                 INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id
                                                      AND pv._table='diaforcedsource'
                                                      AND pv.procver_id={procver}
+                INNER JOIN diaobject o ON s.diaobjectid=o.diaobjectid
                 """
             ) ).format( procver=pvid, procver_fields=procver_fields, objids_table=sql.Identifier(objids_table) )
             if include_base_procver:
@@ -687,8 +699,11 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                 SELECT CASE WHEN f.rootid IS NULL THEN s.rootid ELSE f.rootid END AS rootid,
                        f.diaforcedsourceid,
                        s.diasourceid,
+                       f.forced_diaobjectid,
+                       s.source_diaobjectid,
+                       f.forced_obj_bpv,
+                       s.source_obj_bpv,
                        {procver_fields}
-                       CASE WHEN f.diaobjectid IS NULL THEN s.diaobjectid ELSE f.diaobjectid END AS diaobjectid,
                        CASE WHEN f.visit IS NULL THEN s.visit ELSE f.visit END AS visit,
                        CASE WHEN f.mjd IS NULL THEN s.mjd ELSE f.mjd END AS mjd,
                        CASE WHEN f.band IS NULL THEN s.band ELSE f.band END AS band,
@@ -703,14 +718,27 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                 """ ) ).format( pos_fields=pos_fields, procver_fields=procver_fields )
             rows, cols = dbcon.execute( q )
 
-        # We might also need to get object info
+        # We might also need to get object info.  Get all diaobjects
+        #    that match the rootids the caller asked for, from any base
+        #    processing version from any diaobjectid from any source or
+        #    forced source that we found.
         if return_object_info:
+            sbpvdex = cols.index( 'source_obj_bpv' )
+            bpvs = set( r[sbpvdex] for r in rows )
+            if which != 'detections':
+                fbpvdex = cols.index( 'forced_obj_bpv' )
+                bpvs = bpvs.union( set( r[fbpvdex] for r in rows ) )
+            bpvs = list( bpvs )
+
             columns = [ 'diaobjectid', 'rootid' ]
             if include_base_procver:
-                columns.extend( [ 'obj_base_procver', 'pos_base_procver' ] )
+                columns.append( 'obj_base_procver' )
             if not always_use_weighted_source_positions:
                 columns.extend( [ 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ] )
-            objdf = get_object_infos( objids_table=objids_table, processing_version=objpvid,
+                if include_base_procver:
+                    columns.append( 'pos_base_procver' )
+
+            objdf = get_object_infos( objids_table=objids_table, base_procvers=bpvs,
                                       position_processing_version=pospvid, columns=columns,
                                       return_format='pandas', dbcon=dbcon )
 
@@ -830,6 +858,11 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
             ltcvsdf = ltcvsdf[ ltcvsdf.ispatch==0 ]
         ltcvsdf.drop( 'ispatch', axis='columns', inplace=True )
 
+    if not include_obj_base_procver_id:
+        ltcvsdf.drop( 'source_obj_bpv', axis='columns', inplace=True )
+        if which != 'detections':
+            ltcvsdf.drop( 'forced_obj_bpv', axis='columns', inplace=True )
+
     if return_format == 'pandas':
         ltcvsdf.set_index( ['rootid', 'mjd'], inplace=True )
         if return_object_info:
@@ -842,12 +875,15 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
         for objid in ltcvsdf.rootid.unique():
             subf = ltcvsdf[ ltcvsdf.rootid==objid  ]
             thisretval = { 'rootid': subf.rootid.iloc[0],
-                           'diaobjectid': list( subf.diaobjectid.values ),
                            'visit': list( subf.visit.values ),
-                           'diasourceid': list( subf.diasourceid.values )
+                           'diasourceid': list( subf.diasourceid.values ),
+                           'source_diaobjectid': [ None if pandas.isna(i) else i
+                                                   for i in subf.source_diaobjectid.values ]
                           }
             if which != 'detections':
                 thisretval['diaforcedsourceid'] = list( subf.diaforcedsourceid.values )
+                thisretval['forced_diaobjectid'] = [ None if pandas.isna(i) else i
+                                                     for i in subf.forced_diaobjectid.values ]
             thisretval.update( {'mjd': list( subf.mjd.values ),
                                 'band': list( subf.band.values ),
                                 'flux': list( subf.flux.values ),
@@ -883,7 +919,7 @@ def object_ltcv( processing_version='default', diaobjectid=None, bands=None, whi
                  include_base_procver=False, include_source_positions=False,
                  use_weighted_source_positions=False, always_use_weighted_source_positions=False,
                  return_format='json',
-                 return_object_info=False, object_processing_version=None, position_processing_version=None,
+                 return_object_info=False, position_processing_version=None,
                  mjd_now=None, dbcon=None ):
     """Get the lightcurve for an object.
 
@@ -955,7 +991,6 @@ def object_ltcv( processing_version='default', diaobjectid=None, bands=None, whi
                               include_base_procver=include_base_procver,
                               include_source_positions=include_source_positions,
                               return_object_info=return_object_info,
-                              object_processing_version=object_processing_version,
                               position_processing_version=position_processing_version,
                               use_weighted_source_positions=use_weighted_source_positions,
                               always_use_weighted_source_positions=always_use_weighted_source_positions,
@@ -2170,15 +2205,11 @@ def get_hot_ltcvs( processing_version, position_processing_version=None,
     with db.DBCon( dbcon ) as con:
         try:
             procver = util.procver_id( processing_version, dbcon=con.con )
-            if object_processing_version is None:
-                objprocver = procver
-            else:
-                objprocver = util.procver_id( object_processing_version, dbcon=con.con )
 
             if always_use_weighted_source_positions:
                 posprocver = None
             elif position_processing_version is None:
-                posprocver = objprocver
+                posprocver = procver
             else:
                 posprocver = util.procver_id( position_processing_version, dbcon=con.con )
 
@@ -2201,25 +2232,26 @@ def get_hot_ltcvs( processing_version, position_processing_version=None,
             q += sql.SQL( "ORDER BY o.rootid\n" )
             con.execute_nofetch( q, { 'procver': procver, 't0': mjd0, 't1': mjd_now } )
 
+            # Second: get the lightcurves
+            df = many_object_ltcvs( processing_version=procver, objids_table='tmp_objids',
+                                    return_format='pandas', mjd_now=mjd_now, dbcon=con,
+                                    which='patch' if source_patch else 'forced',
+                                    include_source_positions=include_source_positions,
+                                    use_weighted_source_positions=use_weighted_source_positions,
+                                    always_use_weighted_source_positions=always_use_weighted_source_positions
+                                   )
+
             # Second: pull out the object info for these objects
             columns = [ 'diaobjectid', 'rootid' ]
             if include_object_positions:
                 columns.extend( [ 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ] )
             objdf = get_object_infos( objids_table='tmp_objids', return_format='pandas', columns=columns, dbcon=con,
-                                      processing_version=objprocver, position_processing_version=posprocver )
+                                      position_processing_version=posprocver )
 
             # Third: get the host stuff -- hosts aren't currently implemented, and probably won't be
             #   until a few years from now when DR1 is out
             hostdf = None
 
-            # Fourth: get the lightcurves
-            df = many_object_ltcvs( processing_version=procver, objids_table='tmp_objids',
-                                    return_format='pandas', mjd_now=mjd_now, dbcon=con,
-                                    which='patch' if source_patch else 'forced',
-                                    include_source_positions=inclue_source_positions,
-                                    use_weighted_source_positions=use_weighted_source_positions,
-                                    always_use_weighted_source_positions=always_use_weighted_source_positions
-                                   )
             if ( ( always_use_weighted_source_positions ) or
                  ( use_weighted_source_positions and ( not include_object_positions ) )
                 ):
