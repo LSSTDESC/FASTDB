@@ -24,25 +24,33 @@ import pymongo
 import util
 from util import FDBLogger
 
-# These next three are for debugging.  They are used in DBCon.__init__.
-# For normal use, they should be False, as they bloat the logs a lot.
-# They will be ignored if the logging level of FGDBLogger is not DEBUG.
+# These next three are for debugging, as sometimes it's very useful to
+# see the actual queries being sent to the database, and to see what
+# parts of them are taking a long time in the database.  THe actual
+# messages are sent at the DEBUG level, so if FDBLogger isn't set to
+# that level, you won't see the messages.
 #
-# ALSO : use of alwaysexplain and alwaysanalyze makes us susceptible to
-# SQL injection attacks, so we REALLY don't want these set in production
-# databases!!!!!!!  They are for debugging purposes only.  Do not try
-# this at home.  Do not eat, multilate, or spindle.  Consult your doctor
-# if you do not feel extreme anxiety when using these.
+# For normal use, they should be False, as they bloat the logs a lot.
+# What's more, they will cause some failres.  (E.g., it turns out you
+# can't EXPLAIN a DROP, so having _alwaysexplain on causes some of our
+# tests to fail.)
+#
+# BUT, ALSO, CRUCIALLY : use of alwaysexplain and alwaysanalyze makes us
+# susceptible to SQL injection attacks, so we REALLY don't want these
+# set in production databases!!!!!!!  They are for debugging purposes
+# only.  Do not try this at home.  Do not eat, multilate, or spindle.
+# Consult your doctor if you do not feel extreme anxiety when using
+# these.
 #
 # explaining can slow down queries as sometimes it seems that
 # postgres really wants to think about what it's doing before giving you
 # a query plan (I don't know why; is it a pg_hint_plan thing?)
-#
-# We should replace them with configurable options.
 _echoqueries = False
-_dumpmongopipeline = False
 _alwaysexplain = False
 _alwaysanalyze = False
+
+# The next one is aspirational, not yet implemnted.
+_dumpmongopipeline = False
 
 # The tables here should be in the order they safe to drop.
 # (Insofar as it's safe to drop all your tables....)

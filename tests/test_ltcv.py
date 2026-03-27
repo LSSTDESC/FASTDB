@@ -66,13 +66,40 @@ def test_get_object_infos( set_of_lightcurves, procver_collection ):
     # The None/<NA> values aren't comparing as equal, probably because of the whole "all nan tests are False" thing
     assert ( info2.loc[ [ 200, 201, 202 ], : ] == info.loc[ [ 200, 201, 202], : ] ).all().all()
 
-
-
     info = ltcv.get_object_infos( [ 200, 201, 202 ], columns=['ra', 'dec'], processing_version='pvc_pv2',
                                   return_format='pandas' )
     assert info.index.values.tolist() == [ 200, 201, 202 ]
     assert set( info.keys() ) == { 'ra', 'dec' }
 
+    # Test passing base_procver_ids
+    with pytest.raises( ValueError, match="Must supply a position processing.version with base_procvers" ):
+        info  = ltcv.get_object_infos( [ roots[i]['root'].id for i in [0, 1, 2] ], return_format='pandas',
+                                       base_procvers=[ bpvs[i].id
+                                                       for i in [ 'realtime_diaobject', 'bpv1_diaobject' ] ] )
+    info  = ltcv.get_object_infos( [ roots[i]['root'].id for i in [0, 1, 2] ], return_format='pandas',
+                                   base_procvers=[ bpvs[i].id for i in [ 'realtime_diaobject', 'bpv1_diaobject' ] ],
+                                   position_processing_version='realtime' )
+    assert set( info.rootid ) == set( roots[i]['root'].id for i in [0, 1, 2] )
+    assert set( info.index.values ) == { 0, 1, 2, 100 }
+    for objid in [ 0, 1, 2 ]:
+        assert not pandas.isna( info.loc[ objid, 'ra' ] )
+        assert not pandas.isna( info.loc[ objid, 'dec' ] )
+    for col in [ 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ]:
+        assert pandas.isna( info.loc[ 100, col ] )
+
+    info = ltcv.get_object_infos(  [ roots[i]['root'].id for i in [0, 1, 2] ], return_format='pandas',
+                                   base_procvers=[ bpvs[i].id for i in [ 'realtime_diaobject', 'bpv2_diaobject' ] ],
+                                   position_processing_version='pvc_pv2' )
+    assert set( info.rootid ) == set( roots[i]['root'].id for i in [0, 1, 2] )
+    assert set( info.index.values ) == { 0, 1, 2, 200, 201, 2011, 202 }
+    for objid in [ 200, 201, 202 ]:
+        assert not pandas.isna( info.loc[ objid, 'ra' ] )
+        assert not pandas.isna( info.loc[ objid, 'dec' ] )
+    for objid in [ 0, 1, 2, 2011 ]:
+        for col in [ 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ]:
+            assert pandas.isna( info.loc[ objid, col ] )
+
+    # Test passing an object id table
     with db.DBCon() as dbcon:
         dbcon.execute( "CREATE TEMP TABLE tempthing(diaobjectid bigint)", explain=False )
         dbcon.execute( "INSERT INTO tempthing(diaobjectid) VALUES ( 200 )" )

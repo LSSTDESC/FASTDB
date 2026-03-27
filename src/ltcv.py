@@ -4,7 +4,6 @@ import datetime
 import time
 import io
 import numbers
-import uuid
 import textwrap
 import json   # noqa: F401
 
@@ -18,8 +17,8 @@ import util
 from util import FDBLogger, laboriously_construct_pandas
 
 
-def get_object_infos( objids=None, objids_table=None, processing_version=None,
-                      position_processing_version=None, columns=None, return_format='json', dbcon=None ):
+def get_object_infos( objids=None, objids_table=None, processing_version=None, position_processing_version=None,
+                      base_procvers=None, columns=None, return_format='json', dbcon=None ):
     """Get information from the diaobject table.
 
     Parameters
@@ -50,7 +49,16 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None,
         will be assumed to be the same as the diaobject processing
         version.  If both processing_version and position_processing
         version is None, then you will not get back positions, those
-        columns will all be null.
+        columns will all be null.  (Note: if you pass base_procvers and
+        also ask for any position columns (which is the default), then
+        this is required.)
+
+      base_procvers : list of uuid or None
+        You usually do not want to specify this.  They're used
+        internally by other functions in this module.  If you find that
+        you really need it (e.g. if you are Rob reading this six months
+        later and wondering what the heck you were thinking six months
+        ago), bug Rob to document them.
 
       columns : list of str, default None
         If given only include these columns in the returned data.  If
@@ -78,10 +86,17 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None,
         keys are the columns names, and whose values are lists all of
         the same length.
 
+        NOTE THAT it's possible you will get back more diaobjectids than
+        you asked for if you specified a list of diaobjectids!  This is
+        because sometimes there is more than one diaobjectid in the same
+        processing version with the same rootid.  (It's also possible
+        that you will get back fewer if you didn't give the right object
+        processing version, or if the diaobjectids don't exist.)
+
         Columns included come from the diaobject and diaboject_position tables:
 
            diaobjectid         | bigint           | Globally unique (across all proc vers) diaobject id [Index]
-           rootid              | uuid             | root_diaobject id for this object
+           rootid              | uuid             | root_diaobject id for this object; this is true object identifier
            obj_base_procver    | uuid             | base processing version for the diaobject
            pos_base_procver    | uuid             | base processing version for the diaobject_position
            ra                  | double precision | ra
@@ -91,6 +106,9 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None,
            ra_dec_cov          | real             | covariance between ra and dec
 
     """
+
+    if return_format not in ( 'pandas', 'json' ):
+        raise ValueError( f"return_format must be pandas or json, not {return_format}" )
 
     if objids_table is not None:
         if dbcon is None:
@@ -119,6 +137,7 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None,
             objids = [ objids ]
         if all( isinstance( o, numbers.Integral ) for o in objids ):
             # Make sure they're int, because if it's something like np.int64, postgres may choke
+            #  (...really??)
             objids = [ int(o) for o in objids ]
             obj_is_root = False
         else:
@@ -136,20 +155,20 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None,
         if len(objids) == 0:
             raise ValueError( "no objids requested" )
 
-    pv = db.ProcessingVersion.procver_id( processing_version if processing_version is not None else 'default' )
-    if position_processing_version is None:
-        if pv is not None:
-            pospv = pv
-        elif processing_version is not None:
-            pospv = db.ProcessingVersion.procver_id( processing_version )
-        else:
-            # Pick a random UUID, this will effectively null out the join to the diaobject_position table
-            pospv = uuid.uuid4()
+    objpvid = None
+    if base_procvers is not None:
+        if not util.isSequence( base_procvers ):
+            raise TypeError( "base_procvers must be a list of uuids" )
+        base_procvers = [ util.asUUID(v) for v in base_procvers ]
+        if processing_version is not None:
+            FDBLogger.warning( "Both processing_version and base_procvers given, ignoring processing_version" )
     else:
-        pospv = db.ProcessingVersion.procver_id( position_processing_version )
+        objpvid = db.ProcessingVersion.procver_id( processing_version
+                                                   if processing_version is not None
+                                                   else "default" )
 
-    if return_format not in ( 'pandas', 'json' ):
-        raise ValueError( f"return_format must be pandas or json, not {return_format}" )
+    pospvid = ( objpvid if position_processing_version is None
+                else db.ProcessingVersion.procver_id( position_processing_version ) )
 
     objcols = [ 'diaobjectid', 'rootid', 'obj_base_procver' ]
     poscols = [ 'pos_base_procver', 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ]
@@ -167,7 +186,6 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None,
             unknown = set(columns) - set( objcols ).union( poscols )
             raise ValueError( f"Unknown Columns: {unknown}" )
         if 'diaobjectid' not in columns:
-            columns = columns.copy()
             columns.insert( 0, 'diaobjectid' )
 
     for c in columns:
@@ -180,66 +198,73 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None,
                                else sql.Identifier( 'p', 'description' ) + sql.SQL( " AS " ) + sql.Identifier( c ) )
     sqlcolumns = sql.SQL(',').join( c for c in sqlcolumns )
 
+    if gotsomepos and ( pospvid is None ):
+        raise ValueError( "Must supply a position processing_version with base_procvers" )
+
+    if ( not gotsomepos ) and ( position_processing_version is not None ):
+        FDBLogger.warning( "Didn't ask for positon columns, but provided position processing version; "
+                           "ignoring the position processing version." )
+
     with db.DBCon( dbcon ) as dbcon:
+        if obj_is_root:
+            q = sql.SQL( "/*+ IndexScan(o idx_diaobject_rootid)\n" )
+        else:
+            q = sql.SQL( "/*+ IndexScan(o idx_diaobject_diaobjectid)\n" )
+
         if gotsomepos:
-            positionclause = sql.SQL( textwrap.dedent(
+            q += sql.SQL( "    IndexScan(p1 idx_position_diaobjectid)\n" )
+
+        q +=  sql.SQL( textwrap.dedent(
+            """\
+            */
+            SELECT DISTINCT ON(o.diaobjectid) {sqlcolumns}
+            FROM diaobject o
+            INNER JOIN base_processing_version b ON b.id=o.base_procver_id
+            """ ) ).format( sqlcolumns=sqlcolumns )
+        if base_procvers is None:
+            q += sql.SQL( textwrap.dedent(
                 """\
-                SELECT DISTINCT ON(p1.diaobjectid) p1.*, b1.description
-                FROM diaobject_position p1
-                INNER JOIN base_procver_of_procver p1pv ON p1.base_procver_id=p1pv.base_procver_id
-                                                       AND p1pv._table='diaobject_position'
-                                                       AND p1pv.procver_id={pospv}
-                INNER JOIN base_processing_version b1 ON p1pv.base_procver_id=b1.id
-                ORDER BY p1.diaobjectid, p1pv.priority DESC
-                """ ) ).format( pospv=pospv )
+                INNER JOIN base_procver_of_procver pv ON b.id=pv.base_procver_id
+                                                     AND pv.procver_id={objpvid}
+                """ ) ).format( objpvid=objpvid )
+        else:
+            q += sql.SQL( "                          AND b.id=ANY({base_procvers})\n"
+                         ).format( base_procvers=base_procvers )
+
+        if gotsomepos:
+            q += sql.SQL( textwrap.dedent(
+                """\
+                LEFT JOIN (
+                  SELECT DISTINCT ON(p1.diaobjectid) p1.*, b1.description
+                  FROM diaobject o1
+                  INNER JOIN diaobject_position p1 ON o1.diaobjectid=p1.diaobjectid
+                  INNER JOIN base_processing_version b1 ON p1.base_procver_id=b1.id
+                  INNER JOIN base_procver_of_procver pv1 ON b1.id=pv1.base_procver_id
+                                                        AND pv1.procver_id={pospvid}
+                  ORDER BY p1.diaobjectid, pv1.priority DESC
+                ) p ON o.diaobjectid=p.diaobjectid
+                """ ) ).format( pospvid=pospvid )
 
         if objids_table is not None:
-            q = sql.SQL( textwrap.dedent(
+            q += sql.SQL( textwrap.dedent(
                 """\
-                /*+ IndexScan(o idx_diaobject_diaobjectid)
-                    IndexScan(p1 idx_diaobject_position_diaobjectid)
-                */
-                SELECT DISTINCT ON(o.diaobjectid) {sqlcolumns}
-                FROM {objids_table} t
-                INNER JOIN diaobject o ON o.{joincolumn}=t.{joincolumn}
-                INNER JOIN base_procver_of_procver pv ON o.base_procver_id=pv.base_procver_id
-                                                     AND pv._table='diaobject'
-                                                     AND pv.procver_id={pv}
-                INNER JOIN base_processing_version b ON b.id=pv.base_procver_id
-                """ ) ).format( sqlcolumns=sqlcolumns,
-                                objids_table=sql.Identifier(objids_table),
-                                joincolumn=sql.Identifier(joincolumn),
-                                pv=pv )
-            if gotsomepos:
-                q += sql.SQL( "LEFT JOIN (\n" )
-                q += positionclause
-                q += sql.SQL( ") p ON p.diaobjectid=o.diaobjectid\n" )
-            q += sql.SQL( "ORDER BY o.diaobjectid" )
+                INNER JOIN {objids_table} t ON {ojoin}={tjoin}
+                """ ) ).format( objids_table=sql.Identifier(objids_table),
+                                ojoin=sql.Identifier( 'o', joincolumn ),
+                                tjoin=sql.Identifier( 't', joincolumn ) )
         else:
-            q = sql.SQL( textwrap.dedent(
+            q += sql.SQL( textwrap.dedent(
                 """\
-                /*+ IndexScan(o idx_diaobject_diaobjectid)
-                    IndexScan(p1 idx_diaobject_position_diaobjectid)
-                */
-                SELECT DISTINCT ON(o.diaobjectid) {sqlcolumns}
-                FROM diaobject o
-                INNER JOIN base_procver_of_procver pv ON o.base_procver_id=pv.base_procver_id
-                                                     AND pv._table='diaobject'
-                                                     AND pv.procver_id={pv}
-                INNER JOIN base_processing_version b ON b.id=pv.base_procver_id
-                """ ) ).format( sqlcolumns=sqlcolumns, pv=pv )
-            if gotsomepos:
-                q += sql.SQL( "LEFT JOIN (\n" )
-                q += positionclause
-                q += sql.SQL( ") p ON p.diaobjectid=o.diaobjectid\n" )
-            q += sql.SQL( "WHERE o.{joincolumn}=ANY(%(objids)s)\n"
-                          "ORDER BY o.diaobjectid" ).format( joincolumn=sql.Identifier(joincolumn) )
+                WHERE {ojoin}=ANY({objids})
+                """ ) ).format( ojoin=sql.Identifier( 'o', joincolumn ), objids=objids )
+
+        q += sql.SQL( "ORDER BY o.diaobjectid\n" )
 
         # ****
         # TEMP DEBUGGING, TAKE THIS OUT
         # dbcon.echoqueries = True
         # ****
-        rows, cols = dbcon.execute( q, { 'objids': objids } )
+        rows, cols = dbcon.execute( q )
         # Next line deals with what I think is a dysfunctional psycopg return
         cols = columns if len(rows) == 0 else cols
         if return_format == 'pandas':
@@ -1943,8 +1968,8 @@ def object_search( processing_version='default', ignore_object_processing_versio
     return rval
 
 
-def get_hot_ltcvs( processing_version, object_processing_version=None, position_processing_version=None,
-                   include_object_positions=True, include_source_positions=False,
+def get_hot_ltcvs( processing_version, position_processing_version=None,
+                   include_object_positions=True, include_source_positions=False, include_processing_versions=False,
                    use_weighted_source_positions=False, always_use_weighted_source_positions=False,
                    detected_since_mjd=None, detected_in_last_days=None,
                    mjd_now=None, source_patch=True, dbcon=None ):
@@ -1955,11 +1980,6 @@ def get_hot_ltcvs( processing_version, object_processing_version=None, position_
       processing_version: string
         The description of the processing version, or processing version
         alias, to use for searching diasource and diaforcedsource tables.
-
-      object_processing_version: string, default None
-        The description of the processing version, or processing version
-        alias, to use for searching for diaobjects.  If None, will be
-        the same as processing_version.
 
       position_processing_version: string, default None
         Ignored if always_use_weighted_source_positions is True or if
@@ -1981,13 +2001,20 @@ def get_hot_ltcvs( processing_version, object_processing_version=None, position_
       always_use_weighted_source_positions: bool, default False
         Don't bother searching for object positions, just use weighted
         source positions.  Implies use_weighted_source_positions, and
-        implies include_object_positions=False.
+        implies include_object_positions=False.  (These positions may
+        be better than the ones you get from the diaobject_position table,
+        at least for realtime sources.  The case may be different in the
+        future when we've loaded in actual data releases.)
 
       include_object_positions: bool, default True
         Include positions from the diaobject_position table.
 
       include_source_positions: bool, default False
         Include positions from the diasource table.
+
+      include_processing_versions : bool, default False
+        If true, then returned objects will include the names of the
+        base processing versions of various things.
 
       detected_since_mjd: float, default None
         If given, will search for all objects detected (i.e. with an
@@ -2003,7 +2030,13 @@ def get_hot_ltcvs( processing_version, object_processing_version=None, position_
         What "now" is.  By default, this does an MJD conversion of
         datetime.datetime.now(), which is usually what you want.  But,
         for simulations or reconstructions, you might want to pretend
-        it's a different time.
+        it's a different time.  (This isn't a perfect recreation of the
+        past.  This is just a cut on the MJDs of objects to return.  It
+        will not return *what the database knew* when it really was
+        mjd_now, but *everything you've asked for with mjd ≤ mjd_now*.
+        In practice, the database won't get some information until some
+        time (at least seconds, but potentially days or, in edge cases,
+        more) after the time of the observation.
 
       source_patch : bool, default True
         If False, returned light curves only return fluxes from the
@@ -2033,24 +2066,39 @@ def get_hot_ltcvs( processing_version, object_processing_version=None, position_
 
         ltcvdf: pandas.DataFrame
            A dataframe with lightcurves. It is sorted and indexed by
-           rootid (uuid) and mjd (float), and has columns:
+           rootid (uuid) and mjd (float).  rootid is what you should
+           use to uniquely identify objects, and is what FASTDB
+           considers to be the identifier of an object.  rootid
+           transcends processing version; all diaobjects in all
+           processing versions at the same point on the sky will
+           all have the same rootids.
 
-             diasourceid -- the diaSourceId for this source
-             diaobjectid -- the diaObjectId that FASTDB thinks is associated with this source (*see below)
+           ltcvdf  has columns:
+
+             diasourceid -- the diaSourceId for this source, or None
+             diaforcedsourceid -- the diaForcedSourceId for this source, or None
+             diaobjectid -- the diaObjectId that FASTDB thinks is associated with this (forced)source (*see below)
              visit -- the visit number
              mjd -- the MJD of the obervation
              band -- the filter (u, g, r, i, z, or Y)
-             flux -- the PSF flux in nJy
+             flux -- the PSF flux in nJy, from the diaForcedSource if it exists, otherwise the diaSource
              fluxerr -- uncertaintly on psfflux in nJy
              istdet -- bool, True if this was detected (i.e. has an associated source)
              ispatch -- bool, True if this data is from a source rather than a forced source
                         (only included if source_patch is True)
+
+             Optional columns (will only be present if certain things
+               are True when this function is called):
+
              det_ra, det_dec, det_raerr, det_decerr, det_ra_dec_cov -- float
                   The positions from the diaSource.  These will only be included if
                   include_source_positions is True.  They will all be null if
                   source_patch is False.  They will be null for points that
                   have forced photometry but no detection photometry in the database.
 
+             source_base_procver -- string, the name of the base processing version of this diasource, or None
+             forcedsource_base_procver -- str/None, the name of the base processsing version of this diaforcedsource
+             obj_base_procver -- string, the name of the base processing version of this diaobject
 
         objinfo: pandas.DataFrame
            Information about the objects.  Sorted and indexed by
@@ -2120,65 +2168,87 @@ def get_hot_ltcvs( processing_version, object_processing_version=None, position_
                                   - datetime.timedelta( days=lastdays ) ).mjd
 
     with db.DBCon( dbcon ) as con:
-        procver = util.procver_id( processing_version, dbcon=con.con )
-        if object_processing_version is None:
-            objprocver = procver
-        else:
-            objprocver = util.procver_id( object_processing_version, dbcon=con.con )
+        try:
+            procver = util.procver_id( processing_version, dbcon=con.con )
+            if object_processing_version is None:
+                objprocver = procver
+            else:
+                objprocver = util.procver_id( object_processing_version, dbcon=con.con )
 
-        if always_use_weighted_source_positions:
-            posprocver = None
-        elif position_processing_version is None:
-            posprocver = objprocver
-        else:
-            posprocver = util.procver_id( position_processing_version, dbcon=con.con )
+            if always_use_weighted_source_positions:
+                posprocver = None
+            elif position_processing_version is None:
+                posprocver = objprocver
+            else:
+                posprocver = util.procver_id( position_processing_version, dbcon=con.con )
 
-        # First : get a table of all root object ids that have a
-        #   detection (i.e. a diasource) in the desired time period.
+            # First : get a table of all root object ids that have a
+            #   detection (i.e. a diasource) in the desired time period.
 
-        q = ( "/*+ IndexScan(s idx_diasource_mjd) */\n"
-              "SELECT DISTINCT ON(o.rootid) o.rootid\n"
-              "INTO TEMP TABLE tmp_objids\n"
-              "FROM diasource s\n"
-              "INNER JOIN diaobject o ON s.diaobjectid=o.diaobjectid\n"
-              "INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id\n"
-              "                                     AND pv.procver_id=%(procver)s\n"
-              "WHERE s.midpointmjdtai>=%(t0)s\n" )
-        if mjd_now is not None:
-            q += "  AND s.midpointmjdtai<=%(t1)s\n"
-        # ...any reason to order?
-        # q += "ORDER BY o.rootid\n"
-        con.execute_nofetch( q, { 'procver': procver, 't0': mjd0, 't1': mjd_now } )
+            q = sql.SQL( textwrap.dedent(
+                """\
+                /*+ IndexScan(s idx_diasource_mjd) */
+                SELECT DISTINCT ON(o.rootid) o.rootid
+                INTO TEMP TABLE tmp_rootids
+                FROM diasource s
+                INNER JOIN diaobject o ON s.diaobjectid=o.diaobjectid
+                INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id
+                                                     AND pv.procver_id=%(procver)s
+                WHERE s.midpointmjdtai>=%(t0)s
+                """ ) )
+            if mjd_now is not None:
+                q += sql.SQL( "  AND s.midpointmjdtai<=%(t1)s\n" )
+            q += sql.SQL( "ORDER BY o.rootid\n" )
+            con.execute_nofetch( q, { 'procver': procver, 't0': mjd0, 't1': mjd_now } )
 
-        # Second: pull out the object info for these objects
-        columns = [ 'diaobjectid', 'rootid' ]
-        if include_object_positions:
-            columns.extend( [ 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ] )
-        objdf = get_object_infos( objids_table='tmp_objids', return_format='pandas', columns=columns, dbcon=con,
-                                  processing_version=objprocver, position_processing_version=posprocver )
+            # Second: pull out the object info for these objects
+            columns = [ 'diaobjectid', 'rootid' ]
+            if include_object_positions:
+                columns.extend( [ 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ] )
+            objdf = get_object_infos( objids_table='tmp_objids', return_format='pandas', columns=columns, dbcon=con,
+                                      processing_version=objprocver, position_processing_version=posprocver )
 
-        # Third: get the host stuff -- hosts aren't currently implemented, and probably won't be
-        #   until a few years from now when DR1 is out
-        hostdf = None
+            # Third: get the host stuff -- hosts aren't currently implemented, and probably won't be
+            #   until a few years from now when DR1 is out
+            hostdf = None
 
-        # Fourth: get the lightcurves
-        df = many_object_ltcvs( processing_version=procver, objids_table='tmp_objids',
-                                return_format='pandas', mjd_now=mjd_now, dbcon=con,
-                                which='patch' if source_patch else 'forced',
-                                include_source_positions=use_weighted_source_positions )
-        if ( ( always_use_weighted_source_positions ) or
-             ( use_weighted_source_positions and ( not include_object_positions ) )
-            ):
-            # Zero out all columns if we're always using weighted source positions,
-            #   or if we're sometimes using weighted source positions but didn't
-            #   ask for the position columns from get_object_infos
-            objdf.pos_base_procver_id = None
-            objdf.ra = None
-            objdf.dec = None
-            objdf.raerr = None
-            objdf.decerr = None
-            objdf.ra_dec_cov = None
-        if use_weighted_source_positions:
-            raise RuntimeError( "OMG ROB YOU ARE IN THE MIDDLE OF EDITING CODE" )
+            # Fourth: get the lightcurves
+            df = many_object_ltcvs( processing_version=procver, objids_table='tmp_objids',
+                                    return_format='pandas', mjd_now=mjd_now, dbcon=con,
+                                    which='patch' if source_patch else 'forced',
+                                    include_source_positions=inclue_source_positions,
+                                    use_weighted_source_positions=use_weighted_source_positions,
+                                    always_use_weighted_source_positions=always_use_weighted_source_positions
+                                   )
+            if ( ( always_use_weighted_source_positions ) or
+                 ( use_weighted_source_positions and ( not include_object_positions ) )
+                ):
+                # Zero out all columns if we're always using weighted source positions,
+                #   or if we're sometimes using weighted source positions but didn't
+                #   ask for the position columns from get_object_infos
+                objdf.pos_base_procver_id = None
+                objdf.ra = None
+                objdf.dec = None
+                objdf.raerr = None
+                objdf.decerr = None
+                objdf.ra_dec_cov = None
+            if use_weighted_source_positions:
+                raise RuntimeError( "OMG ROB YOU ARE IN THE MIDDLE OF EDITING CODE" )
 
-        return df, objdf, hostdf
+            return df, objdf, hostdf
+
+        finally:
+            # This is probably gratuitous.  However, *just in case*
+            # somebody passed a dbcon, and might try to create temp
+            # tables that have exactly the same names as the temp tables
+            # we just created, drop them for cleanliness.
+            con.execute( "DROP TABLE IF EXISTS tmp_rootids" )
+
+            # However, don't commit!  Reason: if somebody passed a dbcon
+            # in the middle of a transaction, for whatever perverse
+            # reason, we don't want to end that transaction.  If
+            # somebody passed a dbcon, then the table is already deleted
+            # for that dbcon now even without committing.  If there was
+            # no passed dbcon, then the while db.DBCon() loop will close
+            # the connection when it exits, which will automatically
+            # delete the temp tables anyway.
