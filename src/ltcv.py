@@ -288,11 +288,11 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None, p
             raise RuntimeError( "This should never happen" )
 
 
-def many_object_ltcvs( processing_version='default', objids=None, objids_table=None,
+def many_object_ltcvs( processing_version='default', objids=None, objids_table=None, return_format='json',
                        bands=None, which='patch', include_base_procver=False, include_obj_base_procver_id=False,
                        include_source_positions=False,
                        use_weighted_source_positions=False, always_use_weighted_source_positions=False,
-                       return_format='json', return_object_info=False, position_processing_version=None,
+                       return_object_info=False, include_object_positions=False, position_processing_version=None,
                        mjd_now=None, dbcon=None ):
     """Get lightcurves for objects.
 
@@ -360,6 +360,11 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
 
       return_object_info : bool, default False
          If True, you get a second return.  See Returns below
+
+      include_object_positions: bool, default False
+         Irrelevant if return_object_info is False or if
+         alwyas_use_weighted_source positions is True.  Otherwise, try
+         to get object positions from the diaobject_position table.
 
       position_processing_version : str or uuid, default None
          The processing version for getting object position info.  Not
@@ -529,16 +534,17 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
 
     # Figure out what stuff we're going to have to get
     use_weighted_source_positions = use_weighted_source_positions or always_use_weighted_source_positions
-    if use_weighted_source_positions and ( not return_object_info ):
-        FDBLogger.warning( "Asked for weighted source positions, but return_object_info was False. "
+    if use_weighted_source_positions and ( ( not return_object_info ) or ( not include_object_positions ) ):
+        FDBLogger.warning( "Asked for weighted source positions, but you didn't ask for object positions."
                            "Ignoring weighted source positions." )
         use_weighted_source_positions = False
-    must_get_source_positions = include_source_positions or use_weighted_source_positions or return_object_info
+    must_get_source_positions = ( include_source_positions or use_weighted_source_positions or
+                                  ( return_object_info and include_object_positions ) )
 
     with db.DBCon( dbcon ) as dbcon:
         pvid = db.ProcessingVersion.procver_id( processing_version, dbcon=dbcon )
         pospvid = None
-        if return_object_info and ( not always_use_weighted_source_positions ):
+        if return_object_info and include_object_positions and ( not always_use_weighted_source_positions ):
             pospvid = ( db.ProcessingVersion.procver_id( position_processing_version, dbcon=dbcon )
                         if position_processing_version is not None else pvid )
 
@@ -733,7 +739,7 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
             columns = [ 'diaobjectid', 'rootid' ]
             if include_base_procver:
                 columns.append( 'obj_base_procver' )
-            if not always_use_weighted_source_positions:
+            if include_object_positions and not always_use_weighted_source_positions:
                 columns.extend( [ 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ] )
                 if include_base_procver:
                     columns.append( 'pos_base_procver' )
@@ -755,14 +761,15 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
     #   we have to do it the long way.
 
     ltcvsdf = laboriously_construct_pandas( rows, cols,
-                                            int64cols=['diaforcedsourceid', 'diasourceid', 'diaobjectid', 'visit'],
+                                            int64cols=['diaforcedsourceid', 'diasourceid', 'visit',
+                                                       'source_diaobjectid', 'forced_diaobjectid'],
                                             floatcols=['flux', 'fluxerr', 'det_raerr', 'det_decerr', 'det_ra_dec_cov'],
                                             doublecols=['mjd', 'det_ra', 'det_dec'],
                                             boolcols=['isdet', 'ispatch'],
                                             ignore_missing_cols=True )
 
     # Update object positions if necessary
-    if use_weighted_source_positions and return_object_info:
+    if use_weighted_source_positions and return_object_info and include_object_positions:
         if always_use_weighted_source_positions:
             # Pandas is so annoying.  Things like objdf.at[ :, 'pos_base_procver'] = None was
             #   not working.  So, drop the columns first, then maybe it will work.
@@ -919,7 +926,7 @@ def object_ltcv( processing_version='default', diaobjectid=None, bands=None, whi
                  include_base_procver=False, include_source_positions=False,
                  use_weighted_source_positions=False, always_use_weighted_source_positions=False,
                  return_format='json',
-                 return_object_info=False, position_processing_version=None,
+                 return_object_info=False, include_object_positions=False, position_processing_version=None,
                  mjd_now=None, dbcon=None ):
     """Get the lightcurve for an object.
 
@@ -991,6 +998,7 @@ def object_ltcv( processing_version='default', diaobjectid=None, bands=None, whi
                               include_base_procver=include_base_procver,
                               include_source_positions=include_source_positions,
                               return_object_info=return_object_info,
+                              include_object_positions=include_object_positions,
                               position_processing_version=position_processing_version,
                               use_weighted_source_positions=use_weighted_source_positions,
                               always_use_weighted_source_positions=always_use_weighted_source_positions,
@@ -2182,9 +2190,6 @@ def get_hot_ltcvs( processing_version, position_processing_version=None,
 
     mjd0 = None
 
-    use_weighted_source_positions = use_weighted_source_positions or always_use_weighted_source_positions
-    include_object_positions = include_object_positions and ( not always_use_weighted_source_positions )
-
     if detected_since_mjd is not None:
         if detected_in_last_days is not None:
             raise ValueError( "Only specify at most one of detected_since_mjd and detected_in_last_days" )
@@ -2206,13 +2211,6 @@ def get_hot_ltcvs( processing_version, position_processing_version=None,
         try:
             procver = util.procver_id( processing_version, dbcon=con.con )
 
-            if always_use_weighted_source_positions:
-                posprocver = None
-            elif position_processing_version is None:
-                posprocver = procver
-            else:
-                posprocver = util.procver_id( position_processing_version, dbcon=con.con )
-
             # First : get a table of all root object ids that have a
             #   detection (i.e. a diasource) in the desired time period.
 
@@ -2220,7 +2218,7 @@ def get_hot_ltcvs( processing_version, position_processing_version=None,
                 """\
                 /*+ IndexScan(s idx_diasource_mjd) */
                 SELECT DISTINCT ON(o.rootid) o.rootid
-                INTO TEMP TABLE tmp_rootids
+                INTO TEMP TABLE tmp_objids
                 FROM diasource s
                 INNER JOIN diaobject o ON s.diaobjectid=o.diaobjectid
                 INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id
@@ -2232,49 +2230,26 @@ def get_hot_ltcvs( processing_version, position_processing_version=None,
             q += sql.SQL( "ORDER BY o.rootid\n" )
             con.execute_nofetch( q, { 'procver': procver, 't0': mjd0, 't1': mjd_now } )
 
-            # Second: get the lightcurves
-            df = many_object_ltcvs( processing_version=procver, objids_table='tmp_objids',
-                                    return_format='pandas', mjd_now=mjd_now, dbcon=con,
-                                    which='patch' if source_patch else 'forced',
-                                    include_source_positions=include_source_positions,
-                                    use_weighted_source_positions=use_weighted_source_positions,
-                                    always_use_weighted_source_positions=always_use_weighted_source_positions
-                                   )
+            # Second: get the lightcurves and object info
+            df, objdf = many_object_ltcvs( processing_version=procver, objids_table='tmp_objids',
+                                           return_format='pandas', mjd_now=mjd_now, dbcon=con,
+                                           which='patch' if source_patch else 'forced',
+                                           include_source_positions=include_source_positions,
+                                           use_weighted_source_positions=use_weighted_source_positions,
+                                           always_use_weighted_source_positions=always_use_weighted_source_positions,
+                                           include_object_positions=include_object_positions,
+                                           return_object_info=True
+                                          )
+            FDBLogger.error( "RAGE" )
 
-            # Second: pull out the object info for these objects
-            columns = [ 'diaobjectid', 'rootid' ]
-            if include_object_positions:
-                columns.extend( [ 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ] )
-            objdf = get_object_infos( objids_table='tmp_objids', return_format='pandas', columns=columns, dbcon=con,
-                                      position_processing_version=posprocver )
-
-            # Third: get the host stuff -- hosts aren't currently implemented, and probably won't be
-            #   until a few years from now when DR1 is out
-            hostdf = None
-
-            if ( ( always_use_weighted_source_positions ) or
-                 ( use_weighted_source_positions and ( not include_object_positions ) )
-                ):
-                # Zero out all columns if we're always using weighted source positions,
-                #   or if we're sometimes using weighted source positions but didn't
-                #   ask for the position columns from get_object_infos
-                objdf.pos_base_procver_id = None
-                objdf.ra = None
-                objdf.dec = None
-                objdf.raerr = None
-                objdf.decerr = None
-                objdf.ra_dec_cov = None
-            if use_weighted_source_positions:
-                raise RuntimeError( "OMG ROB YOU ARE IN THE MIDDLE OF EDITING CODE" )
-
-            return df, objdf, hostdf
+            return df, objdf, None
 
         finally:
             # This is probably gratuitous.  However, *just in case*
             # somebody passed a dbcon, and might try to create temp
             # tables that have exactly the same names as the temp tables
             # we just created, drop them for cleanliness.
-            con.execute( "DROP TABLE IF EXISTS tmp_rootids" )
+            con.execute( "DROP TABLE IF EXISTS tmp_objids" )
 
             # However, don't commit!  Reason: if somebody passed a dbcon
             # in the middle of a transaction, for whatever perverse
