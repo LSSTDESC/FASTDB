@@ -11,17 +11,23 @@ LABEL maintainer="Rob Knop <raknop@lbl.gov>"
 SHELL ["/bin/bash", "-c"]
 
 RUN apt-get update \
-  && DEBIAN_FRONTEND="nointeractive" apt-get -y upgrade \
-  && DEBIAN_FRONTEND="noninteractive" TZ="UTC" apt-get -y install -y --no-install-recommends \
-      postgresql-15 postgresql-client-15 pgtop libssl3 libreadline8 zlib1g netcat-openbsd \
-      libzstd1 liblz4-1 \
-      tmux emacs-nox less procps \
+  && apt-get install -y curl ca-certificates gnupg lsb-release \
+  && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /usr/share/keyrings/pgdg.gpg \
+  && echo "deb [signed-by=/usr/share/keyrings/pgdg.gpg] http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
+  && apt-get update \
+  && DEBIAN_FRONTEND="noninteractive" TZ="UTC" apt-get -y install --no-install-recommends \
+     postgresql-15 postgresql-client-15 pgbackrest pgtop libssl3 libreadline8 zlib1g netcat-openbsd \
+     libzstd1 liblz4-1 \
+     tmux emacs-nox less procps \
   && apt-get clean \
   && rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /var/lib/postgresql/data \
   && chmod 700 /var/lib/postgresql/data \
   && chown postgres:postgres /var/lib/postgresql/data
+
+RUN mkdir -p /etc/pgbackrest /var/log/pgbackrest /var/lib/pgbackrest \
+    && chown postgres:postgres /var/log/pgbackrest /var/lib/pgbackrest
 
 RUN cat /etc/locale.gen | perl -pe 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' > /etc/locale.gen.new \
     && mv /etc/locale.gen.new /etc/locale.gen
@@ -136,3 +142,14 @@ ADD run_pgdump.sh /home/pgdump/run_pgdump.sh
 
 USER postgres
 ENTRYPOINT [ "/bin/bash", "/home/pgdump/run_pgdump.sh" ]
+
+# ======================================================================
+FROM conf AS standby
+
+COPY run_standby.sh /tmp/run_standby.sh
+RUN cp /tmp/run_standby.sh /run_standby.sh && chmod 755 /run_standby.sh
+
+RUN mkdir -p /tmp/postgres_temp && chown -R postgres:postgres /tmp/postgres_temp
+
+USER postgres
+CMD ["bash", "/run_standby.sh"]

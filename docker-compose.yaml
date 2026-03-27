@@ -2,6 +2,27 @@
 # environment.
 
 services:
+  init-certs:
+    image: alpine/openssl
+    volumes:
+      - ./certs:/certs
+    entrypoint: [""]
+    command: ["/bin/sh", "-c", "if [ -f /certs/public.crt ]; then echo 'Certs already exist, skipping'; exit 0; fi && openssl genrsa -out /certs/ca.key 2048 && openssl req -new -x509 -key /certs/ca.key -out /certs/ca.crt -days 3650 -subj '/CN=MinIO-CA' && openssl genrsa -out /certs/server.key 2048 && openssl req -new -key /certs/server.key -out /certs/server.csr -subj '/CN=minio' && echo 'subjectAltName=DNS:minio-site1,DNS:minio-site2,DNS:localhost,DNS:host.docker.internal' > /certs/san.ext && openssl x509 -req -in /certs/server.csr -CA /certs/ca.crt -CAkey /certs/ca.key -CAcreateserial -out /certs/server.crt -days 3650 -sha256 -extfile /certs/san.ext && cp /certs/server.crt /certs/public.crt && cp /certs/server.key /certs/private.key && echo 'Certs generated'"]
+  create-buckets:
+    image: minio/mc
+    depends_on:
+      minio-site1:
+        condition: service_started
+      minio-site2:
+        condition: service_started
+    entrypoint: /bin/sh -c "
+      sleep 5 &&
+      mc alias set site1 https://minio-site1:9000 minioadmin minioadmin --insecure &&
+      mc alias set site2 https://minio-site2:9000 minioadmin minioadmin --insecure &&
+      mc mb --ignore-existing site1/fastdb-wal --insecure &&
+      mc mb --ignore-existing site2/fastdb-wal --insecure
+      "
+
   kafka-zookeeper:
     image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-kafka-test:${DOCKER_VERSION:-test20251201}
     build:
@@ -358,6 +379,70 @@ services:
         user: root
     working_dir: /code/tests
     entrypoint: pytest -v
+  minio-site1:
+    depends_on:
+      init-certs:
+        condition: service_completed_successfully
+    image: minio/minio
+    command: server /data --console-address ":9001" --certs-dir /certs
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio-site1-data:/data
+      - ./certs:/certs:ro
+  minio-site2:
+    depends_on:
+      init-certs:
+        condition: service_completed_successfully
+    image: minio/minio
+    command: server /data --console-address ":9001" --certs-dir /certs
+    ports:
+      - "9010:9000"
+      - "9011:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio-site2-data:/data
+      - ./certs:/certs:ro
+
+  postgres-standby:
+    depends_on:
+      create-buckets:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-postgres-standby:${DOCKER_VERSION:-test20251201}
+    environment:
+      PGBACKREST_REPO1_S3_KEY: minioadmin
+      PGBACKREST_REPO1_S3_KEY_SECRET: minioadmin
+      PGBACKREST_REPO2_S3_KEY: minioadmin
+      PGBACKREST_REPO2_S3_KEY_SECRET: minioadmin
+    build:
+      context: ./docker/postgres
+      target: standby
+      args:
+        NERSCSPIN: ${NERSCSPIN:-0}
+    volumes:
+      - type: volume
+        source: standby_data
+        target: /var/lib/postgresql/data
+      - type: bind
+        source: tests/secrets
+        target: /secrets
+        read_only: true
+      - ./certs:/certs:ro
+      - ./docker/postgres/pgbackrest.conf:/etc/pgbackrest/pgbackrest.conf:ro
+    healthcheck:
+      test: netcat -w 1 localhost 5432 || exit 1
+      interval: 5s
+      timeout: 10s
+      retries: 10
+
     
 volumes:
   postgres_data:
@@ -365,3 +450,6 @@ volumes:
   query_results:
   sessions:
   logs:
+  minio-site1-data:
+  minio-site2-data:
+  standby_data:

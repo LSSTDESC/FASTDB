@@ -23,20 +23,12 @@ spec:
       initContainers:
       - name: volume-mount-hack
         image: busybox
-        {{- if .Values.postgres.walArchive.enabled }}
-        command: ["sh", "-c", "chown 100:108 /pgdata && mkdir -p /wal-archive && chown 100:108 /wal-archive"]
-        {{- else }}
         command: ["sh", "-c", "chown 100:108 /pgdata"]
-        {{- end }}
         securityContext:
           runAsUser: 0
         volumeMounts:
         - name: postgres-data
           mountPath: /pgdata
-        {{- if .Values.postgres.walArchive.enabled }}
-        - name: wal-archive
-          mountPath: /wal-archive
-        {{- end }}
       containers:
       - name: postgres
         image: {{ include "fastdb.image" (dict "image" .Values.postgres.image "global" .Values.global) }}
@@ -55,6 +47,32 @@ spec:
         env:
         - name: POSTGRES_DATA_DIR
           value: /var/lib/postgresql/data
+        {{- if .Values.postgres.pgbackrest.enabled }}
+        - name: FASTDB_ARCHIVE_ENABLED
+          value: "true"
+        - name: PGBACKREST_REPO1_S3_KEY
+          valueFrom:
+            secretKeyRef:
+              name: pgbackrest-s3-creds
+              key: repo1-access-key
+        - name: PGBACKREST_REPO1_S3_KEY_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: pgbackrest-s3-creds
+              key: repo1-secret-key
+        {{- if .Values.postgres.pgbackrest.repo2.enabled }}
+        - name: PGBACKREST_REPO2_S3_KEY
+          valueFrom:
+            secretKeyRef:
+              name: pgbackrest-s3-creds
+              key: repo2-access-key
+        - name: PGBACKREST_REPO2_S3_KEY_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: pgbackrest-s3-creds
+              key: repo2-secret-key
+        {{- end }}
+        {{- end }}
         ports:
         - containerPort: 5432
         volumeMounts:
@@ -65,9 +83,14 @@ spec:
           readOnly: true
         - name: dshm
           mountPath: /dev/shm
-        {{- if .Values.postgres.walArchive.enabled }}
-        - name: wal-archive
-          mountPath: /wal-archive
+        {{- if .Values.postgres.pgbackrest.enabled }}
+        - name: pgbackrest-conf
+          mountPath: /etc/pgbackrest/pgbackrest.conf
+          subPath: pgbackrest.conf
+          readOnly: true
+        - name: certs
+          mountPath: /certs
+          readOnly: true
         {{- end }}
         readinessProbe:
           tcpSocket:
@@ -90,10 +113,13 @@ spec:
         emptyDir:
           medium: Memory
           sizeLimit: {{ .Values.postgres.sharedMemory }}
-      {{- if .Values.postgres.walArchive.enabled }}
-      - name: wal-archive
-        persistentVolumeClaim:
-          claimName: {{ $namespace }}-wal-archive-pvc
+      {{- if .Values.postgres.pgbackrest.enabled }}
+      - name: pgbackrest-conf
+        configMap:
+          name: pgbackrest-conf
+      - name: certs
+        secret:
+          secretName: minio-certs
       {{- end }}
 ---
 apiVersion: v1

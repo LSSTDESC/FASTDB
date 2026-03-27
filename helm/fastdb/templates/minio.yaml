@@ -1,0 +1,244 @@
+{{- if .Values.minio.enabled }}
+#
+# MinIO Site 1
+#
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio-site1
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: minio-site1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: minio-site1
+  template:
+    metadata:
+      labels:
+        app: minio-site1
+    spec:
+      containers:
+        - name: minio
+          image: minio/minio
+          command: ["minio", "server"]
+          args: ["/data", "--console-address", ":9001", "--certs-dir", "/certs"]
+          env:
+            - name: MINIO_ROOT_USER
+              value: {{ .Values.minio.credentials.accessKey | quote }}
+            - name: MINIO_ROOT_PASSWORD
+              value: {{ .Values.minio.credentials.secretKey | quote }}
+          ports:
+            - containerPort: 9000
+              name: s3
+            - containerPort: 9001
+              name: console
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: certs
+              mountPath: /certs
+              readOnly: true
+          readinessProbe:
+            tcpSocket:
+              port: 9000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: minio-site1-data
+        - name: certs
+          secret:
+            secretName: minio-certs
+            items:
+              - key: public.crt
+                path: public.crt
+              - key: private.key
+                path: private.key
+              - key: ca.crt
+                path: CAs/ca.crt
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio-site1
+  namespace: {{ .Values.global.namespace }}
+spec:
+  type: {{ .Values.minio.site1.service.type }}
+  selector:
+    app: minio-site1
+  ports:
+    - name: s3
+      port: {{ .Values.minio.site1.port }}
+      targetPort: 9000
+      {{- if eq .Values.minio.site1.service.type "NodePort" }}
+      nodePort: {{ .Values.minio.site1.service.nodePortS3 }}
+      {{- end }}
+    - name: console
+      port: {{ .Values.minio.site2.consolePort }}
+      targetPort: 9001
+      {{- if eq .Values.minio.site1.service.type "NodePort" }}
+      nodePort: {{ .Values.minio.site1.service.nodePortConsole }}
+      {{- end }}
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: minio-site1-data
+  namespace: {{ .Values.global.namespace }}
+spec:
+  accessModes: [ReadWriteOnce]
+  {{- if .Values.volumes.storageClass }}
+  storageClassName: {{ .Values.volumes.storageClass }}
+  {{- end }}
+  resources:
+    requests:
+      storage: 5Gi
+
+---
+#
+# MinIO Site 2
+#
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio-site2
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: minio-site2
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: minio-site2
+  template:
+    metadata:
+      labels:
+        app: minio-site2
+    spec:
+      containers:
+        - name: minio
+          image: minio/minio
+          command: ["minio", "server"]
+          args: ["/data", "--console-address", ":9001", "--certs-dir", "/certs"]
+          env:
+            - name: MINIO_ROOT_USER
+              value: {{ .Values.minio.credentials.accessKey | quote }}
+            - name: MINIO_ROOT_PASSWORD
+              value: {{ .Values.minio.credentials.secretKey | quote }}
+          ports:
+            - containerPort: 9000
+              name: s3
+            - containerPort: 9001
+              name: console
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: certs
+              mountPath: /certs
+              readOnly: true
+          readinessProbe:
+            tcpSocket:
+              port: 9000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: minio-site2-data
+        - name: certs
+          secret:
+            secretName: minio-certs
+            items:
+              - key: public.crt
+                path: public.crt
+              - key: private.key
+                path: private.key
+              - key: ca.crt
+                path: CAs/ca.crt
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio-site2
+  namespace: {{ .Values.global.namespace }}
+spec:
+  type: {{ .Values.minio.site2.service.type }}
+  selector:
+    app: minio-site2
+  ports:
+    - name: s3
+      port: {{ .Values.minio.site2.port }}
+      targetPort: 9000
+      {{- if eq .Values.minio.site2.service.type "NodePort" }}
+      nodePort: {{ .Values.minio.site2.service.nodePortS3 }}
+      {{- end }}      
+    - name: console
+      port: {{ .Values.minio.site2.consolePort }}
+      targetPort: 9001
+      {{- if eq .Values.minio.site2.service.type "NodePort" }}
+      nodePort: {{ .Values.minio.site2.service.nodePortConsole }}
+      {{- end }}
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: minio-site2-data
+  namespace: {{ .Values.global.namespace }}
+spec:
+  accessModes: [ReadWriteOnce]
+  {{- if .Values.volumes.storageClass }}
+  storageClassName: {{ .Values.volumes.storageClass }}
+  {{- end }}
+  resources:
+    requests:
+      storage: 5Gi
+
+---
+#
+# Bucket creation job
+# Retries until both MinIO instances are ready
+#
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: create-buckets
+  namespace: {{ .Values.global.namespace }}
+spec:
+  backoffLimit: 10
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: create-buckets
+          image: minio/mc
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              echo "Waiting for MinIO instances to be ready..."
+              for i in $(seq 1 30); do
+                mc alias set site1 https://minio-site1:{{ .Values.minio.site1.port }} \
+                  {{ .Values.minio.credentials.accessKey }} \
+                  {{ .Values.minio.credentials.secretKey }} --insecure 2>/dev/null && break
+                echo "MinIO site1 not ready, retry $i/30..."
+                sleep 5
+              done
+
+              for i in $(seq 1 30); do
+                mc alias set site2 https://minio-site2:{{ .Values.minio.site2.port }} \
+                  {{ .Values.minio.credentials.accessKey }} \
+                  {{ .Values.minio.credentials.secretKey }} --insecure 2>/dev/null && break
+                echo "MinIO site2 not ready, retry $i/30..."
+                sleep 5
+              done
+
+              mc mb --ignore-existing site1/{{ .Values.postgres.pgbackrest.repo1.bucket }} --insecure &&
+              mc mb --ignore-existing site2/{{ .Values.postgres.pgbackrest.repo2.bucket }} --insecure &&
+              echo "Buckets created successfully"
+{{- end }}

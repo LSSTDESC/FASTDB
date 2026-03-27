@@ -3,7 +3,12 @@
 if [ ! -f $POSTGRES_DATA_DIR/PG_VERSION ]; then
     echo "Running initdb in $POSTGRES_DATA_DIR"
     /usr/lib/postgresql/15/bin/initdb -U postgres --pwfile=/secrets/pgpasswd $POSTGRES_DATA_DIR
-    /usr/lib/postgresql/15/bin/pg_ctl -o "-c listen_addresses=''" -D $POSTGRES_DATA_DIR start
+    if [ "$FASTDB_ARCHIVE_ENABLED" = "true" ]; then
+        /usr/lib/postgresql/15/bin/pg_ctl -o "-c listen_addresses='' -c wal_level=replica -c archive_mode=on -c archive_timeout=300 -c archive_command='pgbackrest --stanza=fastdb archive-push \"%p\"'" -D $POSTGRES_DATA_DIR start
+    else
+        /usr/lib/postgresql/15/bin/pg_ctl -o "-c listen_addresses=''" -D $POSTGRES_DATA_DIR start
+    fi
+
     psql --command "CREATE DATABASE fastdb OWNER postgres"
     psql --command "CREATE EXTENSION q3c" fastdb
     psql --command "CREATE EXTENSION pgcrypto" fastdb
@@ -15,6 +20,28 @@ if [ ! -f $POSTGRES_DATA_DIR/PG_VERSION ]; then
     psql --command "GRANT USAGE ON SCHEMA public TO postgres_ro" fastdb
     psql --command "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO postgres_ro" fastdb
     /usr/lib/postgresql/15/bin/pg_ctl -D $POSTGRES_DATA_DIR stop
+
+    # pgBackRest stanza creation and initial base backup (first init only)
+    if [ "$FASTDB_ARCHIVE_ENABLED" = "true" ]; then
+        /usr/lib/postgresql/15/bin/pg_ctl -o "-c listen_addresses='' -c wal_level=replica -c archive_mode=on -c archive_timeout=300 -c archive_command='pgbackrest --stanza=fastdb archive-push \"%p\"'" -D $POSTGRES_DATA_DIR start
+
+        # Wait for S3 buckets to be ready (created by create-buckets job)
+        echo "Waiting for S3 buckets to be ready..."
+        for i in $(seq 1 60); do
+            if pgbackrest --stanza=fastdb stanza-create 2>&1; then
+                echo "Stanza created successfully"
+                break
+            fi
+            echo "Stanza create failed, retry $i/60 (buckets may not exist yet)..."
+            sleep 5
+        done
+
+        pgbackrest --stanza=fastdb backup
+        pgbackrest --stanza=fastdb backup repo=2
+        echo "Initial base backup complete"
+
+        /usr/lib/postgresql/15/bin/pg_ctl -D $POSTGRES_DATA_DIR stop
+    fi
 fi
 
 # RKNOP 2025-11-05 : commented this out, confusion is reigning
@@ -24,5 +51,14 @@ fi
 # psql --command "CREATE TABLESPACE postgres_temp LOCATION '/tmp/postgres_temp'" fastdb
 # /usr/lib/postgresql/15/bin/pg_ctl -D $POSTGRES_DATA_DIR stop
 
-# Now run the database server for real
-exec /usr/lib/postgresql/15/bin/postgres -c config_file=/etc/postgresql/15/main/postgresql.conf
+if [ "$FASTDB_ARCHIVE_ENABLED" = "true" ]; then
+    exec /usr/lib/postgresql/15/bin/postgres \
+        -c config_file=/etc/postgresql/15/main/postgresql.conf \
+        -c wal_level=replica \
+        -c archive_mode=on \
+        -c archive_command='pgbackrest --stanza=fastdb archive-push "%p"' \
+        -c archive_timeout=300
+else
+    exec /usr/lib/postgresql/15/bin/postgres \
+        -c config_file=/etc/postgresql/15/main/postgresql.conf
+fi

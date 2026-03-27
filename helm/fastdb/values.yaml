@@ -97,17 +97,40 @@ postgres:
     runAsNonRoot: false
     allowPrivilegeEscalation: false
 
-  # WAL archiving for replication
-  walArchive:
+  # pgBackRest WAL archiving
+  pgbackrest:
     enabled: false
-    size: 20Gi
-    accessMode: ReadWriteMany
+    stanza: fastdb
+    # S3 repositories (up to 2)
+    repo1:
+      type: s3
+      bucket: fastdb-wal
+      endpoint: ""       # e.g., minio-site1, or real S3 endpoint
+      region: us-east-1
+      path: /repo1
+      uriStyle: path
+      storagePort: 9000
+      verifyTls: true
+      caFile: /certs/ca.crt
+    repo2:
+      enabled: true
+      bucket: fastdb-wal
+      endpoint: ""
+      region: us-east-1
+      path: /repo2
+      uriStyle: path
+      storagePort: 9000
+      verifyTls: true
+      caFile: /certs/ca.crt
+    retention:
+      full: 2
+    archiveTimeout: 300
 
 # PostgreSQL standby (read replica)
 postgresStandby:
   enabled: false
   image:
-    repository: fastdb-postgres
+    repository: fastdb-postgres-standby
     tag: ""
   replicas: 1
 
@@ -218,14 +241,20 @@ createdb:
     tag: ""
   ttlSecondsAfterFinished: 300
 
-# WAL webserver (for replication - SLAC specific)
-walWebserver:
+# MinIO for local pgBackRest testing
+# Use site2 ports that match the pgbackrest-primary.conf
+minio:
   enabled: false
-  replicas: 1
-
-  ingress:
-    enabled: false
-    host: ""
-    path: /fastdb-wal
-    annotations: {}
-    tls: []
+  site1:
+    port: 9000
+    consolePort: 9001
+    service:
+      type: ClusterIP
+  site2:
+    port: 9000
+    consolePort: 9001
+    service:
+      type: ClusterIP
+  credentials:
+    accessKey: minioadmin
+    secretKey: minioadmin

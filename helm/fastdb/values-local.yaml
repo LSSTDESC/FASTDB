@@ -48,6 +48,14 @@ postgres:
     type: NodePort
     nodePort: 30432
 
+  pgbackrest:
+    enabled: true
+    repo1:
+      endpoint: minio-site1
+    repo2:
+      enabled: true
+      endpoint: minio-site2
+
 # Standby enabled for local testing
 postgresStandby:
   enabled: true
@@ -95,3 +103,20 @@ mailhog:
 # Database migrations
 createdb:
   enabled: true
+
+# Deploy MinIO pods in the Kind cluster
+minio:
+  enabled: true  
+  credentials:
+    accessKey: minioadmin
+    secretKey: minioadmin
+  site1:
+    service:
+      type: NodePort
+      nodePortS3: 30090
+      nodePortConsole: 30091
+  site2:
+    service:
+      type: NodePort
+      nodePortS3: 30092
+      nodePortConsole: 30093

@@ -44,6 +44,8 @@ EXTERNAL_URL="/"
 KUBE_CONTEXT=""
 CREATE_CLUSTER=""
 LOAD_IMAGES=false
+NAMESPACE=${1:-fastdb-local}
+CLUSTER_NAME=${CLUSTER_NAME:-$NAMESPACE}
 
 # ── Parse optional flags (after positional args) ─────────────────────
 shift 2 2>/dev/null || true
@@ -88,6 +90,10 @@ if [[ -n "$CREATE_CLUSTER" ]]; then
   LOAD_IMAGES=true
   echo ""
 fi
+
+# Create directories
+docker exec "$CLUSTER_NAME"-control-plane mkdir -p /fastdb-install
+docker exec "$CLUSTER_NAME"-control-plane mkdir -p /fastdb-db
 
 # ── Preflight checks ────────────────────────────────────────────────
 for cmd in kubectl helm; do
@@ -166,14 +172,14 @@ if [[ "$LOAD_IMAGES" == "true" ]]; then
   DOCKER_VERSION="${DOCKER_VERSION:-test20251201}"
 
   echo "--- Building container images ---"
-  $CONTAINER_RT compose build postgres mongodb shell webap queryrunner
+  $CONTAINER_RT compose build postgres postgres-standby mongodb shell webap queryrunner
   echo ""
 
   echo "--- Loading images into Kind cluster '$NS' ---"
   # Save and load each image individually. podman save does not correctly
   # preserve multiple images in a single archive (all tags collapse to one
   # image), so we must handle them one at a time.
-  for img in postgres mongodb shell webap query-runner; do
+  for img in postgres postgres-standby mongodb shell webap query-runner; do
     local_tag="${DOCKER_ARCHIVE}/fastdb-${img}:${DOCKER_VERSION}"
     echo "  Loading $local_tag"
     IMAGE_TAR=$(mktemp /tmp/fastdb-kind-${img}.XXXXXX.tar)
@@ -183,6 +189,12 @@ if [[ "$LOAD_IMAGES" == "true" ]]; then
   done
   echo ""
 fi
+
+
+# ── Step 1c: Install certs into Kind ───────────────────────────────────
+echo "--- Setting up MinIO certs ---"
+./scripts/setup-kind-certs.sh "$NS"
+echo ""
 
 # ── Step 2: Helm upgrade --install ───────────────────────────────────
 if [[ "$SKIP_HELM" == "false" ]]; then
