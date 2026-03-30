@@ -79,7 +79,7 @@ class ProcVer( BaseView ):
                                    ") subq\n"
                                    "GROUP BY _table",
                                    { 'pv': pvid } )
-            retval['base_procvers'] = { r[0]: { p: d for p, d in zip(r[1], r[2]) } for r in rows }
+            retval['base_procvers'] = { r[0]: [ [ d, p ] for d, p in zip(r[1], r[2]) ] for r in rows }
 
             return retval
 

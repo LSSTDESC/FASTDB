@@ -25,28 +25,35 @@ def test_procver( procver_collection, test_user, fastdb_client, procver_postimes
         assert res['id'] == str( allpvs[pv].id )
         assert res['description'] == allpvs[pv].description
         assert res['aliases'] == aliases
-        for tab in 'diaobject', 'diasource', 'diaforcedsource':
-            for prio, bpv in enumerate( bpvs ):
-                assert res['base_procvers'][tab][ allbpvs[bpv].description ] == prio
-        baseprio = 0
-        for bpv in bpvs:
-            for prio, postime in enumerate( procver_postimes ):
-                assert ( res['base_procvers']['diaobject_position'][ f'{allbpvs[bpv].description}_{postime}' ]
-                         == baseprio + prio )
-                prio += 1
-            baseprio += 10
+        tables = { 'diaobject', 'diasource', 'diaforcedsource', 'diaobject_position', 'host_galaxy' }
+        assert set( res['base_procvers'].keys() ) == tables
+        # ...reverse engineering the priorities that were set up in procver_collection in conftest.py...
+        bpvprios = list( range( len(bpvs) ) )
+        bpvprios.reverse()
+        bwpostimes = procver_postimes.copy()
+        bwpostimes.reverse()
+        for tab in tables:
+            if tab == 'diaobject_position':
+                bpvkeys = [ f'{b}_{tab}_{t}' for b in bpvs for t in bwpostimes ]
+                prios = [ 10 * b + t for b in bpvprios for t in range( len(procver_postimes)-1, -1, -1 ) ]
+            else:
+                bpvkeys = [ f'{b}_{tab}' for b in bpvs ]
+                prios = bpvprios
+            assert len( res['base_procvers'][tab] ) == len( bpvkeys )
+            for i, (p, b) in enumerate( zip( prios, bpvkeys ) ):
+                assert res['base_procvers'][tab][i] == [ allbpvs[b].description, p ]
 
-    for suffix in [ 'default', allpvs['pv3'].description, allpvs['pv3'].id ]:
+    for suffix in [ 'default', allpvs['pv2'].description, allpvs['pv2'].id ]:
         res = fastdb_client.post( f'/procver/{suffix}' )
-        check_res( 'pv3', [ 'bpv3' ], [ 'default' ] )
+        check_res( 'pv2', [ 'bpv2a', 'bpv2' ], [ 'default' ] )
 
-    for suffix in [ allpvs['pv2'].description, allpvs['pv2'].id ]:
+    for suffix in [ allpvs['pv3'].description, allpvs['pv3'].id ]:
         res = fastdb_client.post( f'/procver/{suffix}' )
-        check_res( 'pv2', [ 'bpv2', 'bpv2a' ] )
+        check_res( 'pv3', [ 'bpv3' ] )
 
     for suffix in [ allpvs['pv1'].description, allpvs['pv1'].id ]:
         res = fastdb_client.post( f'/procver/{suffix}' )
-        check_res( 'pv1', [ 'bpv1', 'bpv1a', 'bpv1b' ] )
+        check_res( 'pv1', [ 'bpv1b', 'bpv1a', 'bpv1' ] )
 
     for suffix in [ allpvs['realtime'].description, allpvs['realtime'].id ]:
         res = fastdb_client.post( f'/procver/{suffix}' )

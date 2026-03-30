@@ -87,7 +87,8 @@ Hit this API endpoint with ``procver/<procver>``, where ``<procver>`` is either 
 * ``id``: string UUID, the UUID of the processing version
 * ``description`` : string, the name of the processing version
 * ``aliases`` : list of string, aliases of this processing version
-* ``base_procvers`` : the names of the base processing versions associated with this processing version, sorted from highest priority to lowest priority.
+* ``base_procvers`` : a dictionary of lists of lists.  The dictionary keys are table names.  The dictionary values are lists; the list elements are each themselves 2-element lists, [base processing_version, priority], sorted from high to low.
+
 
 You can pass either a processing version or a processing version alias in ``<procver>``.  If the name you pass is actually an alias, the ``description`` in the result is the name of the processing version itself, not the alias.  You will see the alias you passed in the ``aliases`` array.
 
