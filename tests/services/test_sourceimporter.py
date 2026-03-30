@@ -898,7 +898,7 @@ def test_import_only_30days_after_90days_consumed( import_only_30days_after_90da
 #   loading up a database for use developing the web ap.  See the developers documentation for FASTDB.
 
 @pytest.mark.skipif( env_as_bool('RUN_FULL90DAYS'), reason='RUN_FULL90DAYS is set' )
-def test_full90days_fast( alerts_90days_sent_received_and_imported ):
+def test_full90days_fast( alerts_90days_sent_received_and_imported, snana_fits_ppdb_loaded ):
     nobj, nroot, npos, nsrc, nfrc, ninfo = alerts_90days_sent_received_and_imported
     assert nobj == 37
     assert nroot == nobj
