@@ -1,4 +1,5 @@
 import logging
+import textwrap
 
 from psycopg import sql
 import flask
@@ -120,36 +121,52 @@ class CountThings( BaseView ):
     def do_the_things( self, which, procver='default' ):
         global app
 
-        tablemap = { 'object': ( 'diaobject', ( 'rootid', ) ),
-                     'source': ( 'diasource', ( 'diaobjectid', 'visit' ) ),
-                     'forced': ( 'diaforcedsource', ( 'diaobjectid', 'visit' ) ) }
-        tablemap['diaobject'] = tablemap['object']
-        tablemap['diasource'] = tablemap['source']
-        tablemap['diaforcedsource'] = tablemap['forced']
+        synonyms = { 'rootid': [ 'rootid', 'rootobject', 'rootdiaobject' ],
+                     'diaobject': [ 'object', 'diaobject'],
+                     'diasource': [ 'source', 'diasource' ],
+                     'diaforcedsource': [ 'forced', 'forcedsource' ,'diaforcedsource' ]
+                    }
 
-        if which not in tablemap:
+        thingtocount = None
+        for k, v in synonyms.items():
+            if which in v:
+                thingtocount = k
+                break
+        if thingtocount is None:
             return f"Unknown thing to count: {which}", 422
-        table = tablemap[ which ][0]
-        objfields = tablemap[ which ][1]
 
         estimate = False
         if flask.request.is_json:
             data = flask.request.json
             estimate = ( 'estimate' in data ) and ( data['estimate'] )
-            # IN PROGRESS
 
         with db.DBCon() as dbcon:
             pvid = db.ProcessingVersion.procver_id( procver )
 
-            baseq = sql.SQL(
-                """
-                  SELECT DISTINCT ON({pk}) t.base_procver_id FROM {table} t
-                  INNER JOIN base_procver_of_procver pv ON t.base_procver_id=pv.base_procver_id
-                                                       AND pv.procver_id={pvid}
-                  ORDER BY {pk},pv.priority DESC
-                """
-            ).format( pk=sql.SQL(',').join( sql.Identifier(i) for i in objfields ),
-                      table=sql.Identifier(table), pvid=pvid )
+            if thingtocount in ( 'rootid', 'diaobject' ):
+                distinct = 'diaobjectid' if thingtocount=='diaobject' else 'rootid'
+                indexes = [ 'o idx_diaobject_procver' ]
+                baseq = sql.SQL( textwrap.dedent(
+                    """\
+                    SELECT DISTINCT ON({distinct}) {distinct} FROM diaobject o
+                    INNER JOIN base_procver_of_procver pv ON o.base_procver_id=pv.base_procver_id
+                                                         AND pv.procver_id={pvid}
+                    ORDER BY {distinct}, pv.priority DESC
+                    """
+                ) ).format( distinct=sql.Identifier("o", distinct), pvid=pvid )
+            else:
+                indexes = [ f's idx_{thingtocount}_base_procver_id', f'o idx_{thingtocount}_diaobjectid' ]
+                baseq = sql.SQL( textwrap.dedent(
+                    """\
+                    SELECT DISTINCT ON(o.rootid, s.visit) {idfield} FROM {table} s
+                    INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id
+                                                         AND pv.procver_id={pvid}
+                    INNER JOIN diaobject o ON o.diaobjectid=s.diaobjectid
+                    ORDER BY o.rootid, s.visit, pv.priority DESC
+                    """
+                ) ).format( table=sql.Identifier(thingtocount),
+                            idfield=sql.Identifier("s", f"{thingtocount}id" ),
+                            pvid=pvid )
 
             if estimate:
                 # THIS DOES A REALLY TERRIBLE JOB.
@@ -173,13 +190,15 @@ class CountThings( BaseView ):
                 #   workers, to make it faster.  For this count query,
                 #   this is probably not going to be a problem, but it
                 #   is of course scary.
-                q = sql.SQL( f"/*+ IndexScan(t idx_{table}_procver) Parallel(t 4) */\n"
-                             f"SELECT COUNT(*) FROM (\n{{baseq}}\n) subq" ).format( baseq=baseq )
+                q = sql.SQL( "/*+ " )
+                q += sql.SQL(" ").join( sql.SQL( f"IndexScan({i})" ) for i in indexes )
+                q += sql.SQL( " Parallel(t 4) */\n" )
+                q += sql.SQL( "SELECT COUNT(*) FROM (\n{baseq}\n) subq" ).format( baseq=baseq )
                 rows, _ = dbcon.execute( q )
                 count = rows[0][0]
 
             return { 'status': 'ok',
-                     'table': table,
+                     'table': thingtocount,
                      'isestimate': estimate,
                      'count': count }
 

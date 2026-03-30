@@ -100,12 +100,19 @@ def test_base_procver( procver_collection, test_user, fastdb_client ):
 
 def test_countthings( set_of_lightcurves, test_user, fastdb_client ):
     for pv in ( '', 'pvc_pv2', 'pvc_pv3', 'default' ):
+        for table in ( 'rootobject', 'rootdiaobject', 'rootid' ):
+            suffix = table if pv == '' else f'{table}/{pv}'
+            res = fastdb_client.post( f'/count/{suffix}' )
+            assert res['status'] == 'ok'
+            assert res['table'] == 'rootid'
+            assert res['count'] == ( 0 if pv == 'pvc_pv3' else 4 )
+
         for table in ( 'diaobject', 'object' ):
             suffix = table if pv == '' else f'{table}/{pv}'
             res = fastdb_client.post( f'/count/{suffix}' )
             assert res['status'] == 'ok'
             assert res['table'] == 'diaobject'
-            assert res['count'] == ( 4 if pv == 'pvc_pv2' else 0 )
+            assert res['count'] == ( 0 if pv == 'pvc_pv3' else 5 )
 
         for table in ( 'diasource', 'source' ):
             suffix = table if pv == '' else f'{table}/{pv}'
@@ -122,10 +129,10 @@ def test_countthings( set_of_lightcurves, test_user, fastdb_client ):
             assert res['count'] == 100
 
 
-    for table in ( 'diaobject', 'object' ):
+    for table in ( 'diaobject', 'object', 'rootobject', 'rootdiaobject', 'rootid' ):
         res = fastdb_client.post( f'/count/{table}/realtime' )
         assert res['status'] == 'ok'
-        assert res['table'] == 'diaobject'
+        assert res['table'] == ( 'diaobject' if table in ( 'diaobject', 'object' ) else 'rootid' )
         assert res['count'] == 3
 
     for table in ( 'diasource', 'source' ):
@@ -192,7 +199,7 @@ def test_getdiaobjectinfo( fastdb_client, procver_collection, set_of_lightcurves
         res = fastdb_client.post( "/getdiaobjectinfo/pvc_pv2", json={ 'objectids': [ 200, 201 ] } )
         assert res['diaobjectid'] == [ 200, 201 ]
         assert res['rootid'] == [ str(roots[i]['root'].id) for i in [ 0, 1 ] ]
-        assert set( res.keys() ) == { 'diaobjectid', 'rootid', 'obj_base_procver_id', 'pos_base_procver_id',
+        assert set( res.keys() ) == { 'diaobjectid', 'rootid', 'obj_base_procver', 'pos_base_procver',
                                       'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' }
 
         res = fastdb_client.post( "/getdiaobjectinfo/pvc_pv2", json={ 'objectids': [ 200, 201, 202 ],
