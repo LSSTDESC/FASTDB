@@ -544,7 +544,7 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
     with db.DBCon( dbcon ) as dbcon:
         pvid = db.ProcessingVersion.procver_id( processing_version, dbcon=dbcon )
         pospvid = None
-        if return_object_info and include_object_positions and ( not always_use_weighted_source_positions ):
+        if return_object_info and include_object_positions:
             pospvid = ( db.ProcessingVersion.procver_id( position_processing_version, dbcon=dbcon )
                         if position_processing_version is not None else pvid )
 
@@ -711,13 +711,13 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                        s.source_obj_bpv,
                        {procver_fields}
                        CASE WHEN f.visit IS NULL THEN s.visit ELSE f.visit END AS visit,
-                       CASE WHEN f.mjd IS NULL THEN s.mjd ELSE f.mjd END AS mjd,
-                       CASE WHEN f.band IS NULL THEN s.band ELSE f.band END AS band,
-                       CASE WHEN f.flux IS NULL THEN s.flux ELSE f.flux END AS flux,
-                       CASE WHEN f.fluxerr IS NULL THEN s.fluxerr ELSE f.fluxerr END AS fluxerr,
+                       CASE WHEN f.visit IS NULL THEN s.mjd ELSE f.mjd END AS mjd,
+                       CASE WHEN f.visit IS NULL THEN s.band ELSE f.band END AS band,
+                       CASE WHEN f.visit IS NULL THEN s.flux ELSE f.flux END AS flux,
+                       CASE WHEN f.visit IS NULL THEN s.fluxerr ELSE f.fluxerr END AS fluxerr,
                        {pos_fields}
-                       CASE WHEN s.mjd IS NULL THEN FALSE ELSE TRUE END AS isdet,
-                       CASE WHEN f.mjd IS NULL THEN TRUE ELSE FALSE END as ispatch
+                       CASE WHEN s.visit IS NULL THEN FALSE ELSE TRUE END AS isdet,
+                       CASE WHEN f.visit IS NULL THEN TRUE ELSE FALSE END as ispatch
                 FROM tmp_forced f
                 FULL OUTER JOIN tmp_sources s ON f.rootid=s.rootid AND s.visit=f.visit
                 ORDER BY rootid, mjd
@@ -739,7 +739,7 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
             columns = [ 'diaobjectid', 'rootid' ]
             if include_base_procver:
                 columns.append( 'obj_base_procver' )
-            if include_object_positions and not always_use_weighted_source_positions:
+            if include_object_positions:
                 columns.extend( [ 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ] )
                 if include_base_procver:
                     columns.append( 'pos_base_procver' )
@@ -773,19 +773,20 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
     # Update object positions if necessary
     if use_weighted_source_positions and return_object_info and include_object_positions:
         if always_use_weighted_source_positions:
-            # Pandas is so annoying.  Things like objdf.at[ :, 'pos_base_procver'] = None was
-            #   not working.  So, drop the columns first, then maybe it will work.
-            cols = [ i for i in [ 'pos_base_procver', 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ]
-                     if i in objdf.columns ]
-            if len( cols ) > 0:
-                objdf.drop( columns=cols, inplace=True )
-            if include_base_procver:
-                objdf.at[ :, 'pos_base_procver' ] = None
-            objdf.at[ :, 'ra' ] = None
-            objdf.at[ :, 'dec' ]= None
-            objdf.at[ :, 'raerr' ] = None
-            objdf.at[ :, 'decerr' ] = None
-            objdf.at[ :, 'ra_dec_cov' ] = None
+            if len(objdf) > 0:
+                # Pandas is so annoying.  Things like objdf.at[ :, 'pos_base_procver'] = None was
+                #   not working.  So, drop the columns first, then maybe it will work.
+                cols = [ i for i in [ 'pos_base_procver', 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ]
+                         if i in objdf.columns ]
+                if len( cols ) > 0:
+                    objdf.drop( columns=cols, inplace=True )
+                if include_base_procver:
+                    objdf.at[ :, 'pos_base_procver' ] = None
+                objdf.at[ :, 'ra' ] = None
+                objdf.at[ :, 'dec' ]= None
+                objdf.at[ :, 'raerr' ] = None
+                objdf.at[ :, 'decerr' ] = None
+                objdf.at[ :, 'ra_dec_cov' ] = None
 
         # I'm not sure we can count on really getting ra_err for everything, so instead
         #  of using that for weighting, we'll use S/N^2 (like variance weighting)
@@ -2014,10 +2015,10 @@ def object_search( processing_version='default', ignore_object_processing_versio
 
 
 def get_hot_ltcvs( processing_version, position_processing_version=None,
-                   include_object_positions=True, include_source_positions=False, include_processing_versions=False,
+                   include_object_positions=True, include_source_positions=False, include_base_procver=False,
                    use_weighted_source_positions=False, always_use_weighted_source_positions=False,
                    detected_since_mjd=None, detected_in_last_days=None,
-                   mjd_now=None, source_patch=True, dbcon=None ):
+                   mjd_now=None, source_patch=True, return_format='pandas', dbcon=None ):
     """Get lightcurves of objects with a recent detection.
 
     Parameters
@@ -2233,18 +2234,15 @@ def get_hot_ltcvs( processing_version, position_processing_version=None,
             con.execute_nofetch( q, { 'procver': procver, 't0': mjd0, 't1': mjd_now } )
 
             # Second: get the lightcurves and object info
-            df, objdf = many_object_ltcvs( processing_version=procver, objids_table='tmp_objids',
-                                           return_format='pandas', mjd_now=mjd_now, dbcon=con,
-                                           which='patch' if source_patch else 'forced',
-                                           include_source_positions=include_source_positions,
-                                           use_weighted_source_positions=use_weighted_source_positions,
-                                           always_use_weighted_source_positions=always_use_weighted_source_positions,
-                                           include_object_positions=include_object_positions,
-                                           return_object_info=True
-                                          )
-            FDBLogger.error( "RAGE" )
-
-            return df, objdf, None
+            return many_object_ltcvs( processing_version=procver, objids_table='tmp_objids',
+                                      return_format=return_format, mjd_now=mjd_now, dbcon=con,
+                                      which='patch' if source_patch else 'forced',
+                                      include_base_procver=include_base_procver,
+                                      include_source_positions=include_source_positions,
+                                      use_weighted_source_positions=use_weighted_source_positions,
+                                      always_use_weighted_source_positions=always_use_weighted_source_positions,
+                                      include_object_positions=include_object_positions,
+                                      return_object_info=True )
 
         finally:
             # This is probably gratuitous.  However, *just in case*

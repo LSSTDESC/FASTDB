@@ -1341,19 +1341,19 @@ def test_get_hot_ltcvs( set_of_lightcurves, procver_collection ):
     stuff = { 'set_of_lightcurves': roots, 'procver_collection': procver_collection }
 
 
-    df, objdf, _ = ltcv.get_hot_ltcvs( 'pvc_pv2', detected_since_mjd=60035, mjd_now=60056 )
+    df, objdf = ltcv.get_hot_ltcvs( 'pvc_pv2', detected_since_mjd=60035, mjd_now=60056 )
     compare_ltcv_to_expected( None, None, df, patinfo=objdf, mjdnow=60056.,
                               include_object_positions=True, procver=pvs['pv2'],
                               expected_roots=[1, 2, 3], expected_diaobjectids=[201, 2011, 202, 203],
                               **stuff )
 
-    df, objdf, _ = ltcv.get_hot_ltcvs( 'pvc_pv2', detected_since_mjd=60035, mjd_now=60046 )
+    df, objdf = ltcv.get_hot_ltcvs( 'pvc_pv2', detected_since_mjd=60035, mjd_now=60046 )
     compare_ltcv_to_expected( None, None, df, patinfo=objdf, mjdnow=60046,
                               include_object_positions=True, procver=pvs['pv2'],
                               expected_roots=[1, 2], expected_diaobjectids=[201, 2011, 202],
                               **stuff )
 
-    df, objdf, _ = ltcv.get_hot_ltcvs( 'pvc_pv2', detected_in_last_days=2, mjd_now=60021 )
+    df, objdf = ltcv.get_hot_ltcvs( 'pvc_pv2', detected_in_last_days=2, mjd_now=60021 )
     compare_ltcv_to_expected( None, None, df, patinfo=objdf, mjdnow=60021,
                               include_object_positions=True, procver=pvs['pv2'],
                               expected_roots=[0, 1], expected_diaobjectids=[200, 201, 2011],
@@ -1361,34 +1361,34 @@ def test_get_hot_ltcvs( set_of_lightcurves, procver_collection ):
                               all_forced_diaobjectids_in_pat=True,
                               **stuff )
 
-    df, objdf, _ = ltcv.get_hot_ltcvs( 'pvc_pv2', detected_in_last_days=2, mjd_now=60041 )
+    df, objdf = ltcv.get_hot_ltcvs( 'pvc_pv2', detected_in_last_days=2, mjd_now=60041 )
     compare_ltcv_to_expected( None, None, df, patinfo=objdf, mjdnow=60021,
                               include_object_positions=True, procver=pvs['pv2'],
                               expected_roots=[1, 2], expected_diaobjectids=[201, 2011, 202],
                               **stuff )
 
     # detected_in_last_days defaults to 30
-    df, objdf, _ = ltcv.get_hot_ltcvs( 'pvc_pv2', mjd_now=60085 )
+    df, objdf = ltcv.get_hot_ltcvs( 'pvc_pv2', mjd_now=60085 )
     compare_ltcv_to_expected( None, None, df, patinfo=objdf, mjdnow=60085,
                               include_object_positions=True, procver=pvs['pv2'],
                               expected_roots=[1, 2, 3], expected_diaobjectids=[201, 2011, 202, 203],
                               **stuff )
 
-    df, objdf, _ = ltcv.get_hot_ltcvs( 'pvc_pv2', mjd_now=60095 )
+    df, objdf = ltcv.get_hot_ltcvs( 'pvc_pv2', mjd_now=60095 )
     compare_ltcv_to_expected( None, None, df, patinfo=objdf, mjdnow=60095,
                               include_object_positions=True, procver=pvs['pv2'],
                               expected_roots=[2], expected_diaobjectids=[202],
                               **stuff )
 
     # Weighted source positions
-    df, objdf, _ = ltcv.get_hot_ltcvs( 'pvc_pv2', mjd_now=60085, use_weighted_source_positions=True )
+    df, objdf = ltcv.get_hot_ltcvs( 'pvc_pv2', mjd_now=60085, use_weighted_source_positions=True )
     compare_ltcv_to_expected( None, None, df, patinfo=objdf, mjdnow=60085,
                               include_object_positions=True, procver=pvs['pv2'],
                               use_weighted_source_positions=True,
                               expected_roots=[1, 2, 3], expected_diaobjectids=[201, 2011, 202, 203],
                               **stuff )
 
-    df, objdf, _ = ltcv.get_hot_ltcvs( 'pvc_pv2', mjd_now=60085, always_use_weighted_source_positions=True )
+    df, objdf = ltcv.get_hot_ltcvs( 'pvc_pv2', mjd_now=60085, always_use_weighted_source_positions=True )
     compare_ltcv_to_expected( None, None, df, patinfo=objdf, mjdnow=60085,
                               include_object_positions=True, procver=pvs['pv2'],
                               always_use_weighted_source_positions=True,
@@ -1396,7 +1396,7 @@ def test_get_hot_ltcvs( set_of_lightcurves, procver_collection ):
                               **stuff )
 
     # ...something
-    df, objdf, _ = ltcv.get_hot_ltcvs( 'realtime', mjd_now=60061 )
+    df, objdf = ltcv.get_hot_ltcvs( 'realtime', mjd_now=60061 )
     compare_ltcv_to_expected( None, None, df, patinfo=objdf, mjdnow=60061,
                               include_object_positions=True, procver=pvs['realtime'],
                               expected_roots=[1, 2], expected_diaobjectids=[1, 2],
@@ -1408,7 +1408,7 @@ def test_get_hot_ltcvs( set_of_lightcurves, procver_collection ):
     assert all( pandas.isna( df[ df.mjd>60055 ].diaforcedsourceid ) )
 
     # Forced
-    df, objdf, _ = ltcv.get_hot_ltcvs( 'realtime', mjd_now=60061, source_patch=False )
+    df, objdf = ltcv.get_hot_ltcvs( 'realtime', mjd_now=60061, source_patch=False )
     compare_ltcv_to_expected( None, df, None, frcinfo=objdf, mjdnow=60061,
                               include_object_positions=True, procver=pvs['realtime'],
                               expected_roots=[1, 2], expected_diaobjectids=[1, 2],

@@ -41,8 +41,10 @@ class GetManyLtcvs( BaseView ):
 
         Returns
         -------
-          result: either a two-element list or a single list,
-              the same as the json return from ltcv.py::many_object_ltcvs
+          application/json
+
+          If return_object_info is True, then this is a dict with keys 'ltcvs' and 'obinfo'.  ROB DOCUMENT.
+
 
         """
 
@@ -92,12 +94,6 @@ class GetManyLtcvs( BaseView ):
 
 # ======================================================================
 # /ltcv/getltcv
-#
-# Returns a dict with keys everything from diaobject, plus ltcv
-# ltcv is itself a dict with keys mjd, band, flux, fluxerr, isdet, and maybe ispatch,
-# each of which is a list.
-#
-# Can pass optional parameters in JSON POST; see GetManyLtcvs.get_ltcvs
 
 class GetLtcv( GetManyLtcvs ):
     def do_the_things( self, procver, objid=None ):
@@ -106,15 +102,18 @@ class GetLtcv( GetManyLtcvs ):
             procver = 'default'
 
         mess = self.get_ltcvs( procver, [ objid ] )
-        if len(mess) == 0:
-            raise FASTDBWebException( f"Could not find lightcurve for {objid} in processing version {procver}" )
-        if len(mess) > 1:
-            raise FASTDBWebException( f"Got {len(mess)} lightcurves for {objid} in processing version {procver}; "
-                                      f"this is suprising, and something is wrong somewhere." )
-        key0 = list( mess.keys() )[0]
-        mess = mess[ key0 ]
-        mess['rootid'] = key0
-        return mess
+        if isinstance( mess, dict ):
+            # This means we returned ltcvs and objinfo
+            if len(mess['ltcvs']) == 0:
+                raise FASTDBWebException( f"Could not find lightcurve for {objid} in processing version {procver}" )
+            return { 'ltcv': mess['ltcvs'][0], 'objinfo': mess['objinfo'] }
+        else:
+            if len(mess) == 0:
+                raise FASTDBWebException( f"Could not find lightcurve for {objid} in processing version {procver}" )
+            if len(mess) > 1:
+                raise FASTDBWebException( f"Got {len(mess)} lightcurves for {objid} in processing version {procver}; "
+                                          f"this is suprising, and something is wrong somewhere." )
+            return mess[0]
 
 
 # ======================================================================
@@ -155,66 +154,9 @@ class GetRandomLtcv( GetLtcv ):
 class GetHotTransients( BaseView ):
     """Get lightcurves of recently-detected transients.  URL endpoint /ltcv/gethottransients
 
-    Calling
-    -------
+    ROB DOCUMENT.
 
-    Hit this entpoint with a POST request.  The POST payload should be a JSON
-    dictionary.  The dictionary can include the following keys (though all are
-    optional):
-
-       processing_version : str
-         The processing version or alias for searching photometry.  If
-         not given, uses "realtime".
-
-       object_processing_version : str
-         The processing version or alias for searching objects.  If not given,
-         defaults to the same as processing_version.
-
-       position_processing_version : str
-         The processing version or alias for searching object positions.  If not given,
-         defaults to the same as object_processing_version.
-
-       return format : int
-         Specifies the format of the data returned; see below.  If not given,
-         assumes 0.
-
-       include_ids : bool, default False
-         See Returns below
-
-       include_object_positions : bool, default False
-         See Returns below
-
-       include_source_positions : bool, default False
-         See Returns below
-
-       detected_since_mjd : float
-         If given, gets all transients detected since this mjd.
-
-       detected_in_last_days : float
-         Get all transients detected in this many days.  Can't give both this
-         and detected_since_mjd.  If neither are given, assumes
-         detected_in_last_days=30
-
-       mjd_now : float
-         Pass a value here to make the server pretend that this is the current
-         mjd.  Normally, it just uses the current time.  (Useful for tests and
-         development.)
-
-       source_patch : bool
-         Defaults to False, in which case only forced photometry will be
-         returned.  If True, then return detections where forced photometry is
-         not available.  See "WARNING re: forced photometry and detctions"
-         below.
-
-       include_hostinfo : bool
-         Defaults to False.  If True, additional information will be returned
-         with the first-listed possible host of each transient.
-
-    Returns
-    -------
-      application/json   (utf-8 encoded, which I believe is required for json)
-
-         The format of the returned JSON depends on the return_format paremeter.
+    OLD:
 
          return_format = 0:
             Returns a list of dictionaries.  Each row corresponds to a single
@@ -303,149 +245,29 @@ class GetHotTransients( BaseView ):
 
     """
 
-    def do_the_things( self ):
-        bands = [ 'u', 'g', 'r', 'i', 'z', 'y' ]
+    def do_the_things( self, procver='realtime' ):
+        known_keys = { 'position_processing_version', 'include_object_positions',
+                       'include_source_positions', 'include_base_procver',
+                       'use_weighted_source_positions', 'always_use_weighted_source_positions',
+                       'detected_since_mjd', 'detected_in_last_days', 'mjd_now',
+                       'source_patch' }
 
         if not flask.request.is_json:
-            raise FASTDBWebException( "POST data was not JSON" )
-        data = flask.request.json
-
-        kwargs = {}
-        if 'processing_version' not in data:
-            kwargs['processing_version'] = 'realtime'
-        kwargs.update( data )
-        if 'return_format' in kwargs:
-            return_format = kwargs['return_format']
-            del kwargs['return_format']
+            kwargs = dict()
         else:
-            return_format = 0
+            kwargs = flask.request.json
 
-        source_patch = ( 'source_patch' in data ) and ( data['source_patch'] )
+        unknown = set( kwargs.keys() ) - known_keys
+        if len(unknown) > 0:
+            raise FASTDBWebException( f"Unknown data parameters: {unknown}" )
 
-        ltcvdf, objdf, hostdf = ltcv.get_hot_ltcvs( **kwargs )
+        try:
+            rval = ltcv.get_hot_ltcvs( procver, return_format='json', **kwargs )
+        except Exception as ex:
+            FDBLogger.exception( ex )
+            raise FASTDBWebException( f"Error trying to get hot transients: {ex}" )
 
-        if ( return_format == 0 ) or ( return_format == 1 ):
-            sne = []
-        elif ( return_format == 2 ):
-            sne = { 'diaobjectid': [],
-                    'rootid': [],
-                    'ra': [],
-                    'dec': [],
-                    'mjd': [],
-                    'visit': [],
-                    'band': [],
-                    'flux': [],
-                    'fluxerr': [],
-                    'isdet': [],
-                    'zp': [],
-                    'redshift': [],
-                    'sncode': [] }
-            if source_patch:
-                sne[ 'ispatch' ] = []
-            if hostdf is not None:
-                sne[ 'hostgal_petroflux_r' ] = []
-                sne[ 'hostgal_petroflux_r_err' ] = []
-                sne[ 'hostgal_snsep' ] = []
-                sne[ 'hostgal_pzmean' ] = []
-                sne[ 'hostgal_pzstd' ] = []
-                for bandi in range( len(bands)-1 ):
-                    sne[ f'hostgal_stdcolor_{bands[bandi]}_{bands[bandi+1]}' ] = []
-                    sne[ f'hostgal_stdcolor_{bands[bandi]}_{bands[bandi+1]}_err' ] = []
-        else:
-            raise FASTDBWebException( "This should never happen." )
-
-        # ZEROPOINT
-        #
-        # https://sdm-schemas.lsst.io/apdb.html claims that all fluxes are in nJy.
-        # Wikipedia tells me that mAB = -2.5log_10(f_ν) + 8.90
-        #   with f_ν in Jy, or, better stated, since arguments of logs should not have units:
-        #     mAB = -2.5 log_10( f_ν / 1 Jy ) + 8.90
-        # Converting units:
-        #    mAB = -2.5 log_10( f_ν / 1 Jy * ( 1 Jy / 10⁹ nJy ) ) + 8.90
-        #        = -2.5 log_10( f_ν / nJy * 10⁻⁹ ) +  8.90
-        #        = -2.5 ( log_10( f_ν / nJy ) - 9 ) + 8.90
-        #        = -2.5 log_10( f_ν / nJy ) + 31.4
-
-        if len(ltcvdf) > 0:
-            objids = objdf.index.get_level_values( 'diaobjectid' ).unique()
-            FDBLogger.debug( f"GetHotSNEView: got {len(objids)} objects in a df of length {len(ltcvdf)}" )
-
-            for objid in objids:
-                subdf = ltcvdf.xs( objid, level='diaobjectid' )
-                if hostdf is not None:
-                    subhostdf = hostdf.xs( objid )
-                if ( return_format == 0 ) or ( return_format == 1 ):
-                    toadd = { 'diaobjectid': int( objid ),
-                              'rootid': str( objdf.loc[objid].rootid ),
-                              'ra': float( objdf.loc[objid].ra ),
-                              'dec': float( objdf.loc[objid].dec ),
-                              'zp': 31.4,
-                              'redshift': -99.,
-                              'sncode': -99 }
-                    if hostdf is not None:
-                        toadd[ 'hostgal_petroflux_r' ] = subhostdf.petroflux_r
-                        toadd[ 'hostgal_petroflux_r_err' ] = subhostdf.petroflux_r_err
-                        toadd[ 'hostgal_snsep' ] = subhostdf.nearbyextobj1sep
-                        toadd[ 'hostgal_pzmean' ] = subhostdf.pzmean
-                        toadd[ 'hostgal_pzstd' ] = subhostdf.pzstd
-                        for bandi in range( len(bands)-1 ):
-                            toadd[ f'hostgal_stdcolor_{bands[bandi]}_{bands[bandi+1]}' ] = (
-                                subhostdf[ f'stdcolor_{bands[bandi]}_{bands[bandi+1]}' ] )
-                            toadd[ f'hostgal_stdcolor_{bands[bandi]}_{bands[bandi+1]}_err' ] = (
-                                subhostdf[ f'stdcolor_{bands[bandi]}_{bands[bandi+1]}_err' ] )
-
-                    if return_format == 0:
-                        toadd['photometry'] = { 'mjd': list( subdf.index.values ),
-                                                'visit': list( subdf['visit'] ),
-                                                'band': list( subdf['band'] ),
-                                                'flux': list( subdf['flux'] ),
-                                                'fluxerr': list( subdf['fluxerr'] ),
-                                                'isdet': list( subdf['isdet'] ) }
-                        if source_patch:
-                            toadd['photometry']['ispatch'] = list( subdf['ispatch'] )
-                    else:
-                        toadd['mjd'] = list( subdf.index.values )
-                        toadd['visit'] = list( subdf['visit'] )
-                        toadd['band'] = list( subdf['band'] )
-                        toadd['flux'] = list( subdf['psfflux'] )
-                        toadd['fluxerr'] = list( subdf['psffluxerr'] )
-                        toadd['isdet'] = list( subdf['isdet'] )
-                        if source_patch:
-                            toadd['ispatch'] = list( subdf['ispatch'] )
-                    sne.append( toadd )
-                elif return_format == 2:
-                    sne['objectid'].append( str(objid) )
-                    sne['ra'].append( subdf.ra.values[0] )
-                    sne['dec'].append( subdf.dec.values[0] )
-                    sne['mjd'].append( subdf.index.values )
-                    sne['visit'].append( list( subdf['visit'] ) )
-                    sne['band'].append( list( subdf['band'] ) )
-                    sne['flux'].append( list( subdf['flux'] ) )
-                    sne['fluxerr'].append( list( subdf['fluxerr'] ) )
-                    sne['isdet'].append( list( subdf['isdet'] ) )
-                    if source_patch:
-                        sne['ispatch'].append( list( subdf['ispatch'] ) )
-                    sne['zp'].append( 31.4 )
-                    sne['redshift'].append( -99 )
-                    sne['sncode'].append( -99 )
-                    if hostdf is not None:
-                        sne[ 'hostgal_petroflux_r' ].append( subhostdf['petroflux_r'] )
-                        sne[ 'hostgal_petroflux_r_err'] .append( subhostdf['petroflux_r_err'] )
-                        sne[ 'hostgal_snsep' ].append( subhostdf['nearbyextobj1sep'] )
-                        sne[ 'hostgal_pzmean' ].append( subhostdf['pzmean'] )
-                        sne[ 'hostgal_pzstd' ].append( subhostdf['pzstd'] )
-                        for bandin in range( len(bands) ):
-                            sne[ f'hostgal_stdcolor_{bands[bandi]}_{bands[bandi+1]}' ].append(
-                                subhostdf[f'stdcolor_{bands[bandi]}_{bands[bandi+1]}'] )
-                            sne[ f'hostgal_stdcolor_{bands[bandi]}_{bands[bandi+1]}_err' ].append(
-                                subhostdf[f'stdcolor_{bands[bandi]}_{bands[bandi+1]}_err'] )
-                else:
-                    raise FASTDBWebException( "This should never happen." )
-
-
-        # FDBLogger.info( "GetHotTransients; returning" )
-        return sne
-
+        return { 'ltcvs': rval[0], 'objinfo': rval[1] }
 
 
 
@@ -462,7 +284,8 @@ urls = {
     "/getltcv/<procver>/<objid>": GetLtcv,
     "/getrandomltcv": GetRandomLtcv,
     "/getrandomltcv/<procver>": GetRandomLtcv,
-    "/gethottransients": GetHotTransients
+    "/gethottransients": GetHotTransients,
+    "/gethottransients/<procver>": GetHotTransients
 }
 
 usedurls = {}

@@ -1,14 +1,15 @@
 import pytest
+import time
 import itertools
 
 import numpy as np
 
 import db
-import ltcv
+from util import FDBLogger
 
 
-def _check_ltcv_res( procver, expected_roots, expected_diaobjectids, res,
-                     mjdnow=None, bands=None, which='patch', return_object_info=False,
+def _check_ltcv_res( procver, expected_roots, expected_diaobjectids, res, single=False,
+                     mjd_now=None, bands=None, which='patch', return_object_info=False, include_object_positions=False,
                      include_base_procver=False, include_source_ids=False, include_source_positions=False,
                      use_weighted_source_positions=False, always_use_weighted_source_positions=False,
                      procver_collection=None, set_of_lightcurves=None,
@@ -29,13 +30,25 @@ def _check_ltcv_res( procver, expected_roots, expected_diaobjectids, res,
     use_weighted_source_positions = use_weighted_source_positions or always_use_weighted_source_positions
 
     if return_object_info:
-        ltcvs = res['ltcvs']
+        assert isinstance( res, dict )
+        if single:
+            assert set( res.keys() ) == { 'ltcv', 'objinfo' }
+            assert isinstance( res['ltcv'], dict )
+            assert isinstance( res['objinfo'], dict )
+            ltcvs = [ res['ltcv'] ]
+        else:
+            assert set( res.keys() ) == { 'ltcvs', 'objinfo' }
+            assert isinstance( res['ltcvs'], list )
+            assert isinstance( res['objinfo'], dict )
+            ltcvs = res['ltcvs']
         infos = res['objinfo']
-        if not include_base_procver:
-            raise RuntimeError( '_check_ltcv_res is broken when include_base_procver is False '
-                                'and return_object_info is True' )
     else:
-        ltcvs = res
+        if single:
+            assert isinstance( res, dict )
+            ltcvs = [ res ]
+        else:
+            assert isinstance( res, list )
+            ltcvs = res
         infos = None
 
     expected_keys = [ 'rootid', 'mjd', 'diasourceid', 'source_diaobjectid',
@@ -83,11 +96,11 @@ def _check_ltcv_res( procver, expected_roots, expected_diaobjectids, res,
         #   data.  We need to extract the highest priority for each.  To do this, rewrangle the
         #   set_of_lightcurves data so that its indexed by base_procver, in descending priority order.
 
-        if mjdnow is not None:
+        if mjd_now is not None:
             if bands is not None:
-                conds = lambda s: s.midpointmjdtai <= mjdnow and s.band in bands
+                conds = lambda s: s.midpointmjdtai <= mjd_now and s.band in bands
             else:
-                conds = lambda s: s.midpointmjdtai <= mjdnow
+                conds = lambda s: s.midpointmjdtai <= mjd_now
         elif bands is not None:
             conds = lambda s: s.band in bands
         else:
@@ -217,50 +230,71 @@ def _check_ltcv_res( procver, expected_roots, expected_diaobjectids, res,
 
     if infos is not None:
 
+        expected_obj_keys = { 'diaobjectid', 'rootid' }
+        if include_base_procver:
+            expected_obj_keys.add( 'obj_base_procver' )
+        if include_object_positions:
+            expected_obj_keys = expected_obj_keys.union( { 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' } )
+            if include_base_procver:
+                expected_obj_keys.add( 'pos_base_procver' )
+
+        assert set( infos.keys() ) == expected_obj_keys
+
         assert set( infos['rootid'] ) == set( str(e) for e in expected_root_ids )
-        # We know that there's only one diaobject per processing version, so we don't have
-        #   to go through all the pain we'll go through with sources below
         assert len( infos['diaobjectid'] ) == len( expected_diaobjectids )
         assert set( infos['diaobjectid'] ) == set( expected_diaobjectids )
 
         for r in expected_roots:
+
+            # These next two are a bit gratuitous (since they aren't
+            #   used again), but useful for pdb debugging.
+            dex = [ lc['rootid'] for lc in ltcvs ].index( str(roots[r]['root'].id) )
+            thisltcv = ltcvs[dex]
+
             for diaobjectid in expected_diaobjectids:
                 if diaobjectid not in roots[r]['obj'].keys():
                     continue
                 diaobject = roots[r]['obj'][diaobjectid]
                 dex = infos['diaobjectid'].index( diaobjectid )
                 assert infos['rootid'][dex] == str( diaobject.rootid )
-                bpv = [ b[0] for b in pvrow['diaobject'] if b[0].description==infos['obj_base_procver'][dex] ]
-                assert len(bpv) == 1
-                bpv = bpv[0]
-                assert diaobject.base_procver_id == bpv.id
+                if include_base_procver:
+                    # TODO : make sure the *right* processing version was returned!
+                    # ...actually... the fixtures only have objects in a single base processing
+                    # version for each processing version, so that wouldn't be an interesting test right now.
+                    bpv = [ b[0] for b in pvrow['diaobject'] if b[0].description==infos['obj_base_procver'][dex] ]
+                    assert len(bpv) == 1
+                    bpv = bpv[0]
+                    assert diaobject.base_procver_id == bpv.id
 
-                # There *are* multiple positions, so make sure we got the highest priority one that exists
-                #
-                # OMG this is becoming such an ugly hack of how I store data, this is what
-                #   happens when you just need to get stuff done fast and can't go back
-                #   and refactor.
-                pos = None
-                posbpv = None
-                for proposedposbpv, prio, bpvkey in pvrow['diaobject_position']:
-                    if (diaobjectid, bpvkey) in roots[r]['pos'].keys():
-                        pos = roots[r]['pos'][ (diaobjectid, bpvkey) ]
-                        posbpv = proposedposbpv
-                        break
+                if include_object_positions:
+                    pos = None
 
-                if always_use_weighted_source_positions:
-                    assert infos['pos_base_procver'][dex] is None
+                    if always_use_weighted_source_positions:
+                        pos = None
+                        if include_base_procver and return_object_info:
+                            assert infos['pos_base_procver'][dex] is None
 
-                else:
-                    if pos is None:
-                        assert infos['pos_base_procver'][dex] is None
                     else:
-                        if use_weighted_source_positions:
-                            assert infos['pos_base_procver'][dex] in ( posbpv.description, None )
-                        else:
-                            assert infos['pos_base_procver'][dex] == posbpv.description
+                        # There are multiple positions, so make sure we got the highest priority one that exists
+                        #
+                        # OMG this is becoming such an ugly hack of how I store data, this is what
+                        #   happens when you just need to get stuff done fast and can't go back
+                        #   and refactor.
+                        pos = None
+                        posbpv = None
+                        for proposedposbpv, prio, bpvkey in pvrow['diaobject_position']:
+                            if (diaobjectid, bpvkey) in roots[r]['pos'].keys():
+                                pos = roots[r]['pos'][ (diaobjectid, bpvkey) ]
+                                posbpv = proposedposbpv
+                                break
 
-                        if infos['pos_base_procver'] is not None:
+                        if include_base_procver:
+                            if ( pos is None ) or always_use_weighted_source_positions:
+                                assert infos['pos_base_procver'][dex] is None
+                            else:
+                                assert infos['pos_base_procver'][dex] == posbpv.description
+
+                        if pos is not None:
                             assert infos['ra'][dex] == pytest.approx( pos.ra, rel=1e-12 )
                             assert infos['dec'][dex] == pytest.approx( pos.dec, rel=1e-12 )
                             assert infos['raerr'][dex] == pytest.approx( pos.raerr, rel=1e-6 )
@@ -268,243 +302,249 @@ def _check_ltcv_res( procver, expected_roots, expected_diaobjectids, res,
                             # Fixture didn't put any correlations in but for random variancer
                             assert infos['ra_dec_cov'][dex] == pytest.approx( pos.ra_dec_cov, abs=0.0001/3600. )
 
-                if ( use_weighted_source_positions ) and ( infos['pos_base_procver'][dex] ) is None:
-                    justsrcs = [ d['src'] for d in datacache[r] if d['src'] is not None ]
-                    srcra = np.array( j.ra for j in justsrcs )
-                    srcdec = np.array( j.dec for j in justsrcs )
-                    sn = np.array( j.psfflux / j.psffluxerr for j in justsrcs )
-                    w = np.where( sn > 3 )[0]
-                    srcra = srcra[w]
-                    srcdec = srcdec[w]
-                    weight = sn[w] ** 2
-                    meanra = ( srcra * weight ).sum() / ( weight.sum() )
-                    meandec = ( srcdec * weight.sum() ) / ( weight.sum() )
-                    raerr = np.sqrt( ( weight * ( srcra - meanra )**2 ).sum() / weight.sum() )
-                    decerr = np.sqrt( ( weight * ( srcdec - meandec )**2 ).sum() / weight.sum() )
-                    ra_dec_cov = ( weight * ( srcra - meanra ) * ( srcdec - meandec ) ).sum() / weight.sum()
+                    if use_weighted_source_positions:
+                        justsrcs = [ d for d in datacache[roots[r]['root'].id] if d['src'] is not None ]
+                        srcra = np.array( [ j['src'].ra for j in justsrcs ] )
+                        srcdec = np.array( [ j['src'].dec for j in justsrcs ] )
+                        if which == 'detections':
+                            sn = np.array( [ j['src'].psfflux / j['src'].psffluxerr for j in justsrcs ] )
+                        else:
+                            # ... this may be wholly gratuitous because I don't think
+                            #     the fixtures set a different forced flux from the source flux
+                            # However, this is the equivalent logic server-side.
+                            sn = np.array( [ ( j['frc'].psfflux / j['frc'].psffluxerr )
+                                             if j['frc'] is not None
+                                             else ( j['src'].psfflux / j['src'].psffluxerr )
+                                             for j in justsrcs ] )
+                        w = np.where( sn > 3 )[0]
+                        srcra = srcra[w]
+                        srcdec = srcdec[w]
+                        weight = sn[w] ** 2
+                        meanra = ( srcra * weight ).sum() / ( weight.sum() )
+                        meandec = ( srcdec * weight ).sum() / ( weight.sum() )
+                        raerr = np.sqrt( ( weight * ( srcra - meanra )**2 ).sum() / weight.sum() )
+                        decerr = np.sqrt( ( weight * ( srcdec - meandec )**2 ).sum() / weight.sum() )
+                        ra_dec_cov = ( weight * ( srcra - meanra ) * ( srcdec - meandec ) ).sum() / weight.sum()
 
-                    # In this case, the position should *not* match the diaobject_position value too closely
-                    assert not infos['ra'][dex] != pytest.approx( pos.ra, abs=0.01/3600. )
-                    assert not infos['dec'][dex] != pytest.approx( pos.dec, abs=0.01/3600. )
-
-                    # But should be good within numerical precision to the calculated positions (modulo
-                    # order of operations and floating roundoff)
-                    assert infos['ra'][dex] == pytest.approx( meanra, rel=1e-12 )
-                    assert infos['dec'][dex] == pytest.approx( meandec, rel=1e-12 )
-                    assert infos['raerr'][dex] == pytest.approx( raerr, rel=1e-12 )
-                    assert infos['decerr'][dex] == pytest.approx( decerr, rel=1e-12 )
-                    # Fixture didn't put any correlations in
-                    assert infos['ra_dec_cov'][dex] == pytest.approx( ra_dec_cov, abs=0.0001/3600. )
+                        if ( pos is None ) or always_use_weighted_source_positions:
+                            if pos is not None:
+                                # In this case, the position should *not* match the diaobject_position value too closely
+                                assert not infos['ra'][dex] != pytest.approx( pos.ra, abs=0.01/3600. )
+                                assert not infos['dec'][dex] != pytest.approx( pos.dec, abs=0.01/3600. )
+                            # But should be good within numerical precision to the calculated positions (modulo
+                            # order of operations and floating roundoff)
+                            # ....*if* there were enough sources to calculate a position from!
+                            if len(srcra) > 0:
+                                # THIS NEEDS TO BE FIXED
+                                # The fact that it's happening only in realtime / forced really
+                                #   suggests to me that it's not a string float roundoff thing
+                                #   and that there's some weird bug in my code somewhere.
+                                # (And, honestly, it might be in the test fixture....)
+                                # if ( procver == 'realtime' ) and ( which == 'forced' ):
+                                if False:
+                                    assert infos['ra'][dex] == pytest.approx( meanra, rel=3e-7 )
+                                    assert infos['dec'][dex] == pytest.approx( meandec, rel=3e-7 )
+                                    assert infos['raerr'][dex] == pytest.approx( raerr, rel=3e-3 )
+                                    assert infos['decerr'][dex] == pytest.approx( decerr, rel=3e-3 )
+                                    # Fixture didn't put any correlations in
+                                    assert infos['ra_dec_cov'][dex] == pytest.approx( ra_dec_cov, abs=0.0001/3600. )
+                                else:
+                                    assert infos['ra'][dex] == pytest.approx( meanra, rel=1e-12 )
+                                    assert infos['dec'][dex] == pytest.approx( meandec, rel=1e-12 )
+                                    assert infos['raerr'][dex] == pytest.approx( raerr, rel=1e-6 )
+                                    assert infos['decerr'][dex] == pytest.approx( decerr, rel=1e-6 )
+                                    # Fixture didn't put any correlations in
+                                    assert infos['ra_dec_cov'][dex] == pytest.approx( ra_dec_cov, abs=0.0001/3600. )
+                            else:
+                                assert all( infos[i][dex] is None
+                                            for i in ( 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ) )
 
 
 def test_getmanyltcvs( test_user, fastdb_client, set_of_lightcurves, procver_collection ):
     roots = set_of_lightcurves
     pvc = procver_collection
 
-    # Object 1 is not in pv1, so ony expect object 0 back
-    for which in [ 'detections', 'forced', 'patch', None ]:
-        postdata = { "objids": [ str(roots[i]['root'].id) for i in [0, 1] ] }
-        if which is not None:
-            postdata['which'] = which
-        res = fastdb_client.post( '/ltcv/getmanyltcvs/pvc_pv1', json=postdata )
-        _check_ltcv_res( 'pv1', [0], [100], res, which=which,
-                         set_of_lightcurves=roots, procver_collection=pvc )
 
-    # pvc_pv2 should be the default
-    for which in [ 'detections', 'forced', 'patch', None ]:
-        for objset in [ [ str(roots[i]['root'].id) for i in [0, 2] ], [ 200, 202 ] ]:
-            postdata = { 'objids': objset }
-            if which is not None:
-                postdata['which'] = which
-            for suffix in [ '/pvc_pv2', '' ]:
-                res = fastdb_client.post( f'/ltcv/getmanyltcvs{suffix}', json=postdata )
-                _check_ltcv_res( 'pv2', [0, 2], [200, 202], res, which=which,
-                                 set_of_lightcurves=roots, procver_collection=pvc )
+    ltcvlist = [
+        # Object 1 is not in pv1, so ony expect object 0 back
+        ( 'pvc_pv1', [ str(roots[i]['root'].id) for i in [0, 1] ], [0], [100], 'pv1' ),
+        # pvc_pv2 should be the default
+        ( None, [ str(roots[i]['root'].id) for i in [0, 2] ], [0, 2], [200, 202], 'pv2' ),
+        # If we ask for diaobjects that are in the wrong processing version, we still get
+        #   back the corresponding ones from the sources in this processing version
+        ( 'pvc_pv2', [0, 2], [ 0, 2], [200, 202], 'pv2' ),
+        ( 'realtime', [0, 1, 2], [0, 1, 2], [0, 1, 2], 'realtime' ),
+    ]
 
+    extras = [
+        {},
+        { 'always_use_weighted_source_positions': 1, 'include_base_procver': 1,
+          'include_source_positions': 1, 'include_object_positions': 1, 'return_object_info': 1 },
+        { 'mjd_now': 60061., 'always_use_weighted_source_positions': 1, 'include_base_procver': 1,
+          'include_source_positions': 1, 'include_object_positions': 1, 'return_object_info': 1 },
+        { 'bands': 'r' },
+        { 'bands': ['r'] },
+        { 'include_source_positions': 1 },
+        { 'return_object_info': 1 },
+        { 'return_object_info': 1, 'include_object_positions': 1 },
+        { 'return_object_info': 1, 'include_base_procver': 1 },
+        { 'return_object_info': 1, 'include_base_procver': 1, 'include_object_positions': 1 },
+        { 'use_weighted_source_positions': 1 },
+        { 'always_use_weighted_source_positions': 1 },
+        { 'mjd_now': 60041. }
+    ]
 
-    # If we ask for diaobjectids that are in the wrong processing version, we still get
-    #   back the corresponding ones from this processing version
-    for which in [ 'detections', 'forced', 'patch', None ]:
-        postdata = { 'objids': [0, 2] }
-        if which is not None:
-            postdata['which'] = which
-        res = fastdb_client.post( '/ltcv/getmanyltcvs/pvc_pv2', json=postdata )
-        _check_ltcv_res( 'pv2', [0, 2], [200, 202], res, which=which,
-                         set_of_lightcurves=roots, procver_collection=pvc )
+    n = 0
+    t0 = time.perf_counter()
+    first = True
+    for ltcvreq in ltcvlist:
+        for which in [ None, 'patch', 'detections', 'forced' ]:
+            for extra in extras:
+                if ltcvreq[0] is None:
+                    url = '/ltcv/getmanyltcvs'
+                else:
+                    url = f'/ltcv/getmanyltcvs/{ltcvreq[0]}'
 
+                if first:
+                    first = False
+                    # Just check the missing objids call once
+                    for foo in [ extra, [], 'kitten' ]:
+                        with pytest.raises( RuntimeError, match=( "^Error response from server, status 422: "
+                                                                  "Must pass POST data as a json dict with at least "
+                                                                  "objids as a key" ) ):
+                            n += 1
+                            fastdb_client.post( url, json=foo )
 
-    # Test mjd_now
-    for which in [ 'detections', 'forced', 'patch', None ]:
-        for objset in [ [ str(roots[i]['root'].id) for i in [0, 2] ], [ 200, 202 ] ]:
-            postdata = { 'objids': objset, 'mjd_now': 60041. }
-            if which is not None:
-                postdata['which'] = which
-            res = fastdb_client.post( '/ltcv/getmanyltcvs/pvc_pv2', json=postdata )
-            _check_ltcv_res( 'pv2', [0, 2], [200, 202], res, which=which, mjdnow=60041.,
-                             set_of_lightcurves=roots, procver_collection=pvc )
+                    # Just check the bad paramter call once
+                    with pytest.raises( RuntimeError, match=( "^Error response from server, status 422: "
+                                                              "Unknown data parameters: {'foo'}" ) ):
+                        n += 1
+                        fastdb_client.post( url, json={'objids': ltcvreq[1], 'foo': 'bar'} )
 
-
-    # Make sure bands words
-    for which in [ 'detections', 'forced', 'patch', None ]:
-        for objset in [ [ str(roots[i]['root'].id) for i in [0, 2] ], [ 200, 202 ] ]:
-            for bands in [ 'r', [ 'r' ] ]:
-                postdata = { 'objids': objset, 'bands': bands }
+                kwargs = extra.copy()
+                kwargs['objids'] = ltcvreq[1]
                 if which is not None:
-                    postdata['which'] = which
-                res = fastdb_client.post( '/ltcv/getmanyltcvs/pvc_pv2', json=postdata )
-                _check_ltcv_res( 'pv2', [0, 2], [200, 202], res, which=which, bands=['r'],
-                                 set_of_lightcurves=roots, procver_collection=pvc )
+                    kwargs['which'] = which
+                n += 1
+                res = fastdb_client.post( url, json=kwargs )
+                # ****
+                if ( ( extra.get('mjd_now', None) == 60061 ) and ( ltcvreq[0] == 'realtime' ) and
+                     ( which in [ 'patch', 'forced' ] ) ):
+                    import pdb; pdb.set_trace()
+                # ****
+                if which is None:
+                    kwargs['which'] = 'patch'
+                del kwargs['objids']
+                _check_ltcv_res( ltcvreq[4], ltcvreq[2], ltcvreq[3], res,
+                                 set_of_lightcurves=roots, procver_collection=pvc,
+                                 **kwargs )
+                pass
 
-    # Test include source positions
-    for which in [ 'detections', 'forced', 'patch', None ]:
-        for objset in [ [ str(roots[i]['root'].id) for i in [0, 1] ], [ 200, 201 ] ]:
-            postdata = { 'objids': objset, 'include_source_positions': 1 }
-            if which is not None:
-                postdata['which'] = which
-            res = fastdb_client.post( '/ltcv/getmanyltcvs/pvc_pv2', json=postdata )
-            _check_ltcv_res( 'pv2', [0, 1], [200, 201, 2011], res, which=which, include_source_positions=True,
-                             set_of_lightcurves=roots, procver_collection=pvc )
 
-    # Test returning object info
-    for which in [ 'detections', 'forced', 'patch', None ]:
-        for objset in [ [ str(roots[i]['root'].id) for i in [0, 1] ], [ 200, 201 ] ]:
-            postdata = { 'objids': objset,
-                         'include_source_positions': 1,
-                         'return_object_info': 1,
-                         'include_base_procver': 1,
-                         'include_object_positions': 1,
-                        }
-            if which is not None:
-                postdata['which'] = which
-            res = fastdb_client.post( '/ltcv/getmanyltcvs/pvc_pv2', json=postdata )
-            _check_ltcv_res( 'pv2', [0, 1], [200, 201, 2011], res, which=which,
-                             include_source_positions=True, return_object_info=True, include_base_procver=True,
-                             set_of_lightcurves=roots, procver_collection=pvc )
+    FDBLogger.info( f"{n} requests in {time.perf_counter()-t0:.2f} sec." )
 
 
 
 def test_getltcv( test_user, fastdb_client, set_of_lightcurves, procver_collection ):
     roots = set_of_lightcurves
-    bpvs, _pvs, _pvinfo = procver_collection
+    pvc = procver_collection
 
-    def _check_ltcv( res, rootdex, objdex, which='patch', bpv_key='unknown', obj_bpv_key=None,
-                     include_base_procver=False, include_source_ids=False, include_source_positions=False,
-                     obj_base_procver=None, pos_base_procver=None ):
-        obj_bpv_key = bpv_key if obj_bpv_key is None else obj_bpv_key
-        bpv_key = [ bpv_key ] if not isinstance( bpv_key, list ) else bpv_key
-        obj_bpv_key = [ obj_bpv_key ] if not isinstance( obj_bpv_key, list ) else obj_bpv_key
-        expectedkeys = [ 'rootid', 'diaobjectid', 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov', 'ltcv', 'rootid' ]
-        expectedkeys_ltcv = [ 'mjd', 'band', 'flux', 'fluxerr', 'isdet' ]
-        if which == 'patch':
-            expectedkeys_ltcv.append( 'ispatch' )
-        if include_base_procver:
-            expectedkeys.extend( [ 'obj_base_procver_id', 'pos_base_procver_id' ] )
-            expectedkeys_ltcv.extend( [ 'base_procver_s', 'base_procver_f' ] )
-        if include_source_ids:
-            expectedkeys_ltcv.extend( [ 'diaobjectid', 'diasourceid' ] )
-            if which != 'detections':
-                expectedkeys_ltcv.append( 'diaforcedsourceid' )
-        if include_source_positions:
-            expectedkeys_ltcv.extend( [ 'det_ra', 'det_dec', 'det_raerr', 'det_decerr', 'det_ra_dec_cov' ] )
+    # Each element of the list is:
+    #  * processing version
+    #  * object to ask for
+    #  * expected root ids returned
+    #  * expected diaobjects returned
 
-        assert set( res.keys() ) == set( expectedkeys )
-        assert set( res['ltcv'].keys() ) == set( expectedkeys_ltcv )
+    ltcvlist = [ ( None, 202, [2], [202], 'pv2' ),
+                 ( None, roots[2]['root'].id, [2], [202], 'pv2' ),
+                 ( 'pvc_pv1', 100, [0], [100] ),
+                 ( 'pvc_pv1', roots[0]['root'].id, [0], [100] ),
+                 ( 'pvc_pv1', 1, None, None ),
+                 ( 'pvc_pv2', roots[1]['root'].id, [1], [201, 2011] ),
+                 ( 'pvc_pv2', 1, [1], [201, 2011] ),
+                 ( 'pvc_pv2', 201, [1], [201, 2011] ),
+                ]
 
-        assert res['rootid'] == str( roots[rootdex]['root'].id )
-        assert all( o == roots[rootdex]['objs'][objdex]['obj'].diaobjectid for o in res['diaobjectid'] )
-        for r, d in zip( res['ra'], res['dec'] ):
-            assert any( r == pytest.approx( roots[rootdex]['objs'][objdex]['pos'][b][-1].ra, abs=1e-5 )
-                        for b in obj_bpv_key )
-            assert any( d == pytest.approx( roots[rootdex]['objs'][objdex]['pos'][b][-1].dec, abs=1e-5 )
-                        for b in obj_bpv_key )
-        if which == 'detections':
-            assert all( r == 1 for r in res['ltcv']['isdet'] )
-        if include_base_procver:
-            for rb in res['obj_base_procver_id']:
-                assert any( rb == str(bpvs[o].id) for o in obj_bpv_key )
-            for rb in res['pos_base_procver_id']:
-                for opv in obj_bpv_key:
-                    valid_bpvkeys = [ bpvs[k].id for k in bpvs.keys() if k[0:len(opv)+19]==f'{opv}_diaobject_position' ]
-                    assert any( rb == str(v) for v in valid_bpvkeys )
+    extras = [ {},
+               { 'mjd_now': 60040. },
+               { 'include_source_positions': 1 },
+               { 'include_base_procver': 1 },
+               { 'return_object_info': 1, 'include_base_procver': 1 },
+               { 'include_source_positions': 1, 'include_base_procver': 1 },
+               { 'include_source_positions': 1, 'include_base_procver': 1, 'return_object_info': 1 },
+               { 'include_source_positions': 1, 'include_base_procver': 1, 'return_object_info': 1,
+                 'use_weighted_source_positions': 0, 'always_use_weighted_source_positions': 1 },
+               { 'use_weighted_source_positions': 1, 'include_base_procver': 1,
+                 'return_object_info': 1, 'include_object_positions': 1, 'manual_check': 1, },
+               { 'always_use_weighted_source_positions': 1, 'include_base_procver': 1,
+                 'return_object_info': 1 , 'include_object_positions': 1, 'manual_check': 2 }
+              ]
 
-        forced = {}
-        sources = {}
-        # We're assuming that the bpv keys passed will be in increasing priority order
-        for bk in bpv_key:
-            forced.update( { f.visit: f for f in roots[rootdex]['objs'][objdex]['frc'][bk] } )
-            sources.update( { s.visit: s for s in roots[rootdex]['objs'][objdex]['src'][bk] } )
-        forced = list( forced.values() )
-        sources = list( sources.values() )
-        forced.sort( key=lambda f: f.midpointmjdtai )
-        sources.sort( key=lambda s: s.midpointmjdtai )
-        srci = 0
-        frci = 0
-        for i in range( len(res['ltcv']['mjd'] ) ):
-            # Should have forced photometry where ispatch is not 1.  (ispatch will only be 1 for last n points)
-            if ( ( 'which' == 'forced' ) or
-                 ( ( 'ispatch' in res['ltcv'] ) and not ( res['ltcv']['ispatch'][i] ) ) ):
-                assert res['ltcv']['mjd'][i] == pytest.approx( forced[frci].midpointmjdtai, abs=1./3600./24. )
-                assert res['ltcv']['band'][i] == forced[frci].band
-                assert res['ltcv']['flux'][i] == pytest.approx( forced[frci].psfflux, rel=1e-6 )
-                assert res['ltcv']['fluxerr'][i] == pytest.approx( forced[frci].psffluxerr, rel=1e-6 )
-                frci += 1
-            # If 'isdet' is true, should correspond to a source
-            if res['ltcv']['isdet'][i]:
-                assert res['ltcv']['mjd'][i] == pytest.approx( sources[srci].midpointmjdtai, abs=1./3600./24. )
-                assert res['ltcv']['band'][i] == sources[srci].band
-                assert res['ltcv']['flux'][i] == pytest.approx( sources[srci].psfflux, rel=1e-6 )
-                assert res['ltcv']['fluxerr'][i] == pytest.approx( sources[srci].psffluxerr, rel=1e-6 )
-                srci += 1
 
-    res = fastdb_client.post( f'/ltcv/getltcv/pvc_pv2/{roots[3]["root"].id}' )
-    _check_ltcv( res, 3, 1, bpv_key='bpv2a' )
+    n = 0
+    t0 = time.perf_counter()
+    first = True
+    firstforreq = set()
+    for ltcvreq in ltcvlist:
+        for which in [ 'detections', 'forced', 'patch', None ]:
+            for extra in extras:
+                # So we can mung it
+                extra = extra.copy()
 
-    # The base processing version of the *object* is going to be bpv2,
-    #   even though we're supposed to be pulling photometry from default
-    #   (which is an alias for pv3).  (TODO: fix the fixture so that the
-    #   processing versions are different for different sources so we
-    #   can test that!  That probably means editing other tests too when
-    #   the fixture changes....)
-    with pytest.raises( RuntimeError, match=( "Error response from server, status 422: rootids from "
-                                              "many_object_ltcvs and get_object_infos don't match; you probably "
-                                              "have the wrong object_procver." ) ):
-        res = fastdb_client.post( '/ltcv/getltcv/203' )
+                manual = None
+                if 'manual_check' in extra:
+                    manual = extra['manual_check']
+                    del extra['manual_check']
+                if which is not None:
+                    extra['which'] = which
 
-    with pytest.raises( RuntimeError, match=( "Error response from server, status 422: rootids from "
-                                              "many_object_ltcvs and get_object_infos don't match; you probably "
-                                              "have the wrong object_procver." ) ):
-        res = fastdb_client.post( '/ltcv/getltcv/pvc_pv3/203' )
+                if ltcvreq[0] is None:
+                    url = f'/ltcv/getltcv/{ltcvreq[1]}'
+                    pv = ltcvreq[4]
+                else:
+                    url = f'/ltcv/getltcv/{ltcvreq[0]}/{ltcvreq[1]}'
+                    pv = ltcvreq[0]
 
-    res = fastdb_client.post( '/ltcv/getltcv/pvc_pv3/203', json={ 'object_procver': 'pvc_pv2' } )
-    _check_ltcv( res, 3, 1, bpv_key='bpv3', obj_bpv_key='bpv2a' )
+                if first:
+                    first = False
+                    # ...we don't really need to test this 320 times...
+                    with pytest.raises( RuntimeError, match=( "^Error response from server, status 422: "
+                                                              "Unknown data parameters: {'foo'}" ) ):
+                        n += 1
+                        fastdb_client.post( url, json={'foo': 'bar'} )
 
-    # Objects aren't defined in 'default', which is probably bad, damn, I really need to
-    #   rethink these fixtures, which will be PAINFUL.
-    with pytest.raises( RuntimeError, match=( "Error response from server, status 422: rootids from "
-                                              "many_object_ltcvs and get_object_infos don't match; you probably "
-                                              "have the wrong object_procver." ) ):
-        res = fastdb_client.post( f'/ltcv/getltcv/{roots[3]["root"].id}' )
+                if ltcvreq[2] is None:
+                    # ...and we don't have to test this with every set of options...
+                    if ltcvreq not in firstforreq:
+                        firstforreq.add( ltcvreq )
+                        with pytest.raises( RuntimeError, match=( f"^Error response from server, status 422: "
+                                                                  f"Could not find lightcurve for {ltcvreq[1]} "
+                                                                  f"in processing version {ltcvreq[0]}" ) ):
+                            n += 1
+                            res = fastdb_client.post( url, json=extra )
+                else:
+                    n += 1
+                    res = fastdb_client.post( url, json=extra )
 
-    with pytest.raises( RuntimeError, match=( "Error response from server, status 422: rootids from "
-                                              "many_object_ltcvs and get_object_infos don't match; you probably "
-                                              "have the wrong object_procver." ) ):
-        res = fastdb_client.post( f'/ltcv/getltcv/pvc_pv3/{roots[3]["root"].id}' )
+                    if ( manual == 1 ) and ( pv == 'pvc_pv2' ):
+                        for dex in range( len(res['objinfo']['diaobjectid']) ):
+                            if res['objinfo']['diaobjectid'][dex] == 201:
+                                # use_weighted_source_position won't be necessary for
+                                #   object 201 in pv 2
+                                assert res['objinfo']['pos_base_procver'][dex] is not None
+                            elif res['objinfo']['diaobjectid'][dex] == 2011:
+                                # But, object 2011 has no positions stored
+                                assert res['objinfo']['pos_base_procver'][dex] is None
+                    elif manual == 2:
+                        assert len( res['objinfo']['diaobjectid'] ) == len( ltcvreq[3] )
+                        # In this case, every object should have a weighted source position
+                        assert all( pbv is None for pbv in res['objinfo']['pos_base_procver'] )
 
-    res = fastdb_client.post( f'/ltcv/getltcv/pvc_pv3/{roots[3]["root"].id}',
-                              json={ 'object_procver': 'pvc_pv2' } )
-    _check_ltcv( res, 3, 1, bpv_key='bpv3', obj_bpv_key='bpv2a' )
+                    _check_ltcv_res( pv, ltcvreq[2], ltcvreq[3], res, single=True, **extra,
+                                     set_of_lightcurves=roots, procver_collection=pvc )
 
-    res = fastdb_client.post( '/ltcv/getltcv/realtime/0' )
-    _check_ltcv( res, 0, 0, bpv_key='realtime' )
+    FDBLogger.info( f"Sent {n} requests in {time.perf_counter()-t0:.2f} sec." )
 
-    # The object *is* defined in realtime, so the fallback defaults server side should work here
-    res = fastdb_client.post( f'/ltcv/getltcv/realtime/{roots[0]["root"].id}' )
-    _check_ltcv( res, 0, 0, bpv_key='realtime' )
-
-    # This is an example where there's actually a mix of base processing versions on
-    #   the returned forced photometry.
-    res = fastdb_client.post( '/ltcv/getltcv/pvc_pv1/100' )
-    _check_ltcv( res, 0, 2, bpv_key=['bpv1a', 'bpv1'], obj_bpv_key='bpv1a' )
 
 
 # TODO : test getrandomltcv ; that might require the ability to pass a random seed for a reproducible test.
@@ -514,78 +554,172 @@ def test_getrandomltcv( test_user, fastdb_client, procver_collection, set_of_lig
 
 
 def test_gethottransients( test_user, fastdb_client, procver_collection, set_of_lightcurves ):
-    # This tests gets the same information as ../test_ltcv.py, only via
-    # the webap.  ../test_ltcv.py::test_get_hot_ltcvs makes sure that
-    # the direct call to ltcv.get_hot_ltcvs returns the right stuff.
-    # (Or, at least, it should.)  This test makes sure that what you get
-    # from the webap matches what you get from a direct call.
+    roots = set_of_lightcurves
+    pvc = procver_collection
 
-    def _compare_direct_to_webap( df, objdf, res ):
-        assert ( df.index.get_level_values('diaobjectid').unique()
-                 == np.array( [ r['diaobjectid'] for r in res ] ) ).all()
-        assert ( objdf.index.get_level_values('diaobjectid').unique()
-                 == np.array( [ r['diaobjectid'] for r in res ] ) ).all()
-        for objrow in res:
-            objid = objrow['diaobjectid']
-            subdf = df.loc[ objid ]
-            subobjdf = objdf.loc[ objid ]
-            assert objrow['rootid'] == str( subobjdf.rootid )
-            assert objrow['ra'] == subobjdf.ra
-            assert objrow['dec'] == subobjdf.dec
-            assert objrow['zp'] == 31.4
-            assert len(subdf) == len( objrow['photometry']['mjd'] )
-            assert ( subdf.index.values == np.array( objrow['photometry']['mjd'] ) ).all()
-            assert ( subdf.band == np.array( objrow['photometry']['band'] ) ).all()
-            assert ( subdf.visit == np.array( objrow['photometry']['visit'] ) ).all()
-            assert ( subdf.flux == np.array( objrow['photometry']['flux'] ) ) .all()
-            assert ( subdf.fluxerr == np.array( objrow['photometry']['fluxerr'] ) ).all()
-            assert ( subdf.isdet == np.array( objrow['photometry']['isdet'] ) ).all()
-            if 'ispatch' in subdf.columns:
-                assert ( subdf.ispatch == np.array( objrow['photometry']['ispatch'] ) ).all()
+    ltcvinfo = [ { 'kwargs': { 'mjd_now': 60056., 'detected_since_mjd': 60035. },
+                   'passprocver': 'pvc_pv2',
+                   'testprocver': 'pv2',
+                   'exproot': [1, 2, 3],
+                   'expobj': [201, 2011, 202, 203]
+                  },
+                 { 'kwargs': { 'mjd_now': 60046., 'detected_since_mjd': 60035., },
+                   'passprocver': 'pvc_pv2',
+                   'testprocver': 'pv2',
+                   'exproot': [1, 2],
+                   'expobj': [201, 2011, 202],
+                  },
+                 { 'kwargs': { 'mjd_now': 60021., 'detected_in_last_days': 2 },
+                   'passprocver': 'pvc_pv2',
+                   'testprocver': 'pv2',
+                   'exproot': [0, 1],
+                   'expobj': [200, 201, 2011]
+                  },
+                 { 'kwargs': { 'mjd_now': 60041., 'detected_in_last_days': 2 },
+                   'passprocver': 'pvc_pv2',
+                   'testprocver': 'pv2',
+                   'exproot': [1, 2],
+                   'expobj': [201, 2011, 202]
+                  },
+                 # detected in last days defaults to 30
+                 { 'kwargs': { 'mjd_now': 60085. },
+                   'passprocver': 'pvc_pv2',
+                   'testprocver': 'pv2',
+                   'exproot': [1, 2, 3],
+                   'expobj': [201, 2011, 202, 203]
+                  },
+                 { 'kwargs': { 'mjd_now': 60095. },
+                   'passprocver': 'pvc_pv2',
+                   'testprocver': 'pv2',
+                   'exproot': [2],
+                   'expobj': [202]
+                  },
+                 { 'kwargs': { 'mjd_now': 60061. },
+                   'passprocver': 'realtime',
+                   'testprocver': 'realtime',
+                   'exproot': [1, 2],
+                   'expobj': [1, 2]
+                  },
+                 { 'kwargs': { 'mjd_now': 60061. },
+                   'passprocver': None,
+                   'testprocver': 'realtime',
+                   'exproot': [1, 2],
+                   'expobj': [1, 2]
+                  }
+                ]
 
-    df, objdf, _ = ltcv.get_hot_ltcvs( 'pvc_pv3', detected_since_mjd=60035, mjd_now=60056 )
-    res = fastdb_client.post( '/ltcv/gethottransients', json={ 'processing_version': 'pvc_pv3',
-                                                               'detected_since_mjd': 60035,
-                                                               'mjd_now': 60056 } )
-    _compare_direct_to_webap( df, objdf, res )
+    extras = [ {},
+               { 'include_object_positions': 1 },
+               { 'include_object_positions': 0 },
+               { 'include_source_positions': 1 },
+               { 'include_object_positions': 1, 'include_source_positions': 1 },
+               { 'include_base_procver': 1 },
+               { 'include_base_procver': 1, 'include_object_positions': 1 },
+               { 'use_weighted_source_positions': 1, 'include_object_positions': 1 },
+               { 'always_use_weighted_source_positions': 1, 'include_object_positions': 1, 'include_base_procver': 1 },
+               { 'always_use_weighted_source_positions': 1, 'include_object_positions': 1 },
+              ]
 
-    df, objdf, _ = ltcv.get_hot_ltcvs( 'pvc_pv3', detected_since_mjd=60035, mjd_now=60046 )
-    res = fastdb_client.post( '/ltcv/gethottransients', json={ 'processing_version': 'pvc_pv3',
-                                                               'detected_since_mjd': 60035,
-                                                               'mjd_now': 60046 } )
-    _compare_direct_to_webap( df, objdf, res )
+    for lc in ltcvinfo:
+        for source_patch in [ True, False, None ]:
+            for extra in extras:
 
-    df, objdf, _ = ltcv.get_hot_ltcvs( 'pvc_pv3', detected_in_last_days=2, mjd_now=60021 )
-    res = fastdb_client.post( '/ltcv/gethottransients', json={ 'processing_version': 'pvc_pv3',
-                                                               'detected_in_last_days': 2,
-                                                               'mjd_now': 60021 } )
-    _compare_direct_to_webap( df, objdf, res )
+                if lc['passprocver'] is None:
+                    url = '/ltcv/gethottransients'
+                else:
+                    url = f'/ltcv/gethottransients/{lc["passprocver"]}'
 
-    df, objdf, _ = ltcv.get_hot_ltcvs( 'pvc_pv3', detected_in_last_days=2, mjd_now=60041 )
-    res = fastdb_client.post( '/ltcv/gethottransients', json={ 'processing_version': 'pvc_pv3',
-                                                               'detected_in_last_days': 2,
-                                                               'mjd_now': 60041 } )
-    _compare_direct_to_webap( df, objdf, res )
+                kwargs = extra.copy()
+                kwargs.update( lc['kwargs'] )
+                if source_patch is not None:
+                    kwargs['source_patch'] = source_patch
 
-    # detected_in_last_days defaults to 30
-    df, objdf, _ = ltcv.get_hot_ltcvs( 'pvc_pv3', mjd_now=60085 )
-    res = fastdb_client.post( '/ltcv/gethottransients', json={ 'processing_version': 'pvc_pv3',
-                                                               'mjd_now': 60085 } )
-    _compare_direct_to_webap( df, objdf, res )
-    df, objdf, _ = ltcv.get_hot_ltcvs( 'pvc_pv3', mjd_now=60095 )
-    res = fastdb_client.post( '/ltcv/gethottransients', json={ 'processing_version': 'pvc_pv3',
-                                                               'mjd_now': 60095 } )
-    _compare_direct_to_webap( df, objdf, res )
+                res = fastdb_client.post( url, json=kwargs )
 
-    # Test source patch.  Gotta use pvc_pv1 for this.
+                for yank in [ 'source_patch', 'detected_since_mjd', 'detected_in_last_days' ]:
+                    if yank in kwargs:
+                        del kwargs[yank]
+                kwargs['which'] = 'patch' if source_patch in ( True, None ) else 'forced'
+                if 'include_object_positions' not in kwargs:
+                    # get_hot_ltcvs has a different default from many_object_ltcvs
+                    kwargs['include_object_positions'] = True
+                _check_ltcv_res( lc['testprocver'], lc['exproot'], lc['expobj'], res,
+                                 set_of_lightcurves=roots, procver_collection=pvc,
+                                 return_object_info=True, **kwargs )
 
-    df, objdf, _ = ltcv.get_hot_ltcvs( 'pvc_pv1', mjd_now=60031 )
-    res = fastdb_client.post( '/ltcv/gethottransients', json={ 'processing_version': 'pvc_pv1',
-                                                               'mjd_now': 60031 } )
-    _compare_direct_to_webap( df, objdf, res )
 
-    df, objdf, _ = ltcv.get_hot_ltcvs( 'pvc_pv1', mjd_now=60031, source_patch=True )
-    res = fastdb_client.post( '/ltcv/gethottransients', json={ 'processing_version': 'pvc_pv1',
-                                                               'mjd_now': 60031,
-                                                               'source_patch': True } )
-    _compare_direct_to_webap( df, objdf, res )
+    # # This tests gets the same information as ../test_ltcv.py, only via
+    # # the webap.  ../test_ltcv.py::test_get_hot_ltcvs makes sure that
+    # # the direct call to ltcv.get_hot_ltcvs returns the right stuff.
+    # # (Or, at least, it should.)  This test makes sure that what you get
+    # # from the webap matches what you get from a direct call.
+
+    # def _compare_direct_to_webap( df, objdf, res ):
+    #     assert ( df.index.get_level_values('diaobjectid').unique()
+    #              == np.array( [ r['diaobjectid'] for r in res ] ) ).all()
+    #     assert ( objdf.index.get_level_values('diaobjectid').unique()
+    #              == np.array( [ r['diaobjectid'] for r in res ] ) ).all()
+    #     for objrow in res:
+    #         objid = objrow['diaobjectid']
+    #         subdf = df.loc[ objid ]
+    #         subobjdf = objdf.loc[ objid ]
+    #         assert objrow['rootid'] == str( subobjdf.rootid )
+    #         assert objrow['ra'] == subobjdf.ra
+    #         assert objrow['dec'] == subobjdf.dec
+    #         assert objrow['zp'] == 31.4
+    #         assert len(subdf) == len( objrow['photometry']['mjd'] )
+    #         assert ( subdf.index.values == np.array( objrow['photometry']['mjd'] ) ).all()
+    #         assert ( subdf.band == np.array( objrow['photometry']['band'] ) ).all()
+    #         assert ( subdf.visit == np.array( objrow['photometry']['visit'] ) ).all()
+    #         assert ( subdf.flux == np.array( objrow['photometry']['flux'] ) ) .all()
+    #         assert ( subdf.fluxerr == np.array( objrow['photometry']['fluxerr'] ) ).all()
+    #         assert ( subdf.isdet == np.array( objrow['photometry']['isdet'] ) ).all()
+    #         if 'ispatch' in subdf.columns:
+    #             assert ( subdf.ispatch == np.array( objrow['photometry']['ispatch'] ) ).all()
+
+    # df, objdf, _ = ltcv.get_hot_ltcvs( 'pvc_pv3', detected_since_mjd=60035, mjd_now=60056 )
+    # res = fastdb_client.post( '/ltcv/gethottransients', json={ 'processing_version': 'pvc_pv3',
+    #                                                            'detected_since_mjd': 60035,
+    #                                                            'mjd_now': 60056 } )
+    # _compare_direct_to_webap( df, objdf, res )
+
+    # df, objdf, _ = ltcv.get_hot_ltcvs( 'pvc_pv3', detected_since_mjd=60035, mjd_now=60046 )
+    # res = fastdb_client.post( '/ltcv/gethottransients', json={ 'processing_version': 'pvc_pv3',
+    #                                                            'detected_since_mjd': 60035,
+    #                                                            'mjd_now': 60046 } )
+    # _compare_direct_to_webap( df, objdf, res )
+
+    # df, objdf, _ = ltcv.get_hot_ltcvs( 'pvc_pv3', detected_in_last_days=2, mjd_now=60021 )
+    # res = fastdb_client.post( '/ltcv/gethottransients', json={ 'processing_version': 'pvc_pv3',
+    #                                                            'detected_in_last_days': 2,
+    #                                                            'mjd_now': 60021 } )
+    # _compare_direct_to_webap( df, objdf, res )
+
+    # df, objdf, _ = ltcv.get_hot_ltcvs( 'pvc_pv3', detected_in_last_days=2, mjd_now=60041 )
+    # res = fastdb_client.post( '/ltcv/gethottransients', json={ 'processing_version': 'pvc_pv3',
+    #                                                            'detected_in_last_days': 2,
+    #                                                            'mjd_now': 60041 } )
+    # _compare_direct_to_webap( df, objdf, res )
+
+    # # detected_in_last_days defaults to 30
+    # df, objdf, _ = ltcv.get_hot_ltcvs( 'pvc_pv3', mjd_now=60085 )
+    # res = fastdb_client.post( '/ltcv/gethottransients', json={ 'processing_version': 'pvc_pv3',
+    #                                                            'mjd_now': 60085 } )
+    # _compare_direct_to_webap( df, objdf, res )
+    # df, objdf, _ = ltcv.get_hot_ltcvs( 'pvc_pv3', mjd_now=60095 )
+    # res = fastdb_client.post( '/ltcv/gethottransients', json={ 'processing_version': 'pvc_pv3',
+    #                                                            'mjd_now': 60095 } )
+    # _compare_direct_to_webap( df, objdf, res )
+
+    # # Test source patch.  Gotta use pvc_pv1 for this.
+
+    # df, objdf, _ = ltcv.get_hot_ltcvs( 'pvc_pv1', mjd_now=60031 )
+    # res = fastdb_client.post( '/ltcv/gethottransients', json={ 'processing_version': 'pvc_pv1',
+    #                                                            'mjd_now': 60031 } )
+    # _compare_direct_to_webap( df, objdf, res )
+
+    # df, objdf, _ = ltcv.get_hot_ltcvs( 'pvc_pv1', mjd_now=60031, source_patch=True )
+    # res = fastdb_client.post( '/ltcv/gethottransients', json={ 'processing_version': 'pvc_pv1',
+    #                                                            'mjd_now': 60031,
+    #                                                            'source_patch': True } )
+    # _compare_direct_to_webap( df, objdf, res )

@@ -60,7 +60,7 @@ class TestDiaObjectHostMatch( BaseTestDB ):
 
     @pytest.fixture
     def basetest_setup( self, procver_collection, obj1, obj2, host1, host2 ):
-        bpv, _pv = procver_collection
+        bpv, _pv, _pvinfo = procver_collection
         self.cls = DiaObjectHostMatch
         self.columns = {
             'diaobjectid',
