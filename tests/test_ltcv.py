@@ -11,7 +11,7 @@ from util import FDBLogger
 
 
 def test_get_object_infos( set_of_lightcurves, procver_collection ):
-    bpvs, _pvs = procver_collection
+    bpvs, _pvs, _pvinfo = procver_collection
     roots = set_of_lightcurves
 
     info = ltcv.get_object_infos( [ 200, 201, 202 ], return_format='pandas',
@@ -176,7 +176,7 @@ def compare_ltcv_to_expected( srcdf, frcdf, patdf,
                               mjdnow=None,
                               all_source_diaobjectids_in_pat=True,
                               all_forced_diaobjectids_in_pat=True ):
-    bpvcol, _pvs = procver_collection
+    bpvcol, _pvs, _pvinfo = procver_collection
     roots = set_of_lightcurves
 
     if all( i is None for i in [ srcdf, frcdf, patdf ] ):
@@ -587,7 +587,7 @@ def test_object_ltcv( procver_collection, set_of_lightcurves ):
     #   same processing version that point to the same root object!
 
     roots = set_of_lightcurves
-    _bpvs, pvs = procver_collection
+    _bpvs, pvs, _pvinfo = procver_collection
 
     # The fixture loads up lightcurves every 2.5 days
 
@@ -857,7 +857,7 @@ def test_object_ltcv( procver_collection, set_of_lightcurves ):
 def test_many_object_ltcvs( procver_collection, set_of_lightcurves ):
     # TODO : beef up these tests, think about more edge cases
     roots = set_of_lightcurves
-    _bpvs, pvs = procver_collection
+    _bpvs, pvs, _pvinfo = procver_collection
 
     # Only object 0 is in pv1, so if we ask for both objects 0 and 1, we should only get one object back
 
@@ -869,13 +869,13 @@ def test_many_object_ltcvs( procver_collection, set_of_lightcurves ):
         df = ltcv.many_object_ltcvs( pvs['pv1'].id, searchfor,
                                      return_format='pandas', which='patch', include_base_procver=True )
 
-    assert set( srcs.index.get_level_values( 'rootid' ).unique().values ) == { roots[0]['root'].id }
-    assert set( forced.index.get_level_values( 'rootid' ).unique().values ) == { roots[0]['root'].id }
-    assert set( df.index.get_level_values( 'rootid' ).unique().values ) == { roots[0]['root'].id }
-    compare_ltcv_to_expected( srcs, forced, df, expected_roots=[0], expected_diaobjectids=[100],
-                              procver=pvs['pv1'], include_base_procver=True,
-                              all_roots_in_srcdf=True, all_roots_in_frcdf=True,
-                              set_of_lightcurves=roots, procver_collection=procver_collection )
+        assert set( srcs.index.get_level_values( 'rootid' ).unique().values ) == { roots[0]['root'].id }
+        assert set( forced.index.get_level_values( 'rootid' ).unique().values ) == { roots[0]['root'].id }
+        assert set( df.index.get_level_values( 'rootid' ).unique().values ) == { roots[0]['root'].id }
+        compare_ltcv_to_expected( srcs, forced, df, expected_roots=[0], expected_diaobjectids=[100],
+                                  procver=pvs['pv1'], include_base_procver=True,
+                                  all_roots_in_srcdf=True, all_roots_in_frcdf=True,
+                                  set_of_lightcurves=roots, procver_collection=procver_collection )
 
     # Now ask for two lightcurves where we expect to get two lightcurves
     srcs = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['root'].id for i in [0,2] ],
@@ -1337,7 +1337,7 @@ def test_get_hot_ltcvs( set_of_lightcurves, procver_collection ):
     #    and that will be different based on when this is run
 
     roots = set_of_lightcurves
-    _bpvs, pvs = procver_collection
+    _bpvs, pvs, _pvinfo = procver_collection
     stuff = { 'set_of_lightcurves': roots, 'procver_collection': procver_collection }
 
 

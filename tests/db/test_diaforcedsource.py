@@ -11,7 +11,7 @@ class TestDiaForcedSource( BaseTestDB ):
 
     @pytest.fixture
     def basetest_setup( self, procver_collection, obj1 ):
-        bpv, _pv = procver_collection
+        bpv, _pv, _pvinfo = procver_collection
         self.cls = DiaForcedSource
         self.columns = {
             'base_procver_id',

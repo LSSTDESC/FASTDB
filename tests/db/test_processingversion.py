@@ -95,7 +95,7 @@ class TestProcessingVersion( BaseTestDB ):
 
     # THIS TEST HAS TO GO LAST because it runs the procver_collection fixture that's module scope
     def test_procver_functions( self, procver_collection ):
-        bpvs, pvs = procver_collection
+        bpvs, pvs, _pvinfo = procver_collection
 
         for pv in pvs.values():
             assert ProcessingVersion.procver_id( pv.description ) == pv.id

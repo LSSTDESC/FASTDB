@@ -1,135 +1,391 @@
 import pytest
-import numbers
+import itertools
 
 import numpy as np
 
+import db
 import ltcv
 
 
-def test_getmanyltcvs( test_user, fastdb_client, set_of_lightcurves ):
+def _check_ltcv_res( procver, expected_roots, expected_diaobjectids, res,
+                     mjdnow=None, bands=None, which='patch', return_object_info=False,
+                     include_base_procver=False, include_source_ids=False, include_source_positions=False,
+                     use_weighted_source_positions=False, always_use_weighted_source_positions=False,
+                     procver_collection=None, set_of_lightcurves=None,
+                     expect_all_roots=True ):
+    # This has a lot of redundancy with test_ltcv.py::compare_ltcv_to_expected
+    bpvs, pvs, pvinfo = procver_collection
     roots = set_of_lightcurves
+    assert roots is not None
 
-    def _check_res( infos, ltcvs, res, mjdnow=None, which='patch',
-                    include_base_procver=False, include_source_ids=False, include_source_positions=False ):
-        info_str_rootid = [ str(i) for i in infos['rootid'] ]
-        assert set(res.keys() ) == set( info_str_rootid )
+    which = 'patch' if which is None else which
+    pvrow = [ p for p in pvinfo if ( ( p['procver'].description == procver ) or
+                                     ( procver in pvs and p['procver'].description == pvs[procver].description ) or
+                                     ( isinstance(procver, db.ProcessingVersion) and procver.id==p['procver'].id ) ) ]
+    assert len(pvrow) == 1
+    pvrow = pvrow[0]
 
-        for rootid, mess in res.items():
-            # Because of the test set we're using, there is only one diaobjectid
-            #   for any rootid.  This is too bad, because it means we can't test
-            #   the case of multiple diaobjectids.  However, the thought of
-            #   redoing the set_of_lightcurves fixture and every test that
-            #   depends on it makes me shudder.
-            infodex = info_str_rootid.index( rootid )
-            thisltcv = ltcvs[ [ str(lc['rootid']) for lc in ltcvs ].index( rootid ) ]
-            if include_base_procver:
-                expectedkeys = [ 'diaobjectid', 'obj_base_procverid', 'pos_base_procver_id',
-                                 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ]
+    expected_root_ids = [ roots[i]['root'].id for i in expected_roots ]
+    use_weighted_source_positions = use_weighted_source_positions or always_use_weighted_source_positions
+
+    if return_object_info:
+        ltcvs = res['ltcvs']
+        infos = res['objinfo']
+        if not include_base_procver:
+            raise RuntimeError( '_check_ltcv_res is broken when include_base_procver is False '
+                                'and return_object_info is True' )
+    else:
+        ltcvs = res
+        infos = None
+
+    expected_keys = [ 'rootid', 'mjd', 'diasourceid', 'source_diaobjectid',
+                      'visit', 'band', 'flux', 'fluxerr', 'isdet' ]
+    if which != 'detections':
+        expected_keys.extend( [ 'diaforcedsourceid', 'forced_diaobjectid' ] )
+    if which == 'patch':
+        expected_keys.append( 'ispatch' )
+    if include_base_procver:
+        expected_keys.append( 'base_procver_s' )
+        if which != 'detections':
+            expected_keys.append( 'base_procver_f' )
+    if include_source_positions:
+        expected_keys.extend( [ 'det_ra', 'det_dec', 'det_raerr', 'det_decerr', 'det_ra_dec_cov' ] )
+
+    assert isinstance( ltcvs, list )
+    assert all( set( lc.keys() ) == set( expected_keys ) for lc in ltcvs )
+
+    expected_keys.remove( 'rootid' )
+
+    if expect_all_roots:
+        assert len( ltcvs ) == len( expected_roots )
+        assert set( lc['rootid'] for lc in ltcvs ) == set( str(r) for r in expected_root_ids )
+    else:
+        assert len( set( lc['rootid'] for lc in ltcvs ) ) == len( lc['rootid'] for lc in ltcvs )
+        assert set( lc['rootid'] for lc in ltcvs ).issubset( set( str(r) for r in expected_root_ids ) )
+
+
+    datacache = {}
+    for rootid in expected_root_ids:
+        rdex = None
+        for i, root in enumerate( roots ):
+            if root['root'].id == rootid:
+                rdex = i
+                break
+        if rdex is None:
+            raise ValueError( "Failed to find root object {rootid}" )
+
+        dex = [ lc['rootid'] for lc in ltcvs ].index( str(rootid) )
+        thisltcv = ltcvs[dex]
+
+        assert all( len(thisltcv[k]) == len(thisltcv['mjd']) for k in expected_keys )
+
+        # OK, here's the deal.  For each rootid, there are multiple base processing versions that have
+        #   data.  We need to extract the highest priority for each.  To do this, rewrangle the
+        #   set_of_lightcurves data so that its indexed by base_procver, in descending priority order.
+
+        if mjdnow is not None:
+            if bands is not None:
+                conds = lambda s: s.midpointmjdtai <= mjdnow and s.band in bands
             else:
-                expectedkeys = [ 'diaobjectid', 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ]
+                conds = lambda s: s.midpointmjdtai <= mjdnow
+        elif bands is not None:
+            conds = lambda s: s.band in bands
+        else:
+            conds = lambda s: True
 
-            assert all( k in mess for k in expectedkeys )
-            assert 'ltcv' in mess
-            assert all( infos[k][infodex] == ( pytest.approx( mess[k][0], rel=1e-6 )
-                                               if isinstance( mess[k][0], numbers.Real )
-                                               else mess[k][0] )
-                        for k in expectedkeys )
+        src_bpvkeys = [ p[2] for p in pvrow['diasource'] ]
+        frc_bpvkeys = [ p[2] for p in pvrow['diaforcedsource'] ]
+        reindexed_srces = { k: { s.visit: s for s in roots[rdex]['src'][k] if conds(s) }
+                            for k in src_bpvkeys if k in roots[rdex]['src'].keys() }
+        reindexed_frced = { k: { f.visit: f for f in roots[rdex]['frc'][k] if conds(f) }
+                            for k in frc_bpvkeys if k in roots[rdex]['frc'].keys() }
 
-            expectedkeys = [ 'mjd', 'band', 'flux', 'fluxerr', 'isdet' ]
-            if which == 'patch':
-                expectedkeys.append( 'ispatch' )
-            if include_source_ids:
-                expectedkeys.extend( 'diaobjectid', 'visit', 'diasourceid', 'diaforcedsourceid' )
-            if include_base_procver:
-                expectedkeys.append( 'base_procver_s' )
-                if which != 'detections':
-                    expectedkeys.append( 'base_procver_f' )
-            if include_source_positions:
-                expectedkeys.extend( [ 'det_ra', 'det_dec', 'det_raerr', 'det_decerr', 'det_ra_dec_cov' ] )
+        # Visit is the thing that lets us decide if a diasource and a diaforcedsource are the same thing.
+        # Get the set of visits defined for this object.
+        allvisits = set( itertools.chain( *[ list(x.keys()) for x in reindexed_srces.values() ] ) )
+        allvisits = allvisits.union( set( itertools.chain( *[ list(x.keys()) for x in reindexed_frced.values() ] ) ) )
 
-            assert set( mess['ltcv'].keys() ) == set( expectedkeys )
-            assert all(
-                all( lval == ( pytest.approx( mval, rel=1e-6 ) if isinstance( mval, numbers.Real ) else mval )
-                     for lval, mval in zip( thisltcv[k], mess['ltcv'][k] ) )
-                for k in expectedkeys
-            )
+        data = []
+        for visit in allvisits:
+            thisdata = {}
 
-    infos = ltcv.get_object_infos( [ 200, 201, 202 ], processing_version='pvc_pv2', return_format='json' )
-    ltcvs = ltcv.many_object_ltcvs( 'pvc_pv3', [ 200, 201, 202 ], return_format='json', which='patch' )
-    res = fastdb_client.post( '/ltcv/getmanyltcvs', json={ 'objids': [ 200, 201, 202 ],
-                                                           'object_procver': 'pvc_pv2' } )
-    assert 'ispatch' in res[ str(roots[0]['root'].id) ]['ltcv'].keys()
-    _check_res( infos, ltcvs, res )
+            for bpvtuple in pvrow['diasource']:
+                bpv, _prio, bpvkey = bpvtuple
+                srcgotit = False
+                if bpvkey in reindexed_srces:
+                    if visit in reindexed_srces[bpvkey]:
+                        thisdata['src'] = reindexed_srces[bpvkey][visit]
+                        thisdata['src_bpv'] = bpv
+                        srcgotit = True
+                        break
+                if not srcgotit:
+                    thisdata['src'] = None
+                    thisdata['src_bpv'] = None
 
-    # Default is pv3, which should be identical to pv2, except there are no objects in
-    #   pv2, so we have to give it an object_procver to avoid an error
-    with pytest.raises( RuntimeError, match=( "Error response from server, status 422: rootids from "
-                                              "many_object_ltcvs and get_object_infos don't match; "
-                                              "you probably have the wrong object_procver." ) ):
-        _ = fastdb_client.post( '/ltcv/getmanyltcvs',
-                                json={ 'objids': [ str(roots[i]['root'].id) for i in [0, 1, 2] ] } )
-    resdef = fastdb_client.post( '/ltcv/getmanyltcvs',
-                                 json={ 'objids': [ str(roots[i]['root'].id) for i in [0, 1, 2] ],
-                                        'object_procver': 'pvc_pv2' } )
-    _check_res( infos, ltcvs, resdef )
-    assert res == resdef
+            for bpvtuple in pvrow['diaforcedsource']:
+                bpv, _prio, bpvkey = bpvtuple
+                frcgotit = False
+                if bpvkey in reindexed_frced:
+                    if visit in reindexed_frced[bpvkey]:
+                        thisdata['frc'] = reindexed_frced[bpvkey][visit]
+                        thisdata['frc_bpv'] = bpv
+                        frcgotit = True
+                        break
+                if not frcgotit:
+                    thisdata['frc'] = None
+                    thisdata['frc_bpv'] = None
 
-    # If we just give it procver pv2, then the object procver shouldn't be needed.
-    res = fastdb_client.post( '/ltcv/getmanyltcvs/pvc_pv2',
-                              json={ 'objids': [ str(roots[i]['root'].id) for i in [0, 1, 2] ] } )
-    _check_res( infos, ltcvs, res )
+            if srcgotit or frcgotit:
+                data.append( thisdata )
+
+        # Sort data by mjd, since that's how the ltcv returns sort things
+        data.sort( key=lambda x: ( x['src'].midpointmjdtai
+                                   if x['src'] is not None
+                                   else x['frc'].midpointmjdtai ) )
+
+        if which == 'detections':
+            # If which is detections, throw out only forced sources
+            data = [ d for d in data if d['src'] is not None ]
+        elif which == 'forced':
+            # If which is forced, through out detections for which we don't have forced
+            data = [ d for d in data if d['frc'] is not None ]
+
+        # Save this as it may be used again below
+        datacache[rootid] = data
+
+        # OK, now we have wrangled things to the point where they can be compared
+
+        assert len( data ) == len( thisltcv['mjd'] )
+        if which == 'detections':
+            assert all( flux == pytest.approx( d['src'].psfflux, rel=1e-6 )
+                        for flux, d in zip( thisltcv['flux'], data ) )
+            assert all( flux == pytest.approx( d['src'].psffluxerr, rel=1e-6 )
+                        for flux, d in zip( thisltcv['fluxerr'], data ) )
+            assert all( bool(i) for i in thisltcv['isdet'] )
+            assert all( v == d['src'].visit for v, d in zip( thisltcv['visit'], data ) )
+            assert all( b == d['src'].band for b, d in zip( thisltcv['band'], data ) )
+            assert all( o == d['src'].diaobjectid for o, d in zip( thisltcv['source_diaobjectid'], data ) )
+        elif which =='forced':
+            assert all( flux == pytest.approx( d['frc'].psfflux, rel=1e-6 )
+                        for flux, d in zip( thisltcv['flux'], data ) )
+            assert all( flux == pytest.approx( d['frc'].psffluxerr, rel=1e-6 )
+                        for flux, d in zip( thisltcv['fluxerr'], data ) )
+            assert all( bool(i) == ( d['src'] is not None ) for i, d in zip( thisltcv['isdet'], data ) )
+            assert all( v == d['frc'].visit for v, d in zip( thisltcv['visit'], data ) )
+            assert all( b == d['frc'].band for b, d in zip( thisltcv['band'], data ) )
+            assert all( o == ( d['src'].diaobjectid if d['src'] is not None else None )
+                        for o, d in zip( thisltcv['source_diaobjectid'], data ) )
+            assert all( o == d['frc'].diaobjectid for o, d in zip( thisltcv['forced_diaobjectid'], data ) )
+        else:
+            assert all( flux == pytest.approx( ( d['frc'].psfflux if d['frc'] is not None
+                                                 else d['src'].psfflux ),
+                                               rel=1e-6 )
+                        for flux, d in zip( thisltcv['flux'], data ) )
+            assert all( flux == pytest.approx( ( d['frc'].psffluxerr if d['frc'] is not None
+                                                 else d['src'].psffluxerr ),
+                                               rel=1e-6 )
+                        for flux, d in zip( thisltcv['fluxerr'], data ) )
+            assert all( bool(i) == ( d['src'] is not None ) for i, d in zip( thisltcv['isdet'], data ) )
+            assert all( bool(i) == ( d['frc'] is None ) for i, d in zip( thisltcv['ispatch'], data ) )
+            assert all( v == ( d['frc'].visit if d['frc'] is not None else d['src'].visit )
+                        for v, d in zip( thisltcv['visit'], data ) )
+            assert all( b == ( d['frc'].band if d['frc'] is not None else d['src'].band )
+                        for b, d in zip( thisltcv['band'], data ) )
+            assert all( o == ( d['src'].diaobjectid if d['src'] is not None else None )
+                        for o, d in zip( thisltcv['source_diaobjectid'], data ) )
+            assert all( o == ( d['frc'].diaobjectid if d['frc'] is not None else None )
+                        for o, d in zip( thisltcv['forced_diaobjectid'], data ) )
+
+        if include_base_procver:
+            assert all( v == ( d['src_bpv'].description if d['src_bpv'] is not None else None )
+                        for v, d in zip( thisltcv['base_procver_s'], data ) )
+            if which != 'detections':
+                assert all( v == ( d['frc_bpv'].description if d['frc_bpv'] is not None else None )
+                            for v, d in zip( thisltcv['base_procver_f'], data ) )
+
+        if include_source_positions:
+            assert all( v == ( pytest.approx( d['src'].ra, rel=1e-12 ) if d['src'] is not None else None )
+                        for v, d in zip( thisltcv['det_ra'], data ) )
+            assert all( v == ( pytest.approx( d['src'].dec, rel=1e-12 ) if d['src'] is not None else None )
+                        for v, d in zip( thisltcv['det_dec'], data ) )
+            assert all( v == ( pytest.approx( d['src'].raerr, rel=1e-6 ) if d['src'] is not None else None )
+                        for v, d in zip( thisltcv['det_raerr'], data ) )
+            assert all( v == ( pytest.approx( d['src'].decerr, rel=1e-6 ) if d['src'] is not None else None )
+                        for v, d in zip( thisltcv['det_decerr'], data ) )
+            assert all( v== ( pytest.approx( d['src'].ra_dec_cov, abs=0.0001/3600. ) if d['src'] is not None else None )
+                        for v, d in zip( thisltcv['det_ra_dec_cov'], data ) )
+
+    if infos is not None:
+
+        assert set( infos['rootid'] ) == set( str(e) for e in expected_root_ids )
+        # We know that there's only one diaobject per processing version, so we don't have
+        #   to go through all the pain we'll go through with sources below
+        assert len( infos['diaobjectid'] ) == len( expected_diaobjectids )
+        assert set( infos['diaobjectid'] ) == set( expected_diaobjectids )
+
+        for r in expected_roots:
+            for diaobjectid in expected_diaobjectids:
+                if diaobjectid not in roots[r]['obj'].keys():
+                    continue
+                diaobject = roots[r]['obj'][diaobjectid]
+                dex = infos['diaobjectid'].index( diaobjectid )
+                assert infos['rootid'][dex] == str( diaobject.rootid )
+                bpv = [ b[0] for b in pvrow['diaobject'] if b[0].description==infos['obj_base_procver'][dex] ]
+                assert len(bpv) == 1
+                bpv = bpv[0]
+                assert diaobject.base_procver_id == bpv.id
+
+                # There *are* multiple positions, so make sure we got the highest priority one that exists
+                #
+                # OMG this is becoming such an ugly hack of how I store data, this is what
+                #   happens when you just need to get stuff done fast and can't go back
+                #   and refactor.
+                pos = None
+                posbpv = None
+                for proposedposbpv, prio, bpvkey in pvrow['diaobject_position']:
+                    if (diaobjectid, bpvkey) in roots[r]['pos'].keys():
+                        pos = roots[r]['pos'][ (diaobjectid, bpvkey) ]
+                        posbpv = proposedposbpv
+                        break
+
+                if always_use_weighted_source_positions:
+                    assert infos['pos_base_procver'][dex] is None
+
+                else:
+                    if pos is None:
+                        assert infos['pos_base_procver'][dex] is None
+                    else:
+                        if use_weighted_source_positions:
+                            assert infos['pos_base_procver'][dex] in ( posbpv.description, None )
+                        else:
+                            assert infos['pos_base_procver'][dex] == posbpv.description
+
+                        if infos['pos_base_procver'] is not None:
+                            assert infos['ra'][dex] == pytest.approx( pos.ra, rel=1e-12 )
+                            assert infos['dec'][dex] == pytest.approx( pos.dec, rel=1e-12 )
+                            assert infos['raerr'][dex] == pytest.approx( pos.raerr, rel=1e-6 )
+                            assert infos['decerr'][dex] == pytest.approx( pos.decerr, rel=1e-6 )
+                            # Fixture didn't put any correlations in but for random variancer
+                            assert infos['ra_dec_cov'][dex] == pytest.approx( pos.ra_dec_cov, abs=0.0001/3600. )
+
+                if ( use_weighted_source_positions ) and ( infos['pos_base_procver'][dex] ) is None:
+                    justsrcs = [ d['src'] for d in datacache[r] if d['src'] is not None ]
+                    srcra = np.array( j.ra for j in justsrcs )
+                    srcdec = np.array( j.dec for j in justsrcs )
+                    sn = np.array( j.psfflux / j.psffluxerr for j in justsrcs )
+                    w = np.where( sn > 3 )[0]
+                    srcra = srcra[w]
+                    srcdec = srcdec[w]
+                    weight = sn[w] ** 2
+                    meanra = ( srcra * weight ).sum() / ( weight.sum() )
+                    meandec = ( srcdec * weight.sum() ) / ( weight.sum() )
+                    raerr = np.sqrt( ( weight * ( srcra - meanra )**2 ).sum() / weight.sum() )
+                    decerr = np.sqrt( ( weight * ( srcdec - meandec )**2 ).sum() / weight.sum() )
+                    ra_dec_cov = ( weight * ( srcra - meanra ) * ( srcdec - meandec ) ).sum() / weight.sum()
+
+                    # In this case, the position should *not* match the diaobject_position value too closely
+                    assert not infos['ra'][dex] != pytest.approx( pos.ra, abs=0.01/3600. )
+                    assert not infos['dec'][dex] != pytest.approx( pos.dec, abs=0.01/3600. )
+
+                    # But should be good within numerical precision to the calculated positions (modulo
+                    # order of operations and floating roundoff)
+                    assert infos['ra'][dex] == pytest.approx( meanra, rel=1e-12 )
+                    assert infos['dec'][dex] == pytest.approx( meandec, rel=1e-12 )
+                    assert infos['raerr'][dex] == pytest.approx( raerr, rel=1e-12 )
+                    assert infos['decerr'][dex] == pytest.approx( decerr, rel=1e-12 )
+                    # Fixture didn't put any correlations in
+                    assert infos['ra_dec_cov'][dex] == pytest.approx( ra_dec_cov, abs=0.0001/3600. )
+
+
+def test_getmanyltcvs( test_user, fastdb_client, set_of_lightcurves, procver_collection ):
+    roots = set_of_lightcurves
+    pvc = procver_collection
+
+    # Object 1 is not in pv1, so ony expect object 0 back
+    for which in [ 'detections', 'forced', 'patch', None ]:
+        postdata = { "objids": [ str(roots[i]['root'].id) for i in [0, 1] ] }
+        if which is not None:
+            postdata['which'] = which
+        res = fastdb_client.post( '/ltcv/getmanyltcvs/pvc_pv1', json=postdata )
+        _check_ltcv_res( 'pv1', [0], [100], res, which=which,
+                         set_of_lightcurves=roots, procver_collection=pvc )
+
+    # pvc_pv2 should be the default
+    for which in [ 'detections', 'forced', 'patch', None ]:
+        for objset in [ [ str(roots[i]['root'].id) for i in [0, 2] ], [ 200, 202 ] ]:
+            postdata = { 'objids': objset }
+            if which is not None:
+                postdata['which'] = which
+            for suffix in [ '/pvc_pv2', '' ]:
+                res = fastdb_client.post( f'/ltcv/getmanyltcvs{suffix}', json=postdata )
+                _check_ltcv_res( 'pv2', [0, 2], [200, 202], res, which=which,
+                                 set_of_lightcurves=roots, procver_collection=pvc )
+
+
+    # If we ask for diaobjectids that are in the wrong processing version, we still get
+    #   back the corresponding ones from this processing version
+    for which in [ 'detections', 'forced', 'patch', None ]:
+        postdata = { 'objids': [0, 2] }
+        if which is not None:
+            postdata['which'] = which
+        res = fastdb_client.post( '/ltcv/getmanyltcvs/pvc_pv2', json=postdata )
+        _check_ltcv_res( 'pv2', [0, 2], [200, 202], res, which=which,
+                         set_of_lightcurves=roots, procver_collection=pvc )
+
 
     # Test mjd_now
-    resdefnow = fastdb_client.post( '/ltcv/getmanyltcvs/pvc_pv2',
-                                    json={ 'objids': [ str(roots[i]['root'].id) for i in [0, 1, 2] ],
-                                           'mjd_now': 60041. } )
-    for d in resdefnow.values():
-        assert all( [ m <= 60041 for m in d['ltcv']['mjd'] ] )
-    for mess in ltcvs:
-        # ...zip is magic.  It will only provide as many elements as the
-        # shorter of the two arrays.  So, we don't have to worry if mjd
-        # gets truncated before another.  (It actually makes me feel a
-        # little queasy that zip is magic like this...  I might rather
-        # get an exception?)
-        for k in mess.keys():
-            if k == 'rootid':
-                continue
-            mess[k] = [ i for i, m in zip( mess[k], mess['mjd'] ) if m <= 60041 ]
-    _check_res( infos, ltcvs, resdef )
+    for which in [ 'detections', 'forced', 'patch', None ]:
+        for objset in [ [ str(roots[i]['root'].id) for i in [0, 2] ], [ 200, 202 ] ]:
+            postdata = { 'objids': objset, 'mjd_now': 60041. }
+            if which is not None:
+                postdata['which'] = which
+            res = fastdb_client.post( '/ltcv/getmanyltcvs/pvc_pv2', json=postdata )
+            _check_ltcv_res( 'pv2', [0, 2], [200, 202], res, which=which, mjdnow=60041.,
+                             set_of_lightcurves=roots, procver_collection=pvc )
 
-    # Only the first object exists in pv1
-    infos = ltcv.get_object_infos( [ 100 ], processing_version='pvc_pv1', return_format='json' )
-    ltcvs = ltcv.many_object_ltcvs( 'pvc_pv1', 100, return_format='json', which='patch' )
-    res = fastdb_client.post( '/ltcv/getmanyltcvs/pvc_pv1',
-                              json={ 'objids': [ str(roots[i]['root'].id) for i in [0, 1, 2] ] } )
-    assert list( res.keys() ) == [ str(roots[0]['root'].id) ]
-    _check_res( infos, ltcvs, res )
 
-    # Test which='detections' and 'forced'
-    infos = ltcv.get_object_infos( [ 200, 201, 202 ], processing_version='pvc_pv2', return_format='json' )
-    ltcvs = ltcv.many_object_ltcvs( 'pvc_pv2', [ 200, 201, 202 ], return_format='json', which='detections' )
-    res = fastdb_client.post( '/ltcv/getmanyltcvs/pvc_pv2',
-                              json={ 'objids': [ 200, 201, 202 ], 'which': 'detections' } )
-    _check_res( infos, ltcvs, res, which='detections' )
+    # Make sure bands words
+    for which in [ 'detections', 'forced', 'patch', None ]:
+        for objset in [ [ str(roots[i]['root'].id) for i in [0, 2] ], [ 200, 202 ] ]:
+            for bands in [ 'r', [ 'r' ] ]:
+                postdata = { 'objids': objset, 'bands': bands }
+                if which is not None:
+                    postdata['which'] = which
+                res = fastdb_client.post( '/ltcv/getmanyltcvs/pvc_pv2', json=postdata )
+                _check_ltcv_res( 'pv2', [0, 2], [200, 202], res, which=which, bands=['r'],
+                                 set_of_lightcurves=roots, procver_collection=pvc )
 
-    infos = ltcv.get_object_infos( [ 200, 201, 202 ], processing_version='pvc_pv2', return_format='json' )
-    ltcvs = ltcv.many_object_ltcvs( 'pvc_pv2', [ 200, 201, 202 ], return_format='json', which='forced' )
-    res = fastdb_client.post( '/ltcv/getmanyltcvs/pvc_pv2',
-                              json={ 'objids': [ 200, 201, 202 ], 'which': 'forced' } )
-    _check_res( infos, ltcvs, res, which='forced' )
+    # Test include source positions
+    for which in [ 'detections', 'forced', 'patch', None ]:
+        for objset in [ [ str(roots[i]['root'].id) for i in [0, 1] ], [ 200, 201 ] ]:
+            postdata = { 'objids': objset, 'include_source_positions': 1 }
+            if which is not None:
+                postdata['which'] = which
+            res = fastdb_client.post( '/ltcv/getmanyltcvs/pvc_pv2', json=postdata )
+            _check_ltcv_res( 'pv2', [0, 1], [200, 201, 2011], res, which=which, include_source_positions=True,
+                             set_of_lightcurves=roots, procver_collection=pvc )
 
-    # Test 'ispatch' where patch it matters (i.e. where there are sources without corresponding forced sources)
-    infos = ltcv.get_object_infos( [ 0, 1, 2 ], processing_version='realtime', return_format='json' )
-    ltcvs = ltcv.many_object_ltcvs( 'realtime', [ 0, 1, 2 ], return_format='json', which='patch' )
-    res = fastdb_client.post( '/ltcv/getmanyltcvs/realtime', json={ 'objids': [ 0, 1, 2 ], 'which': 'patch' } )
-    assert any( res[ str(roots[2]['root'].id) ][ 'ltcv' ][ 'ispatch' ] )
-    assert not all( res[ str(roots[2]['root'].id) ][ 'ltcv' ][ 'ispatch' ] )
-    _check_res( infos, ltcvs, res )
+    # Test returning object info
+    for which in [ 'detections', 'forced', 'patch', None ]:
+        for objset in [ [ str(roots[i]['root'].id) for i in [0, 1] ], [ 200, 201 ] ]:
+            postdata = { 'objids': objset,
+                         'include_source_positions': 1,
+                         'return_object_info': 1,
+                         'include_base_procver': 1,
+                         'include_object_positions': 1,
+                        }
+            if which is not None:
+                postdata['which'] = which
+            res = fastdb_client.post( '/ltcv/getmanyltcvs/pvc_pv2', json=postdata )
+            _check_ltcv_res( 'pv2', [0, 1], [200, 201, 2011], res, which=which,
+                             include_source_positions=True, return_object_info=True, include_base_procver=True,
+                             set_of_lightcurves=roots, procver_collection=pvc )
+
 
 
 def test_getltcv( test_user, fastdb_client, set_of_lightcurves, procver_collection ):
     roots = set_of_lightcurves
-    bpvs, _pvs = procver_collection
+    bpvs, _pvs, _pvinfo = procver_collection
 
     def _check_ltcv( res, rootdex, objdex, which='patch', bpv_key='unknown', obj_bpv_key=None,
                      include_base_procver=False, include_source_ids=False, include_source_positions=False,

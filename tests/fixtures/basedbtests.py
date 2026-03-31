@@ -55,7 +55,7 @@ def rootobj3():
 
 @pytest.fixture
 def obj1( procver_collection, rootobj1 ):
-    bpvs, _pvs = procver_collection
+    bpvs, _pvs, _pvinfo = procver_collection
     obj = DiaObject( diaobjectid=42, base_procver_id=bpvs['bpv1_diaobject'].id, rootid=rootobj1.id )
     obj.insert()
 
@@ -69,7 +69,7 @@ def obj1( procver_collection, rootobj1 ):
 
 @pytest.fixture
 def obj2( procver_collection, rootobj2 ):
-    bpvs, _pvs = procver_collection
+    bpvs, _pvs, _pvinfo = procver_collection
     obj = DiaObject( diaobjectid=64, base_procver_id=bpvs['bpv1_diaobject'].id, rootid=rootobj2.id )
     obj.insert()
 
@@ -83,7 +83,7 @@ def obj2( procver_collection, rootobj2 ):
 
 @pytest.fixture
 def obj3( procver_collection, rootobj3 ):
-    bpvs, _pvs = procver_collection
+    bpvs, _pvs, _pvinfo = procver_collection
     obj = DiaObject( diaobjectid=137, base_procver_id=bpvs['bpv1_diaobject'].id, rootid=rootobj3.id )
     obj.insert()
 
@@ -98,7 +98,7 @@ def obj3( procver_collection, rootobj3 ):
 
 @pytest.fixture
 def obj1_src1( obj1, procver_collection ):
-    bpvs, _pvs = procver_collection
+    bpvs, _pvs, _pvinfo = procver_collection
     src = DiaSource( base_procver_id=bpvs['bpv1_diasource'].id,
                      diaobjectid=obj1.diaobjectid,
                      diasourceid=1,
@@ -125,7 +125,7 @@ def obj1_src1( obj1, procver_collection ):
 
 @pytest.fixture
 def obj1_src1_pv2( obj1, procver_collection ):
-    bpvs, _pvs = procver_collection
+    bpvs, _pvs, _pvinfo = procver_collection
     src = DiaSource( base_procver_id=bpvs['bpv2_diasource'].id,
                      diaobjectid=obj1.diaobjectid,
                      diasourceid=2,
@@ -150,7 +150,7 @@ def obj1_src1_pv2( obj1, procver_collection ):
 
 @pytest.fixture
 def obj1_src2( obj1, procver_collection ):
-    bpvs, _pvs = procver_collection
+    bpvs, _pvs, _pvinfo = procver_collection
     src = DiaSource( base_procver_id=bpvs['bpv1_diasource'].id,
                      diaobjectid=obj1.diaobjectid,
                      diasourceid=2,
@@ -177,7 +177,7 @@ def obj1_src2( obj1, procver_collection ):
 
 @pytest.fixture
 def obj1_src3( obj1, procver_collection ):
-    bpvs, _pvs = procver_collection
+    bpvs, _pvs, _pvinfo = procver_collection
     src = DiaSource( base_procver_id=bpvs['bpv1_diasource'].id,
                      diaobjectid=obj1.diaobjectid,
                      diasourceid=3,
@@ -204,7 +204,7 @@ def obj1_src3( obj1, procver_collection ):
 
 @pytest.fixture
 def obj1_frced1( obj1, procver_collection ):
-    bpvs, _pvs = procver_collection
+    bpvs, _pvs, _pvinfo = procver_collection
     frc = DiaForcedSource( base_procver_id=bpvs['bpv1_diaforcedsource'].id,
                            diaobjectid=obj1.diaobjectid,
                            diaforcedsourceid=1,
@@ -230,7 +230,7 @@ def obj1_frced1( obj1, procver_collection ):
 
 @pytest.fixture
 def obj1_frced2( obj1, procver_collection ):
-    bpvs, _pvs = procver_collection
+    bpvs, _pvs, _pvinfo = procver_collection
     frc = DiaForcedSource( base_procver_id=bpvs['bpv1_diaforcedsource'].id,
                            diaobjectid=obj1.diaobjectid,
                            diaforcedsourceid=2,
@@ -256,7 +256,7 @@ def obj1_frced2( obj1, procver_collection ):
 
 @pytest.fixture
 def obj1_frced3( obj1, procver_collection ):
-    bpvs, _pvs = procver_collection
+    bpvs, _pvs, _pvinfo = procver_collection
     frc = DiaForcedSource( base_procver_id=bpvs['bpv1_diaforcedsource'].id,
                            diaobjectid=obj1.diaobjectid,
                            diaforcedsourceid=3,
@@ -282,7 +282,7 @@ def obj1_frced3( obj1, procver_collection ):
 
 @pytest.fixture
 def host1( procver_collection ):
-    bpvs, _pvs = procver_collection
+    bpvs, _pvs, _pvinfo = procver_collection
     host = HostGalaxy( id=uuid.uuid4(),
                        host_catalog='foo',
                        host_id='bar',
@@ -301,7 +301,7 @@ def host1( procver_collection ):
 
 @pytest.fixture
 def host2( procver_collection ):
-    bpvs, _pvs = procver_collection
+    bpvs, _pvs, _pvinfo = procver_collection
     host = HostGalaxy( id=uuid.uuid4(),
                        host_catalog='foo',
                        host_id='smol',

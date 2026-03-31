@@ -19,7 +19,7 @@ def test_getprocvers( procver_collection, test_user, fastdb_client ):
 
 
 def test_procver( procver_collection, test_user, fastdb_client, procver_postimes ):
-    allbpvs, allpvs = procver_collection
+    allbpvs, allpvs, _pvinfo = procver_collection
 
     def check_res( pv, bpvs, aliases=[] ):
         assert res['id'] == str( allpvs[pv].id )
@@ -73,7 +73,7 @@ def test_procver( procver_collection, test_user, fastdb_client, procver_postimes
 
 
 def test_base_procver( procver_collection, test_user, fastdb_client ):
-    bpvs, _pvs = procver_collection
+    bpvs, _pvs, _pvinfo = procver_collection
 
     badbpv = str( uuid.uuid4() )
     with pytest.raises( RuntimeError, match=( f'Error response from server, status 422: '

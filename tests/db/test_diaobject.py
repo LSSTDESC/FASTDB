@@ -10,7 +10,7 @@ class TestDiaObject( BaseTestDB ):
 
     @pytest.fixture
     def basetest_setup( self, procver_collection, rootobj1, rootobj2, rootobj3 ):
-        bpv, _pv = procver_collection
+        bpv, _pv, _pvinfo = procver_collection
         self.cls = DiaObject
         self.columns = {
             'diaobjectid',

@@ -214,7 +214,7 @@ class FASTDBClient:
                 return res
             except Exception as ex:
                 previous_fail = True
-                if 'res' not in locals():
+                if ('res' not in locals() ) or ( res is None ):
                     self.logger.error( f"Error trying contact the webserver: {ex}" )
                     raise
                 if res.status_code in ( 409, 422 ):

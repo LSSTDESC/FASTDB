@@ -105,7 +105,7 @@ def check_df_contents( df, procver, statbands=None ):
 # This is separated out from test_ltcv.py since it uses a different fixture... at least for now
 def test_object_search( procver_collection, test_user, snana_fits_maintables_loaded_module ):
     """This test tests lots of the keywords, but doesn't test every conceivable combination because n² is big."""
-    _bpv, pv = procver_collection
+    _bpv, pv, _pvinfo = procver_collection
 
     with pytest.raises( ValueError, match="Unknown search keywords: {'foo'}" ):
         ltcv.object_search( pv['pv1'].description, foo=5 )

@@ -198,13 +198,18 @@ def procver_collection( procver_postimes, procver_bases ):
             for pv in pvs.values():
                 pv.insert( dbcon=con, nocommit=True, refresh=False )
 
+            pvinfo = []
+
             for pv, bpvae in zip( [ 'pv1', 'pv2', 'pv3', 'realtime' ],
                                   [ [ 'bpv1', 'bpv1a', 'bpv1b' ],
                                     [ 'bpv2', 'bpv2a' ],
                                     [ 'bpv3' ],
                                     [ 'realtime' ] ] ):
+                thisinfo = { 'procver': pvs[pv] }
                 for prio, bpv in enumerate( bpvae ):
                     for table in tables:
+                        if table not in thisinfo:
+                            thisinfo[table] = []
                         if table == 'diaobject_position':
                             for posn, postime in enumerate( procver_postimes ):
                                 # I know that there are never more than 10 bpvs for a given pv
@@ -215,6 +220,7 @@ def procver_collection( procver_postimes, procver_bases ):
                                                      "VALUES (%(pv)s,%(bpv)s,%(tab)s,%(prio)s)",
                                                      { 'pv': pvs[pv].id, 'bpv': bpvs[bpvkey].id,
                                                        'tab': table, 'prio': subprio } )
+                                thisinfo[table].append( ( bpvs[bpvkey], subprio, bpvkey ) )
                         else:
                             bpvkey = f'{bpv}_{table}'
                             con.execute_nofetch( "INSERT INTO base_procver_of_procver(procver_id,base_procver_id,"
@@ -222,13 +228,26 @@ def procver_collection( procver_postimes, procver_bases ):
                                                  "VALUES (%(pv)s,%(bpv)s,%(tab)s,%(prio)s)",
                                                  { 'pv': pvs[pv].id, 'bpv': bpvs[bpvkey].id,
                                                    'tab': table, 'prio': prio } )
+                            # This is becoming an increasingly ugly hack.  This is what happens
+                            #  when you really need to get things done but should really
+                            #  be refactoring previous mistakes.
+                            thisinfo[table].append( ( bpvs[bpvkey], prio, bpvkey ) )
+
+                # Reverse all the table lists so they go from high prio to low prio
+                for table in thisinfo.keys():
+                    if table == 'procver':
+                        continue
+                    thisinfo[table].reverse()
+
+                pvinfo.append( thisinfo )
+
 
             con.execute_nofetch( "INSERT INTO processing_version_alias(description,procver_id) "
                                  "VALUES ('default',%(pvid)s)", { 'pvid': pvs['pv2'].id } )
 
             con.commit()
 
-        yield bpvs, pvs
+        yield bpvs, pvs, pvinfo
 
     finally:
         with DBCon() as con:
@@ -304,7 +323,7 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
     srcexobjs = []
     frcobjs = []
     frcexobjs = []
-    bpvs, _pvs = procver_collection
+    bpvs, _pvs, _pvinfo = procver_collection
 
     try:
         flux = lambda mag: 10 ** ( ( mag - 31.4 ) / ( -2.5 ) )

@@ -10,7 +10,7 @@ class TestHostGalaxy( BaseTestDB ):
 
     @pytest.fixture
     def basetest_setup( self, procver_collection ):
-        bpv, _pv = procver_collection
+        bpv, _pv, _pvinfo = procver_collection
         self.cls = HostGalaxy
         self.columns = {
             'id',

@@ -304,7 +304,7 @@ def alerts_90days_sent_received_and_imported( procver_collection ):
 @pytest.fixture( scope='module' )
 def fully_do_alerts_90days_sent_received_and_imported( barf, procver_collection,
                                                        alerts_60moredays_sent_and_brokermessage_consumed ):
-    bpv, _pv = procver_collection
+    bpv, _pv, _pvinfo = procver_collection
     from services.source_importer import SourceImporter
     mongodb_collection_base = 'fastdb_alertcycle_test'
     try:

@@ -3,6 +3,8 @@ from types import SimpleNamespace
 import simplejson
 import numbers
 
+import pandas
+
 import flask
 import flask.views
 
@@ -14,10 +16,13 @@ from util import FDBLogger
 # Encoder for simplejson
 #
 # Handels UUID (which is why it was named this, as it originally only did this),
-#   floats, and integers, converting numpy types to regular floats and ints
+#   floats, and integers, converting numpy types to regular floats and ints.
+#   Also converts pandas NA to null.
 
 class UUIDJSONEncoder( simplejson.JSONEncoder ):
     def default( self, obj ):
+        if isinstance( obj, pandas.api.typing.NAType ):
+            return None
         if isinstance( obj, uuid.UUID ):
             return str(obj)
         elif isinstance( obj, numbers.Integral ):
