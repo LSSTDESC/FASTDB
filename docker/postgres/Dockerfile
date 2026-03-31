@@ -1,8 +1,8 @@
 #
-# NERSCSPIN=1 docker build --target postgres -t <image>:<label> .
+# docker build --build-arg NERSCSPIN=1 --target postgres -t <image>:<label> .
 #
 # Rob, use:
-#   NERSCSPIN=1 docker build --target postgres -t registry.nersc.gov/m1727/raknop/fastdb-postgres:rknop-dev .
+#   docker build --build-arg NERSCSPIN=1 --target postgres -t registry.nersc.gov/m1727/raknop/fastdb-postgres:... .
 #
 # BUT WARNING, the current (as of 2026-03-16) production FASTDB uses an
 #   older version with postgres 15, so be ready to do the database
