@@ -1,3 +1,5 @@
+import textwrap
+
 from psycopg import sql
 import flask
 
@@ -272,6 +274,65 @@ class GetHotTransients( BaseView ):
 
 
 # **********************************************************************
+
+
+class GetBrokerInfo( BaseView ):
+    def do_the_things( self, processing_version='realtime' ):
+        global app
+        if ( not flask.request.is_json ) or ( not isinstance( flask.request.json, dict ) ):
+            raise FASTDBWebException( "Post data was not a JSON dict, expected a dict as JSON post data." )
+        jsondata = flask.request.json
+        if 'diasourceids' not in jsondata:
+            raise FASTDBWebException( "Post data dict must include key diasourceids with list of source ids." )
+        srcids = jsondata['diasourceids']
+        srcids = list( srcids ) if util.isSequence(srcids) else [ srcids ]
+        brokername = None if 'brokername' not in jsondata else jsondata['brokername']
+        topic = None if 'topic' not in jsondata else jsondata[ 'topic' ]
+
+        with db.DBCon() as con:
+            try:
+                pvid = db.ProcessingVersion.procver_id( processing_version, dbcon=con )
+            except Exception:
+                raise FASTDBWebException( f"Unknown processing version {processing_version}" )
+            q = sql.SQL( textwrap.dedent(
+                """\
+                SELECT DISTINCT ON (b.diasourceid, b.brokername, b.topic)
+                   b.diasourceid, b.brokername, b.topic, b.info
+                FROM diasource_brokerinfo b
+                INNER JOIN base_procver_of_procver pv ON b.base_procver_id=pv.base_procver_id
+                                                     AND pv.procver_id={pvid}
+                WHERE b.diasourceid=ANY({srcids})
+                """
+            ) ).format( pvid=pvid, srcids=srcids )
+            if brokername is not None:
+                q += sql.SQL( "  AND b.brokername={brokername}\n" ).format( brokername=brokername )
+            if topic is not None:
+                q += sql.SQL("   AND b.topic={topic}\n" ).format( topic=topic )
+            q += sql.SQL( textwrap.dedent(
+                """\
+                ORDER BY b.diasourceid, b.brokername, b.topic
+                """
+            ) )
+            rows, _cols = con.execute( q )
+
+        rval = {}
+        curdiasourceid = None
+        for row in rows:
+            if row[0] != curdiasourceid:
+                curdiasourceid = row[0]
+                rval[ curdiasourceid ] = []
+            rval[ curdiasourceid ].append( { 'brokername': row[1],
+                                             'topic': row[2],
+                                             'info': row[3] } )
+
+        return rval
+
+
+
+
+
+
+# **********************************************************************
 # **********************************************************************
 # **********************************************************************
 
@@ -285,7 +346,9 @@ urls = {
     "/getrandomltcv": GetRandomLtcv,
     "/getrandomltcv/<procver>": GetRandomLtcv,
     "/gethottransients": GetHotTransients,
-    "/gethottransients/<procver>": GetHotTransients
+    "/gethottransients/<procver>": GetHotTransients,
+    "/getbrokerinfo": GetBrokerInfo,
+    "/getbrokerinfo/<processing_version>": GetBrokerInfo
 }
 
 usedurls = {}

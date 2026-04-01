@@ -1,6 +1,5 @@
 import itertools
 import io
-import time
 import pytest
 
 import numpy as np
@@ -585,7 +584,7 @@ def compare_ltcv_to_expected( srcdf, frcdf, patdf,
 
 def test_object_ltcv( procver_collection, set_of_lightcurves ):
     # TODO : refactor this to use lightcurve_checker
-    
+
     # TODO : write a test for the case where there are multiple objects within the
     #   same processing version that point to the same root object!
 
@@ -893,15 +892,9 @@ def test_many_object_ltcvs( procver_collection, set_of_lightcurves, lightcurve_c
     ]
 
     n = 0
-    t0 = time.perf_counter()
     for ltcvreq in ltcvlist:
         for which in [ None, 'patch', 'detections', 'forced' ]:
             for extra in extras:
-                if ltcvreq[0] is None:
-                    url = '/ltcv/getmanyltcvs'
-                else:
-                    url = f'/ltcv/getmanyltcvs/{ltcvreq[0]}'
-
                 kwargs = extra.copy()
                 kwargs['objids'] = ltcvreq[1]
                 if ltcvreq[0] is not None:
@@ -927,6 +920,7 @@ def test_many_object_ltcvs( procver_collection, set_of_lightcurves, lightcurve_c
                 if isinstance( pdres, tuple ):
                     # TODO, COMPARE infodf
                     pdltcvs = pdres[0]
+                    assert False, f"test still being written: {pdltcvs}"
 
 
 # There is another test of ltcv_object_search that uses loaded SNANA data
