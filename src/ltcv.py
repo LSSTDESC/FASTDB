@@ -273,6 +273,7 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None, p
         # Next line deals with what I think is a dysfunctional psycopg return
         cols = columns if len(rows) == 0 else cols
         if return_format == 'pandas':
+            FDBLogger.debug( "Constructing pandas dataframe..." )
             df = laboriously_construct_pandas( rows, columns=cols,
                                                int64cols=[ 'diaobjectid' ],
                                                doublecols=[ 'ra', 'dec' ],
@@ -283,9 +284,12 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None, p
                 df.set_index( 'diaobjectid', inplace=True )
             return df
         elif return_format == 'json':
+            FDBLogger.debug( "Extracting postgres return to dictionary" )
             return { c: [ r[i] for r in rows ] for i, c in enumerate( cols ) }
         else:
             raise RuntimeError( "This should never happen" )
+
+        FDBLogger.debug( "get_object_infos done." )
 
 
 def many_object_ltcvs( processing_version='default', objids=None, objids_table=None, return_format='json',
@@ -592,7 +596,8 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                 dbcon.execute( q )
         else:
             actual_objids_table = f'{objids_table}_withboth'
-            dbcon.execute( sql.SQL( "DROP TABLE IF EXISTS {t}" ).format( t=sql.Identifier(actual_objids_table) ) )
+            dbcon.execute( sql.SQL( "DROP TABLE IF EXISTS {t}" ).format( t=sql.Identifier(actual_objids_table) ),
+                           explain=False )
             if objids_are_root:
                 q = sql.SQL( textwrap.dedent(
                     """\
@@ -622,7 +627,7 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                               if must_get_source_positions
                               else "" )
         procver_fields = sql.SQL( "p.description AS base_procver_s, " if include_base_procver else "" )
-        dbcon.execute( "DROP TABLE IF EXISTS tmp_sources" )
+        dbcon.execute( "DROP TABLE IF EXISTS tmp_sources", explain=False )
         q = sql.SQL( textwrap.dedent(
             """\
             /*+ IndexScan(s idx_diasource_diaobjectid)
@@ -662,7 +667,7 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
         else:
             # Extract forced photometry if necessary
             procver_fields = sql.SQL( "p.description as base_procver_f, " if include_base_procver else "" )
-            dbcon.execute( "DROP TABLE IF EXISTS tmp_forced" )
+            dbcon.execute( "DROP TABLE IF EXISTS tmp_forced", explain=False )
             q = sql.SQL( textwrap.dedent(
                 """\
                 /*+ IndexScan(s idx_diaforcedsource_diaobjectid)
@@ -881,6 +886,7 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
             return ltcvsdf
 
     elif return_format == 'json':
+        FDBLogger.debug( "Converting many_object_ltcvs to dict" )
         retval = []
         for objid in ltcvsdf.rootid.unique():
             subf = ltcvsdf[ ltcvsdf.rootid==objid  ]
@@ -2248,7 +2254,7 @@ def get_hot_ltcvs( processing_version, position_processing_version=None,
             # somebody passed a dbcon, and might try to create temp
             # tables that have exactly the same names as the temp tables
             # we just created, drop them for cleanliness.
-            con.execute( "DROP TABLE IF EXISTS tmp_objids" )
+            con.execute( "DROP TABLE IF EXISTS tmp_objids", explain=False )
 
             # However, don't commit!  Reason: if somebody passed a dbcon
             # in the middle of a transaction, for whatever perverse
