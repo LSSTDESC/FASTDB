@@ -80,9 +80,10 @@ class GetManyLtcvs( BaseView ):
             raise FASTDBWebException( f"Error trying to get lightcurves: {ex}" )
 
         if ( 'return_object_info' in kwargs ) and ( kwargs['return_object_info'] ):
-            return { 'ltcvs': rval[0], 'objinfo': rval[1] }
-        else:
-            return rval
+            rval = { 'ltcvs': rval[0], 'objinfo': rval[1] }
+            FDBLogger.error( f"Returning: {rval}\n" )
+
+        return rval
 
 
     def do_the_things( self, procver='default' ):

@@ -283,7 +283,7 @@ def test_gethottransients( test_user, fastdb_client, set_of_lightcurves, lightcu
                 if 'include_object_positions' not in kwargs:
                     # get_hot_ltcvs has a different default from many_object_ltcvs
                     kwargs['include_object_positions'] = True
-                check_ltcv( lc['tesrtprocver'], lc['exproot'], lc['expobj'], res,
+                check_ltcv( lc['testprocver'], lc['exproot'], lc['expobj'], res,
                             return_object_info=True, **kwargs )
 
 

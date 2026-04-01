@@ -388,8 +388,10 @@ def pandas_to_list( values ):
 
 def laboriously_construct_pandas( data, columns=None, int16cols=[], int32cols=[], int64cols=[],
                                   floatcols=[], doublecols=[], boolcols=[], ignore_missing_cols=False ):
+    FDBLogger.debug( "Laboriously construting a pandas dataframe..." )
     if len(data) == 0:
         if columns is None:
+            FDBLogger.debug( "...there were no columns." )
             return pandas.DataFrame( {} )
         else:
             wrangleddata = { c: [] for c in columns }
@@ -455,6 +457,7 @@ def laboriously_construct_pandas( data, columns=None, int16cols=[], int32cols=[]
         else:
             serieses[col] = pandas.Series( wrangleddata[col] )
 
+    FDBLogger.debug( "...done laboriously constructing a pandas dataframe." )
     return pandas.DataFrame( serieses )
 
 

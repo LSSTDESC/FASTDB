@@ -1319,30 +1319,30 @@ def lightcurve_checker( set_of_lightcurves, procver_collection ):
                             w = np.where( sn > 3 )[0]
 
                             # ****
-                            ltcvras = np.array( [ thisltcv['det_ra'][i] for i in range(len(thisltcv['isdet']))
-                                                  if thisltcv['isdet'][i] ] )
-                            ltcvdecs = np.array( [ thisltcv['det_dec'][i] for i in range(len(thisltcv['isdet']))
-                                                   if thisltcv['isdet'][i] ] )
-                            ltcvfluxes = np.array( [ thisltcv['flux'][i] for i in range(len(thisltcv['isdet']))
-                                                     if thisltcv['isdet'][i] ] )
-                            ltcvfluxerrs = np.array( [ thisltcv['fluxerr'][i] for i in range(len(thisltcv['isdet']))
-                                                       if thisltcv['isdet'][i] ] )
-                            justfluxes = np.array( [ s['src'].psfflux for s in justsrcs ] )
-                            justfluxerrs = np.array( [ s['src'].psffluxerr for s in justsrcs ] )
+                            # ltcvras = np.array( [ thisltcv['det_ra'][i] for i in range(len(thisltcv['isdet']))
+                            #                       if thisltcv['isdet'][i] ] )
+                            # ltcvdecs = np.array( [ thisltcv['det_dec'][i] for i in range(len(thisltcv['isdet']))
+                            #                        if thisltcv['isdet'][i] ] )
+                            # ltcvfluxes = np.array( [ thisltcv['flux'][i] for i in range(len(thisltcv['isdet']))
+                            #                          if thisltcv['isdet'][i] ] )
+                            # ltcvfluxerrs = np.array( [ thisltcv['fluxerr'][i] for i in range(len(thisltcv['isdet']))
+                            #                            if thisltcv['isdet'][i] ] )
+                            # justfluxes = np.array( [ s['src'].psfflux for s in justsrcs ] )
+                            # justfluxerrs = np.array( [ s['src'].psffluxerr for s in justsrcs ] )
 
-                            FDBLogger.info( f"procver={procver}, which={which}, rootid={roots[r]['root'].id}, "
-                                            f"diaobjectid={diaobjectid}\n"
-                                            f"  ( thisltcv.det_ra - srcra ) / srcra = "
-                                            f"{( ltcvras - srcra ) / srcra}\n"
-                                            f"  ( thisltcv.det_dec - srcdec ) / srcdec = "
-                                            f"{( ltcvdecs - srcdec ) / srcdec}\n"
-                                            f"  ( thisltcv.flux - justfluxes ) / justfluxes = "
-                                            f"{( ltcvfluxes - justfluxes ) / justfluxes}\n"
-                                            f"  ( thisltcv.fluxerr - justfluxerrs ) / justfluxerrs = "
-                                            f"{( ltcvfluxerrs - justfluxerrs ) / justfluxerrs}\n"
-                                            f"( sn[w] - ltcvfluxes[w]/ltcvfluxerrs[w] ) = "
-                                            f"{sn[w] - ltcvfluxes[w]/ltcvfluxerrs[w]}\n"
-                                            f"sn[w] = {sn[w]}\n" )
+                            # FDBLogger.info( f"procver={procver}, which={which}, rootid={roots[r]['root'].id}, "
+                            #                 f"diaobjectid={diaobjectid}\n"
+                            #                 f"  ( thisltcv.det_ra - srcra ) / srcra = "
+                            #                 f"{( ltcvras - srcra ) / srcra}\n"
+                            #                 f"  ( thisltcv.det_dec - srcdec ) / srcdec = "
+                            #                 f"{( ltcvdecs - srcdec ) / srcdec}\n"
+                            #                 f"  ( thisltcv.flux - justfluxes ) / justfluxes = "
+                            #                 f"{( ltcvfluxes - justfluxes ) / justfluxes}\n"
+                            #                 f"  ( thisltcv.fluxerr - justfluxerrs ) / justfluxerrs = "
+                            #                 f"{( ltcvfluxerrs - justfluxerrs ) / justfluxerrs}\n"
+                            #                 f"( sn[w] - ltcvfluxes[w]/ltcvfluxerrs[w] ) = "
+                            #                 f"{sn[w] - ltcvfluxes[w]/ltcvfluxerrs[w]}\n"
+                            #                 f"sn[w] = {sn[w]}\n" )
                             # ****
 
                             srcra = srcra[w]

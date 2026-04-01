@@ -14,7 +14,7 @@ import astropy.time
 
 import db
 import util
-from util import FDBLogger, laboriously_construct_pandas, pandas_to_list
+from util import FDBLogger, laboriously_construct_pandas
 
 
 def _is_objids_table_rootid( objids_table, dbcon ):
@@ -891,37 +891,50 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
         for objid in ltcvsdf.rootid.unique():
             subf = ltcvsdf[ ltcvsdf.rootid==objid  ]
             thisretval = { 'rootid': subf.rootid.iloc[0],
-                           'visit': pandas_to_list( subf.visit.values ),
-                           'diasourceid': pandas_to_list( subf.diasourceid.values ),
-                           'source_diaobjectid': pandas_to_list( subf.source_diaobjectid.values )
+                           'visit': np.where( pandas.isna(subf.visit.values), None, subf.visit.values ).tolist(),
+                           'diasourceid': np.where( pandas.isna(subf.diasourceid.values),
+                                                    None, subf.diasourceid.values ).tolist(),
+                           'source_diaobjectid': np.where( pandas.isna(subf.source_diaobjectid.values),
+                                                           None, subf.source_diaobjectid.values ).tolist()
                           }
             if which != 'detections':
-                thisretval['diaforcedsourceid'] = pandas_to_list( subf.diaforcedsourceid.values )
-                thisretval['forced_diaobjectid'] = pandas_to_list( subf.forced_diaobjectid.values )
-            thisretval.update( {'mjd': pandas_to_list( subf.mjd.values ),
-                                'band': pandas_to_list( subf.band.values ),
-                                'flux': pandas_to_list( subf.flux.values ),
-                                'fluxerr': pandas_to_list( subf.fluxerr.values ),
+                thisretval['diaforcedsourceid'] = np.where( pandas.isna(subf.diaforcedsourceid.values),
+                                                            None, subf.diaforcedsourceid.values ).tolist()
+                thisretval['forced_diaobjectid'] = np.where( pandas.isna(subf.forced_diaobjectid.values),
+                                                             None, subf.forced_diaobjectid.values ).tolist()
+            thisretval.update( {'mjd': np.where( pandas.isna(subf.mjd.values), None, subf.mjd.values ).tolist(),
+                                'band': np.where( pandas.isna(subf.band.values), None, subf.band.values ).tolist(),
+                                'flux': np.where( pandas.isna(subf.flux.values), None, subf.flux.values ).tolist(),
+                                'fluxerr': np.where( pandas.isna(subf.fluxerr.values),
+                                                     None, subf.fluxerr.values ).tolist(),
                                 'isdet': [ int(i) for i in subf.isdet.values ] } )
             if include_source_positions:
-                thisretval.update( { 'det_ra': pandas_to_list( subf.det_ra.values ),
-                                     'det_dec': pandas_to_list( subf.det_dec.values ),
-                                     'det_raerr': pandas_to_list( subf.det_raerr.values ),
-                                     'det_decerr': pandas_to_list( subf.det_decerr.values ),
-                                     'det_ra_dec_cov': pandas_to_list( subf.det_ra_dec_cov.values )
+                thisretval.update( { 'det_ra': np.where( pandas.isna(subf.det_ra.values),
+                                                         None, subf.det_ra.values ).tolist(),
+                                     'det_dec': np.where( pandas.isna(subf.det_dec.values),
+                                                          None, subf.det_dec.values ).tolist(),
+                                     'det_raerr': np.where( pandas.isna(subf.det_raerr.values),
+                                                            None, subf.det_raerr.values ).tolist(),
+                                     'det_decerr': np.where( pandas.isna(subf.det_decerr.values),
+                                                             None, subf.det_decerr.values ).tolist(),
+                                     'det_ra_dec_cov': np.where( pandas.isna(subf.det_ra_dec_cov.values),
+                                                                 None, subf.det_ra_dec_cov.values ).tolist()
                                     } )
             if which == 'patch':
                 thisretval['ispatch'] = [ int(i) for i in subf.ispatch.values ]
             if include_base_procver:
-                thisretval['base_procver_s'] = pandas_to_list( subf.base_procver_s )
+                thisretval['base_procver_s'] = np.where( pandas.isna(subf.base_procver_s),
+                                                         None, subf.base_procver_s ).tolist()
                 if which != 'detections':
-                    thisretval['base_procver_f'] = pandas_to_list( subf.base_procver_f )
+                    thisretval['base_procver_f'] = np.where( pandas.isna(subf.base_procver_f),
+                                                             None, subf.base_procver_f ).tolist()
 
             retval.append( thisretval )
 
         if return_object_info:
             objdf.reset_index( inplace=True )
-            objjson = { c: pandas_to_list( objdf.loc[ :, c ] ) for c in objdf.columns }
+            objjson = { c: np.where( pandas.isna(objdf.loc[ :, c ]), None, objdf.loc[ :, c ] ).tolist()
+                        for c in objdf.columns }
             return retval, objjson
         else:
             return retval
