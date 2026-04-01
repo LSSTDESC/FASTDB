@@ -380,6 +380,12 @@ def datetime_to_utc( t, with_tz=False, now_on_none=False ):
     return t
 
 
+def pandas_to_list( values ):
+    # Function calling overhead makes me a little quasy.  In C this would have been an inline or macro.
+    return [ ( None if isinstance(v, pandas.api.typing.NAType) else v )
+             for v in values ]
+
+
 def laboriously_construct_pandas( data, columns=None, int16cols=[], int32cols=[], int64cols=[],
                                   floatcols=[], doublecols=[], boolcols=[], ignore_missing_cols=False ):
     if len(data) == 0:

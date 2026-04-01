@@ -14,7 +14,7 @@ import astropy.time
 
 import db
 import util
-from util import FDBLogger, laboriously_construct_pandas
+from util import FDBLogger, laboriously_construct_pandas, pandas_to_list
 
 
 def _is_objids_table_rootid( objids_table, dbcon ):
@@ -885,38 +885,37 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
         for objid in ltcvsdf.rootid.unique():
             subf = ltcvsdf[ ltcvsdf.rootid==objid  ]
             thisretval = { 'rootid': subf.rootid.iloc[0],
-                           'visit': list( subf.visit.values ),
-                           'diasourceid': list( subf.diasourceid.values ),
-                           'source_diaobjectid': [ None if pandas.isna(i) else i
-                                                   for i in subf.source_diaobjectid.values ]
+                           'visit': pandas_to_list( subf.visit.values ),
+                           'diasourceid': pandas_to_list( subf.diasourceid.values ),
+                           'source_diaobjectid': pandas_to_list( subf.source_diaobjectid.values )
                           }
             if which != 'detections':
-                thisretval['diaforcedsourceid'] = list( subf.diaforcedsourceid.values )
-                thisretval['forced_diaobjectid'] = [ None if pandas.isna(i) else i
-                                                     for i in subf.forced_diaobjectid.values ]
-            thisretval.update( {'mjd': list( subf.mjd.values ),
-                                'band': list( subf.band.values ),
-                                'flux': list( subf.flux.values ),
-                                'fluxerr': list( subf.fluxerr.values ),
+                thisretval['diaforcedsourceid'] = pandas_to_list( subf.diaforcedsourceid.values )
+                thisretval['forced_diaobjectid'] = pandas_to_list( subf.forced_diaobjectid.values )
+            thisretval.update( {'mjd': pandas_to_list( subf.mjd.values ),
+                                'band': pandas_to_list( subf.band.values ),
+                                'flux': pandas_to_list( subf.flux.values ),
+                                'fluxerr': pandas_to_list( subf.fluxerr.values ),
                                 'isdet': [ int(i) for i in subf.isdet.values ] } )
             if include_source_positions:
-                thisretval.update( { 'det_ra': list( subf.det_ra.values ),
-                                     'det_dec': list( subf.det_dec.values ),
-                                     'det_raerr': list( subf.det_raerr.values ),
-                                     'det_decerr': list( subf.det_decerr.values ),
-                                     'det_ra_dec_cov': list( subf.det_ra_dec_cov.values )
+                thisretval.update( { 'det_ra': pandas_to_list( subf.det_ra.values ),
+                                     'det_dec': pandas_to_list( subf.det_dec.values ),
+                                     'det_raerr': pandas_to_list( subf.det_raerr.values ),
+                                     'det_decerr': pandas_to_list( subf.det_decerr.values ),
+                                     'det_ra_dec_cov': pandas_to_list( subf.det_ra_dec_cov.values )
                                     } )
             if which == 'patch':
                 thisretval['ispatch'] = [ int(i) for i in subf.ispatch.values ]
             if include_base_procver:
-                thisretval['base_procver_s'] = list( subf.base_procver_s )
+                thisretval['base_procver_s'] = pandas_to_list( subf.base_procver_s )
                 if which != 'detections':
-                    thisretval['base_procver_f'] = list( subf.base_procver_f )
+                    thisretval['base_procver_f'] = pandas_to_list( subf.base_procver_f )
+
             retval.append( thisretval )
 
         if return_object_info:
             objdf.reset_index( inplace=True )
-            objjson = { c: list( objdf.loc[ :, c ] ) for c in objdf.columns }
+            objjson = { c: pandas_to_list( objdf.loc[ :, c ] ) for c in objdf.columns }
             return retval, objjson
         else:
             return retval
