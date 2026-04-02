@@ -22,7 +22,7 @@ from db import ( BaseProcessingVersion,
                  DB,
                  DBCon,
                  AuthUser )
-from util import asUUID, FDBLogger
+from util import asUUID #, FDBLogger
 import admin.load_snana_fits_ppdb
 from admin.load_snana_fits import FITSLoader
 from fastdb.fastdb_client import FASTDBClient

@@ -8,23 +8,22 @@ __all__ = [ "FDBLogger", "parse_bool", "env_as_bool", "asUUID", "isSequence",
 
 import sys
 import os
-import io
 import re
 import datetime
 import pytz
 import pathlib
 import logging
 import numbers
+import itertools
 import uuid
 import collections.abc
 import multiprocessing
 
+import numpy as np
 import pandas
 import fastavro
 import astropy.time
 import rkwebutil
-
-import db
 
 _fastdb_schema_namespace = 'fastdb.v10_0_0'
 _lsst_schema_namespace = 'lsst.v10_0'
@@ -387,14 +386,112 @@ def pandas_to_list( values ):
 
 
 def laboriously_construct_pandas( data, columns=None, int16cols=[], int32cols=[], int64cols=[],
-                                  floatcols=[], doublecols=[], boolcols=[], ignore_missing_cols=False ):
+                                  floatcols=[], doublecols=[], boolcols=[], keyname=None, indices=None,
+                                  ignore_missing_cols=False ):
+    """Convert one of three python structures to a pandas DataFrame.
+
+    Two of these structures nominally could be constrcuted by just
+    feeding them to pandas.DataFrame.  However, that will do bad things.
+    If any of the int64 fields have None in the list, they will be
+    converted to doubles by Pandas, because by default it only knows how
+    to do NaN for floating point values.  That will destroy the int64
+    values, as a double only has 53 bits of precision.  Instead, we have
+    to use pyarrow column types, which do allow for nulls, but pandas
+    does not have the ability to pass types for multiple columns at
+    once.  As such, we have to build several Series objects, each with
+    the type we want, and then stitch them together into a DataFrame.
+
+    The three structures it can take are (in example for):
+
+      { 'a': [ 1, 2, 3 ], 'b': [ 4, 5, 6 ] }
+
+        This will yield a data frame with columns 'a' and 'b', and three rows.
+
+      [ { 'a': 1, 'b': 4 }, { 'a': 2, 'b': 5 }, { 'a': 3, 'b': 6 } ]
+
+        This will yield exactly the same data frame.
+
+      { 'first': { 'a': [ 1, 2, 3 ], 'b': [4, 5, 6], 'c': [7, 8, 9] },
+        'second': { 'a': [1, 2], 'b': [10, None], 'c': [ 2.718, 3.141 ] }
+      }
+
+        This is the natural structure for the return from
+        ltcv.py::many_object_ltcvs.  The keys of the outer dictionary
+        are the rootid of the objects, and the inner dictionary keys are
+        all things like 'band', 'mjd', 'flux'...: the lightcurve for
+        that object.  This *requres* a keyname, and a second index (at
+        least) be passed in the indices column.  It will be turned into
+        a pandas dataframe whose first index is keyname and whose index
+        values are the values of the outer dictionary, and whose
+        subsequent indices are the inner dictionary keys given in the
+        indices argument.  If this was called with kwargs
+        (keyname='which', indices=['a'], int32cols=['b'],
+        floatcols['c']), the resultant dataframe would look like:
+
+                       b      c
+          which  a
+          first  1     4    7.0
+                 2     5    8.0
+                 3     6    9.0
+          second 1    10  2.718
+                 2  <NA>  3.141
+
+
+        with df.b.dtype=int32[pyarrow] and df.c.dtype=float[pyarrow].
+
+    With all data types, it is strongly recommended to indicate the
+    types of all columns by including the colum names in the int16cols,
+    int32cols, int64cols, floatcols, doublecols, and boolcols arguments
+    (all lists of names).  If there are any columns not in one of those
+    lists, it will be an exception unless ignore_missingm_cols is True.
+    (If there are any string columns, then you must set
+    ignore_missing_cols to False and just not include the string columns
+    in the lists passed to the type arguments.)
+
+    (Note: pandas does not have a nullable bool datatype, even using
+    pyarrows types, so boolean columns are converted to in16 columns
+    with 1 for True, 0 for False, and <NA> for None.)
+
+    """
     FDBLogger.debug( "Laboriously construting a pandas dataframe..." )
+
+    serieses = {}
+
+    def get_dtypes( columns ):
+        dtypes = {}
+        missing = set()
+        for col in columns:
+            # Pandas doesn't seem to have a bool type that one can nullify, so turn it into an int
+            if ( col in int16cols ) or ( col in boolcols ):
+                dtype = "int16[pyarrow]"
+            elif col in int32cols:
+                dtype = "int32[pyarrow]"
+            elif col in int64cols:
+                dtype = "int64[pyarrow]"
+            elif col in floatcols:
+                dtype = "float32[pyarrow]"
+            elif col in doublecols:
+                dtype = "float64[pyarrow]"
+            else:
+                dtype = None
+                if not ignore_missing_cols:
+                    missing.add( col )
+            dtypes[col] = dtype
+
+        if len( missing ) > 0:
+            raise ValueError( f"Unknown columns: {missing}" )
+
+        return dtypes
+
+
     if len(data) == 0:
         if columns is None:
             FDBLogger.debug( "...there were no columns." )
             return pandas.DataFrame( {} )
         else:
-            wrangleddata = { c: [] for c in columns }
+            dtypes= get_dtypes( columns )
+            serieses = { c: pandas.Series( [], dtype=dtypes[c] ) for c in columns }
+
     elif isSequence( data ):
         if all( isinstance( row, dict ) for row in data ):
             if columns is not None:
@@ -403,7 +500,10 @@ def laboriously_construct_pandas( data, columns=None, int16cols=[], int32cols=[]
             if any( set( r.keys() != keys for r in data ) ):
                 raise ValueError( "List of dicts must all have the same keys" )
             columns = list( data[0].keys() )
-            wrangleddata = { k: [ r['k'] for r in data ] for k in columns }
+            dtypes = get_dtypes( columns )
+            serieses = { c: pandas.Series( ( r[c] for r in data ), dtype=dtypes[c] ) for c in columns }
+
+
         elif all( isSequence( row ) for row in data ):
             numcols = len( data[0] )
             if any( len(row) != numcols for row in data ):
@@ -415,53 +515,62 @@ def laboriously_construct_pandas( data, columns=None, int16cols=[], int32cols=[]
                     raise ValueError( "columns must have the same length as each row" )
             else:
                 columns = [ f"column_{i}" for i in range(numcols) ]
-            wrangleddata = { k: [ r[i] for r in data ] for i, k in enumerate(columns) }
+
+            dtypes = get_dtypes( columns )
+            serieses = { c: pandas.Series( ( r[i] for r in data ), dtype=dtypes[c] )
+                         for i, c in enumerate(columns) }
+
     elif isinstance( data, dict ):
         if columns is not None:
             raise ValueError( "columns inconsistent with passing a dictionary" )
-        if not all( isSequence( row ) for row in data.values() ):
-            raise TypeError( "All dictionary values must be lists" )
-        columns = list( data.keys() )
-        wrangleddata = data
 
-    if not ignore_missing_cols:
-        bad = {}
-        for name, arr in zip( [ "int16cols", "int32cols", "int64cols", "floatcols", "doublecols", "boolcols"],
-                              [ int16cols, int32cols, int64cols, floatcols, doublecols, boolcols ] ):
-            if any( i not in columns for i in arr ):
-                bad[name] = { i for i in arr if i not in columns }
-        if len(bad) > 0:
-            strio = io.StringIO()
-            strio.write( "Some type columns weren't in the data:\n" )
-            for k, v in bad.items():
-                strio.write( f"   {k} had unknown columns {v}\n" )
-            raise ValueError( strio.getvalue() )
+        if all( isinstance( row, dict ) for row in data.values() ):
+            # This is a key -> { col: list } structure
+            if keyname is None:
+                raise ValueError( "Need a keyname" )
+            columns = list( data[ list(data.keys())[0] ].keys() )
+            if any( ( ( c is None ) or ( pandas.isna(c) ) ) for c in columns ):
+                raise ValueError( "No dictionary key can be None" )
+            if not all( set( row.keys() ) == set( columns ) for row in data.values() ):
+                raise ValueError( "Improperly constructed dictionary" )
+            if not all( all( isinstance( v, (list, np.array) ) for v in row.values() ) for row in data.values() ):
+                raise ValueError( "Improperly constructed dictionary" )
 
-    serieses = {}
-    for col in columns:
-        if col in int16cols:
-            serieses[col] = pandas.Series( wrangleddata[col], dtype="int16[pyarrow]" )
-        elif col in int32cols:
-            serieses[col] = pandas.Series( wrangleddata[col], dtype="int32[pyarrow]" )
-        elif col in int64cols:
-            serieses[col] = pandas.Series( wrangleddata[col], dtype="int64[pyarrow]" )
-        elif col in floatcols:
-            serieses[col] = pandas.Series( wrangleddata[col], dtype="float32[pyarrow]" )
-        elif col in doublecols:
-            serieses[col] = pandas.Series( wrangleddata[col], dtype="float64[pyarrow]" )
-        elif col in boolcols:
-            # Pandas doesn't seem to have a bool type that one can nullify,
-            #   so turn it into an int
-            serieses[col] = pandas.Series( [ None if i is None else int(i) for i in wrangleddata[col] ],
-                                           dtype="int16[pyarrow]" )
+            col0 = columns[0]
+            allcolumns = columns.copy()
+            allcolumns.insert( 0, keyname )
+            dtypes = get_dtypes( allcolumns )
+            serieses = { c: pandas.Series( itertools.chain.from_iterable( row[c] for row in data.values() ),
+                                                                          dtype=dtypes[c] )
+                                           for c in columns }
+            serieses[keyname] = pandas.Series( itertools.chain.from_iterable( [k] * len(v[col0])
+                                                                              for k, v in data.items() ) )
         else:
-            serieses[col] = pandas.Series( wrangleddata[col] )
+            if not all( isSequence( row ) for row in data.values() ):
+                raise TypeError( "All dictionary values must be lists" )
+            columns = list( data.keys() )
+            dtypes = get_dtypes( columns )
+            serieses = { c: pandas.Series( v, dtype=dtypes[c] ) for c, v in data.items() }
+
+
+    df = pandas.DataFrame( serieses )
+
+    if indices is not None:
+        if not isSequence( indices ):
+            indices = [ indices ]
+        else:
+            indices = list( indices )
+        if keyname is not None:
+            indices.insert( 0, keyname )
+        df.set_index( indices, inplace=True )
 
     FDBLogger.debug( "...done laboriously constructing a pandas dataframe." )
-    return pandas.DataFrame( serieses )
+
+    return df
 
 
 def get_alert_schema( schemadir=None ):
+
     """Return a dictionary of { name: schema }, plus 'alert_schema_file': Path }"""
 
     schemadir = pathlib.Path( "/fastdb/share/avsc" if schemadir is None else schemadir )
@@ -497,8 +606,12 @@ def get_alert_schema( schemadir=None ):
 
 
 def procver_id( *args, **kwargs ):
+    # import db here to avoid circular imports
+    import db
     return db.ProcessingVersion.procver_id( *args, **kwargs )
 
 
 def base_procver_id( *args, **kwargs ):
+    # import db here to avoid circular imports
+    import db
     return db.BaseProcessingVersion.base_procver_id( *args, **kwargs )
