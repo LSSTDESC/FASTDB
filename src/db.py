@@ -1465,8 +1465,11 @@ class ProcessingVersion( DBBase ):
 
         """
 
-        if isinstance( processing_version, uuid.UUID ):
+        if isinstance( processing_version, ProcessingVersion ):
+            return processing_version.id
+        elif isinstance( processing_version, uuid.UUID ):
             return processing_version
+
         try:
             ipv = uuid.UUID( processing_version )
             return ipv

@@ -401,32 +401,31 @@ def laboriously_construct_pandas( data, columns=None, int16cols=[], int32cols=[]
     once.  As such, we have to build several Series objects, each with
     the type we want, and then stitch them together into a DataFrame.
 
-    The three structures it can take are (in example for):
+    The four structures it can take are (in example form):
 
-      { 'a': [ 1, 2, 3 ], 'b': [ 4, 5, 6 ] }
+      First, these two:
 
-        This will yield a data frame with columns 'a' and 'b', and three rows.
+        { 'a': [ 1, 2, 3 ], 'b': [ 4, 5, 6 ] }
 
-      [ { 'a': 1, 'b': 4 }, { 'a': 2, 'b': 5 }, { 'a': 3, 'b': 6 } ]
+        [ { 'a': 1, 'b': 4 }, { 'a': 2, 'b': 5 }, { 'a': 3, 'b': 6 } ]
 
-        This will yield exactly the same data frame.
+      will yield exaclty the same data frame, with two coulumns 'a' and 'b' and 3 rows.
+
+      These two next two *require* keyname and indices to be non-none.
 
       { 'first': { 'a': [ 1, 2, 3 ], 'b': [4, 5, 6], 'c': [7, 8, 9] },
         'second': { 'a': [1, 2], 'b': [10, None], 'c': [ 2.718, 3.141 ] }
       }
 
-        This is the natural structure for the return from
-        ltcv.py::many_object_ltcvs.  The keys of the outer dictionary
-        are the rootid of the objects, and the inner dictionary keys are
-        all things like 'band', 'mjd', 'flux'...: the lightcurve for
-        that object.  This *requres* a keyname, and a second index (at
-        least) be passed in the indices column.  It will be turned into
-        a pandas dataframe whose first index is keyname and whose index
-        values are the values of the outer dictionary, and whose
-        subsequent indices are the inner dictionary keys given in the
-        indices argument.  If this was called with kwargs
-        (keyname='which', indices=['a'], int32cols=['b'],
-        floatcols['c']), the resultant dataframe would look like:
+      [ { 'which': 'first', 'a': [1, 2, 3], 'b': [4, 5, 6], 'c': [7, 8, 9] },
+        { 'which': 'second', 'a': [1, 2], 'b': [ 10, None ], 'c': [2.718, 3.141] }
+      ]
+
+      The latter is the natural structure for the return from
+      ltcv.py::many_object_ltcvs.  In both of these cases, if you pass
+      keyname='which', indices=['a'], int32cols=['b'], floatcols['c']),
+      the resultant dataframe would have a multi-index with levels
+      'which' and 'a', and would look like:
 
                        b      c
           which  a
@@ -501,8 +500,38 @@ def laboriously_construct_pandas( data, columns=None, int16cols=[], int32cols=[]
                 raise ValueError( "List of dicts must all have the same keys" )
             columns = list( data[0].keys() )
             dtypes = get_dtypes( columns )
-            serieses = { c: pandas.Series( ( r[c] for r in data ), dtype=dtypes[c] ) for c in columns }
 
+            if keyname is not None:
+                if keyname not in columns:
+                    raise ValueError( "If you pass a keyname with a list of dicts, then keyname must be "
+                                      "one of keys in each dict." )
+                if len(columns) < 3:
+                    raise ValueError( "Passing a keyname with a list of dicts requires at least three "
+                                      "keys in each dictionary." )
+                if any( isSequence( row[keyname] ) for row in data ):
+                    raise ValueError( "If you pass a list of dicts with a keyname, then the values of "
+                                      "that key in each dict must be a scalar." )
+                if not all( all( isinstance(row[col], list) for col in columns if col != keyname )
+                            for row in data ):
+                    raise ValueError( f"All values for all elements of the dictionary except {keyname} "
+                                      f"in every element of the list must be a list." )
+
+                col0 = columns[0] if columns[0] != keyname else columns[1]
+
+                if not all( all( len(row[col])==len(row[col0]) for col in columns if col != keyname )
+                            for row in data ):
+                    raise ValueError( f"All values for all elements of the dictionary except {keyname} "
+                                      f"in each element of the list by lists of the same length." )
+
+                serieses = { c: pandas.Series( itertools.chain.from_iterable( row[c] for row in data ),
+                                               dtype=dtypes[c] )
+                             for c in columns if c != keyname }
+                serieses[keyname] = pandas.Series(
+                    itertools.chain.from_iterable( [row[keyname]] * len(row[col0]) for row in data ),
+                    dtype=dtypes[keyname] )
+
+            else:
+                serieses = { c: pandas.Series( ( r[c] for r in data ), dtype=dtypes[c] ) for c in columns }
 
         elif all( isSequence( row ) for row in data ):
             numcols = len( data[0] )
@@ -551,7 +580,6 @@ def laboriously_construct_pandas( data, columns=None, int16cols=[], int32cols=[]
             columns = list( data.keys() )
             dtypes = get_dtypes( columns )
             serieses = { c: pandas.Series( v, dtype=dtypes[c] ) for c, v in data.items() }
-
 
     df = pandas.DataFrame( serieses )
 

@@ -33,22 +33,27 @@ def test_parse_sexigesimal():
 def test_laboriously_construct_pandas():
 
     data = { 'first': { 'a': [1, 2, 3], 'b': [4, 5, None], 'c': [7, None, 9] },
-             'second': { 'a': [1, 2, 3], 'b': [ 10, 11, 12], 'c': [13, 14, 15] }
+             'second': { 'a': [1, 2], 'b': [ 10, 11], 'c': [13, 14] }
             }
     df = util.laboriously_construct_pandas( data, int16cols=['a', 'b'], doublecols=['c'],
                                             keyname='which', indices=['a'], ignore_missing_cols=True )
 
-    expected = np.empty( 6, dtype='object' )
-    expected[:] = [ ( 'first', 1 ), ( 'first', 2 ), ( 'first', 3 ),
-                    ( 'second', 1 ), ( 'second', 2 ), ( 'second', 3 ) ]
+    expected = np.empty( 5, dtype='object' )
+    expected[:] = [ ( 'first', 1 ), ( 'first', 2 ), ( 'first', 3 ), ( 'second', 1 ), ( 'second', 2 ) ]
     assert all( df.index.values == expected )
 
     assert pandas.isna( df.loc[ ('first', 3), 'b' ] )
     assert pandas.isna( df.loc[ ('first', 2), 'c' ] )
     assert all( df.xs( 1, level='a' ).index.values == ['first', 'second'] )
-    assert all( df.xs( 'second', level='which' )['c'].values == [13., 14., 15.] )
+    assert all( df.xs( 'second', level='which' )['c'].values == [13., 14.] )
     assert df.b.dtype == 'int16[pyarrow]'
     assert df.c.dtype == 'double[pyarrow]'
+
+    data = [ { 'which': 'first', 'a': [1, 2, 3], 'b': [4, 5, None], 'c': [7, None, 9] },
+             { 'which': 'second', 'a': [1, 2], 'b': [10, 11], 'c': [13, 14] } ]
+    df2 = util.laboriously_construct_pandas( data, int16cols=['a', 'b'], doublecols=['c'],
+                                             keyname='which', indices=['a'], ignore_missing_cols=True )
+    assert ( df == df2 ).all().all()
 
     data = { 'cat': [ 1, 2, 3 ], 'dog': [ 4, None, 6 ], 'mouse': [ 7, 8, 9 ], 'wombat': [ 1.414, 2.718, 3.141 ] }
     df = util.laboriously_construct_pandas( data, int16cols='dog', ignore_missing_cols=True )
@@ -86,6 +91,7 @@ def test_laboriously_construct_pandas():
                      ( pandas.isna(df4.reset_index()[c]) & pandas.isna(df2[c]) )
                     )
                 for c in df2.columns )
+    expected = np.empty( (3,), dtype=object )
     expected[:] = [ (1, 7), (2, 8), (3, 9) ]
     # ...it is of course, totally intuitively obvious that you need
     #  to not have all() on the first line below, but you must
