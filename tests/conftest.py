@@ -1021,7 +1021,7 @@ def lightcurve_checker( set_of_lightcurves, procver_collection ):
                     assert isinstance( res['ltcv'], dict )
                     ltcvs = [ res['ltcv'] ]
                 else:
-                    assert set( res.keys() == { 'ltcvs', 'objinfo' } )
+                    assert set( res.keys() ) == { 'ltcvs', 'objinfo' }
                     assert isinstance( res['ltcvs'], list )
                     ltcvs = res['ltcvs']
                 assert isinstance( res['objinfo'], dict )

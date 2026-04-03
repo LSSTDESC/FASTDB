@@ -8,24 +8,22 @@ def test_getmanyltcvs( test_user, fastdb_client, set_of_lightcurves, lightcurve_
     roots = set_of_lightcurves
     check_ltcv = lightcurve_checker
 
-
     ltcvlist = [
         # Object 1 is not in pv1, so ony expect object 0 back
         ( 'pvc_pv1', [ str(roots[i]['root'].id) for i in [0, 1] ], [0], [100], 'pv1' ),
+        ( 'pvc_pv1', [100, 101], [0], [100], 'pv1' ),
         # pvc_pv2 should be the default
         ( None, [ str(roots[i]['root'].id) for i in [0, 2] ], [0, 2], [200, 202], 'pv2' ),
         # If we ask for diaobjects that are in the wrong processing version, we still get
         #   back the corresponding ones from the sources in this processing version
-        ( 'pvc_pv2', [0, 2], [ 0, 2], [200, 202], 'pv2' ),
-        # ( 'realtime', [0, 1, 2], [0, 1, 2], [0, 1, 2], 'realtime' ),
+        ( 'pvc_pv2', [0, 2], [0, 2], [200, 202], 'pv2' ),
+        ( 'pvc_pv2', [0, 1, 2], [0, 1, 2], [200, 201, 2011, 202], 'pv2' ),
+        ( 'realtime', [0, 1, 2], [0, 1, 2], [0, 1, 2], 'realtime' ),
     ]
 
     extras = [
         {},
-        { 'always_use_weighted_source_positions': 1, 'include_base_procver': 1,
-          'include_source_positions': 1, 'include_object_positions': 1, 'return_object_info': 1 },
-        { 'mjd_now': 60061., 'always_use_weighted_source_positions': 1, 'include_base_procver': 1,
-          'include_source_positions': 1, 'include_object_positions': 1, 'return_object_info': 1 },
+        { 'mjd_now': 60041. },
         { 'bands': 'r' },
         { 'bands': ['r'] },
         { 'include_source_positions': 1 },
@@ -33,9 +31,15 @@ def test_getmanyltcvs( test_user, fastdb_client, set_of_lightcurves, lightcurve_
         { 'return_object_info': 1, 'include_object_positions': 1 },
         { 'return_object_info': 1, 'include_base_procver': 1 },
         { 'return_object_info': 1, 'include_base_procver': 1, 'include_object_positions': 1 },
-        { 'use_weighted_source_positions': 1 },
-        { 'always_use_weighted_source_positions': 1 },
-        { 'mjd_now': 60041. }
+        { 'use_weighted_source_positions': 1, 'include_base_procver': 1 },
+        { 'use_weighted_source_positions': 1, 'include_object_positions': 1 },
+        { 'use_weighted_source_positions': 1, 'include_object_positions': 1, 'return_object_info': 1 },
+        { 'use_weighted_source_positions': 1, 'include_source_positions': 1,
+          'return_object_info': 1, 'include_object_positions': 1 },
+        { 'always_use_weighted_source_positions': 1, 'include_source_positions': 1,
+          'return_object_info': 1, 'include_object_positions': 1 },
+        { 'mjd_now': 60061., 'always_use_weighted_source_positions': 1, 'include_base_procver': 1,
+          'include_source_positions': 1, 'include_object_positions': 1, 'return_object_info': 1 },
     ]
 
     n = 0
@@ -71,11 +75,6 @@ def test_getmanyltcvs( test_user, fastdb_client, set_of_lightcurves, lightcurve_
                     kwargs['which'] = which
                 n += 1
                 res = fastdb_client.post( url, json=kwargs )
-                # ****
-                if ( ( extra.get('mjd_now', None) == 60061 ) and ( ltcvreq[0] == 'realtime' ) and
-                     ( which in [ 'patch', 'forced' ] ) ):
-                    import pdb; pdb.set_trace()
-                # ****
                 if which is None:
                     kwargs['which'] = 'patch'
                 del kwargs['objids']
@@ -107,20 +106,26 @@ def test_getltcv( test_user, fastdb_client, set_of_lightcurves, lightcurve_check
                  ( 'pvc_pv2', 201, [1], [201, 2011] ),
                 ]
 
-    extras = [ {},
-               { 'mjd_now': 60040. },
-               { 'include_source_positions': 1 },
-               { 'include_base_procver': 1 },
-               { 'return_object_info': 1, 'include_base_procver': 1 },
-               { 'include_source_positions': 1, 'include_base_procver': 1 },
-               { 'include_source_positions': 1, 'include_base_procver': 1, 'return_object_info': 1 },
-               { 'include_source_positions': 1, 'include_base_procver': 1, 'return_object_info': 1,
-                 'use_weighted_source_positions': 0, 'always_use_weighted_source_positions': 1 },
-               { 'use_weighted_source_positions': 1, 'include_base_procver': 1,
-                 'return_object_info': 1, 'include_object_positions': 1, 'manual_check': 1, },
-               { 'always_use_weighted_source_positions': 1, 'include_base_procver': 1,
-                 'return_object_info': 1 , 'include_object_positions': 1, 'manual_check': 2 }
-              ]
+    extras = [
+        {},
+        { 'mjd_now': 60041. },
+        { 'bands': 'r' },
+        { 'bands': ['r'] },
+        { 'include_source_positions': 1 },
+        { 'return_object_info': 1 },
+        { 'return_object_info': 1, 'include_object_positions': 1 },
+        { 'return_object_info': 1, 'include_base_procver': 1 },
+        { 'return_object_info': 1, 'include_base_procver': 1, 'include_object_positions': 1 },
+        { 'use_weighted_source_positions': 1, 'include_base_procver': 1 },
+        { 'use_weighted_source_positions': 1, 'include_object_positions': 1 },
+        { 'use_weighted_source_positions': 1, 'include_object_positions': 1, 'return_object_info': 1 },
+        { 'use_weighted_source_positions': 1, 'include_source_positions': 1,
+          'return_object_info': 1, 'include_object_positions': 1 },
+        { 'always_use_weighted_source_positions': 1, 'include_source_positions': 1,
+          'return_object_info': 1, 'include_object_positions': 1 },
+        { 'mjd_now': 60061., 'always_use_weighted_source_positions': 1, 'include_base_procver': 1,
+          'include_source_positions': 1, 'include_object_positions': 1, 'return_object_info': 1 },
+    ]
 
 
     n = 0
@@ -197,68 +202,71 @@ def test_getrandomltcv( test_user, fastdb_client, procver_collection, set_of_lig
 def test_gethottransients( test_user, fastdb_client, set_of_lightcurves, lightcurve_checker ):
     check_ltcv = lightcurve_checker
 
-    ltcvinfo = [ { 'kwargs': { 'mjd_now': 60056., 'detected_since_mjd': 60035. },
-                   'passprocver': 'pvc_pv2',
-                   'testprocver': 'pv2',
-                   'exproot': [1, 2, 3],
-                   'expobj': [201, 2011, 202, 203]
-                  },
-                 { 'kwargs': { 'mjd_now': 60046., 'detected_since_mjd': 60035., },
-                   'passprocver': 'pvc_pv2',
-                   'testprocver': 'pv2',
-                   'exproot': [1, 2],
-                   'expobj': [201, 2011, 202],
-                  },
-                 { 'kwargs': { 'mjd_now': 60021., 'detected_in_last_days': 2 },
-                   'passprocver': 'pvc_pv2',
-                   'testprocver': 'pv2',
-                   'exproot': [0, 1],
-                   'expobj': [200, 201, 2011]
-                  },
-                 { 'kwargs': { 'mjd_now': 60041., 'detected_in_last_days': 2 },
-                   'passprocver': 'pvc_pv2',
-                   'testprocver': 'pv2',
-                   'exproot': [1, 2],
-                   'expobj': [201, 2011, 202]
-                  },
-                 # detected in last days defaults to 30
-                 { 'kwargs': { 'mjd_now': 60085. },
-                   'passprocver': 'pvc_pv2',
-                   'testprocver': 'pv2',
-                   'exproot': [1, 2, 3],
-                   'expobj': [201, 2011, 202, 203]
-                  },
-                 { 'kwargs': { 'mjd_now': 60095. },
-                   'passprocver': 'pvc_pv2',
-                   'testprocver': 'pv2',
-                   'exproot': [2],
-                   'expobj': [202]
-                  },
-                 # { 'kwargs': { 'mjd_now': 60061. },
-                 #   'passprocver': 'realtime',
-                 #   'testprocver': 'realtime',
-                 #   'exproot': [1, 2],
-                 #   'expobj': [1, 2]
-                 #  },
-                 # { 'kwargs': { 'mjd_now': 60061. },
-                 #   'passprocver': None,
-                 #   'testprocver': 'realtime',
-                 #   'exproot': [1, 2],
-                 #   'expobj': [1, 2]
-                 #  }
-                ]
+    ltcvinfo = [
+        { 'kwargs': { 'mjd_now': 60056., 'detected_since_mjd': 60035. },
+          'passprocver': 'pvc_pv2',
+          'testprocver': 'pv2',
+          'exproot': [1, 2, 3],
+          'expobj': [201, 2011, 202, 203]
+         },
+        { 'kwargs': { 'mjd_now': 60046., 'detected_since_mjd': 60035., },
+          'passprocver': 'pvc_pv2',
+          'testprocver': 'pv2',
+          'exproot': [1, 2],
+          'expobj': [201, 2011, 202],
+         },
+        { 'kwargs': { 'mjd_now': 60021., 'detected_in_last_days': 2 },
+          'passprocver': 'pvc_pv2',
+          'testprocver': 'pv2',
+          'exproot': [0, 1],
+          'expobj': [200, 201, 2011]
+         },
+        { 'kwargs': { 'mjd_now': 60041., 'detected_in_last_days': 2 },
+          'passprocver': 'pvc_pv2',
+          'testprocver': 'pv2',
+          'exproot': [1, 2],
+          'expobj': [201, 2011, 202]
+         },
+        # detected in last days defaults to 30
+        { 'kwargs': { 'mjd_now': 60085. },
+          'passprocver': 'pvc_pv2',
+          'testprocver': 'pv2',
+          'exproot': [1, 2, 3],
+          'expobj': [201, 2011, 202, 203]
+         },
+        { 'kwargs': { 'mjd_now': 60095. },
+          'passprocver': 'pvc_pv2',
+          'testprocver': 'pv2',
+          'exproot': [2],
+          'expobj': [202]
+         },
+        { 'kwargs': { 'mjd_now': 60061. },
+          'passprocver': 'realtime',
+          'testprocver': 'realtime',
+          'exproot': [1, 2],
+          'expobj': [1, 2]
+         },
+        { 'kwargs': { 'mjd_now': 60061. },
+          'passprocver': None,
+          'testprocver': 'realtime',
+          'exproot': [1, 2],
+          'expobj': [1, 2]
+         }
+    ]
 
-    extras = [ {},
-               { 'include_object_positions': 1 },
-               { 'include_object_positions': 0 },
-               { 'include_source_positions': 1 },
-               { 'include_object_positions': 1, 'include_source_positions': 1 },
-               { 'include_base_procver': 1 },
-               { 'include_base_procver': 1, 'include_object_positions': 1 },
-               { 'use_weighted_source_positions': 1, 'include_object_positions': 1 },
-               { 'always_use_weighted_source_positions': 1, 'include_object_positions': 1, 'include_base_procver': 1 },
-               { 'always_use_weighted_source_positions': 1, 'include_object_positions': 1 },
-              ]
+    extras = [
+        {},
+        { 'include_object_positions': 1 },
+        { 'include_object_positions': 0 },
+        { 'include_source_positions': 1 },
+        { 'include_object_positions': 1, 'include_source_positions': 1 },
+        { 'include_base_procver': 1 },
+        { 'include_base_procver': 1, 'include_object_positions': 1 },
+        { 'use_weighted_source_positions': 1, 'include_object_positions': 1, 'include_base_procver': 1 },
+        { 'always_use_weighted_source_positions': 1, 'include_object_positions': 1, 'include_base_procver': 1 },
+        { 'always_use_weighted_source_positions': 1, 'include_object_positions': 1 },
+    ]
+
 
     for lc in ltcvinfo:
         for source_patch in [ True, False, None ]:
