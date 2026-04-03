@@ -547,147 +547,113 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                                   ( return_object_info and include_object_positions ) )
 
     with db.DBCon( dbcon ) as dbcon:
-        pvid = db.ProcessingVersion.procver_id( processing_version, dbcon=dbcon )
-        pospvid = None
-        if return_object_info and include_object_positions:
-            pospvid = ( db.ProcessingVersion.procver_id( position_processing_version, dbcon=dbcon )
-                        if position_processing_version is not None else pvid )
+        tmpsmade = []
+        try:
+            pvid = db.ProcessingVersion.procver_id( processing_version, dbcon=dbcon )
+            pospvid = None
+            if return_object_info and include_object_positions:
+                pospvid = ( db.ProcessingVersion.procver_id( position_processing_version, dbcon=dbcon )
+                            if position_processing_version is not None else pvid )
 
-        # Make a first pass and extract ALL diaobjectids from all base
-        #   processing versions that share the same roots as the
-        #   requested objects. Even *within* a base processing version
-        #   there are multiple diaOjbects in the lsst alert stream, and
-        #   what's more, the same diaSource will at different time
-        #   (original alert, previous soruces in later alerts) be
-        #   associated with different diaObjects.
-        # However, also, we can't really be sure the actual processing
-        #   versions of objects for the diasources in the processing
-        #   version the user asked for, so just yank them all, and then
-        #   trust the join to the source table to filter out the
-        #   irrelevant ones.
-        if objids is not None:
-            objids_table = 'tmp_objids'
-            if objids_are_root:
-                q = sql.SQL( textwrap.dedent(
-                    """\
-                    SELECT diaobjectid, rootid
-                    INTO TEMP TABLE tmp_objids
-                    FROM diaobject
-                    WHERE rootid=ANY(%(roots)s)
-                    """
-                ) ).format()
-                dbcon.execute_nofetch( q, {'roots': objids} )
+            # Make a first pass and extract ALL diaobjectids from all base
+            #   processing versions that share the same roots as the
+            #   requested objects. Even *within* a base processing version
+            #   there are multiple diaOjbects in the lsst alert stream, and
+            #   what's more, the same diaSource will at different time
+            #   (original alert, previous soruces in later alerts) be
+            #   associated with different diaObjects.
+            # However, also, we can't really be sure the actual processing
+            #   versions of objects for the diasources in the processing
+            #   version the user asked for, so just yank them all, and then
+            #   trust the join to the source table to filter out the
+            #   irrelevant ones.
+            if objids is not None:
+                objids_table = 'tmp_objids'
+                tmpsmade.append( objids_table )
+                if objids_are_root:
+                    q = sql.SQL( textwrap.dedent(
+                        """\
+                        SELECT diaobjectid, rootid
+                        INTO TEMP TABLE tmp_objids
+                        FROM diaobject
+                        WHERE rootid=ANY(%(roots)s)
+                        """
+                    ) ).format()
+                    dbcon.execute_nofetch( q, {'roots': objids} )
+                else:
+                    q = sql.SQL( "CREATE TEMP TABLE temp_input_diaobject( diaobjectid bigint )" )
+                    dbcon.execute( q, explain=False )
+                    q = sql.SQL( "COPY temp_input_diaobject(diaobjectid) FROM STDIN"
+                                ).format( objids_table=sql.Identifier( objids_table ) )
+                    with dbcon.cursor.copy( q ) as copier:
+                        for objid in objids:
+                            copier.write_row( [ objid ] )
+
+                    q = sql.SQL( textwrap.dedent(
+                        """\
+                        SELECT o.diaobjectid, o.rootid
+                        INTO TEMP TABLE tmp_objids
+                        FROM temp_input_diaobject t
+                        INNER JOIN diaobject ot ON t.diaobjectid=ot.diaobjectid
+                        INNER JOIN diaobject o ON ot.rootid=o.rootid
+                        """ ) )
+                    dbcon.execute( q )
             else:
-                q = sql.SQL( "CREATE TEMP TABLE temp_input_diaobject( diaobjectid bigint )" )
-                dbcon.execute( q, explain=False )
-                q = sql.SQL( "COPY temp_input_diaobject(diaobjectid) FROM STDIN"
-                            ).format( objids_table=sql.Identifier( objids_table ) )
-                with dbcon.cursor.copy( q ) as copier:
-                    for objid in objids:
-                        copier.write_row( [ objid ] )
+                actual_objids_table = f'{objids_table}_withboth'
+                tmpsmade.append( actual_objids_table )
+                dbcon.execute( sql.SQL( "DROP TABLE IF EXISTS {t}" ).format( t=sql.Identifier(actual_objids_table) ),
+                               explain=False )
+                if objids_are_root:
+                    q = sql.SQL( textwrap.dedent(
+                        """\
+                        SELECT o.diaobjectid, o.rootid
+                        INTO TEMP TABLE {desttable}
+                        FROM {sourcetable} x
+                        INNER JOIN diaobject o ON x.rootid=o.rootid
+                        """ ) ).format( desttable=sql.Identifier( actual_objids_table ),
+                                        sourcetable=sql.Identifier( objids_table ) )
+                    dbcon.execute( q )
+                else:
+                    q = sql.SQL( textwrap.dedent(
+                        """\
+                        SELECT o.diaobjectid, o.rootid
+                        INTO TEMP TABLE {desttable}
+                        FROM {sourcetable} x
+                        INNER JOIN diaobject ot ON t.diaobjectid=x.diaobjectid
+                        INNER JOIN diaobject o ON t.rootid=o.rootid
+                        """ ) ).format( desttable=sql.Identifier(actual_objids_table),
+                                        sourcetable=sql.Identifier(objids_table) )
+                    dbcon.execute( q )
+                objids_table = actual_objids_table
 
-                q = sql.SQL( textwrap.dedent(
-                    """\
-                    SELECT o.diaobjectid, o.rootid
-                    INTO TEMP TABLE tmp_objids
-                    FROM temp_input_diaobject t
-                    INNER JOIN diaobject ot ON t.diaobjectid=ot.diaobjectid
-                    INNER JOIN diaobject o ON ot.rootid=o.rootid
-                    """ ) )
-                dbcon.execute( q )
-        else:
-            actual_objids_table = f'{objids_table}_withboth'
-            dbcon.execute( sql.SQL( "DROP TABLE IF EXISTS {t}" ).format( t=sql.Identifier(actual_objids_table) ),
-                           explain=False )
-            if objids_are_root:
-                q = sql.SQL( textwrap.dedent(
-                    """\
-                    SELECT o.diaobjectid, o.rootid
-                    INTO TEMP TABLE {desttable}
-                    FROM {sourcetable} x
-                    INNER JOIN diaobject o ON x.rootid=o.rootid
-                    """ ) ).format( desttable=sql.Identifier( actual_objids_table ),
-                                    sourcetable=sql.Identifier( objids_table ) )
-                dbcon.execute( q )
-            else:
-                q = sql.SQL( textwrap.dedent(
-                    """\
-                    SELECT o.diaobjectid, o.rootid
-                    INTO TEMP TABLE {desttable}
-                    FROM {sourcetable} x
-                    INNER JOIN diaobject ot ON t.diaobjectid=x.diaobjectid
-                    INNER JOIN diaobject o ON t.rootid=o.rootid
-                    """ ) ).format( desttable=sql.Identifier(actual_objids_table),
-                                    sourcetable=sql.Identifier(objids_table) )
-                dbcon.execute( q )
-            objids_table = actual_objids_table
-
-        # Extract detections
-        pos_fields = sql.SQL( "ra AS det_ra, dec AS det_dec, raerr AS det_raerr, "
-                              "decerr AS det_decerr, ra_dec_cov AS det_ra_dec_cov, "
-                              if must_get_source_positions
-                              else "" )
-        procver_fields = sql.SQL( "p.description AS base_procver_s, " if include_base_procver else "" )
-        dbcon.execute( "DROP TABLE IF EXISTS tmp_sources", explain=False )
-        q = sql.SQL( textwrap.dedent(
-            """\
-            /*+ IndexScan(s idx_diasource_diaobjectid)
-                IndexScan(ot idx_diaobject_rootid)
-            */
-            SELECT DISTINCT ON (t.rootid, s.visit)
-              t.rootid, s.diasourceid, s.diaobjectid AS source_diaobjectid, s.visit, s.midpointmjdtai AS mjd,
-              s.band, s.psfflux AS flux, s.psffluxerr AS fluxerr, o.base_procver_id AS source_obj_bpv,
-              {pos_fields} {procver_fields} TRUE as isdet
-            INTO tmp_sources
-            FROM {objids_table} t
-            INNER JOIN diaobject ot ON t.rootid=ot.rootid
-            INNER JOIN diasource s ON s.diaobjectid=ot.diaobjectid
-            INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id
-                                                 AND pv._table='diasource'
-                                                 AND pv.procver_id={procver}
-            INNER JOIN diaobject o ON s.diaobjectid=o.diaobjectid
-            """
-        ) ).format( procver=pvid, objids_table=sql.Identifier(objids_table),
-                    pos_fields=pos_fields, procver_fields=procver_fields )
-        if include_base_procver:
-            q += sql.SQL( "INNER JOIN base_processing_version p ON pv.base_procver_id=p.id" )
-        _and = "WHERE"
-        if mjd_now is not None:
-            q += sql.SQL( f"                   {_and} s.midpointmjdtai<={{t0}}" ).format( t0=mjd_now )
-            _and = "  AND"
-        if bands is not None:
-            q += sql.SQL( f"                   {_and} s.band=ANY(%(bands)s)" )
-            _and = "  AND"
-        q += sql.SQL( "   ORDER BY t.rootid, s.visit, pv.priority DESC\n")
-        dbcon.execute_nofetch( q, { 'bands': bands } )
-
-        if which == 'detections':
-            rows, cols = dbcon.execute( "SELECT * FROM tmp_sources "
-                                        "ORDER BY rootid, mjd" )
-
-        else:
-            # Extract forced photometry if necessary
-            procver_fields = sql.SQL( "p.description as base_procver_f, " if include_base_procver else "" )
-            dbcon.execute( "DROP TABLE IF EXISTS tmp_forced", explain=False )
+            # Extract detections
+            pos_fields = sql.SQL( "ra AS det_ra, dec AS det_dec, raerr AS det_raerr, "
+                                  "decerr AS det_decerr, ra_dec_cov AS det_ra_dec_cov, "
+                                  if must_get_source_positions
+                                  else "" )
+            procver_fields = sql.SQL( "p.description AS base_procver_s, " if include_base_procver else "" )
+            dbcon.execute( "DROP TABLE IF EXISTS tmp_sources", explain=False )
+            tmpsmade.append( 'tmp_sources' )
             q = sql.SQL( textwrap.dedent(
                 """\
-                /*+ IndexScan(s idx_diaforcedsource_diaobjectid)
+                /*+ IndexScan(s idx_diasource_diaobjectid)
                     IndexScan(ot idx_diaobject_rootid)
                 */
                 SELECT DISTINCT ON (t.rootid, s.visit)
-                  t.rootid, s.diaforcedsourceid, s.diaobjectid AS forced_diaobjectid, s.visit, s.midpointmjdtai AS mjd,
-                  s.band, s.psfflux AS flux, s.psffluxerr AS fluxerr, o.base_procver_id AS forced_obj_bpv,
-                  {procver_fields} FALSE as isdet
-                INTO tmp_forced
+                  t.rootid, s.diasourceid, s.diaobjectid AS source_diaobjectid, s.visit, s.midpointmjdtai AS mjd,
+                  s.band, s.psfflux AS flux, s.psffluxerr AS fluxerr, o.base_procver_id AS source_obj_bpv,
+                  {pos_fields} {procver_fields} TRUE as isdet
+                INTO tmp_sources
                 FROM {objids_table} t
                 INNER JOIN diaobject ot ON t.rootid=ot.rootid
-                INNER JOIN diaforcedsource s ON s.diaobjectid=ot.diaobjectid
+                INNER JOIN diasource s ON s.diaobjectid=ot.diaobjectid
                 INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id
-                                                     AND pv._table='diaforcedsource'
+                                                     AND pv._table='diasource'
                                                      AND pv.procver_id={procver}
                 INNER JOIN diaobject o ON s.diaobjectid=o.diaobjectid
                 """
-            ) ).format( procver=pvid, procver_fields=procver_fields, objids_table=sql.Identifier(objids_table) )
+            ) ).format( procver=pvid, objids_table=sql.Identifier(objids_table),
+                        pos_fields=pos_fields, procver_fields=procver_fields )
             if include_base_procver:
                 q += sql.SQL( "INNER JOIN base_processing_version p ON pv.base_procver_id=p.id" )
             _and = "WHERE"
@@ -697,88 +663,141 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
             if bands is not None:
                 q += sql.SQL( f"                   {_and} s.band=ANY(%(bands)s)" )
                 _and = "  AND"
-            q += sql.SQL( "   ORDER BY t.rootid, s.visit, pv.priority DESC\n" )
+            q += sql.SQL( "   ORDER BY t.rootid, s.visit, pv.priority DESC\n")
             dbcon.execute_nofetch( q, { 'bands': bands } )
 
-            # Join detections to forced photometry to set the 'isdet' and 'ispatch' flags.
-            # The term FULL OUTER JOIN is extremely scary, of course
-            pos_fields = sql.SQL( "s.det_ra, s.det_dec, s.det_raerr, s.det_decerr, s.det_ra_dec_cov, "
-                                  if must_get_source_positions
-                                  else "" )
-            procver_fields = sql.SQL( "f.base_procver_f, s.base_procver_s, " if include_base_procver else "" )
-            q = sql.SQL( textwrap.dedent(
-                """\
-                SELECT CASE WHEN f.rootid IS NULL THEN s.rootid ELSE f.rootid END AS rootid,
-                       f.diaforcedsourceid,
-                       s.diasourceid,
-                       f.forced_diaobjectid,
-                       s.source_diaobjectid,
-                       f.forced_obj_bpv,
-                       s.source_obj_bpv,
-                       {procver_fields}
-                       CASE WHEN f.rootid IS NULL THEN s.visit ELSE f.visit END AS visit,
-                       CASE WHEN f.rootid IS NULL THEN s.mjd ELSE f.mjd END AS mjd,
-                       CASE WHEN f.rootid IS NULL THEN s.band ELSE f.band END AS band,
-                       CASE WHEN f.rootid IS NULL THEN s.flux ELSE f.flux END AS flux,
-                       CASE WHEN f.rootid IS NULL THEN s.fluxerr ELSE f.fluxerr END AS fluxerr,
-                       {pos_fields}
-                       CASE WHEN s.rootid IS NULL THEN FALSE ELSE TRUE END AS isdet,
-                       CASE WHEN f.rootid IS NULL THEN TRUE ELSE FALSE END as ispatch
-                FROM tmp_forced f
-                FULL OUTER JOIN tmp_sources s ON f.rootid=s.rootid AND s.visit=f.visit
-                ORDER BY rootid, mjd
-                """ ) ).format( pos_fields=pos_fields, procver_fields=procver_fields )
-            rows, cols = dbcon.execute( q )
+            if which == 'detections':
+                rows, cols = dbcon.execute( "SELECT * FROM tmp_sources "
+                                            "ORDER BY rootid, mjd" )
 
-        # Convert the lightcurve return into the dictionary
-        # IF we might need to calculate weighted positions, then make some of the
-        #   columns numpy arrays for faster processing later.  We'll have to
-        #   convert back to a list, but I'm gambling that it will be faster to
-        #   do that than to iterate through the calculations for weighted
-        #   source positions.  (I should check that.)
-        FDBLogger( "Parsing postgres return to dictionary..." )
-        coldex = { c: i for i, c in enumerate(cols) }
-        tmp = { c: ( np.array( [ r[coldex[c]] for r in rows ], dtype=np.float64 )
-                       if use_weighted_source_positions and ( c in [ 'flux', 'fluxerr', 'det_ra', 'det_dec' ] )
-                     else np.array( [ r[coldex[c]] for r in rows ] ) if c == 'rootid'
-                     else [ r[coldex[c]] for r in rows ]
-                    )
-                for c in cols }
-        rootidlist = np.array( tmp['rootid'] )
-        rootids = np.unique( rootidlist )
-        ltcvs = []
-        for rootid in rootids:
-            w = np.where( tmp['rootid'] == rootid )[0]
-            dex0 = w[0]
-            dex1 = w[-1] + 1
-            thisltcv = { c: tmp[c][dex0:dex1] for c in cols if c != 'rootid' }
-            thisltcv['rootid'] = rootid
-            ltcvs.append( thisltcv )
-        FDBLogger.debug( "...done parsing postgres return into dictionary" )
-
-        # We might also need to get object info.  Get all diaobjects
-        #    that match the rootids the caller asked for, from any base
-        #    processing version from any diaobjectid from any source or
-        #    forced source that we found.
-        if return_object_info:
-            sbpvdex = cols.index( 'source_obj_bpv' )
-            bpvs = set( r[sbpvdex] for r in rows )
-            if which != 'detections':
-                fbpvdex = cols.index( 'forced_obj_bpv' )
-                bpvs = bpvs.union( set( r[fbpvdex] for r in rows ) )
-            bpvs = list( bpvs )
-
-            columns = [ 'diaobjectid', 'rootid' ]
-            if include_base_procver:
-                columns.append( 'obj_base_procver' )
-            if include_object_positions:
-                columns.extend( [ 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ] )
+            else:
+                # Extract forced photometry if necessary
+                procver_fields = sql.SQL( "p.description as base_procver_f, " if include_base_procver else "" )
+                dbcon.execute( "DROP TABLE IF EXISTS tmp_forced", explain=False )
+                tmpsmade.append( 'tmp_forced' )
+                q = sql.SQL( textwrap.dedent(
+                    """\
+                    /*+ IndexScan(s idx_diaforcedsource_diaobjectid)
+                        IndexScan(ot idx_diaobject_rootid)
+                    */
+                    SELECT DISTINCT ON (t.rootid, s.visit)
+                      t.rootid, s.diaforcedsourceid, s.diaobjectid AS forced_diaobjectid,
+                      s.visit, s.midpointmjdtai AS mjd,
+                      s.band, s.psfflux AS flux, s.psffluxerr AS fluxerr, o.base_procver_id AS forced_obj_bpv,
+                      {procver_fields} FALSE as isdet
+                    INTO tmp_forced
+                    FROM {objids_table} t
+                    INNER JOIN diaobject ot ON t.rootid=ot.rootid
+                    INNER JOIN diaforcedsource s ON s.diaobjectid=ot.diaobjectid
+                    INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id
+                                                         AND pv._table='diaforcedsource'
+                                                         AND pv.procver_id={procver}
+                    INNER JOIN diaobject o ON s.diaobjectid=o.diaobjectid
+                    """
+                ) ).format( procver=pvid, procver_fields=procver_fields, objids_table=sql.Identifier(objids_table) )
                 if include_base_procver:
-                    columns.append( 'pos_base_procver' )
+                    q += sql.SQL( "INNER JOIN base_processing_version p ON pv.base_procver_id=p.id" )
+                _and = "WHERE"
+                if mjd_now is not None:
+                    q += sql.SQL( f"                   {_and} s.midpointmjdtai<={{t0}}" ).format( t0=mjd_now )
+                    _and = "  AND"
+                if bands is not None:
+                    q += sql.SQL( f"                   {_and} s.band=ANY(%(bands)s)" )
+                    _and = "  AND"
+                q += sql.SQL( "   ORDER BY t.rootid, s.visit, pv.priority DESC\n" )
+                dbcon.execute_nofetch( q, { 'bands': bands } )
 
-            objinfo = get_object_infos( objids_table=objids_table, base_procvers=bpvs,
-                                        position_processing_version=pospvid, columns=columns,
-                                        return_format=return_format, dbcon=dbcon )
+                # Join detections to forced photometry to set the 'isdet' and 'ispatch' flags.
+                # The term FULL OUTER JOIN is extremely scary, of course
+                pos_fields = sql.SQL( "s.det_ra, s.det_dec, s.det_raerr, s.det_decerr, s.det_ra_dec_cov, "
+                                      if must_get_source_positions
+                                      else "" )
+                procver_fields = sql.SQL( "f.base_procver_f, s.base_procver_s, " if include_base_procver else "" )
+                q = sql.SQL( textwrap.dedent(
+                    """\
+                    SELECT CASE WHEN f.rootid IS NULL THEN s.rootid ELSE f.rootid END AS rootid,
+                           f.diaforcedsourceid,
+                           s.diasourceid,
+                           f.forced_diaobjectid,
+                           s.source_diaobjectid,
+                           f.forced_obj_bpv,
+                           s.source_obj_bpv,
+                           {procver_fields}
+                           CASE WHEN f.rootid IS NULL THEN s.visit ELSE f.visit END AS visit,
+                           CASE WHEN f.rootid IS NULL THEN s.mjd ELSE f.mjd END AS mjd,
+                           CASE WHEN f.rootid IS NULL THEN s.band ELSE f.band END AS band,
+                           CASE WHEN f.rootid IS NULL THEN s.flux ELSE f.flux END AS flux,
+                           CASE WHEN f.rootid IS NULL THEN s.fluxerr ELSE f.fluxerr END AS fluxerr,
+                           {pos_fields}
+                           CASE WHEN s.rootid IS NULL THEN FALSE ELSE TRUE END AS isdet,
+                           CASE WHEN f.rootid IS NULL THEN TRUE ELSE FALSE END as ispatch
+                    FROM tmp_forced f
+                    FULL OUTER JOIN tmp_sources s ON f.rootid=s.rootid AND s.visit=f.visit
+                    ORDER BY rootid, mjd
+                    """ ) ).format( pos_fields=pos_fields, procver_fields=procver_fields )
+                rows, cols = dbcon.execute( q )
+
+            # Convert the lightcurve return into the dictionary
+            # IF we might need to calculate weighted positions, then make some of the
+            #   columns numpy arrays for faster processing later.  We'll have to
+            #   convert back to a list, but I'm gambling that it will be faster to
+            #   do that than to iterate through the calculations for weighted
+            #   source positions.  (I should check that.)
+            FDBLogger( "Parsing postgres return to dictionary..." )
+            coldex = { c: i for i, c in enumerate(cols) }
+            tmp = { c: ( np.array( [ r[coldex[c]] for r in rows ], dtype=np.float64 )
+                           if use_weighted_source_positions and ( c in [ 'flux', 'fluxerr', 'det_ra', 'det_dec' ] )
+                         else np.array( [ r[coldex[c]] for r in rows ] ) if c == 'rootid'
+                         else [ r[coldex[c]] for r in rows ]
+                        )
+                    for c in cols }
+            rootidlist = np.array( tmp['rootid'] )
+            rootids = np.unique( rootidlist )
+            ltcvs = []
+            for rootid in rootids:
+                w = np.where( tmp['rootid'] == rootid )[0]
+                dex0 = w[0]
+                dex1 = w[-1] + 1
+                thisltcv = { c: tmp[c][dex0:dex1] for c in cols if c != 'rootid' }
+                thisltcv['rootid'] = rootid
+                ltcvs.append( thisltcv )
+            FDBLogger.debug( "...done parsing postgres return into dictionary" )
+
+            # We might also need to get object info.  Get all diaobjects
+            #    that match the rootids the caller asked for, from any base
+            #    processing version from any diaobjectid from any source or
+            #    forced source that we found.
+            if return_object_info:
+                sbpvdex = cols.index( 'source_obj_bpv' )
+                bpvs = set( r[sbpvdex] for r in rows )
+                if which != 'detections':
+                    fbpvdex = cols.index( 'forced_obj_bpv' )
+                    bpvs = bpvs.union( set( r[fbpvdex] for r in rows ) )
+                bpvs = list( bpvs )
+
+                columns = [ 'diaobjectid', 'rootid' ]
+                if include_base_procver:
+                    columns.append( 'obj_base_procver' )
+                if include_object_positions:
+                    columns.extend( [ 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ] )
+                    if include_base_procver:
+                        columns.append( 'pos_base_procver' )
+
+                objinfo = get_object_infos( objids_table=objids_table, base_procvers=bpvs,
+                                            position_processing_version=pospvid, columns=columns,
+                                            return_format=return_format, dbcon=dbcon )
+
+        finally:
+            # Drop any temp tables we created.  Do NOT commit, however.  Reason:
+            #   If this is called with an existing dbcon, then the caller
+            #   may be impolicitly assuming these temp tables don't exist.
+            #   However, the caller might also (perversely?) be in the middle
+            #   of a transaction, and we don't want to end that transaction
+            #   by committing.
+            for tab in tmpsmade:
+                dbcon.execute( sql.SQL( "DROP TABLE IF EXISTS {tab}" ).format( tab=sql.Identifier(tab) ),
+                               explain=False )
+
 
     # Update object positions if necessary
     if use_weighted_source_positions:
@@ -823,7 +842,7 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                 objinfo.loc[ (objinfo['rootid'] == rootid) & pandas.isna(objinfo['ra']) , 'ra' ] = meanra
             else:
                 for i in range( len( objinfo['diaobjectid'] ) ):
-                    if objinfo['rootid'][i] == rootid:
+                    if ( objinfo['rootid'][i] == rootid ) and ( objinfo['ra'][i] is None ):
                         objinfo['ra'][i] = meanra
                         objinfo['dec'][i] = meandec
                         objinfo['raerr'][i] = raerr

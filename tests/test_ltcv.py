@@ -213,10 +213,7 @@ def test_object_ltcv( set_of_lightcurves, procver_collection, lightcurve_checker
 
     extras = [
         {},
-        { 'always_use_weighted_source_positions': 1, 'include_base_procver': 1,
-          'include_source_positions': 1, 'include_object_positions': 1, 'return_object_info': 1 },
-        { 'mjd_now': 60061, 'always_use_weighted_source_positions': 1, 'include_base_procver': 1,
-          'include_source_positions': 1, 'include_object_positions': 1, 'return_object_info': 1 },
+        { 'mjd_now': 60041. },
         { 'bands': 'r' },
         { 'bands': ['r'] },
         { 'include_source_positions': 1 },
@@ -224,9 +221,15 @@ def test_object_ltcv( set_of_lightcurves, procver_collection, lightcurve_checker
         { 'return_object_info': 1, 'include_object_positions': 1 },
         { 'return_object_info': 1, 'include_base_procver': 1 },
         { 'return_object_info': 1, 'include_base_procver': 1, 'include_object_positions': 1 },
-        { 'use_weighted_source_positions': 1 },
-        { 'always_use_weighted_source_positions': 1 },
-        { 'mjd_now': 60041. }
+        { 'use_weighted_source_positions': 1, 'include_base_procver': 1 },
+        { 'use_weighted_source_positions': 1, 'include_object_positions': 1 },
+        { 'use_weighted_source_positions': 1, 'include_object_positions': 1, 'return_object_info': 1 },
+        { 'use_weighted_source_positions': 1, 'include_source_positions': 1,
+          'return_object_info': 1, 'include_object_positions': 1 },
+        { 'always_use_weighted_source_positions': 1, 'include_source_positions': 1,
+          'return_object_info': 1, 'include_object_positions': 1 },
+        { 'mjd_now': 60061., 'always_use_weighted_source_positions': 1, 'include_base_procver': 1,
+          'include_source_positions': 1, 'include_object_positions': 1, 'return_object_info': 1 },
     ]
 
     t0 = time.perf_counter()
@@ -298,10 +301,7 @@ def test_many_object_ltcvs( procver_collection, set_of_lightcurves, lightcurve_c
 
     extras = [
         {},
-        { 'always_use_weighted_source_positions': 1, 'include_base_procver': 1,
-          'include_source_positions': 1, 'include_object_positions': 1, 'return_object_info': 1 },
-        { 'mjd_now': 60061., 'always_use_weighted_source_positions': 1, 'include_base_procver': 1,
-          'include_source_positions': 1, 'include_object_positions': 1, 'return_object_info': 1 },
+        { 'mjd_now': 60041. },
         { 'bands': 'r' },
         { 'bands': ['r'] },
         { 'include_source_positions': 1 },
@@ -309,59 +309,73 @@ def test_many_object_ltcvs( procver_collection, set_of_lightcurves, lightcurve_c
         { 'return_object_info': 1, 'include_object_positions': 1 },
         { 'return_object_info': 1, 'include_base_procver': 1 },
         { 'return_object_info': 1, 'include_base_procver': 1, 'include_object_positions': 1 },
-        { 'use_weighted_source_positions': 1 },
-        { 'always_use_weighted_source_positions': 1 },
-        { 'mjd_now': 60041. }
+        { 'use_weighted_source_positions': 1, 'include_base_procver': 1 },
+        { 'use_weighted_source_positions': 1, 'include_object_positions': 1 },
+        { 'use_weighted_source_positions': 1, 'include_object_positions': 1, 'return_object_info': 1 },
+        { 'use_weighted_source_positions': 1, 'include_source_positions': 1,
+          'return_object_info': 1, 'include_object_positions': 1 },
+        { 'always_use_weighted_source_positions': 1, 'include_source_positions': 1,
+          'return_object_info': 1, 'include_object_positions': 1 },
+        { 'mjd_now': 60061., 'always_use_weighted_source_positions': 1, 'include_base_procver': 1,
+          'include_source_positions': 1, 'include_object_positions': 1, 'return_object_info': 1 },
     ]
 
     t0 = time.perf_counter()
     tjs = 0
     tpd = 0
     n = 0
-    for ltcvreq in ltcvlist:
-        for which in [ None, 'patch', 'detections', 'forced' ]:
-            for extra in extras:
-                kwargs = extra.copy()
-                kwargs['objids'] = ltcvreq[1]
-                if ltcvreq[0] is not None:
-                    kwargs['processing_version'] = ltcvreq[0]
-                if which is not None:
-                    kwargs['which'] = which
+    with db.DBCon() as dbcon:
+        dbcon.echoqueries = True
+        dbcon.alwaysexplain = True
+        dbcon.alwaysanalyze = True
+        for ltcvreq in ltcvlist:
+            for which in [ None, 'patch', 'detections', 'forced' ]:
+                for extra in extras:
+                    kwargs = extra.copy()
+                    kwargs['objids'] = ltcvreq[1]
+                    if ltcvreq[0] is not None:
+                        kwargs['processing_version'] = ltcvreq[0]
+                    if which is not None:
+                        kwargs['which'] = which
 
-                n += 1
-                tj0 = time.perf_counter()
-                jsres = ltcv.many_object_ltcvs( return_format='json', **kwargs )
-                tjs += time.perf_counter() - tj0
+                    n += 1
+                    tj0 = time.perf_counter()
+                    jsres = ltcv.many_object_ltcvs( return_format='json', dbcon=dbcon, **kwargs )
+                    dbcon.rollback()
+                    tjs += time.perf_counter() - tj0
 
-                n += 1
-                tp0 = time.perf_counter()
-                pdres = ltcv.many_object_ltcvs( return_format='pandas', **kwargs )
-                tpd += time.perf_counter() - tp0
+                    n += 1
+                    tp0 = time.perf_counter()
+                    pdres = ltcv.many_object_ltcvs( return_format='pandas', dbcon=dbcon, **kwargs )
+                    dbcon.rollback()
+                    tpd += time.perf_counter() - tp0
 
-                del kwargs['objids']
-                if which is None:
-                    kwargs['which'] = 'patch'
-                if ltcvreq[0] is not None:
-                    del kwargs['processing_version']
+                    del kwargs['objids']
+                    if which is None:
+                        kwargs['which'] = 'patch'
+                    if ltcvreq[0] is not None:
+                        del kwargs['processing_version']
 
-                # Verify the "json" (really, list/dict) return is right
-                check_ltcv( ltcvreq[4], ltcvreq[2], ltcvreq[3], jsres, **kwargs )
+                    # Verify the "json" (really, list/dict) return is right
+                    check_ltcv( ltcvreq[4], ltcvreq[2], ltcvreq[3], jsres, **kwargs )
 
-                # Make sure pandas return is consistent
-                if isinstance( pdres, tuple ):
-                    jsltcvs = jsres[0]
-                    pdltcvs = pdres[0]
-                    jsobjinfo = jsres[1]
-                    pdobjinfo = pdres[1]
-                else:
-                    jsltcvs = jsres
-                    pdltcvs = pdres
-                    jsobjinfo = None
-                    pdobjinfo = None
+                    # Make sure pandas return is consistent
+                    if isinstance( pdres, tuple ):
+                        jsltcvs = jsres[0]
+                        pdltcvs = pdres[0]
+                        jsobjinfo = jsres[1]
+                        pdobjinfo = pdres[1]
+                    else:
+                        jsltcvs = jsres
+                        pdltcvs = pdres
+                        jsobjinfo = None
+                        pdobjinfo = None
 
-                compare_pandas_to_json( pdltcvs, jsltcvs, pdobjinfo, jsobjinfo )
+                    compare_pandas_to_json( pdltcvs, jsltcvs, pdobjinfo, jsobjinfo )
 
-    FDBLogger.info( f"{n} calls in {time.perf_counter()-t0:.2f} sec; js time={tjs:.2f}, pd time={tpd:.2f}" )
+        FDBLogger.info( f"{n} calls, {time.perf_counter()-t0:.2f}s; t_js={tjs:.2f}, t_pd={tpd:.2f}, "
+                        f"t_query={dbcon.timings.tot_query_time:.2f}, t_commit={dbcon.timings.tot_commit_time:.2f}, "
+                        f"t_fetch={dbcon.timings.tot_fetch_time:.2f}" )
 
 
 # There is another test of ltcv_object_search that uses loaded SNANA data
@@ -664,68 +678,70 @@ def test_get_hot_ltcvs( set_of_lightcurves, lightcurve_checker ):
 
     check_ltcv = lightcurve_checker
 
-    ltcvinfo = [ { 'kwargs': { 'mjd_now': 60056., 'detected_since_mjd': 60035. },
-                   'passprocver': 'pvc_pv2',
-                   'testprocver': 'pv2',
-                   'exproot': [1, 2, 3],
-                   'expobj': [201, 2011, 202, 203]
-                  },
-                 { 'kwargs': { 'mjd_now': 60046., 'detected_since_mjd': 60035., },
-                   'passprocver': 'pvc_pv2',
-                   'testprocver': 'pv2',
-                   'exproot': [1, 2],
-                   'expobj': [201, 2011, 202],
-                  },
-                 { 'kwargs': { 'mjd_now': 60021., 'detected_in_last_days': 2 },
-                   'passprocver': 'pvc_pv2',
-                   'testprocver': 'pv2',
-                   'exproot': [0, 1],
-                   'expobj': [200, 201, 2011]
-                  },
-                 { 'kwargs': { 'mjd_now': 60041., 'detected_in_last_days': 2 },
-                   'passprocver': 'pvc_pv2',
-                   'testprocver': 'pv2',
-                   'exproot': [1, 2],
-                   'expobj': [201, 2011, 202]
-                  },
-                 # detected in last days defaults to 30
-                 { 'kwargs': { 'mjd_now': 60085. },
-                   'passprocver': 'pvc_pv2',
-                   'testprocver': 'pv2',
-                   'exproot': [1, 2, 3],
-                   'expobj': [201, 2011, 202, 203]
-                  },
-                 { 'kwargs': { 'mjd_now': 60095. },
-                   'passprocver': 'pvc_pv2',
-                   'testprocver': 'pv2',
-                   'exproot': [2],
-                   'expobj': [202]
-                  },
-                 # { 'kwargs': { 'mjd_now': 60061. },
-                 #   'passprocver': 'realtime',
-                 #   'testprocver': 'realtime',
-                 #   'exproot': [1, 2],
-                 #   'expobj': [1, 2]
-                 #  },
-                 # { 'kwargs': { 'mjd_now': 60061. },
-                 #   'passprocver': None,
-                 #   'testprocver': 'realtime',
-                 #   'exproot': [1, 2],
-                 #   'expobj': [1, 2]
-                 #  }
-                ]
+    ltcvinfo = [
+        { 'kwargs': { 'mjd_now': 60056., 'detected_since_mjd': 60035. },
+          'passprocver': 'pvc_pv2',
+          'testprocver': 'pv2',
+          'exproot': [1, 2, 3],
+          'expobj': [201, 2011, 202, 203]
+         },
+        { 'kwargs': { 'mjd_now': 60046., 'detected_since_mjd': 60035., },
+          'passprocver': 'pvc_pv2',
+          'testprocver': 'pv2',
+          'exproot': [1, 2],
+          'expobj': [201, 2011, 202],
+         },
+        { 'kwargs': { 'mjd_now': 60021., 'detected_in_last_days': 2 },
+          'passprocver': 'pvc_pv2',
+          'testprocver': 'pv2',
+          'exproot': [0, 1],
+          'expobj': [200, 201, 2011]
+         },
+        { 'kwargs': { 'mjd_now': 60041., 'detected_in_last_days': 2 },
+          'passprocver': 'pvc_pv2',
+          'testprocver': 'pv2',
+          'exproot': [1, 2],
+          'expobj': [201, 2011, 202]
+         },
+        # detected in last days defaults to 30
+        { 'kwargs': { 'mjd_now': 60085. },
+          'passprocver': 'pvc_pv2',
+          'testprocver': 'pv2',
+          'exproot': [1, 2, 3],
+          'expobj': [201, 2011, 202, 203]
+         },
+        { 'kwargs': { 'mjd_now': 60095. },
+          'passprocver': 'pvc_pv2',
+          'testprocver': 'pv2',
+          'exproot': [2],
+          'expobj': [202]
+         },
+        { 'kwargs': { 'mjd_now': 60061. },
+          'passprocver': 'realtime',
+          'testprocver': 'realtime',
+          'exproot': [1, 2],
+          'expobj': [1, 2]
+         },
+        { 'kwargs': { 'mjd_now': 60061. },
+          'passprocver': None,
+          'testprocver': 'realtime',
+          'exproot': [1, 2],
+          'expobj': [1, 2]
+         }
+    ]
 
-    extras = [ {},
-               { 'include_object_positions': 1 },
-               { 'include_object_positions': 0 },
-               { 'include_source_positions': 1 },
-               { 'include_object_positions': 1, 'include_source_positions': 1 },
-               { 'include_base_procver': 1 },
-               { 'include_base_procver': 1, 'include_object_positions': 1 },
-               { 'use_weighted_source_positions': 1, 'include_object_positions': 1 },
-               { 'always_use_weighted_source_positions': 1, 'include_object_positions': 1, 'include_base_procver': 1 },
-               { 'always_use_weighted_source_positions': 1, 'include_object_positions': 1 },
-              ]
+    extras = [
+        {},
+        { 'include_object_positions': 1 },
+        { 'include_object_positions': 0 },
+        { 'include_source_positions': 1 },
+        { 'include_object_positions': 1, 'include_source_positions': 1 },
+        { 'include_base_procver': 1 },
+        { 'include_base_procver': 1, 'include_object_positions': 1 },
+        { 'use_weighted_source_positions': 1, 'include_object_positions': 1, 'include_base_procver': 1 },
+        { 'always_use_weighted_source_positions': 1, 'include_object_positions': 1, 'include_base_procver': 1 },
+        { 'always_use_weighted_source_positions': 1, 'include_object_positions': 1 },
+    ]
 
     n = 0
     t0 = time.perf_counter()

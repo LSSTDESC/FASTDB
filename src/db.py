@@ -8,6 +8,7 @@
 # import sys
 import os
 import uuid
+import time
 import collections
 import types
 import logging
@@ -126,6 +127,19 @@ def DB( dbcon=None ):
             conn.close()
 
 
+class DBConTimings:
+    def __init__( self ):
+        self.reset()
+
+    def reset( self ):
+        self.last_query_time = None
+        self.last_commit_time = None
+        self.last_fetch_time = None
+        self.tot_query_time = 0.
+        self.tot_commit_time = 0.
+        self.tot_fetch_time = 0.
+
+
 class DBCon:
     """Class that encapsulates a postgres database connection.
 
@@ -178,19 +192,28 @@ class DBCon:
         if con is not None:
             if isinstance( con, DBCon ):
                 self.con = con.con
+                self.timings = con.timings
+                self.echoqueries = con.echoqueries
+                self.alwaysexplain = con.alwaysexplain
+                self.alwaysanalyze = con.alwaysanalyze
             elif isinstance( con, psycopg.Connection ):
                 self.con = con
+                self.timings = DBConTimings()
+                self.echoqueries = _echoqueries
+                self.alwaysexplain = _alwaysexplain
+                self.alwaysanalyze = _alwaysanalyze
             else:
                 raise TypeError( f"con must be None, a DBCon, or a psycopg.Connection, not a {type(con)}" )
             self._con_is_mine = False
         else:
             self.con = psycopg.connect( dbname=dbname, user=dbuser, password=dbpasswd, host=dbhost, port=dbport )
             self._con_is_mine = True
+            self.timings = DBConTimings()
+            self.echoqueries = _echoqueries
+            self.alwaysexplain = _alwaysexplain
+            self.alwaysanalyze = _alwaysanalyze
 
         self.dictcursor = dictcursor
-        self.echoqueries = _echoqueries
-        self.alwaysexplain = _alwaysexplain
-        self.alwaysanalyze = _alwaysanalyze
         self.remake_cursor()
 
 
@@ -200,6 +223,14 @@ class DBCon:
 
     def __exit__( self, type, value, traceback ):
         self.close()
+
+    def reset_time_counters( self ):
+        self.last_query_time = None
+        self.last_fetch_time = None
+        self.last_commit_time = None
+        self.tot_query_time = 0.
+        self.tot_fetch_time = 0.
+        self.tot_commit_time = 0.
 
 
     def remake_cursor( self, dictcursor=None ):
@@ -240,6 +271,14 @@ class DBCon:
             self.con.close()
 
 
+    def rollback( self ):
+        """Rollback any ongoing transaction.
+
+        Also be all cavalier about python function calling overhead.
+
+        """
+        self.con.rollback()
+
     def commit( self ):
         """Commit changes to the database.
 
@@ -248,7 +287,11 @@ class DBCon:
         stick.
 
         """
+        t0 = time.perf_counter()
         self.con.commit()
+        t1 = time.perf_counter()
+        self.timings.last_commit_time = t1 - t0
+        self.timings.tot_commit_time += t1 - t0
         self.remake_cursor( self.curcursorisdict )  # ...is this necessary?
 
 
@@ -258,6 +301,8 @@ class DBCon:
         Parameters are the same as execute().  Returns nothing.
 
         """
+
+        t0 = time.perf_counter()
 
         alreadydid = False
         if not isinstance( q, ( sql.SQL, sql.Composed ) ):
@@ -294,6 +339,10 @@ class DBCon:
 
         if ( FDBLogger.instance().get().level <= logging.DEBUG ) and ( echo or explain ):
             FDBLogger.debug( "Query complete." )
+
+        t1 = time.perf_counter()
+        self.timings.last_query_time = t1 - t0
+        self.timings.tot_query_time += t1 - t0
 
     def execute( self, q, subdict={}, silent=False, echo=None, explain=None ):
         """Runs a query, and returns either (rows, columns) or just rows.
@@ -340,12 +389,21 @@ class DBCon:
             if self.cursor.description is None:
                 return None
             else:
-                return self.cursor.fetchall()
+                t0 = time.perf_counter()
+                rval = self.cursor.fetchall()
+                t1 = time.perf_counter()
+                self.timings.last_fetch_time = t1 - t0
+                self.timings.tot_fetch_time += t1 - t0
+                return rval
         else:
             if self.cursor.description is None:
                 return None, None
+            t0 = time.perf_counter()
             rows = self.cursor.fetchall()
             cols = [ desc[0] for desc in self.cursor.description ]
+            t1 = time.perf_counter()
+            self.timings.last_fetch_time = t1 - t0
+            self.timings.tot_fetch_time += t1 - t0
             return rows, cols
 
 
