@@ -6,71 +6,91 @@ metadata:
   namespace: {{ include "fastdb.namespace" . }}
   labels:
     app: postgres-standby
+
 spec:
   replicas: {{ .Values.postgresStandby.replicas | default 1 }}
+
   selector:
     matchLabels:
       app: postgres-standby
+
   strategy:
     type: Recreate
+
   template:
     metadata:
       labels:
         app: postgres-standby
+
     spec:
       {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
 
-      # Init container: wait for primary to be healthy and have a base backup
+      {{- if .Values.postgresStandby.waitForPrimary.enabled }}
       initContainers:
-        - name: volume-mount-hack
-          image: busybox
-          command: ["sh", "-c", "chown 100:108 /pgdata"]
-          securityContext:
-            runAsUser: 0
-          volumeMounts:
-            - name: standby-data
-              mountPath: /pgdata
         - name: wait-for-primary
           image: busybox
-          command: ['sh', '-c',
-            'echo "Waiting for primary postgres...";
-             until nc -z postgres {{ .Values.postgres.service.port | default 5432 }}; do
-               echo "Primary not ready, sleeping 5s...";
-               sleep 5;
-             done;
-             echo "Primary is up, waiting extra 30s for base backup to complete...";
-             sleep 30;
-             echo "Proceeding with standby startup."']
+          securityContext:
+            runAsUser: 0
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for primary postgres..."
+              until nc -z postgres {{ .Values.postgres.service.port | default 5432 }}; do
+                echo "Primary not ready, sleeping 5s..."
+                sleep 5
+              done
+              echo "Primary is up, waiting extra 30s..."
+              sleep 30
+              echo "Proceeding with standby startup."
+      {{- end }}
 
       containers:
         - name: postgres-standby
           image: {{ include "fastdb.image" (dict "image" .Values.postgresStandby.image "global" .Values.global) }}
           imagePullPolicy: {{ .Values.global.imagePullPolicy }}
 
-          # run_standby.sh is the CMD in the Dockerfile standby target
-          # No command override needed — the image default is correct
+          securityContext:
+            runAsUser: {{ .Values.postgres.securityContext.runAsUser }}
+            runAsNonRoot: {{ .Values.postgres.securityContext.runAsNonRoot }}
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            privileged: false
+            readOnlyRootFilesystem: false
 
           env:
-            # pgBackRest S3 credentials (same repos the primary writes to)
+            - name: FASTDB_STANDBY_WAIT_FOR_PRIMARY
+              value: {{ .Values.postgresStandby.waitForPrimary.enabled | default false | quote }}
+            - name: FASTDB_STANDBY_REMOTE_RESTORE
+              value: {{ .Values.postgresStandby.remoteRestore.enabled | default false | quote }}
+
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+            
             - name: PGBACKREST_REPO1_S3_KEY
               valueFrom:
                 secretKeyRef:
                   name: pgbackrest-s3-creds
                   key: repo1-access-key
+
             - name: PGBACKREST_REPO1_S3_KEY_SECRET
               valueFrom:
                 secretKeyRef:
                   name: pgbackrest-s3-creds
                   key: repo1-secret-key
+
             {{- if .Values.postgres.pgbackrest.repo2.enabled }}
             - name: PGBACKREST_REPO2_S3_KEY
               valueFrom:
                 secretKeyRef:
                   name: pgbackrest-s3-creds
                   key: repo2-access-key
+
             - name: PGBACKREST_REPO2_S3_KEY_SECRET
               valueFrom:
                 secretKeyRef:
@@ -91,7 +111,7 @@ spec:
               mountPath: /etc/pgbackrest/pgbackrest.conf
               subPath: pgbackrest.conf
               readOnly: true
-            - name: certs
+            - name: nersc-minio-ca
               mountPath: /certs
               readOnly: true
             - name: dshm
@@ -102,64 +122,61 @@ spec:
             {{- toYaml . | nindent 12 }}
           {{- end }}
 
-          readinessProbe:
-            exec:
-              command: ['sh', '-c', 'pg_isready -U postgres']
-            initialDelaySeconds: 30
-            periodSeconds: 10
-          livenessProbe:
-            exec:
-              command: ['sh', '-c', 'pg_isready -U postgres']
-            initialDelaySeconds: 60
-            periodSeconds: 30
-
       volumes:
         - name: standby-data
           persistentVolumeClaim:
             claimName: standby-data
+
         - name: secrets
           secret:
             secretName: secrets
+
         - name: pgbackrest-conf
           configMap:
             name: pgbackrest-conf
-        - name: certs
+
+        - name: nersc-minio-ca
           secret:
-            secretName: minio-certs
+            secretName: nersc-minio-ca
+
         - name: dshm
           emptyDir:
             medium: Memory
             sizeLimit: {{ .Values.postgresStandby.sharedMemory | default "1Gi" }}
 
 ---
-# Standby data PVC
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: standby-data
   namespace: {{ include "fastdb.namespace" . }}
+
 spec:
   accessModes:
     - {{ .Values.postgresStandby.persistence.accessMode | default "ReadWriteOnce" }}
+
   {{- if .Values.volumes.storageClass }}
   storageClassName: {{ .Values.volumes.storageClass }}
   {{- end }}
+
   resources:
     requests:
       storage: {{ .Values.postgresStandby.persistence.size | default "10Gi" }}
 
 ---
-# Standby service (read-only queries)
 apiVersion: v1
 kind: Service
 metadata:
   name: postgres-standby
   namespace: {{ include "fastdb.namespace" . }}
+
 spec:
   selector:
     app: postgres-standby
+
   ports:
     - port: 5432
       targetPort: 5432
+
   type: ClusterIP
 {{- end }}

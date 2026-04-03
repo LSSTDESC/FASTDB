@@ -22,13 +22,24 @@ spec:
       containers:
         - name: minio
           image: minio/minio
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            privileged: false
+            readOnlyRootFilesystem: false
           command: ["minio", "server"]
-          args: ["/data", "--console-address", ":9001", "--certs-dir", "/certs"]
+          args: ["/data", "--console-address", ":9001"]
           env:
             - name: MINIO_ROOT_USER
               value: {{ .Values.minio.credentials.accessKey | quote }}
             - name: MINIO_ROOT_PASSWORD
               value: {{ .Values.minio.credentials.secretKey | quote }}
+            - name: MINIO_SERVER_URL
+              value: "https://minio-site1.rearmstr-dev.development.svc.spin.nersc.org"
+            - name: MINIO_BROWSER_REDIRECT_URL
+              value: "https://minio-site1-console.rearmstr-dev.development.svc.spin.nersc.org"
           ports:
             - containerPort: 9000
               name: s3
@@ -37,9 +48,6 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /data
-            - name: certs
-              mountPath: /certs
-              readOnly: true
           readinessProbe:
             tcpSocket:
               port: 9000
@@ -49,16 +57,6 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: minio-site1-data
-        - name: certs
-          secret:
-            secretName: minio-certs
-            items:
-              - key: public.crt
-                path: public.crt
-              - key: private.key
-                path: private.key
-              - key: ca.crt
-                path: CAs/ca.crt
 
 ---
 apiVersion: v1
@@ -123,8 +121,15 @@ spec:
       containers:
         - name: minio
           image: minio/minio
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            privileged: false
+            readOnlyRootFilesystem: false
           command: ["minio", "server"]
-          args: ["/data", "--console-address", ":9001", "--certs-dir", "/certs"]
+          args: ["/data", "--console-address", ":9001"]
           env:
             - name: MINIO_ROOT_USER
               value: {{ .Values.minio.credentials.accessKey | quote }}
@@ -138,9 +143,6 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /data
-            - name: certs
-              mountPath: /certs
-              readOnly: true
           readinessProbe:
             tcpSocket:
               port: 9000
@@ -150,16 +152,6 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: minio-site2-data
-        - name: certs
-          secret:
-            secretName: minio-certs
-            items:
-              - key: public.crt
-                path: public.crt
-              - key: private.key
-                path: private.key
-              - key: ca.crt
-                path: CAs/ca.crt
 
 ---
 apiVersion: v1
@@ -218,27 +210,32 @@ spec:
       containers:
         - name: create-buckets
           image: minio/mc
+          securityContext:
+            capabilities:
+              drop:
+              - ALL
+            privileged: false
+            readOnlyRootFilesystem: false
+          env:
+          - name: HOME
+            value: /tmp
+          - name: MC_CONFIG_DIR
+            value: /tmp/.mc
           command: ["/bin/sh", "-c"]
           args:
             - |
               echo "Waiting for MinIO instances to be ready..."
               for i in $(seq 1 30); do
-                mc alias set site1 https://minio-site1:{{ .Values.minio.site1.port }} \
+                mc alias set site1 http://minio-site1:{{ .Values.minio.site1.port }} \
                   {{ .Values.minio.credentials.accessKey }} \
                   {{ .Values.minio.credentials.secretKey }} --insecure 2>/dev/null && break
                 echo "MinIO site1 not ready, retry $i/30..."
                 sleep 5
               done
 
-              for i in $(seq 1 30); do
-                mc alias set site2 https://minio-site2:{{ .Values.minio.site2.port }} \
-                  {{ .Values.minio.credentials.accessKey }} \
-                  {{ .Values.minio.credentials.secretKey }} --insecure 2>/dev/null && break
-                echo "MinIO site2 not ready, retry $i/30..."
-                sleep 5
-              done
+
 
               mc mb --ignore-existing site1/{{ .Values.postgres.pgbackrest.repo1.bucket }} --insecure &&
-              mc mb --ignore-existing site2/{{ .Values.postgres.pgbackrest.repo2.bucket }} --insecure &&
+              
               echo "Buckets created successfully"
 {{- end }}

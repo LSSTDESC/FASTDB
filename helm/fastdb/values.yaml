@@ -134,6 +134,13 @@ postgresStandby:
     tag: ""
   replicas: 1
 
+  waitForPrimary:
+    enabled: true
+    extraDelaySeconds: 30
+
+  remoteRestore:
+    enabled: false
+
   persistence:
     size: 10Gi
     accessMode: ReadWriteOnce

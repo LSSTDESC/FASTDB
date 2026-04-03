@@ -84,6 +84,9 @@ spec:
         volumeMounts:
         - name: postgres-data
           mountPath: /var/lib/postgresql/data
+        - name: pgbackrest-ca
+          mountPath: /etc/pgbackrest-ca
+          readOnly: true
         - name: secrets
           mountPath: /secrets
           readOnly: true
@@ -98,16 +101,6 @@ spec:
           mountPath: /certs
           readOnly: true
         {{- end }}
-        readinessProbe:
-          tcpSocket:
-            port: 5432
-          initialDelaySeconds: 5
-          periodSeconds: 5
-        livenessProbe:
-          tcpSocket:
-            port: 5432
-          initialDelaySeconds: 30
-          periodSeconds: 10
       volumes:
       - name: postgres-data
         persistentVolumeClaim:
@@ -115,6 +108,9 @@ spec:
       - name: secrets
         secret:
           secretName: secrets
+      - name: pgbackrest-ca
+        secret:
+          secretName: pgbackrest-ca
       - name: dshm
         emptyDir:
           medium: Memory

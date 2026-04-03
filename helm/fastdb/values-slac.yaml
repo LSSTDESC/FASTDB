@@ -39,7 +39,7 @@ secrets:
 
 # PostgreSQL with WAL archiving and LoadBalancer
 postgres:
-  enabled: true
+  enabled: false
   persistence:
     size: 10Gi
 
@@ -59,14 +59,20 @@ postgres:
   pgbackrest:
     enabled: true
     repo1:
-      endpoint: minio-site1
+      endpoint: https://minio-site1.rearmstr-dev.development.svc.spin.nersc.org
+      storagePort: 443
     repo2:
-      enabled: true
+      enabled: false
       endpoint: minio-site2
 
 # Standby not enabled by default for SLAC
 postgresStandby:
   enabled: true
+  waitForPrimary:
+    enabled: false
+    
+  remoteRestore:
+    enabled: true
 
 # MongoDB disabled for SLAC (postgres-only setup)
 mongodb:
@@ -93,7 +99,7 @@ createdb:
   enabled: false
 
 minio:
-  enabled: true  
+  enabled: false  
   credentials:
     accessKey: minioadmin
     secretKey: minioadmin
