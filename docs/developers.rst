@@ -4,6 +4,8 @@
 Information for Developers
 ==========================
 
+**WARNING** This documentation is not up to date.
+
 .. contents::
 
 This documentation is for people who want to install a test version of FASTDB on their local machine, edit the FASTDB code, or try to install FASTDB somewhere else.  (It is currently woefully incomplete for the last purpose.)
