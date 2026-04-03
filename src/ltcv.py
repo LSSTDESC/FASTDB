@@ -1416,9 +1416,11 @@ def object_search( processing_version='default', ignore_object_processing_versio
                 CREATE TEMPORARY VIEW tmp_diaobject_with_position AS
                 SELECT DISTINCT ON (o.rootid) o.rootid, r.ra AS rootra, r.dec AS rootdec, p.ra, p.dec,
                                               p.description AS pos_base_procver, """ ) )
+        q += sql.SQL( "                              obpv.description AS obj_base_procver" )
+        if objprocver is not None:
+            q += sql.SQL( ",\n                              pv.priority" )
         q += sql.SQL( textwrap.dedent(
-            """\
-            obpv.description AS obj_base_procver
+            """
             FROM diaobject o
             INNER JOIN root_diaobject r ON o.rootid=r.id
             INNER JOIN base_processing_version obpv ON o.base_procver_id=obpv.id
@@ -1441,6 +1443,9 @@ def object_search( processing_version='default', ignore_object_processing_versio
                   ORDER BY p1.diaobjectid, p1pv.priority DESC
                 ) p ON p.diaobjectid=o.diaobjectid
                 """ ) ).format( pospv=str(posprocver) )
+        q += sql.SQL( "ORDER BY o.rootid" )
+        if objprocver is not None:
+            q += sql.SQL( ", pv.priority DESC" )
         con.execute_nofetch( q )
         t1 = time.perf_counter()
         timings[ 'make_initial_view' ] = t1 - t0
