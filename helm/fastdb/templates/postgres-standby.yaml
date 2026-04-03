@@ -107,13 +107,14 @@ spec:
             - name: secrets
               mountPath: /secrets
               readOnly: true
+            - name: pgbackrest-ca
+              mountPath: /etc/pgbackrest-ca
+              readOnly: true         
             - name: pgbackrest-conf
               mountPath: /etc/pgbackrest/pgbackrest.conf
               subPath: pgbackrest.conf
               readOnly: true
-            - name: nersc-minio-ca
-              mountPath: /certs
-              readOnly: true
+
             - name: dshm
               mountPath: /dev/shm
 
@@ -135,9 +136,9 @@ spec:
           configMap:
             name: pgbackrest-conf
 
-        - name: nersc-minio-ca
+        - name: pgbackrest-ca
           secret:
-            secretName: nersc-minio-ca
+            secretName: pgbackrest-ca
 
         - name: dshm
           emptyDir:

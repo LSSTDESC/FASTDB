@@ -61,6 +61,7 @@ postgres:
     repo1:
       endpoint: https://minio-site1.rearmstr-dev.development.svc.spin.nersc.org
       storagePort: 443
+      caFile: /etc/pgbackrest-ca/ca.crt
     repo2:
       enabled: false
       endpoint: minio-site2

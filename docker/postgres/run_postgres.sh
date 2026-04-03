@@ -35,8 +35,9 @@ if [ ! -f $POSTGRES_DATA_DIR/PG_VERSION ]; then
             sleep 5
         done
 
-        pgbackrest --stanza=fastdb backup
-        pgbackrest --stanza=fastdb backup repo=2
+        pgbackrest --stanza=fastdb --repo=1 --type=full backup
+        #When ready to deploy 2
+        #pgbackrest --stanza=fastdb --repo=2 --type=full backup
         echo "Initial base backup complete"
 
         /usr/lib/postgresql/15/bin/pg_ctl -D $POSTGRES_DATA_DIR stop
