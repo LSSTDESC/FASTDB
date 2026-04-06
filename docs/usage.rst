@@ -143,7 +143,7 @@ Hit this API endpoint with ``/baseprocver/<procver>/<table>``, where ``<procver>
 .. _webap-count:
 
 ``/count``
-*********
+***********
 
 Use this API endpoint to count how many objects, sources, or forced sources there are associated with a given processing version.  There are two calling methods:
 
@@ -162,6 +162,33 @@ Note that ``count`` is not the total number of rows in the table, only the numbe
 
 Because of the table joins necessary to handle processing versions, this can actually be a slow query.  An instance of FASTDB with ELAsTiCC2 loaded into it (4 million objects, 60 million sources, 900 million forced sources) took a minute or two to count the source table, and over 10 minutes to count the forced source table.  As of this writing the production FASTDB had 59 thousand diaobjects, 3 million diasources, and 8 million diaforcedsources; it took 14 seconds to return the count of diaforcedsources.
 
+.. _webap-getdiaobjectinfo:
+
+``/getdiaobjectinfo``
+*********************
+
+Call this with one of:
+
+  * ``/getdiaobjectinfo/objid``
+  * ``/getdiaobjectinfo/procver/objid``
+
+Where procver is the prcoessing version; it can either be the database's UUID, or the human-readable processing version, or an alias for the processing version.  If not given, it assumes "default".  ``objid`` is either the rootid, or the diaobjectid, of the object you want information for.
+
+You can include in the ``json=`` dictionary a single parameter, ``columns``, which is a list of the columns you want back.  (The query *may* be slightly faster if you don't ask for any position information, but realistically it should be pretty fast in either case.)
+
+You get back a dictionary.  Each key of the dictionary is a string, the name of the column, and each the value of each element of the dictionary is a list, the values for that column; each list will have the same length.  There may be more than one value in each list because FASTDB will return information on each diaobject that shares the same rootid in the processing version you've queried.  Returned columns include:
+
+  * ``diaobjectid`` : the object ID that came from LSST
+  * ``rootid`` : the FASTDB-deduplicated rootid that transcends processing version; this is the best one for referring to diaobjects
+  * ``obj_base_procver`` : the name of the *base* processing version for this diaobjectid (see :ref:`processing-versions`).
+  * ``pos_base_procver`` : the name of the *base* processing version for the position information in this row.  There *can* be multiple position base processing versions for a single diaobjectid and single processing version (although as of this writing, that's not the case in the current production FASTDB instance).
+  * ``ra`` : decimal degrees, the position of the object.  This might not actually be the best position estimate for the object; it's *probably* something like the position of the first diasource that was detected for the object.  You can get better positions by getting a lightcurve for the object, and then either doing a weighted average of diaobject positions yourself, or taking the one one that FASTDB can give you.
+  * ``dec`` : decimal degrees, the position of the object.
+  * ``raerr`` : uncertainty on ra, as reported by LSST
+  * ``decerr`` : undertainty on dec, as reported by LSST
+  * ``ra_dec_cov`` : covariance between ra and dec, as reported by LSST
+  
+    
 .. _webap-objectsearch:
 
 ``/objectsearch``
@@ -408,6 +435,33 @@ Additional options that you can included in the ``json=`` dictionary are:
 * ``source_patch`` : TBD, defaults to True.  Just leave it at that, probably.
 
 You will get back the same thing as the return from :ref:`ltcv-getmanyltcvs`, including both ``ltcvs`` and ``objinfo``.  It will only include the lightcurves for objects that had a detection in the time window you specified.
+
+``/ltcv/getbrokerinfo``
+***********************
+
+This one will return information we have from brokers for specified diasources.  Just call it with:
+
+  * ``/ltcv/getbrokerinfo``
+  * ``/ltcv/getbrokerinfo/<procver>``
+
+In the second case, specify the processing version.  If you just use ``/ltcv/getbrokerinfo``, it uses processing version ``realtime``, which is almost certainly what you want, so just use ``/ltcv/getbrokerinfo``.
+
+You must pass a dictionary with ``json=`` with a single key, ``diasourceids``, that lists the numeric diasource ids you want broker information for::
+
+  result = fdb.post( "/ltcv/getbrokerinfo", json={'diasourceids': [1, 2, 3]} )
+
+You can find the ``diasourceid`` values from, e.g., a previous call to ``gethottransients``.
+
+You will get back a dictionary.  They keys of the dictionary are the ``diasourceid`` values (though as strings, not integers, because of limitations of JSON); the values are a list of dictionaries.  If we have broker information for more than one broker/topic for this diasource, the list for one diasourceid will have more than on entry.  Each entry of the list is a dictionary with keys:
+
+   * ``brokername`` : string
+   * ``topic`` : string
+   * ``info`` : dict
+
+``brokername`` will be something like ``Fink``, ``Pitt-Google``, etc.  ``topic`` will be the topic from the broker that this information came from.  ``info`` will be *whatever we got from this broker and topic*.  It will be different for each broker and topic.  Different brokers, and different topics within each broker, give us different information.
+
+Note that you will not necessarily get back broker information on every ``diasourceid`` you pass!  The reason is, some diasources we only learn about from the "previous diasources" array in a later alert.  There will only be broker information for a given broker/topic if that diasource passed the filters for that particular broker and topic.
+
 
 
 Spectrum Endpoints
