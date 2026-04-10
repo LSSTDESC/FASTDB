@@ -1,17 +1,17 @@
-import pytest
 import datetime
-import time
+import itertools
 import numbers
 import random
 import textwrap
-import psycopg.errors
-import itertools
-from psycopg import sql
+import time
 
 import db
-from util import env_as_bool, FDBLogger, datetime_to_utc
-from services.source_importer import SourceImporter
+import psycopg.errors
+import pytest
+from psycopg import sql
 from services.brokerconsumer import FinkConsumer
+from services.source_importer import SourceImporter
+from util import FDBLogger, datetime_to_utc, env_as_bool
 
 # Ordering of these tests matters, because they use module scope
 # fixtures from tests/fixtures/alertcycle.py (the "alerts*" fixtures).
