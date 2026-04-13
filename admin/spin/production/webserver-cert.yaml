@@ -4,6 +4,6 @@ data:
   tls.key: PUT THE RIGHT THING HERE
 kind: Secret
 metadata:
-  name: fastdb-cert
-  namespace: fastdb-rknop-dev
+  name: webserver-cert
+  namespace: desc-fastdb
 type: kubernetes.io/tls
