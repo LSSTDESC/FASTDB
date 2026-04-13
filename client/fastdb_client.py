@@ -143,7 +143,10 @@ class FASTDBClient:
             self.username = username if username is not None else config[server]['username']
             self.password = password if password is not None else config[server]['password']
             if 'verify' in config[server]:
-                self.verify = bool( config[server]['verify'] )
+                if ( config[server]['verify'] in [ 0, '0', 'false', 'False', 'FALSE', 'no', 'No', 'NO'] ):
+                    self.verify = False
+                else:
+                    self.verify = True
             if 'retries' in config[server]:
                 self.retries = int( config[server]['retries'] )
             if 'retrysleep' in config[server]:

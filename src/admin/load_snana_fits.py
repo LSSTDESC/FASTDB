@@ -137,7 +137,10 @@ class FITSFileHandler( SNANAColumnMapper ):
 
             if self.really_do:
                 with DB() as conn:
-                    RootDiaObject.bulk_insert_or_upsert( { 'id': list( diaobject['rootid'] ) },
+                    RootDiaObject.bulk_insert_or_upsert( { 'id': list( diaobject['rootid'] ),
+                                                           'ra': list( diaobject_position['ra'] ),
+                                                           'dec': list( diaobject_position['dec'] )
+                                                          },
                                                          assume_no_conflict=True, dbcon=conn )
 
                     nobjs = DiaObject.bulk_insert_or_upsert( dict(diaobject), assume_no_conflict=True, dbcon=conn )

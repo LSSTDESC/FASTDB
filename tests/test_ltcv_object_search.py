@@ -120,7 +120,8 @@ def test_object_search( procver_collection, test_user, snana_fits_maintables_loa
                                           'firstdetmjd', 'firstdetband', 'firstdetflux', 'firstdetfluxerr',
                                           'lastdetmjd', 'lastdetband', 'lastdetflux', 'lastdetfluxerr',
                                           'maxdetmjd', 'maxdetband', 'maxdetflux', 'maxdetfluxerr',
-                                          'lastforcedmjd', 'lastforcedband', 'lastforcedflux', 'lastforcedfluxerr' }
+                                          'lastforcedmjd', 'lastforcedband', 'lastforcedflux', 'lastforcedfluxerr',
+                                          'obj_base_procver', 'pos_base_procver' }
     with db.DBCon( dictcursor=True ) as con:
         rows = con.execute( "SELECT diaobjectid FROM diaobject WHERE rootid=ANY(%(roots)s)",
                             { "roots": jsonresults['rootid'] } )

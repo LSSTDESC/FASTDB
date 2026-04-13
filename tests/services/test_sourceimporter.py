@@ -29,7 +29,7 @@ from services.brokerconsumer import FinkConsumer
 
 @pytest.mark.skipif( not env_as_bool('RUN_FINK_TESTS'), reason='RUN_FINK_TESTS is not set' )
 def test_fink( procver_collection ):
-    bpv, _pv = procver_collection
+    bpv, _pv, _pvinfo = procver_collection
     barf = "".join( random.choices( 'abcdefghijklmnopqrstuvwxyz', k=6 ) )
     brokertopic = 'fink_sn_near_galaxy_candidate_lsst'
 
@@ -109,7 +109,7 @@ def test_fink( procver_collection ):
 
 @pytest.fixture( scope='module' )
 def sourceimporter_args( procver_collection ):
-    bpv, _pv = procver_collection
+    bpv, _pv, _pvinfo = procver_collection
     return { 'object_base_processing_version': bpv['realtime_diaobject'].id,
              'object_position_base_processing_version': bpv['realtime_diaobject_position_60000'].id,
              'source_base_processing_version': bpv['realtime_diasource'].id,

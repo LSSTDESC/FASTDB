@@ -22,7 +22,7 @@ from db import ( BaseProcessingVersion,
                  DB,
                  DBCon,
                  AuthUser )
-from util import asUUID, FDBLogger
+from util import asUUID
 import admin.load_snana_fits_ppdb
 from admin.load_snana_fits import FITSLoader
 from fastdb.fastdb_client import FASTDBClient
@@ -1008,24 +1008,24 @@ def lightcurve_checker( set_of_lightcurves, procver_collection ):
         if return_object_info:
             if isinstance( res, tuple ):
                 if single:
+                    assert isinstance( res[0], dict )
                     ltcvs = [ res[0] ]
                 else:
+                    assert isinstance( res[0], list )
                     ltcvs = res[0]
                 infos = res[1]
-            elif isinstance( res, dict ):
+            else:
+                assert isinstance( res, dict )
                 if single:
                     assert set( res.keys() ) == { 'ltcv', 'objinfo' }
                     assert isinstance( res['ltcv'], dict )
-                    assert isinstance( res['objinfo'], dict )
                     ltcvs = [ res['ltcv'] ]
                 else:
                     assert set( res.keys() ) == { 'ltcvs', 'objinfo' }
                     assert isinstance( res['ltcvs'], list )
-                    assert isinstance( res['objinfo'], dict )
                     ltcvs = res['ltcvs']
-                infos = res['objinfo']
-            else:
-                assert False, "don't receognize res"
+                assert isinstance( res['objinfo'], dict )
+                infos = res[ 'objinfo' ]
         else:
             if single:
                 assert isinstance( res, dict )
@@ -1034,6 +1034,13 @@ def lightcurve_checker( set_of_lightcurves, procver_collection ):
                 assert isinstance( res, list )
                 ltcvs = res
             infos = None
+
+        if ( len(ltcvs) > 0 ) and isinstance( ltcvs[0]['rootid'], uuid.UUID ):
+            rootid_is_uuid = True
+            assert all( isinstance( lc['rootid'], uuid.UUID ) for lc in ltcvs )
+        else:
+            rootid_is_uuid = False
+            assert all( isinstance( lc['rootid'], str ) for lc in ltcvs )
 
         expected_keys = [ 'rootid', 'mjd', 'diasourceid', 'source_diaobjectid',
                           'visit', 'band', 'flux', 'fluxerr', 'isdet' ]
@@ -1048,18 +1055,19 @@ def lightcurve_checker( set_of_lightcurves, procver_collection ):
         if include_source_positions:
             expected_keys.extend( [ 'det_ra', 'det_dec', 'det_raerr', 'det_decerr', 'det_ra_dec_cov' ] )
 
-        assert isinstance( ltcvs, list )
-        assert all( set( lc.keys() ) == set( expected_keys ) for lc in ltcvs )
-
-        expected_keys.remove( 'rootid' )
-
-        if expect_all_roots:
-            assert len( ltcvs ) == len( expected_roots )
-            assert set( str(lc['rootid']) for lc in ltcvs ) == set( str(r) for r in expected_root_ids )
-        else:
-            assert len( set( lc['rootid'] for lc in ltcvs ) ) == len( lc['rootid'] for lc in ltcvs )
-            assert set( str(lc['rootid']) for lc in ltcvs ).issubset( set( str(r) for r in expected_root_ids ) )
-
+        if not single:
+            if expect_all_roots:
+                assert len( ltcvs ) == len( expected_roots )
+                if rootid_is_uuid:
+                    assert set( lc['rootid'] for lc in ltcvs ) == set( expected_root_ids )
+                else:
+                    assert set( lc['rootid'] for lc in ltcvs ) == set( str(r) for r in expected_root_ids )
+            else:
+                assert len( set( lc['rootid'] for lc in ltcvs ) ) == len( ltcvs )
+                if rootid_is_uuid:
+                    assert set( lc['rootid'] for lc in ltcvs ).issubset( expected_root_ids )
+                else:
+                    assert set( lc['rootid'] for lc in ltcvs ).issubset( set( str(r) for r in expected_root_ids ) )
 
         datacache = {}
         for rootid in expected_root_ids:
@@ -1071,13 +1079,20 @@ def lightcurve_checker( set_of_lightcurves, procver_collection ):
             if rdex is None:
                 raise ValueError( "Failed to find root object {rootid}" )
 
-            if isinstance( rootid, uuid.UUID ):
-                dex = [ asUUID(lc['rootid']) for lc in ltcvs ].index( rootid )
-            else:
-                dex = [ str(lc['rootid']) for lc in ltcvs ].index( rootid )
-            thisltcv = ltcvs[dex]
+            if single:
+                thisltcv = ltcvs[0]
+                assert thisltcv['rootid'] == ( rootid if rootid_is_uuid else str(rootid) )
+            elif len(ltcvs) == 0:
+                # Logically, if we get here, expect_all_roots must be false
+                continue
 
-            assert all( len(thisltcv[k]) == len(thisltcv['mjd']) for k in expected_keys )
+            dexen = [ i for i, lc in enumerate( ltcvs )
+                      if lc['rootid'] == ( rootid if rootid_is_uuid else str(rootid) ) ]
+            assert len(dexen) == 1
+            thisltcv = ltcvs[ dexen[0] ]
+
+            assert all( len(thisltcv[k]) == len(thisltcv['mjd']) for k in expected_keys
+                        if k != 'rootid' )
 
             # OK, here's the deal.  For each rootid, there are multiple base processing versions that have
             #   data.  We need to extract the highest priority for each.  To do this, rewrangle the
@@ -1085,7 +1100,7 @@ def lightcurve_checker( set_of_lightcurves, procver_collection ):
 
             if mjd_now is not None:
                 if bands is not None:
-                    conds = lambda s: s.midpointmjdtai <= mjd_now and s.band in bands
+                    conds = lambda s: ( s.midpointmjdtai <= mjd_now ) and ( s.band in bands )
                 else:
                     conds = lambda s: s.midpointmjdtai <= mjd_now
             elif bands is not None:
@@ -1102,39 +1117,34 @@ def lightcurve_checker( set_of_lightcurves, procver_collection ):
 
             # Visit is the thing that lets us decide if a diasource and a diaforcedsource are the same thing.
             # Get the set of visits defined for this object.
-            allvisits = set( itertools.chain( *[ list(x.keys()) for x in reindexed_srces.values() ] ) )
-            allvisits = allvisits.union( set( itertools.chain( *[ list(x.keys())
-                                                                  for x in reindexed_frced.values() ] ) ) )
+            allvisits = set( itertools.chain.from_iterable( list(x.keys()) for x in reindexed_srces.values() ) )
+            allvisits = allvisits.union( set( itertools.chain
+                                              .from_iterable( list(x.keys())
+                                                              for x in reindexed_frced.values() ) ) )
 
             data = []
             for visit in allvisits:
-                thisdata = {}
+                thisdata = { 'src': None, 'src_bpv': None, 'frc': None, 'frc_bpv': None }
 
+                srcgotit = False
                 for bpvtuple in pvrow['diasource']:
                     bpv, _prio, bpvkey = bpvtuple
-                    srcgotit = False
                     if bpvkey in reindexed_srces:
                         if visit in reindexed_srces[bpvkey]:
                             thisdata['src'] = reindexed_srces[bpvkey][visit]
                             thisdata['src_bpv'] = bpv
                             srcgotit = True
                             break
-                    if not srcgotit:
-                        thisdata['src'] = None
-                        thisdata['src_bpv'] = None
 
+                frcgotit = True
                 for bpvtuple in pvrow['diaforcedsource']:
                     bpv, _prio, bpvkey = bpvtuple
-                    frcgotit = False
                     if bpvkey in reindexed_frced:
                         if visit in reindexed_frced[bpvkey]:
                             thisdata['frc'] = reindexed_frced[bpvkey][visit]
                             thisdata['frc_bpv'] = bpv
                             frcgotit = True
                             break
-                    if not frcgotit:
-                        thisdata['frc'] = None
-                        thisdata['frc_bpv'] = None
 
                 if srcgotit or frcgotit:
                     data.append( thisdata )
@@ -1144,15 +1154,15 @@ def lightcurve_checker( set_of_lightcurves, procver_collection ):
                                        if x['src'] is not None
                                        else x['frc'].midpointmjdtai ) )
 
+            # Save this as it may be used again below
+            datacache[rootid] = data.copy()
+
             if which == 'detections':
                 # If which is detections, throw out only forced sources
                 data = [ d for d in data if d['src'] is not None ]
             elif which == 'forced':
                 # If which is forced, through out detections for which we don't have forced
                 data = [ d for d in data if d['frc'] is not None ]
-
-            # Save this as it may be used again below
-            datacache[rootid] = data
 
             # OK, now we have wrangled things to the point where they can be compared
 
@@ -1205,17 +1215,18 @@ def lightcurve_checker( set_of_lightcurves, procver_collection ):
                                 for v, d in zip( thisltcv['base_procver_f'], data ) )
 
             if include_source_positions:
-                assert all( v == ( pytest.approx( d['src'].ra, rel=1e-12 ) if d['src'] is not None else None )
-                            for v, d in zip( thisltcv['det_ra'], data ) )
-                assert all( v == ( pytest.approx( d['src'].dec, rel=1e-12 ) if d['src'] is not None else None )
-                            for v, d in zip( thisltcv['det_dec'], data ) )
-                assert all( v == ( pytest.approx( d['src'].raerr, rel=1e-6 ) if d['src'] is not None else None )
-                            for v, d in zip( thisltcv['det_raerr'], data ) )
-                assert all( v == ( pytest.approx( d['src'].decerr, rel=1e-6 ) if d['src'] is not None else None )
-                            for v, d in zip( thisltcv['det_decerr'], data ) )
-                assert all( v== ( pytest.approx( d['src'].ra_dec_cov, abs=0.0001/3600. )
-                                  if d['src'] is not None else None )
-                            for v, d in zip( thisltcv['det_ra_dec_cov'], data ) )
+                for i, d in enumerate( data ):
+                    if d['src'] is None:
+                        assert all( thisltcv[c][i] is None for c in [ 'det_ra', 'det_dec', 'det_raerr',
+                                                                      'det_decerr', 'det_ra_dec_cov' ] )
+                    else:
+                        assert thisltcv['det_ra'][i] == pytest.approx( d['src'].ra, rel=1e-12 )
+                        assert thisltcv['det_dec'][i] == pytest.approx( d['src'].dec, rel=1e-12 )
+                        assert thisltcv['det_raerr'][i] == pytest.approx( d['src'].raerr, rel=1e-6 )
+                        assert thisltcv['det_decerr'][i] == pytest.approx( d['src'].decerr, rel=1e-6 )
+                        # Because the fixutre randomly generaetd ra and dec independently, we expect
+                        #  ra_dec_cov to be close to 0, so it's unreasonable to expect full float64 precision
+                        assert thisltcv['det_ra_dec_cov'][i] == pytest.approx( d['src'].ra_dec_cov, abs=0.0001/3600. )
 
         if infos is not None:
 
@@ -1238,13 +1249,11 @@ def lightcurve_checker( set_of_lightcurves, procver_collection ):
 
             for r in expected_roots:
 
-                # These next two are a bit gratuitous (since they aren't
-                #   used again), but useful for pdb debugging.
-                if ( len(ltcvs) > 0 ) and ( isinstance( ltcvs[0]['rootid'], uuid.UUID ) ):
-                    dex = [ lc['rootid'] for lc in ltcvs ].index( roots[r]['root'].id )
-                else:
-                    dex = [ lc['rootid'] for lc in ltcvs ].index( str(roots[r]['root'].id) )
-                thisltcv = ltcvs[dex]
+                # These next two lines are gratitous, but can be useful for debugging
+                dexen = [ i for i, lc in enumerate( ltcvs )
+                          if lc['rootid'] == ( roots[r]['root'].id if rootid_is_uuid
+                                               else str(roots[r]['root'].id) ) ]
+                thisltcv = ltcvs[dexen[0]]
 
                 for diaobjectid in expected_diaobjectids:
                     if diaobjectid not in roots[r]['obj'].keys():
@@ -1319,30 +1328,30 @@ def lightcurve_checker( set_of_lightcurves, procver_collection ):
                             w = np.where( sn > 3 )[0]
 
                             # ****
-                            ltcvras = np.array( [ thisltcv['det_ra'][i] for i in range(len(thisltcv['isdet']))
-                                                  if thisltcv['isdet'][i] ] )
-                            ltcvdecs = np.array( [ thisltcv['det_dec'][i] for i in range(len(thisltcv['isdet']))
-                                                   if thisltcv['isdet'][i] ] )
-                            ltcvfluxes = np.array( [ thisltcv['flux'][i] for i in range(len(thisltcv['isdet']))
-                                                     if thisltcv['isdet'][i] ] )
-                            ltcvfluxerrs = np.array( [ thisltcv['fluxerr'][i] for i in range(len(thisltcv['isdet']))
-                                                       if thisltcv['isdet'][i] ] )
-                            justfluxes = np.array( [ s['src'].psfflux for s in justsrcs ] )
-                            justfluxerrs = np.array( [ s['src'].psffluxerr for s in justsrcs ] )
+                            # ltcvras = np.array( [ thisltcv['det_ra'][i] for i in range(len(thisltcv['isdet']))
+                            #                       if thisltcv['isdet'][i] ] )
+                            # ltcvdecs = np.array( [ thisltcv['det_dec'][i] for i in range(len(thisltcv['isdet']))
+                            #                        if thisltcv['isdet'][i] ] )
+                            # ltcvfluxes = np.array( [ thisltcv['flux'][i] for i in range(len(thisltcv['isdet']))
+                            #                          if thisltcv['isdet'][i] ] )
+                            # ltcvfluxerrs = np.array( [ thisltcv['fluxerr'][i] for i in range(len(thisltcv['isdet']))
+                            #                            if thisltcv['isdet'][i] ] )
+                            # justfluxes = np.array( [ s['src'].psfflux for s in justsrcs ] )
+                            # justfluxerrs = np.array( [ s['src'].psffluxerr for s in justsrcs ] )
 
-                            FDBLogger.info( f"procver={procver}, which={which}, rootid={roots[r]['root'].id}, "
-                                            f"diaobjectid={diaobjectid}\n"
-                                            f"  ( thisltcv.det_ra - srcra ) / srcra = "
-                                            f"{( ltcvras - srcra ) / srcra}\n"
-                                            f"  ( thisltcv.det_dec - srcdec ) / srcdec = "
-                                            f"{( ltcvdecs - srcdec ) / srcdec}\n"
-                                            f"  ( thisltcv.flux - justfluxes ) / justfluxes = "
-                                            f"{( ltcvfluxes - justfluxes ) / justfluxes}\n"
-                                            f"  ( thisltcv.fluxerr - justfluxerrs ) / justfluxerrs = "
-                                            f"{( ltcvfluxerrs - justfluxerrs ) / justfluxerrs}\n"
-                                            f"( sn[w] - ltcvfluxes[w]/ltcvfluxerrs[w] ) = "
-                                            f"{sn[w] - ltcvfluxes[w]/ltcvfluxerrs[w]}\n"
-                                            f"sn[w] = {sn[w]}\n" )
+                            # FDBLogger.info( f"procver={procver}, which={which}, rootid={roots[r]['root'].id}, "
+                            #                 f"diaobjectid={diaobjectid}\n"
+                            #                 f"  ( thisltcv.det_ra - srcra ) / srcra = "
+                            #                 f"{( ltcvras - srcra ) / srcra}\n"
+                            #                 f"  ( thisltcv.det_dec - srcdec ) / srcdec = "
+                            #                 f"{( ltcvdecs - srcdec ) / srcdec}\n"
+                            #                 f"  ( thisltcv.flux - justfluxes ) / justfluxes = "
+                            #                 f"{( ltcvfluxes - justfluxes ) / justfluxes}\n"
+                            #                 f"  ( thisltcv.fluxerr - justfluxerrs ) / justfluxerrs = "
+                            #                 f"{( ltcvfluxerrs - justfluxerrs ) / justfluxerrs}\n"
+                            #                 f"( sn[w] - ltcvfluxes[w]/ltcvfluxerrs[w] ) = "
+                            #                 f"{sn[w] - ltcvfluxes[w]/ltcvfluxerrs[w]}\n"
+                            #                 f"sn[w] = {sn[w]}\n" )
                             # ****
 
                             srcra = srcra[w]
@@ -1369,26 +1378,12 @@ def lightcurve_checker( set_of_lightcurves, procver_collection ):
                                 #
                                 # ....*if* there were enough sources to calculate a position from!
                                 if len(srcra) > 0:
-                                    # THIS NEEDS TO BE FIXED
-                                    # The fact that it's happening only in realtime / forced really
-                                    #   suggests to me that it's not a string float roundoff thing
-                                    #   and that there's some weird bug in my code somewhere.
-                                    # (And, honestly, it might be in the test fixture....)
-                                    # if ( procver == 'realtime' ) and ( which == 'forced' ):
-                                    if ( procver == 'realtime') and ( which == 'forced' ):
-                                        assert infos['ra'][dex] == pytest.approx( meanra, rel=3e-9 )
-                                        assert infos['dec'][dex] == pytest.approx( meandec, rel=3e-9 )
-                                        assert infos['raerr'][dex] == pytest.approx( raerr, rel=3e-3 )
-                                        assert infos['decerr'][dex] == pytest.approx( decerr, rel=3e-3 )
-                                        # Fixture didn't put any correlations in
-                                        assert infos['ra_dec_cov'][dex] == pytest.approx( ra_dec_cov, abs=0.0001/3600. )
-                                    else:
-                                        assert infos['ra'][dex] == pytest.approx( meanra, rel=1e-12 )
-                                        assert infos['dec'][dex] == pytest.approx( meandec, rel=1e-12 )
-                                        assert infos['raerr'][dex] == pytest.approx( raerr, rel=1e-6 )
-                                        assert infos['decerr'][dex] == pytest.approx( decerr, rel=1e-6 )
-                                        # Fixture didn't put any correlations in
-                                        assert infos['ra_dec_cov'][dex] == pytest.approx( ra_dec_cov, abs=0.0001/3600. )
+                                    assert infos['ra'][dex] == pytest.approx( meanra, rel=1e-12 )
+                                    assert infos['dec'][dex] == pytest.approx( meandec, rel=1e-12 )
+                                    assert infos['raerr'][dex] == pytest.approx( raerr, rel=1e-6 )
+                                    assert infos['decerr'][dex] == pytest.approx( decerr, rel=1e-6 )
+                                    # Fixture didn't put any correlations in
+                                    assert infos['ra_dec_cov'][dex] == pytest.approx( ra_dec_cov, abs=0.0001/3600. )
                                 else:
                                     assert all( infos[i][dex] is None
                                                 for i in ( 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ) )
