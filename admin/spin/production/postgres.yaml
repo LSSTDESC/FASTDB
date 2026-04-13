@@ -43,7 +43,7 @@ spec:
       - env:
         - name: POSTGRES_DATA_DIR
           value: /var/lib/postgresql/data
-        image: registry.nersc.gov/m1727/raknop/fastdb-postgres:20260319
+        image: registry.nersc.gov/m1727/raknop/fastdb-postgres:20260331a
         imagePullPolicy: IfNotPresent
         name: postgres
         resources: {}

@@ -33,7 +33,7 @@ spec:
       affinity: {}
       containers:
       - name: webserver
-        image: registry.nersc.gov/m1727/raknop/fastdb-webserver:20260224
+        image: registry.nersc.gov/m1727/raknop/fastdb-webap:20260331
         env:
         - name: MONGODB_HOST
           value: mongodb
@@ -190,17 +190,17 @@ spec:
             port:
               number: 8080
         pathType: ImplementationSpecific
-  # - host: fastdb.lbl.gov
-  #   http:
-  #     paths:
-  #     - backend:
-  #         service:
-  #           name: webserver-ingress
-  #           port:
-  #             number: 8080
-  #       pathType: ImplementationSpecific
-  # tls:
-  # - hosts:
-  #   - desc-fastdb.lbl.gov
-  #   secretName: fastdb-cert
+  - host: desc-fastdb.lbl.gov
+    http:
+      paths:
+      - backend:
+          service:
+            name: webserver-ingress
+            port:
+              number: 8080
+        pathType: ImplementationSpecific
+  tls:
+  - hosts:
+    - desc-fastdb.lbl.gov
+    secretName: webserver-cert
 ---
