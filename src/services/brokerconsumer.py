@@ -474,10 +474,12 @@ class BrokerConsumer:
 
     @classmethod
     def _wrangle_object( cls, msg, metamsg ):
-        obj = { 'diaobjectid': msg['diaObject']['diaObjectId'],
+        obj = { 'diaobjectid': msg['diaSource']['diaObjectId'],
                 'savetime': metamsg['savetime'],
                 'diaobjectposition': None }
-        if all( ( i in msg['diaObject'] ) and ( i is not None ) for i in ['ra', 'dec'] ):
+        if ( ( msg['diaObject'] is not None ) and
+             all( ( i in msg['diaObject'] ) and ( i is not None ) for i in ['ra', 'dec'] )
+            ):
             obj['diaobjectposition'] = {
                 'ra': msg['diaObject']['ra'],
                 'dec': msg['diaObject']['dec'],
@@ -531,7 +533,7 @@ class BrokerConsumer:
         try:
             np.int64( obj['diaobjectid'] )
         except Exception as ex:
-            self.countlogger.error( f"Got an alert with diaObject.diaObjectId={obj['diaobjectid']} "
+            self.countlogger.error( f"Got an alert with diaSource.diaObjectId={obj['diaobjectid']} "
                                     f"(type {type(obj['diaobjectid'])}), which isn't "
                                     f"a 64-bit integer.  Skipping this alert!  Exception: {ex}" )
             return None
@@ -621,7 +623,7 @@ class BrokerConsumer:
                 { 'brokername': metamsg['brokername'],
                   'topic': metamsg['topic'],
                   'diasourceid': msg['diaSourceId'],
-                  'diaobjectid': msg['diaObject']['diaObjectId'],
+                  'diaobjectid': msg['diaSource']['diaObjectId'],
                   'prv_diasourceid': ( None if msg['prvDiaSources'] is None
                                        else [ m['diaSourceId'] for m in msg['prvDiaSources'] ] ),
                   'prv_diaforcedsourceid': ( None if msg['prvDiaForcedSources'] is None
@@ -751,6 +753,7 @@ class BrokerConsumer:
                     inserted['alertcache'] = len( results.inserted_ids )
                 else:
                     inserted['alertcache'] = 0
+
         # ****
         import pprint
         strio = io.StringIO()
@@ -885,7 +888,10 @@ class BrokerConsumer:
 
         except Exception as ex:
             self.logger.error( f"Unhandled exception in BrokerConsumer.poll: {ex}" )
-            self.countlogger.error( f"Unhandled exception in BrokerConsumer.poll: {ex}" )
+            strio = io.StringIO("")
+            strio.write( f"Unhandled exception in BrokerConsumer.poll: {ex}\n" )
+            traceback.print_exc( file=strio )
+            self.countlogger.error( strio.getvalue() )
             self.close_connection()
             if self.pipe is not None:
                 self.pipe.send( { "message": "unhandled exception", "nconsumed": -1,
@@ -1147,15 +1153,11 @@ class PittGoogleConsumer(BrokerConsumer):
         nadded = self.mongodb_store( messagebatch=messagebatch, **wrangled )
         t2 = time.perf_counter()
         self.tot_n_messages_consumed += len(messagebatch)
-        self.countlogger.info( f"...added {nadded} messages to mongodb collections {self.mongodb_collection_base}*\n"
+        self.countlogger.info( f"...added {len(messagebatch)} messages to mongodb collections "
+                               f"{self.mongodb_collection_base}*\n"
+                               f"    ...{nadded}\n"
                                f"    ...wrangle time: {t1-t0:.3f}\n"
                                f"    ...store time: {t2-t1:.3f}\n" )
-        # ****
-        self.logger.info( f"...added {nadded} messages to mongodb collections {self.mongodb_collection_base}*\n"
-                          f"    ...wrangle time: {t1-t0:.3f}\n"
-                          f"    ...store time: {t2-t1:.3f}\n" )
-        self.logger.info( f"Total handled: {self.tot_n_messages_consumed}" )
-        # ****
 
 
     def poll(self, reset=None, restart_time=None, max_restarts=None, max_msgs=None, **kwargs ):
@@ -1233,7 +1235,10 @@ class PittGoogleConsumer(BrokerConsumer):
 
         except Exception as ex:
             self.logger.error( f"Unhandled exception in PittGoogleConsumer.poll: {ex}" )
-            self.countlogger.error( f"Unhandled exception in PittGoogleConsumer.poll: {ex}" )
+            strio = io.StringIO("")
+            strio.write( f"Unhandled exception in PittGoogleConsumer.poll: {ex}\n" )
+            traceback.print_exc( file=strio )
+            self.countlogger.error( strio.getvalue() )
             if self.pipe is not None:
                 self.pipe.send( { "message": "unhandled exception", "nconsumed": -1,
                                   "exception": str(ex),
