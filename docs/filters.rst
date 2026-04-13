@@ -10,7 +10,7 @@ Some of the requirements for filters include:
 
 * **reproducible:** they should return the same objects if they were to be run multiple times on the same set of objects
 * **broker-level:** filters should be applied at the broker level (i.e. within its pipeline), and create their own stream of alerts
-* **provide certain alert parameters:** each of the alerts being output from a filter should have all of the data from the `DiaSource <https://sdm-schemas.lsst.io/apdb.html#DiaSource>`_ table. Ideally, the alerts should have all of the original data from the Rubin alert, in addition to any new data that was added by the broker or the filter itself. At a minimum, the following parameters are required in order to get some sense of the alert:
+* **provide certain alert data:** each of the alerts being output from a filter should have all of the data from the `DiaSource <https://sdm-schemas.lsst.io/apdb.html#DiaSource>`_ table. Ideally, the alerts should have all of the original data from the Rubin alert, in addition to any new data that was added by the broker or the filter itself. At a minimum, the following parameters are required in order to get some sense of the alert:
 
     * diaSourceId (unique identifier for the source) 
     * diaObjectId (id of the object this source was associated with, if any)
@@ -20,9 +20,6 @@ Some of the requirements for filters include:
     * visit (id of the visit where the source was measured)
     * ra (Right ascension of the center of this source)
     * dec (Delination coordinate of the center of the source)
-
-     
-
 
 
 
@@ -70,11 +67,14 @@ Links:
 Fink
 ----
 
+The Fink broker streams alert data that has been enriched, for example with data from other catalogues and machine learning classification scores. 
+
 Links:
 ^^^^^^
 * `Creating a new Fink filter <https://doc.lsst.fink-broker.org/developers/filter_tutorial/>`_
 
 Steps to create a new LSST filter for Fink:
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 1. Fork and clone https://github.com/astrolabsoftware/fink-filters.git
 2. Make a new folder in ``/fink_filters/rubin/livestream`` called ``filter_[name]``, where you replace ``[name]`` with the name of your filter. Make sure that your filter name doesn't already exist by taking a look at the other filters that already exist. 
