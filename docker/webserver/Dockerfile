@@ -4,8 +4,8 @@
 # You probably want to build for both targets webserver and shell
 #
 # Rob, use:
-#   DOCKER_BUILDKIT=1 docker build --target webserver -t registry.nersc.gov/m1727/raknop/fastdb-webap:rknop-dev .
-#   DOCKER_BUILDKIT=1 docker build --target shell -t registry.nersc.gov/m1727/raknop/fastdb-shell:rknop-dev .
+#   docker build --target webserver -t registry.nersc.gov/m1727/raknop/fastdb-webap:...
+#   docker build --target shell -t registry.nersc.gov/m1727/raknop/fastdb-shell:...
 
 FROM debian:trixie-20260223 AS base
 LABEL maintainer="Rob Knop <rknop@pobox.com>"
