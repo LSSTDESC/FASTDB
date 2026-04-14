@@ -27,7 +27,9 @@ Creating new filters
 ====================
 
 
-This section details how to create new filters at the broker level for FASTDB to subscribe to, for all of the LSST brokers where that is available. 
+This section details how to create new filters at the broker level for FASTDB to subscribe to, for all of the LSST brokers where that is available. Once you have created your filter, let Rob know the broker and the topic name to get FASTDB subscribed to it.
+
+**NOTE:** Much of the broker code is still in progress, so make sure to check the linked tutorials for possible changes if you run into any difficulties.
 
 
 ALeRCE
@@ -52,6 +54,20 @@ Links:
 ANTARES
 -------
 
+The ANTARES broker is 
+
+Links: 
+^^^^^^
+* `Filter creation tutorial notebook <https://nsf-noirlab.gitlab.io/csdc/antares/devkit/notebooks/AntaresFilterDevKit/>`_
+
+Steps to create a new LSST filter for ANTARES:
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+1. Create a `GitLab <https://about.gitlab.com>`_ account if you don't already have one. You can use your Github account to create your GitLab account.
+2. Fork and clone https://gitlab.com/nsf-noirlab/csdc/antares/devkit
+3. Pip install the package in editable mode: ``pip install -e .``
+4. Create a new folder for your filter in ``/antares_devkit/filters/``, and create an ``__init__.py`` file where all your code will go. 
+5. Create your filter class. It should be a class based on the ``BaseFilter`` class, and should at a minimum have a ``_run(self,locus)`` method, which is where the filter logic should go. It should run ``locus.tag('[tag_name]')`` on the loci that have been chosen by your filter code. Start with this `filter template <https://nsf-noirlab.gitlab.io/csdc/antares/devkit/learn/structure-of-a-filter/>`_ and work from there. See `The Locus Object <https://nsf-noirlab.gitlab.io/csdc/antares/antares/devkit/locus.html>`_ for a description of what the 'locus' is and a reference for some of its methods and properties. 
 
 
 Babamul
