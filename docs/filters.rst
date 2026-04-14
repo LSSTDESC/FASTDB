@@ -10,7 +10,7 @@ Some of the requirements for filters include:
 
 * **reproducible:** they should return the same objects if they were to be run multiple times on the same set of objects
 * **broker-level:** filters should be applied at the broker level (i.e. within its pipeline), and create their own stream of alerts
-* **provide certain alert data:** each of the alerts being output from a filter should have all of the data from the `DiaSource <https://sdm-schemas.lsst.io/apdb.html#DiaSource>`_ table. Ideally, the alerts should have all of the original data from the Rubin alert, in addition to any new data that was added by the broker or the filter itself. At a minimum, the following parameters are required in order to get some sense of the alert:
+* **provide certain alert data:** each of the alerts being output from a filter should have all of the data from the `DiaSource <https://sdm-schemas.lsst.io/apdb.html#DiaSource>`_ schema. Ideally, the alerts should have all of the original data from the Rubin alert, in addition to any new data that was added by the broker or the filter itself. At a minimum, the following parameters are required in order to get some sense of the alert:
 
     * diaSourceId (unique identifier for the source) 
     * diaObjectId (id of the object this source was associated with, if any)
