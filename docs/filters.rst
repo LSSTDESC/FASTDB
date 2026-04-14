@@ -54,11 +54,12 @@ Links:
 ANTARES
 -------
 
-The ANTARES broker is 
+The ANTARES broker processes alerts from ZTF and Rubin and runs a pipeline on them. This includes associating the alert with the nearest point of known past measurements, called a Locus. This is the object they use instead of the Alert object within the filters and send out via stream. They also filter out poor quality and bogus alerts, associate graviational wave events, and look up associated objects. Finally, they apply the existing filters to the Locus object. The output of the streams seems to be the Locus object, which has all `Locus properties <https://antares.noirlab.edu/properties>`_, as well as the alert and all past alerts associated with this object. 
 
 Links: 
 ^^^^^^
 * `Filter creation tutorial notebook <https://nsf-noirlab.gitlab.io/csdc/antares/devkit/notebooks/AntaresFilterDevKit/>`_
+* `Existing filters <https://gitlab.com/nsf-noirlab/csdc/antares/devkit/-/tree/main/antares_devkit/filters?ref_type=heads>`_
 
 Steps to create a new LSST filter for ANTARES:
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -67,8 +68,46 @@ Steps to create a new LSST filter for ANTARES:
 2. Fork and clone https://gitlab.com/nsf-noirlab/csdc/antares/devkit
 3. Pip install the package in editable mode: ``pip install -e .``
 4. Create a new folder for your filter in ``/antares_devkit/filters/``, and create an ``__init__.py`` file where all your code will go. 
-5. Create your filter class. It should be a class based on the ``BaseFilter`` class, and should at a minimum have a ``_run(self,locus)`` method, which is where the filter logic should go. It should run ``locus.tag('[tag_name]')`` on the loci that have been chosen by your filter code. Start with this `filter template <https://nsf-noirlab.gitlab.io/csdc/antares/devkit/learn/structure-of-a-filter/>`_ and work from there. See `The Locus Object <https://nsf-noirlab.gitlab.io/csdc/antares/antares/devkit/locus.html>`_ for a description of what the 'locus' is and a reference for some of its methods and properties. 
+5. Create your filter class. It should be a class based on the ``BaseFilter`` class, and should at a minimum have a ``_run(self,locus)`` method, which is where the filter logic should go. It should run ``locus.tag('[tag_name]')`` on the loci that have been chosen by your filter code. The tag will be the name of the stream topic that your filter creates. Start with this `filter template <https://nsf-noirlab.gitlab.io/csdc/antares/devkit/learn/structure-of-a-filter/>`_ and work from there. See `The Locus Object <https://nsf-noirlab.gitlab.io/csdc/antares/antares/devkit/locus.html>`_ for a description of what the 'locus' is and a reference for some of its methods and properties. Take a look at `this filter <https://gitlab.com/nsf-noirlab/csdc/antares/devkit/-/merge_requests/39>`_ for an example implementation.
+6. Install the ANTARES client in order to get sample data for your tests by running: ``pip install antares-client``
+7. Test out your filter. You can use the sample code below using the ``antares-client`` ``search.get_random_loci(n)`` function. You can also make use of the `other existing search functions <https://nsf-noirlab.gitlab.io/csdc/antares/client/api.html#module-antares_client.search>`_ to get your test data, for example ``search.cone_search()`` which searches for loci in a certain region. For more detail, take a look at the ANTARES tutorial notebook section on `testing your filter <https://nsf-noirlab.gitlab.io/csdc/antares/devkit/notebooks/AntaresFilterDevKit/#3-test-a-filter>`_.
 
+.. code:: python
+
+    from antares_client import search
+    from antares_devkit.models import DevKitLocus
+    from antares_devkit.utils import filter_report
+
+
+    # Execute your_filter_class filter on 10 random loci
+    for client_locus in search.get_random_loci(10):
+        devkit_locus = DevKitLocus.model_validate(client_locus.to_devkit())
+        report = filter_report([your_filter_class], devkit_locus)
+
+        # `filter_report()` returns a report of what the filter did. Take a look at it:
+        print(report)
+
+8. Once you have successfully run your test, create a pull request of your forked repository. Use the following template to write out your pull request:
+
+.. code: git
+
+    ### Summary
+   Provide a brief summary of the changes introduced in this Merge Request.
+
+   ### Changes Added
+   - List the ky changes included in this MR.
+   - Explain why these changes are necessary.
+
+   ### New Filter Information (if applicable)
+   - **What does the filter do?** Describe its purpose and functionality
+   - **Any dependencies or configuration required?** List any additional setup needed.
+
+   ### Testing
+   - Describe how the changes were tested
+   - Provide any code you used to test the filter 
+   - Provide any test cases or steps to verify functionality (optional)
+
+   ### Additional Notes
 
 Babamul
 -------
@@ -88,6 +127,7 @@ The Fink broker streams alert data that has been enriched, for example with data
 Links:
 ^^^^^^
 * `Creating a new Fink filter <https://doc.lsst.fink-broker.org/developers/filter_tutorial/>`_
+* `Existing filters <https://github.com/astrolabsoftware/fink-filters/tree/master/fink_filters/rubin/livestream>`_
 
 Steps to create a new LSST filter for Fink:
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
