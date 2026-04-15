@@ -260,18 +260,3 @@ Links:
 * `Pitt-Google broker documentation <https://pitt-broker.readthedocs.io/en/latest/broker/broker-overview.html>`_
 * `Pitt-Google client documentation <https://mwvgroup.github.io/pittgoogle-client/index.html#pittgoogle-client>`_
 
-
-SNAPS
------
-
-**Current status as of April 2026:** no clear way to make a filter on the broker stream, and no known documentation.
-
-
-POI broker
-----------
-
-**Current status as of April 2026:** no clear way to make a filter on the broker stream. 
-
-Useful Links:
-^^^^^^^^^^^^^
-* `POI <https://poibroker.uantof.cl/>`_
