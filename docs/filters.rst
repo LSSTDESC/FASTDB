@@ -98,7 +98,7 @@ This section details how to create new filters at the broker level for FASTDB to
 ALeRCE
 ------
 
-**Current status as of April 2026:** no obvious way to create new filters at the broker level, beyond submitting your own 'step' in the pipeline. 
+**Current status as of April 2026:** no immediate way to create new filters at the broker level. We think filtering would be handled through the 'step' mechanism, but this is unclear. 
 
 Useful Links:
 ^^^^^^^^^^^^^
@@ -109,7 +109,7 @@ Useful Links:
 AMPEL
 -----
 
-**Current status as of April 2026:** have to contact the broker maintainers in order to implement filters.
+**Current status as of April 2026:** have to contact the broker maintainers in order to implement filters. At the moment it looks like filters are implemented in 'Tier 0', but FASTDB might want to have an option to have filters implemented in an additional post-existing-pipeline stage (unless you can implemenet a filter in Tier 0 and also get all the preprocessing info)
 
 Useful Links:
 ^^^^^^^^^^^^^
@@ -181,7 +181,7 @@ Steps to create a new LSST filter for ANTARES:
 Babamul
 -------
 
-**Current status as of April 2026:** no obvious way to create filters on Babamul
+**Current status as of April 2026:** no immediate way to create filters on Babamul
 
 Useful Links:
 ^^^^^^^^^^^^^
