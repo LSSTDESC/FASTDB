@@ -4,7 +4,7 @@
 Filters Overview
 ================
  
-This page is about filters as they are used in the context of the LSST alert stream. Essentially, a filter takes a stream of alerts from a broker, and returns a subset of those alerts based on some criteria. This is useful for narrowing down the vast stream of alerts that the Rubin Observatory outputs to something that can be more easily digested and used for specific science cases. For example, a filter could output only objects that look like supernovae, or on objects in a certain area on the sky. 
+This page discusses filters as they are used in the context of the LSST alert stream. Essentially, a filter takes a stream of alerts from a broker, and returns a subset of those alerts based on some scientific criteria. This is useful for narrowing down the vast stream of millions of alerts a day that the Rubin Observatory outputs to something that can be more easily digested and used for specific science cases. For example, a filter could output only objects that look like supernovae, or on objects in a certain area on the sky. 
 
 Some of the requirements for filters include: 
 
@@ -253,10 +253,12 @@ Pitt-Google
 -----------
 
 **Current status as of April 2026:** how to set up filters currently in progress
+Pitt-Google operates a differently than the other brokers, running on Google Cloud instead of Kafka. 
 
 Links:
 ^^^^^^
 * `Pitt-Google client and filter tutorials <https://github.com/mwvgroup/pittgoogle-user-demos?tab=readme-ov-file>`_
+* `Pitt-Google Pub/Sub tutorial <https://github.com/mwvgroup/pittgoogle-user-demos/blob/main/pubsub/README.md#javascript-udfs>`_
 * `Pitt-Google broker documentation <https://pitt-broker.readthedocs.io/en/latest/broker/broker-overview.html>`_
 * `Pitt-Google client documentation <https://mwvgroup.github.io/pittgoogle-client/index.html#pittgoogle-client>`_
 
