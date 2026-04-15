@@ -241,7 +241,7 @@ This will load in the test dataset in ``datatest/rubin_test_data_10_0.parquet`` 
 Lasair
 ------
 
-**Current status as of April 2026:** can make filters using their builder, and then convert to an active filter. Need a Lasair account. 
+**Current status as of April 2026:** can make filters using their online builder, and then convert to an active filter. You need a Lasair account for this. 
 
 Useful Links:
 ^^^^^^^^^^^^^
