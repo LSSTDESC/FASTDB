@@ -109,7 +109,7 @@ Useful Links:
 AMPEL
 -----
 
-**Current status as of April 2026:** have to contact the broker maintainers in order to implement filters. At the moment it looks like filters are implemented in 'Tier 0', but FASTDB might want to have an option to have filters implemented in an additional post-existing-pipeline stage (unless you can implemenet a filter in Tier 0 and also get all the preprocessing info)
+**Current status as of April 2026:** have to contact the broker maintainers in order to implement filters. At the moment it looks like filters are implemented in 'Tier 0', but FASTDB might want to have an option to have filters implemented in an additional post-existing-pipeline stage (unless you can implement a filter in Tier 0 and also get all the preprocessing info)
 
 Useful Links:
 ^^^^^^^^^^^^^
@@ -130,7 +130,7 @@ Useful Links:
 Steps to create a new LSST filter for ANTARES:
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-1. Create a `GitLab <https://about.gitlab.com>`_ account if you don't already have one. You can use your Github account to create your GitLab account.
+1. Create a `GitLab <https://about.gitlab.com>`_ account if you don't already have one. You can use your GitHub account to create your GitLab account.
 2. Fork and clone https://gitlab.com/nsf-noirlab/csdc/antares/devkit
 3. Pip install the package in editable mode: ``pip install -e .``
 4. Create a new folder for your filter in ``/antares_devkit/filters/``, and create an ``__init__.py`` file where all your code will go. 
@@ -253,12 +253,15 @@ Pitt-Google
 -----------
 
 **Current status as of April 2026:** how to set up filters currently in progress
-Pitt-Google operates a differently than the other brokers, running on Google Cloud instead of Kafka. 
+Pitt-Google operates a differently than the other brokers, running on Google Cloud's Pub/Sub service instead of Kafka. This means that unlike other brokers, where Python is used to create filters that build upon a Kafka package, Pitt-Google filters use the Pub/Sub-native JavaScript. As of yet it is unclear whether these filters will need to be upstreamed to Pitt-Google who will create a new Pub/Sub topic for FASTDB to listen to; or whether there will be some other middleman "broker" which listens to the un-filtered Pitt-Google stream and re-broadcasts a set of filtered topics, and FASTDB will poll from there.
+
+At present there are only a few attributes which can easily be filtered on, which are best accessed by downloading a test alert from Pitt-Google with their Python client, and viewing the ``downloaded_alert.msg.attributes`` dictionary.
+
+The Pitt-Google and Google Pub/Sub documentation both discuss string-based attribute filters, however, given the limited options available within that method of filtering, and the expected desire for more complex filters, the JavaScript UDF method should be used. 
 
 Links:
 ^^^^^^
-* `Pitt-Google client and filter tutorials <https://github.com/mwvgroup/pittgoogle-user-demos?tab=readme-ov-file>`_
-* `Pitt-Google Pub/Sub tutorial <https://github.com/mwvgroup/pittgoogle-user-demos/blob/main/pubsub/README.md#javascript-udfs>`_
+* `Pitt-Google tutorial on pulling and filtering alerts <https://github.com/mwvgroup/pittgoogle-user-demos/blob/main/pubsub/README.md>`_
+* `Pitt-Google client documentation <https://mwvgroup.github.io/pittgoogle-client/index.html>`_
 * `Pitt-Google broker documentation <https://pitt-broker.readthedocs.io/en/latest/broker/broker-overview.html>`_
-* `Pitt-Google client documentation <https://mwvgroup.github.io/pittgoogle-client/index.html#pittgoogle-client>`_
 
