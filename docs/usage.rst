@@ -17,10 +17,10 @@ The FASTDB Client
 
 While you can access the FASTDB web API using any standard way of accessing web APIs (e.g. the python ``requests`` module), there is a FASTDB client designed to make this a little bit easier.
 
-Getting Set Up to Use the FASDTB Client
+Getting Set Up to Use the FASTDB Client
 ----------------------------------------
 
-The FASDTB client is entirely contained in the file ``client/fastdb_client.py`` in the github checkout.  You can just refer to this directly in your checkout by adding something to your `PYTHONPATH`, or you can copy it somewhere.  (**Warning**: if you copy it somewhere, then be aware that eventually stuff might break as your copied version falls out of date!)
+The FASTDB client is entirely contained in the file ``client/fastdb_client.py`` in the GitHub checkout.  You can just refer to this directly in your checkout by adding something to your `PYTHONPATH`, or you can copy it somewhere.  (**Warning**: if you copy it somewhere, then be aware that eventually stuff might break as your copied version falls out of date!)
 
 The `fastdb_client.py` requires some python modules that are always installed in various environments.  The specific packages required that may not be included in base python installs are:
 
@@ -53,7 +53,7 @@ Having done that, thereafter in order to use FASTDB from Perlmutter, each time y
 
       source /global/cfs/cdirs/lsst/groups/TD/setup_td.sh
 
-  * Add the ``fastdb_client`` diretory to your python path with::
+  * Add the ``fastdb_client`` directory to your python path with::
 
       export PYTHONPATH=/dvs_ro/cfs/cdirs/desc-td/SOFTWARE/fastdb_deployment/fastdb_client:$PYTHONPATH
 
@@ -98,9 +98,9 @@ Top-Level Endpoints
 .. _webap-getprocvers:
 
 ``/getprocvers``
-***************
+****************
 
-Returns a list of known procesing versions and processing version aliases.  You get back a JSON-encoded dictionary with keys:
+Returns a list of known processing versions and processing version aliases.  You get back a JSON-encoded dictionary with keys:
 
 * ``status``: string, value ``ok``
 * ``procvers`` : list of string; the processing version names.
@@ -110,7 +110,7 @@ Because ``procvers`` includes both aliases and processing version names, some of
 .. _webap-procver:
 
 ``/procver``
-***********
+************
 
 Hit this API endpoint with ``/procver/<procver>``, where ``<procver>`` is either the name or the UUID (as a string) of the processing version you want information about.  For example, on the production FASTDB, try::
 
@@ -124,12 +124,12 @@ You will get back a JSON dictionary with keys:
 * ``aliases`` : list of string, aliases of this processing version
 * ``base_procvers`` : a dictionary of lists of lists.  The dictionary keys are table names.  The dictionary values are lists; the list elements are each themselves 2-element lists, [base processing_version, priority], sorted from high to low.
 
-You can pass either a processing version or a processing version alias in ``<procver>``.  If the name you pass is actually an alias, the ``description`` in the result is the name of the processing version itself, not the alias.  You will see the alias you passed in the ``aliases`` array.  (It turns out you could also pass the UUID of the processing version, but that will usually not be the most conveient for users.)
+You can pass either a processing version or a processing version alias in ``<procver>``.  If the name you pass is actually an alias, the ``description`` in the result is the name of the processing version itself, not the alias.  You will see the alias you passed in the ``aliases`` array.  (It turns out you could also pass the UUID of the processing version, but that will usually not be the most convenient for users.)
 
 .. _webap-baseprocver:
 
 ``/baseprocver``
-***************
+****************
 
 Hit this API endpoint with ``/baseprocver/<procver>/<table>``, where ``<procver>`` is either the name or the UUID (as a string) of the base processing version you want information about; if this is a UUID, then you should omit the ``/<table>``, but if it's a string, then ``<table>`` should be one of ``diaobject``, ``diasource``, or ``diaforcedsource``.  You will get back a JSON dictionary with keys:
 
@@ -150,7 +150,7 @@ Use this API endpoint to count how many objects, sources, or forced sources ther
 * ``/count/<which>``
 * ``/count/<which>/<procver>``
 
-In both of these ``<which>`` is one of ``diaobject``, ``diasource``, or ``diaforcedsource``; it indicates the table whose rows you want to convert.  ``<procver>`` is the name or string UUID of the processing version you want to count rows for.  If you omit it, it will use ``default`` as the procesing version.  (Note: as of this writing, the ``default`` processing version is not actually defined in the production FASTDB; the only one defined is ``realtime``.)
+In both of these ``<which>`` is one of ``diaobject``, ``diasource``, or ``diaforcedsource``; it indicates the table whose rows you want to convert.  ``<procver>`` is the name or string UUID of the processing version you want to count rows for.  If you omit it, it will use ``default`` as the processing version.  (Note: as of this writing, the ``default`` processing version is not actually defined in the production FASTDB; the only one defined is ``realtime``.)
 
 You will get back a JSON dictionary with keys:
 
@@ -172,7 +172,7 @@ Call this with one of:
   * ``/getdiaobjectinfo/objid``
   * ``/getdiaobjectinfo/procver/objid``
 
-Where procver is the prcoessing version; it can either be the database's UUID, or the human-readable processing version, or an alias for the processing version.  If not given, it assumes "default".  ``objid`` is either the rootid, or the diaobjectid, of the object you want information for.
+Where procver is the processing version; it can either be the database's UUID, or the human-readable processing version, or an alias for the processing version.  If not given, it assumes "default".  ``objid`` is either the rootid, or the diaobjectid, of the object you want information for.
 
 You can include in the ``json=`` dictionary a single parameter, ``columns``, which is a list of the columns you want back.  (The query *may* be slightly faster if you don't ask for any position information, but realistically it should be pretty fast in either case.)
 
@@ -185,26 +185,26 @@ You get back a dictionary.  Each key of the dictionary is a string, the name of 
   * ``ra`` : decimal degrees, the position of the object.  This might not actually be the best position estimate for the object; it's *probably* something like the position of the first diasource that was detected for the object.  You can get better positions by getting a lightcurve for the object, and then either doing a weighted average of diaobject positions yourself, or taking the one one that FASTDB can give you.
   * ``dec`` : decimal degrees, the position of the object.
   * ``raerr`` : uncertainty on ra, as reported by LSST
-  * ``decerr`` : undertainty on dec, as reported by LSST
+  * ``decerr`` : uncertainty on dec, as reported by LSST
   * ``ra_dec_cov`` : covariance between ra and dec, as reported by LSST
   
     
 .. _webap-objectsearch:
 
 ``/objectsearch``
-****************
+*****************
 
 WARNING : this query right now can be very slow, the web proxy may time out.  Rob will work on this.
 
 MORE IMPORTANT WARNING : this endpoint is currently broken.
 
-Find objects according to criteria.  Hit this API endpoint with either just ``/objectsearch`` or with ``/objectsearch/<procver>``.  In the latter case, ``<procver>`` is either the name or the UUID (as a string) of the processing version you want to search.  In the former case, it will search the ``default`` processing verson.
+Find objects according to criteria.  Hit this API endpoint with either just ``/objectsearch`` or with ``/objectsearch/<procver>``.  In the latter case, ``<procver>`` is either the name or the UUID (as a string) of the processing version you want to search.  In the former case, it will search the ``default`` processing version.
 
 Search criteria are passed as a JSON-encoded dictionary in the body of the POST.  Keywords that may be included are:
 
 * ``object_processing_version`` : Use this with great care, because it's complicated and confusing; probably you want to omit it.  However, if you know what you're doing, it's possible you'll make the search faster by including the right thing here.
 
-* ``position_processing_Version`` : ...even more complciated and confusing than ``object_processing_version``.  Unless you know what you're doing, don't specify this option.
+* ``position_processing_Version`` : ...even more complicated and confusing than ``object_processing_version``.  Unless you know what you're doing, don't specify this option.
 
 * ``fall_back_to_root_position`` : bool, default True; documentation TBD
 
@@ -214,7 +214,7 @@ Search criteria are passed as a JSON-encoded dictionary in the body of the POST.
 
 * ``noforced`` : bool.  Normally, you will get back the last forced photometry point for each object (see below).  If ``noforced`` is True, then you will not get that back.  This can make the search faster.  Ignored if either ``min_lastmag`` or ``max_lastmag`` are True.
   
-* ``mjd_now`` : float.  Normally, the search will look through all photometry when trying to find objects that match your specified criteria.  If you pass a value here, it will only look at photometry taken at this MJD or earlier.  Use this for tests and simuilations when you want to pretend that the current date is different from the real current date.
+* ``mjd_now`` : float.  Normally, the search will look through all photometry when trying to find objects that match your specified criteria.  If you pass a value here, it will only look at photometry taken at this MJD or earlier.  Use this for tests and simulations when you want to pretend that the current date is different from the real current date.
 
 * ``ra``, ``dec`` : floats.  The RA and Dec, in decimal degrees, for the center of a cone search.  If you pass these, both are required, and ``radius`` is also required.
 
@@ -242,7 +242,7 @@ Search criteria are passed as a JSON-encoded dictionary in the body of the POST.
 
 * ``mint_maxdetection`` : float.  The brightest detection must be on or after this MJD.
 
-* ``maxt_maxdetection`` : float.  The brightest detecton must be on or before this MJD.
+* ``maxt_maxdetection`` : float.  The brightest detection must be on or before this MJD.
 
 * ``minmag_maxdetection`` : float.  The brightest detection must be no brighter than this.  This is often the one you will want to use to throw out too-bright objects.
 
@@ -252,15 +252,15 @@ Search criteria are passed as a JSON-encoded dictionary in the body of the POST.
   
 * ``mindt_firstlastdetection`` : float.  The time between the first and last *detections* must be at least this many days.
 
-* ``maxdt_firstlastdetection`` : float.  The time between the first and last *detections* m ust be at most this many days.  Be careful with this.  If you're trying to find stuff whose lightcurve only lasts a week, and a cosmic ray hit the objects' host galaxy a year later, and somehow that cosmic ray didn't get properly filtered out, then the ``dt`` between the first and last detections will be a year.
+* ``maxdt_firstlastdetection`` : float.  The time between the first and last *detections* must be at most this many days.  Be careful with this.  If you're trying to find stuff whose lightcurve only lasts a week, and a cosmic ray hit the objects' host galaxy a year later, and somehow that cosmic ray didn't get properly filtered out, then the ``dt`` between the first and last detections will be a year.
 
 * ``min_lastmag`` : The most recent photometric measurement (including both detections and forced photometry ) must be no brighter than this.
 
 * ``max_lastmag`` : The most recent photometry measurement must be no dimmer than this.
 
-* ``statbands`` : list of string.  Normally, all of the cuts based on detection dates, detection counts, magnitudes, etc., consider all bands equally.  If you only want to consider some bands, list those here.  For instance, if you're only interested in cutting on measurements of the g, r, and i bands, pass ``['g', 'r', 'i']`` here.  This parameter also affects what is inclued in the returned data; it will ignore any measurements of bands that aren't in this list.
+* ``statbands`` : list of string.  Normally, all of the cuts based on detection dates, detection counts, magnitudes, etc., consider all bands equally.  If you only want to consider some bands, list those here.  For instance, if you're only interested in cutting on measurements of the g, r, and i bands, pass ``['g', 'r', 'i']`` here.  This parameter also affects what is included in the returned data; it will ignore any measurements of bands that aren't in this list.
 
-You get back a dictionary-encoded table of data.  Each key of the dictionary is a column in the table, and each value is a list of values in that column.  The columns are as follows.  (Note first, last, max detections all implicilty include "within ``statbands``" if that parmeters was passed.)  "Detections" below are from the ``diasource`` able.  It's possible that the brightest point on the lightcurve isn't a "detection", because for whatever reason it didn't end up in the list of detections by LSST differential imaging.
+You get back a dictionary-encoded table of data.  Each key of the dictionary is a column in the table, and each value is a list of values in that column.  The columns are as follows.  (Note first, last, max detections all implicitly include "within ``statbands``" if that parameters was passed.)  "Detections" below are from the ``diasource`` able.  It's possible that the brightest point on the lightcurve isn't a "detection", because for whatever reason it didn't end up in the list of detections by LSST differential imaging.
 
 * ``diaobjectid`` : Object ID
 * ``ra`` : RA in decimal degrees
@@ -276,7 +276,7 @@ You get back a dictionary-encoded table of data.  Each key of the dictionary is 
 * ``lastdetflux`` : flux (nJy) of last detection
 * ``lastdetfluxerr`` : uncertainty on ``lastdetflux``
 * ``maxdetmjd`` : MJD of brightest detection
-* ``maxdetband`` : Band of brighest detection
+* ``maxdetband`` : Band of brightest detection
 * ``maxdetflux`` : flux (nJy) of brightest detection
 * ``maxdetfluxerr`` : uncertainty on ``maxdetflux``
 * ``lastforcedmjd`` : MJD of the latest forced-photometry measurement
@@ -313,7 +313,7 @@ In addition, there are several optional keys that control what's included:
 
 * ``which`` : a string, one of "detections", "forced", or "patch".  If "detections", you will only get back ``diasource`` information (i.e. things that passed detection cuts on a difference image).  If "forced", you get back only forced photometry.  If "patch", you get back forced photometry where it's available, with detections filled in where forced photometry is not available (see below).  The default is ``patch``, which is often not what you want (but often is).
 
-* ``mjd_now`` : float.  Normally, you will get back all relevant photometry.  For normal usage, that means photomtery from before the current time, because the future hasen't happened yet.  If you specify this value, you only get back photometry from this MJD or earlier.  Use this during tests and simulations.
+* ``mjd_now`` : float.  Normally, you will get back all relevant photometry.  For normal usage, that means photometry from before the current time, because the future hasn't happened yet.  If you specify this value, you only get back photometry from this MJD or earlier.  Use this during tests and simulations.
 
 * ``return_object_info`` : See below
 
@@ -337,44 +337,44 @@ What you get depends on whether you included ``return_object_info``.  If you inc
   * ``mjd`` : float, the MJD of this point on the lightcurve
   * ``diasourceid`` : int, the diaSourceId, or null if this was not a detection
   * [ ``diaforcedsourceid`` : bigint, the diaForcedSourceId, or null if FASTDB does not have forced photometry for this object at this epoch.  Only included you didn't pass ``which`` as ``detections``. ]
-  * ``source_diaobjectid`` : int, the diaObjectId that was associated with this diaSource, or null if this was not a detection.  It *is* possible that this will be different for different rows for the *same* diaobject, because at least the alert stream, LSST sometimes identifies more than one ``diaobjectid`` for the same actual physical transient or variable.  What' smore, the ``diaobjectid`` associated with a given ``diasource`` can *change* in different alerts froM LSST.  So, treat this with care; within FASTDB, the ``rootid`` is what you want to use.  However, if you want to compare objects to things that are reported elsewhere, you will probably need to use the LSST ``diaobjectid`` values; in that case, use, at least, the full collection of ``diaobjectid`` values identified for a single object's lightcurve.
+  * ``source_diaobjectid`` : int, the diaObjectId that was associated with this diaSource, or null if this was not a detection.  It *is* possible that this will be different for different rows for the *same* diaobject, because at least the alert stream, LSST sometimes identifies more than one ``diaobjectid`` for the same actual physical transient or variable.  What's more, the ``diaobjectid`` associated with a given ``diasource`` can *change* in different alerts froM LSST.  So, treat this with care; within FASTDB, the ``rootid`` is what you want to use.  However, if you want to compare objects to things that are reported elsewhere, you will probably need to use the LSST ``diaobjectid`` values; in that case, use, at least, the full collection of ``diaobjectid`` values identified for a single object's lightcurve.
   * [ ``forced_diaobjectid`` : int, the diaObjectId that was associated with this diaForcedSource, or null if this was not a detection.  All the same caveats apply as for ``source_diaobjectid``.  This column is not included if ``which`` was ``detections``. ]
   * ``visit`` : int, the visit number (as defined by LSST) for this observation
   * ``band`` : the filter/band of the this point.
-  * ``flux`` : float, the flux in nJy of this point on the lightcruve
+  * ``flux`` : float, the flux in nJy of this point on the lightcurve
   * ``fluxerr`` : float, the uncertainty on flux
   * ``isdet`` : int: 1 if this was detected (i.e. a diaSource exists), 0 if not
-  * [ ``ispatch`` : see below ; only inclucded you passed ``which`` as ``patch`` (the default) ]
+  * [ ``ispatch`` : see below ; only included you passed ``which`` as ``patch`` (the default) ]
   * [ ``base_procver_s`` : TBD; only included if you set ``include_base_procver`` ]
   * [ ``base_procver_f`` : TBD; only included if you set ``includebase_procver`` and ``which`` wasn't ``detections`` ]
-  * [ ``det_ra`` : the RA where this source was detected by LSST on the difference image.  Only incluced if you specified ``include_source_positions`` ]
-  * [ ``det_dec`` : the Dec where this source was detected by LSST on the difference image.  Only incluced if you specified ``include_source_positions`` ]
-  * [ ``det_ra_err`` : uncetainty on RA.  Only incluced if you specified ``include_source_positions`` ]
-  * [ ``det_dec_err`` : uncertainty on Dec.  Only incluced if you specified ``include_source_positions`` ]
-  * [ ``det_ra_dec_cov`` : covariance between ra and dec.  Only incluced if you specified ``include_source_positions`` ]
+  * [ ``det_ra`` : the RA where this source was detected by LSST on the difference image.  Only included if you specified ``include_source_positions`` ]
+  * [ ``det_dec`` : the Dec where this source was detected by LSST on the difference image.  Only included if you specified ``include_source_positions`` ]
+  * [ ``det_ra_err`` : uncertainty on RA.  Only included if you specified ``include_source_positions`` ]
+  * [ ``det_dec_err`` : uncertainty on Dec.  Only included if you specified ``include_source_positions`` ]
+  * [ ``det_ra_dec_cov`` : covariance between ra and dec.  Only included if you specified ``include_source_positions`` ]
 
 If you also get back ``objinfo``, then ROB DOCUMENT.
 
 About the flux values you get back
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-There are two kinds of photometry that is stored for object lightcurves.  A ``diaSource`` stores *detections*.  LSST does image subtractions, and then scans the difference image for soruces that patch detection thresholds.  Anything found is a ``diaSource``.
+There are two kinds of photometry that is stored for object lightcurves.  A ``diaSource`` stores *detections*.  LSST does image subtractions, and then scans the difference image for sources that patch detection thresholds.  Anything found is a ``diaSource``.
 
-A ``diaForcedSource`` stores *forced photometry*.  When objects are known, LSST goes back and does image subractions and measures the brightness at the know object positions, regardless of whether they would have been deteted or not when scanning that difference image.
+A ``diaForcedSource`` stores *forced photometry*.  When objects are known, LSST goes back and does image subtractions and measures the brightness at the know object positions, regardless of whether they would have been detected or not when scanning that difference image.
 
 If you set ``which`` to ``detections``, you only get back ``diaSource`` values.  The fluxes come from there, and forced sources are ignored.
 
 If you set ``which`` to ``forced``, you only get back ``diaForcedSource`` values.  The fluxes come from there, and *mostly* diasources are ignored, except that the ``isdet`` column tells you if there was a ``diaSoruce`` at this visit for this root object.
 
-If you set ``which`` to ``patch``... it's more complicated.  You might think that (a) mostly what you want is forced sources, because it includes nondetections, and because the position is consistent so the lightcurve fluxes are less biased (**warning** it's totally unclear, however, exactly what this means for forced source values that come in the alert stream!).  Howevever, forced photometry is performed by LSST at a delay, and we only find out about it if there is a later detection that triggers an alert.  So, FASTDB will have some diasources where it does not have any forced photometry, and, normally you would expect this to be the most recent points.  If you're planning follow-up, you want those most recent points.  In this case, use ``patch``.  You will get forced photometry, but if there are visits for the object where FASTDB has a detection but does not have forced photometry, it will "patch in" the photometry from the detection.
+If you set ``which`` to ``patch``... it's more complicated.  You might think that (a) mostly what you want is forced sources, because it includes nondetections, and because the position is consistent so the lightcurve fluxes are less biased (**warning** it's totally unclear, however, exactly what this means for forced source values that come in the alert stream!).  However, forced photometry is performed by LSST at a delay, and we only find out about it if there is a later detection that triggers an alert.  So, FASTDB will have some diasources where it does not have any forced photometry, and, normally you would expect this to be the most recent points.  If you're planning follow-up, you want those most recent points.  In this case, use ``patch``.  You will get forced photometry, but if there are visits for the object where FASTDB has a detection but does not have forced photometry, it will "patch in" the photometry from the detection.
 
-**TLDR short summary**: ``patch`` is what you want for knowing what we've got and planning follow-up.  If you're trying to do any kind of high precision analysis with the phtometry from the alert stream, you're doing it wrong.
+**TLDR short summary**: ``patch`` is what you want for knowing what we've got and planning follow-up.  If you're trying to do any kind of high precision analysis with the photometry from the alert stream, you're doing it wrong.
 
 
 .. _ltcv-getltcv:
 
 ``/ltcv/getltcv``
-****************
+*****************
 
 Get the lightcurve of a single object.  Hit this with one of:
 
@@ -385,14 +385,14 @@ Get the lightcurve of a single object.  Hit this with one of:
 
 ``<procver>`` is the processing version of the photometry to fetch.  If not given, it will assume ``default``.
 
-You can optionally include a JSON-encoded dictionary as POST data with any of the keys ``bands``, ``which``, or ``mjd_now``.  See the docuemtnation on :ref:`ltcv-getmanyltcvs` for what these mean.
+You can optionally include a JSON-encoded dictionary as POST data with any of the keys ``bands``, ``which``, or ``mjd_now``.  See the documentation on :ref:`ltcv-getmanyltcvs` for what these mean.
 
-What you get back is the same as what youg et back from :ref:`ltcv-getmanyltcvs`, except that instead of ``ltcvs`` as a list of dictionaries, get get a single dictionary with the lightcurve for the one object.
+What you get back is the same as what you get back from :ref:`ltcv-getmanyltcvs`, except that instead of ``ltcvs`` as a list of dictionaries, get get a single dictionary with the lightcurve for the one object.
 
 
 
 ``/ltcv/getrandomltcv``
-**********************
+***********************
 
 * ``/ltcv/getrandomltcv``
 * ``/ltcv/getrandomltcv/<procver>``
@@ -405,7 +405,7 @@ Randomly choose an object from the given processing version (using "default" if 
 .. _ltcv-gethottransients:
 
 ``/ltcv/gethottransients``
-*************************
+**************************
 
 Call this with one of:
 
@@ -420,7 +420,7 @@ Additional options that you can included in the ``json=`` dictionary are:
 
 * ``detected_in_last_days`` : Only return lightcurves of sources that have been detected by LSST between this many days ago and now.  Do not include both this and ``detected_since_mjd``, because they are do different ways of asking the same question.  If you don't include either, it defaults to 30 (*I think*) for ``detected_in_last_days``.
 
-* ``mjd_now`` : Normally, it includes all data until the current mjd.  If you're doing simulations, or if you want to (sort of) reconstruct what we knew earlier, pass this parameter with the MJD to pretend it is.  This will affect the time window that ``detected_in_last_days`` specifies, and what photometry is returned.
+* ``mjd_now`` : Normally, it includes all data until the current MJD.  If you're doing simulations, or if you want to (sort of) reconstruct what we knew earlier, pass this parameter with the MJD to pretend it is.  This will affect the time window that ``detected_in_last_days`` specifies, and what photometry is returned.
 
 * ``position_processing_version`` : TBD, and you probably don't want to include this
 
@@ -474,7 +474,7 @@ Spectrum Endpoints
 
 This is the web API end point you use to register your desire for spectroscopic follow-up of a transient.  (Or, ideally, host, but the system is not yet designed to distinguish the two.)  You pass to it JSON-encoded POST data which is a dictionary with keys:
 
-* ``requester`` : string.  Who wants this specrum?  In the case of RESSEPCT instances, this should indicate that it was RESSPECT, and which running algorithm / instance of RESSPECT is making the request.
+* ``requester`` : string.  Who wants this spectrum?  In the case of RESSEPCT instances, this should indicate that it was RESSPECT, and which running algorithm / instance of RESSPECT is making the request.
 
 * ``objectids`` : The *root* object ids of the objects whose spectra you want.  This is a list of uuids (or strings formatted from UUIDs); it is *not* a list of integers.  Do *not* use the ``diaobjectid`` field to fill this out!
 
@@ -500,7 +500,7 @@ POST to the endpoint with dictionary in a JSON payload.  This may be an empty di
 
 * ``no_spectra_in_last_days``: int; only return objects that have not had spectrum information reported in this many days.  This is also for coordination.  If you don't want to consider just what is planned, but what somebody actually claims to have observed, then use this.  If not given, it defaults to 7.  (This may be combined with ``not_claimed_in_last_days``.  It's entirely possible that people will report spectra that they have not claimed.)  To disable consideration of existing spectra, as with ``not_claimed_in_last_days`` set this parameter to ``None``.
   
-* ``detected_since_mjd`` : float.  Only return objects that have been *detected* (i.e. found as a source in DIA scanning) by Rubin since this MJD.  Be aware that an object may not have been detected in the last few days simply because it's field hasn't been observed!  If not passed, then the server will use ``detected_in_last_days`` (below) instead.  Pass ``None`` to explicilty disable consideration of recent detections.
+* ``detected_since_mjd`` : float.  Only return objects that have been *detected* (i.e. found as a source in DIA scanning) by Rubin since this MJD.  Be aware that an object may not have been detected in the last few days simply because it's field hasn't been observed!  If not passed, then the server will use ``detected_in_last_days`` (below) instead.  Pass ``None`` to explicitly disable consideration of recent detections.
 
 * ``detected_in_last_days``: float.  Only return objects that have been *detected* within this may previous days by LSST DIA.  Ignored if ``detected_since_mjd`` is specified.  If neither this nor ``detected_since_mjd`` is given, defaults to 14.
 
@@ -517,7 +517,7 @@ You will get back a JSON-encoded list.  Each element of the list is a dictionary
 * ``requester`` : a string, the name of the person or system who requested the spectrum
 * ``priority`` : an integer in the range [0,5]: the priority of the spectrum.  Higher means higher priority.  This is defined fuzzily, so consider it advisory rather than rigorous; different requesters may use this differently.
 * ``ra`` : RA in degrees of the object (from the ``diaobject`` table)
-* ``dec`` : Dec in degrees of hte object (from the ``diaobject`` table )
+* ``dec`` : Dec in degrees of the object (from the ``diaobject`` table )
 * ``latest_source_mjd`` : the MJD of the latest *detection* of this object
 * ``latest_source_band`` : the latest *detection* of this object
 * ``latest_source_mag`` : the AB magnitude of the latest *detection*
@@ -539,9 +539,9 @@ POST to the api endpoint with a JSON payload that is a dict.  Required keys are:
 
 * ``root_diaobject_id``: string UUID; the object ID of the object you're going to take a spectrum of.  These UUIDs are returned by ``ltcv/gethottransients``.
 
-* ``facility``: string; the name of the telescope or facility where you will take the spectrm.
+* ``facility``: string; the name of the telescope or facility where you will take the spectrum.
 
-* ``plantime``: string ``YYYY-MM-DD`` or ``YYYY-MM-DD HH:MM:SS``; when you expect to actuallyobtain the spectrum.
+* ``plantime``: string ``YYYY-MM-DD`` or ``YYYY-MM-DD HH:MM:SS``; when you expect to actually obtain the spectrum.
 
 You may also include one optional key:
 
@@ -552,7 +552,7 @@ If all is well, you will get back a dictionary with a single key: ``{'status': '
 ``spectrum/removespectrumplan``
 *******************************
 
-Use this to remove a spectrum plan.  This isn't strictly necessary if you succesfully took a spectrum and reported the info with ``spectrum/reportspectruminfo`` (see below), but you may still use it.  The real use case is if you planned a spectrum, but for whatever reason (e.g. the night was cloudy), you didn't actually get that spectrum.  In that case, you probably want to remove your spectrum plan from FASTDB so that other people won't skip that object thinking you are going to do it.
+Use this to remove a spectrum plan.  This isn't strictly necessary if you successfully took a spectrum and reported the info with ``spectrum/reportspectruminfo`` (see below), but you may still use it.  The real use case is if you planned a spectrum, but for whatever reason (e.g. the night was cloudy), you didn't actually get that spectrum.  In that case, you probably want to remove your spectrum plan from FASTDB so that other people won't skip that object thinking you are going to do it.
 
 POST to the api endpoint with a JSON payload that is a dict.  There are two required keywords:
 * ``root_diaobject_id``: string UUID
@@ -572,9 +572,9 @@ POST to the api endpoint with a JSON payload that is a dict, with keys:
 
 * ``root_diaobject_id``: string UUID;  the id of the object, the same value that all the previous URLs have used
 
-* ``facility``: string; the name of the facility. If you submitted a plan, this should match the facililty that you sent to ``spectrum/planspectrum``. (It's OK to report spectra that you didn't declare a plan for ahead of time!)
+* ``facility``: string; the name of the facility. If you submitted a plan, this should match the facility that you sent to ``spectrum/planspectrum``. (It's OK to report spectra that you didn't declare a plan for ahead of time!)
 
-* ``mjd``: float; the mjd of when the spectrum was taken. (Beginning, middle, or end of exposure, doesn't matter.)
+* ``mjd``: float; the MJD of when the spectrum was taken. (Beginning, middle, or end of exposure, doesn't matter.)
 
 * ``z``: float;  the redshift of the supernova from the spectrum. Leave this blank ("" or None) if it cannot be determined.
 
@@ -592,11 +592,11 @@ POST to the api endpoint a JSON-encoded dict.  All keys are optional; possibilit
 
 * ``facility``: str; if included, only get spectrum information from this facility.  Otherwise, include spectrum information from all facilities.
 
-* ``mjd_min``: float; if included, only get information about spectra taken at this mjd or later.
+* ``mjd_min``: float; if included, only get information about spectra taken at this MJD or later.
 
-* ``mjd_max``: float; if included, only get information about spectra taken at this mjd or earlier.
+* ``mjd_max``: float; if included, only get information about spectra taken at this MJD or earlier.
 
-* ``classid``: float; if included, only get information about spectra tagged with this cass id.
+* ``classid``: float; if included, only get information about spectra tagged with this class id.
 
 * ``z_min``: float; if included, only get information about spectra at this redshift or higher.
 
@@ -606,19 +606,19 @@ POST to the api endpoint a JSON-encoded dict.  All keys are optional; possibilit
 
 If you include no keys, you'll get information about all spectra that the database knows about, which may be overwhelming. (The API may also time out.)
 
-If all is well, the response you get back is a json-encoded list (which might be empty).  Each element of the list is a dictionary with keys:
+If all is well, the response you get back is a JSON-encoded list (which might be empty).  Each element of the list is a dictionary with keys:
 
 * ``specinfo_id``: string UUID; you can safely ignore this
 
 * ``root_diaobject_id``: string UUID; the same UUID you've been using all along
 
-* ``facility``: string; the facility that reported the spectrumn
+* ``facility``: string; the facility that reported the spectrum
 
-* ``inserted_at``: datatime; the time at which the spectrum was reported to the database
+* ``inserted_at``: datetime; the time at which the spectrum was reported to the database
   
 * ``mjd``: float, the MJD the spectrum was taken
 
-* ``z``: float or None, the redshift from the spectrum.  If None, it means that the redshfit wasn't able to be determined from the spectrum.
+* ``z``: float or None, the redshift from the spectrum.  If None, it means that the redshift wasn't able to be determined from the spectrum.
 
 * ``classid``: the reported class id.
 
@@ -627,8 +627,8 @@ Direct SQL Queries
 
 **WARNING** : this API is currently broken and not working.
 
-**Warning**: We strongly recommend *against* using custom-built SQL queries to the database.  The reason is that the table structure surrounding :ref:`processing-versions` is complicated enough that it's very easy to construct a query that will give you results that to casual inspecton look right but that are in fact wrong.  If you can't find a web API to do what you need to do, please talk to Rob.  If you *must* do direct SQL queries, make sure you really understand how processing versions work.
+**Warning**: We strongly recommend *against* using custom-built SQL queries to the database.  The reason is that the table structure surrounding :ref:`processing-versions` is complicated enough that it's very easy to construct a query that will give you results that to casual inspection look right but that are in fact wrong.  If you can't find a web API to do what you need to do, please talk to Rob.  If you *must* do direct SQL queries, make sure you really understand how processing versions work.
 
-The FASDTB web interface includes a front-end for direct read-only SQL queries to the backend PostgreSQL database.  (Note that "read-only" means that you can't commit changes to the database.  You *can* use temporary tables with this interface, and that is often a very useful thing to do.)
+The FASTDB web interface includes a front-end for direct read-only SQL queries to the backend PostgreSQL database.  (Note that "read-only" means that you can't commit changes to the database.  You *can* use temporary tables with this interface, and that is often a very useful thing to do.)
 
-TODO document this.  In the mean time, see the `examples FASDTB client Juypyter notebook <https://github.com/LSSTDESC/FASTDB/blob/main/examples/using_fastdb_client.ipynb>`_ for documentation on this interface.
+TODO document this.  In the mean time, see the `examples FASTDB client Juypyter notebook <https://github.com/LSSTDESC/FASTDB/blob/main/examples/using_fastdb_client.ipynb>`_ for documentation on this interface.
