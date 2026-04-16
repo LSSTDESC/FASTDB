@@ -94,6 +94,9 @@ ALeRCE
 
 **Current status as of April 2026:** no immediate way to create new filters at the broker level. We think filtering would be handled through the 'step' mechanism, but this is unclear. 
 
+ALeRCE is a Kafka-based broker that provides Kafka topic streams that users can subscribe to via a variety of methods. They also have an API interface, a Python client, and a web-based explorer that allow you to access the last 48 hours of data on demand. 
+
+
 Useful Links:
 ^^^^^^^^^^^^^
 * `ALeRCE <https://science.alerce.online/>`_
@@ -128,7 +131,7 @@ Steps to create a new LSST filter for ANTARES:
 2. Fork and clone https://gitlab.com/nsf-noirlab/csdc/antares/devkit
 3. Pip install the package in editable mode: ``pip install -e .``
 4. Create a new folder for your filter in ``/antares_devkit/filters/``, and create an ``__init__.py`` file where all your code will go. 
-5. Create your filter class. It should be a class based on the ``BaseFilter`` class, and should at a minimum have a ``_run(self,locus)`` method, which is where the filter logic should go. It should run ``locus.tag('[tag_name]')`` on the loci that have been chosen by your filter code, where ``[tag_name]`` is the name you want for the stream topic that your filter creates. Start with this `filter template <https://nsf-noirlab.gitlab.io/csdc/antares/devkit/learn/structure-of-a-filter/>`_ and work from there (the Slack channel/id is optional, you should not need to worry about that). See `The Locus Object <https://nsf-noirlab.gitlab.io/csdc/antares/antares/devkit/locus.html>`_ for a description of what the 'locus' is and a reference for some of its methods and properties. Take a look at the `uniform_random_sample <https://gitlab.com/nsf-noirlab/csdc/antares/devkit/-/merge_requests/39>`_ filter for an example implementation.
+5. Create your filter class. It should be a class based on the ``BaseFilter`` class, and should at a minimum have a ``_run(self,locus)`` method, which is where the filter logic should go. It should run ``locus.tag('[tag_name]')`` on the loci that have been chosen by your filter code, where ``[tag_name]`` is the name you want for the stream topic that your filter creates. Start with this `filter template <https://nsf-noirlab.gitlab.io/csdc/antares/devkit/learn/structure-of-a-filter/>`_ and work from there (the Slack channel/id is optional, you should not need to worry about that). See `The Locus Object <https://nsf-noirlab.gitlab.io/csdc/antares/antares/devkit/locus.html>`_ for a description of what the 'locus' is and a reference for some of its methods and properties. There is a `full list of the locus and alert object properties <https://antares.noirlab.edu/properties>`_ for reference as well. Take a look at the `uniform_random_sample <https://gitlab.com/nsf-noirlab/csdc/antares/devkit/-/merge_requests/39>`_ filter for an example implementation.
 6. Install the ANTARES client in order to get sample data for your tests by running: ``pip install antares-client``
 7. Test out your filter. You can use the sample code below using the ``antares-client`` ``search.get_random_loci(n)`` function. You can also make use of the `other existing search functions <https://nsf-noirlab.gitlab.io/csdc/antares/client/api.html#module-antares_client.search>`_ to get your test data, for example ``search.cone_search()`` which searches for loci in a certain region. For more detail, take a look at the ANTARES tutorial notebook section on `testing your filter <https://nsf-noirlab.gitlab.io/csdc/antares/devkit/notebooks/AntaresFilterDevKit/#3-test-a-filter>`_.
 
@@ -175,17 +178,21 @@ Steps to create a new LSST filter for ANTARES:
 Babamul
 -------
 
-**Current status as of April 2026:** no immediate way to create filters on Babamul
+**Current status as of April 2026:** no immediate way to create filters on Babamul. You need an account to access some of their API and their Kafka documentation, and to use their Python client to consume alerts. There is some API documentation and minimal client documentation. 
+
+
+Babamul is a Kafka-based broker, written in Rust. It seems to have a specific set of `filter 'workers' <https://github.com/boom-astro/boom>`_, which is likely where new filters would be added in. 
 
 Useful Links:
 ^^^^^^^^^^^^^
 * `Babamul <https://babamul.caltech.edu/>`_
-* `Babamul Github <https://github.com/babamul/babamul>`_
+* `Babamul client documentation <https://pypi.org/project/babamul/>`_
+* `Babamul streaming examples <https://github.com/boom-astro/babamul/blob/main/examples/>`_
 
 Fink
 ----
 
-The Fink broker streams alert data that has been enriched, for example with data from other catalogues and machine learning classification scores. 
+The Fink broker is Kafka based. It streams alert data that has been enriched, for example with data from other catalogues and machine learning classification scores. 
 
 Useful Links:
 ^^^^^^^^^^^^^
@@ -235,7 +242,7 @@ This will load in the test dataset in ``datatest/rubin_test_data_10_0.parquet`` 
 Lasair
 ------
 
-**Current status as of April 2026:** can make filters using their online builder, and then convert to an active filter. You need a Lasair account for this. 
+**Current status as of April 2026:** can make filters using their online builder, using an SQL-style query. To convert this to an active filter, you need a Lasair account. This filter will then output a Kafka topic that you can subscribe to. There is an option to send only the fields that you have filtered on, or the whole alert (without the cutout images). 
 
 Useful Links:
 ^^^^^^^^^^^^^
@@ -246,7 +253,8 @@ Useful Links:
 Pitt-Google
 -----------
 
-**Current status as of April 2026:** how to set up filters currently in progress
+**Current status as of April 2026:** 
+
 Pitt-Google operates a differently than the other brokers, running on Google Cloud's Pub/Sub service instead of Kafka. This means that unlike other brokers, where Python is used to create filters that build upon a Kafka package, Pitt-Google filters use the Pub/Sub-native JavaScript. As of yet it is unclear whether these filters will need to be upstreamed to Pitt-Google who will create a new Pub/Sub topic for FASTDB to listen to; or whether there will be some other middleman "broker" which listens to the un-filtered Pitt-Google stream and re-broadcasts a set of filtered topics, and FASTDB will poll from there.
 
 At present there are only a few attributes which can easily be filtered on, which are best accessed by downloading a test alert from Pitt-Google with their Python client, and viewing the ``downloaded_alert.msg.attributes`` dictionary.
