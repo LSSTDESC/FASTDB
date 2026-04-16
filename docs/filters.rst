@@ -50,12 +50,6 @@ Some of the requirements for filters include:
     +-----------------+----------------------------------------------------------+
     | ``dec``         | Declination coordinate of the center of the source (deg) |    
     +-----------------+----------------------------------------------------------+
-    | ``raErr``       | Uncertainty of ra                                        |  
-    +-----------------+----------------------------------------------------------+
-    | ``decErr``      | Uncertainty of dec                                       |  
-    +-----------------+----------------------------------------------------------+
-    | ``ra_dec_cov``  | Covariance between ra and dec                            |  
-    +-----------------+----------------------------------------------------------+
 
 
 .. table:: From the ``prvDiaForcedSources`` array (see `LSST alert packet schema <https://github.com/lsst/alert_packet/blob/main/python/lsst/alert/packet/schema/10/0/lsst.v10_0.alert.avsc>`_):
