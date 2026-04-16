@@ -41,15 +41,21 @@ Some of the requirements for filters include:
 .. table:: From the DiaObject schema: 
     :align: center
 
-    +-----------------+----------------------------------------------------------+
-    | parameter       | description                                              |
-    +=================+==========================================================+
-    | ``diaObjectId`` | id of the object this source was associated with, if any | 
-    +-----------------+----------------------------------------------------------+
-    | ``ra``          | Right ascension of the center of this source (deg)       |  
-    +-----------------+----------------------------------------------------------+
-    | ``dec``         | Declination coordinate of the center of the source (deg) |    
-    +-----------------+----------------------------------------------------------+
+    +-----------------+--------------------------------------------------------------------------+
+    | parameter       | description                                                              |
+    +=================+==========================================================================+
+    | ``diaObjectId`` | id of the object this source was associated with, if any                 | 
+    +-----------------+--------------------------------------------------------------------------+
+    | ``ra``          | Right ascension of the center of this source (deg)                       |  
+    +-----------------+--------------------------------------------------------------------------+
+    | ``dec``         | Declination coordinate of the center of the source (deg)                 |    
+    +-----------------+--------------------------------------------------------------------------+
+    | ``raErr``       | Uncertainty of ra *(Can be omitted if absolutely necessary)*             |  
+    +-----------------+--------------------------------------------------------------------------+
+    | ``decErr``      | Uncertainty of dec *(Can be omitted if absolutely necessary)*            |  
+    +-----------------+--------------------------------------------------------------------------+
+    | ``ra_dec_cov``  | Covariance between ra and dec *(Can be omitted if absolutely necessary)* |  
+    +-----------------+--------------------------------------------------------------------------+
 
 
 .. table:: From the ``prvDiaForcedSources`` array (see `LSST alert packet schema <https://github.com/lsst/alert_packet/blob/main/python/lsst/alert/packet/schema/10/0/lsst.v10_0.alert.avsc>`_):
