@@ -260,16 +260,35 @@ Pitt-Google
 -----------
 
 **Current status as of April 2026:** 
-
-Pitt-Google operates a differently than the other brokers, running on Google Cloud's Pub/Sub service instead of Kafka. This means that unlike other brokers, where Python is used to create filters that build upon a Kafka package, Pitt-Google filters use the Pub/Sub-native JavaScript. As of yet it is unclear whether these filters will need to be upstreamed to Pitt-Google who will create a new Pub/Sub topic for FASTDB to listen to; or whether there will be some other middleman "broker" which listens to the un-filtered Pitt-Google stream and re-broadcasts a set of filtered topics, and FASTDB will poll from there.
-
-At present there are only a few attributes which can easily be filtered on, which are best accessed by downloading a test alert from Pitt-Google with their Python client, and viewing the ``downloaded_alert.msg.attributes`` dictionary.
+Pitt-Google operates a differently than the other brokers, as it runs on Google Cloud's Pub/Sub service instead of Kafka. This means that unlike other brokers, where Python is used to create filters that build upon a Kafka package, Pitt-Google filters use the Pub/Sub-native JavaScript. 
 
 The Pitt-Google and Google Pub/Sub documentation both discuss string-based attribute filters, however, given the limited options available within that method of filtering, and the expected desire for more complex filters, the JavaScript UDF method should be used. 
+
+UDF filters are JavaScript functions which get passed a message object. The message contains both an ``attributes`` key with a few items that could be filtered on, and a ``data`` key. For the ``lsst-alerts-json`` Pitt-Google topic, the ``data`` key contains the alert information as set out by the LSST schema. `Other topics <https://mwvgroup.github.io/pittgoogle-client/listings.html#pub-sub-alert-streams>`_ contain subsets of the alert schema, in some cases with additional added data. Note that due to limitations in the work than can be done with a UDF filter, only the JSON streams are likely to be of any use. If this is an issue, reach out to the Pitt-Google team, as there may be workarounds available. 
+
+.. code-block:: javascript
+
+    function customFilter(message, _) {
+      // see the Google Pub/Sub documentation for more information about the second (metadata) argument
+
+      attributes = message.attributes; // a select few fields that could be filtered on
+      payload = JSON.parse(message.data); // the contents of the alert following the LSST schema
+
+      if (payload["diaSource"]["isNegative"]) {
+        return null; // return null to stop the message from being included in the stream
+      }
+
+      // you can also add new entries into the attributes or data
+      return message;
+    }
+
+In order to create a new filtered topic for FASTDB to subscribe to, you should write a new filter (following the `tutorial <https://github.com/mwvgroup/pittgoogle-user-demos/blob/main/pubsub/README.md>`_) and then upstream it to Pitt-Google by creating a GitHub issue on the `broker repository <https://github.com/mwvgroup/Pitt-Google-Broker>`_. Provided the filter is accepted, Pitt-Google will create a new Topic which can be subscribed to by FASTDB.
+
 
 Links:
 ^^^^^^
 * `Pitt-Google tutorial on pulling and filtering alerts <https://github.com/mwvgroup/pittgoogle-user-demos/blob/main/pubsub/README.md>`_
 * `Pitt-Google client documentation <https://mwvgroup.github.io/pittgoogle-client/index.html>`_
-* `Pitt-Google broker documentation <https://pitt-broker.readthedocs.io/en/latest/broker/broker-overview.html>`_
+* `Pitt-Google broker repository <https://github.com/mwvgroup/Pitt-Google-Broker>`_
+* `Google Pub/Sub documentation on UDF filters <https://docs.cloud.google.com/pubsub/docs/smts/udfs-overview>`_
 
