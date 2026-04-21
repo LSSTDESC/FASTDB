@@ -1,9 +1,9 @@
-.. contents::
-
 ===============
 FASTDB Overview
 ===============
 
+.. contents::
+   :local:
 
 FASTDB runs with two database backends, a PostgreSQL server and a MongoDB server.  Neither database server is directly accessible; rather, you access FASTDB through a webserver.  As of this writing, a few instances of FASTDB exist; not all of them are running the latest version of the code....
 
