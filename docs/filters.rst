@@ -248,12 +248,17 @@ This will load in the test dataset in ``datatest/rubin_test_data_10_0.parquet`` 
 Lasair
 ------
 
-**Current status as of April 2026:** can make filters using their online builder, using an SQL-style query. To convert this to an active filter, you need a Lasair account. This filter will then output a Kafka topic that you can subscribe to. There is an option to send only the fields that you have filtered on, or the whole alert (without the cutout images). 
+**Current status as of April 2026:** 
+their online builder allows you to make filters using an SQL-style query. To convert this to an active filter, you need to sign up for a Lasair account. This filter will then output a Kafka topic that you can subscribe to. 
+The alerts streamed to the topic can include only the fields that were filtered on, those fields and lightcurve data, or the entire alert packet (excepting the cutout images).
+
+While the Kafka topic can be set up to provide the entire alert packet, only a subset of fields are available to filter on. These can be seen in the `Lasair schema browser <https://lasair.lsst.ac.uk/schema/>`_.
 
 Useful Links:
 ^^^^^^^^^^^^^
 * `Lasair <https://lasair.lsst.ac.uk/>`_
 * `Making a Lasair filter <https://lasair-lsst.readthedocs.io/en/main/core_functions/make_filter.html>`_
+* `Streaming Lasair alerts with Kafka <https://lasair-lsst.readthedocs.io/en/main/core_functions/alert-streams.html>`_
 
 
 Pitt-Google
