@@ -83,8 +83,10 @@ Some of the requirements for filters include:
 
 
 
-
-
+Useful Links:
+^^^^^^^^^^^^^
+* `Full alert schema (avsc format) <https://github.com/lsst/alert_packet/blob/main/python/lsst/alert/packet/schema/10/0/lsst.v10_0.alert.avsc>`_
+* `Full alert schema (schema browser) <https://sdm-schemas.lsst.io/apdb.html>`_
 
 Creating new filters
 ====================
