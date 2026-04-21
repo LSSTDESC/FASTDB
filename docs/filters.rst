@@ -120,7 +120,7 @@ Useful Links
 AMPEL
 =====
 
-**Current status as of April 2026:** have to contact the broker maintainers in order to implement filters. At the moment it looks like filters are implemented in 'Tier 0', but FASTDB might want to have an option to have filters implemented in an additional post-existing-pipeline stage (unless you can implement a filter in Tier 0 and also get all the preprocessing info)
+**Current status as of April 2026:** have to contact the broker maintainers in order to implement filters. At the moment it looks like there are base filters implemented in 'Tier 0', before the enriching and processing of the data, but FASTDB might want to have an option to have filters implemented in an additional post-existing-pipeline stage, since it seems there is also some filtering happening in the final stages. 
 
 Useful Links
 ------------
@@ -192,7 +192,7 @@ Steps to create a new LSST filter for ANTARES
 Babamul
 =======
 
-**Current status as of April 2026:** no immediate way to create filters on Babamul. You need an account to access some of their API and their Kafka documentation, and to use their Python client to consume alerts. There is some API documentation and minimal client documentation. 
+**Current status as of April 2026:** no immediate way to create filters on Babamul. You need an account to access some of their API and their Kafka documentation, and to use their Python client to consume alerts. There is some API documentation and minimal client documentation. Not all of the previous sources data seems to be kept in the alerts that get streamed.  
 
 
 Babamul is a Kafka-based broker, written in Rust. It seems to have a specific set of `filter 'workers' <https://github.com/boom-astro/boom>`_, which is likely where new filters would be added in. 
@@ -202,6 +202,7 @@ Useful Links
 * `Babamul <https://babamul.caltech.edu/>`_
 * `Babamul client documentation <https://pypi.org/project/babamul/>`_
 * `Babamul streaming examples <https://github.com/boom-astro/babamul/blob/main/examples/>`_
+* `Babamul's 'BOOM' broker <https://github.com/boom-astro/boom>`_
 
 Fink
 ====
