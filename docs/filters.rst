@@ -126,6 +126,7 @@ Useful Links
 ------------
 * `AMPEL Github <https://github.com/AmpelAstro/Ampel-LSST>`_
 * `AMPEL Documentation <https://ampelproject.github.io/>`_
+* `example filter <https://github.com/AmpelAstro/Ampel-HU-astro/blob/main/ampel/contrib/hu/t0/DecentVroFilter.py>`_
 
 
 ANTARES
@@ -192,10 +193,11 @@ Steps to create a new LSST filter for ANTARES
 Babamul
 =======
 
-**Current status as of April 2026:** no immediate way to create filters on Babamul. You need an account to access some of their API and their Kafka documentation, and to use their Python client to consume alerts. There is some API documentation and minimal client documentation. Not all of the previous sources data seems to be kept in the alerts that get streamed.  
+**Current status as of April 2026:** no immediate way to create filters on Babamul. It seems to have a specific set of `filter 'workers' <https://github.com/boom-astro/boom>`_, which is likely where new filters would be added in. Not all of the previous sources data seems to be kept in the alerts that get streamed, and it seems that the diaObject and diaSource data has been combined, so there's only one ra and dec per alert.
 
 
-Babamul is a Kafka-based broker, written in Rust. It seems to have a specific set of `filter 'workers' <https://github.com/boom-astro/boom>`_, which is likely where new filters would be added in. 
+Babamul is a Kafka-based broker, written in Rust. You need an account to access their Kafka documentation, and to use their Python client to consume alerts. There is some API documentation and minimal client documentation.    
+
 
 Useful Links
 ------------
