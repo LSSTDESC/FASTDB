@@ -454,7 +454,8 @@ The ``.yaml`` files defining the Spin workloads are in ``admin/spin/rknop_dev`` 
     --with-installdir=/global/cfs/cdirs/lsst/groups/TD/SOFTWARE/fastdb_deployment/rknop_dev/install \
     --with-smtp-server=smtp.lbl.gov \
     --with-smtp-port=25 \
-    --with-email-from=raknop@lbl.gov
+    --with-email-from=raknop@lbl.gov \
+    --external-url=https://desc-fastdb.lbl.gov/
   make install
 
 This is necessary because the docker image for the web ap does *not* have the fastdb code baked into it.  Rather, it bind mounds the ``install`` directory and uses the code there.  (This allows development without having to rebuild the docker image.)
