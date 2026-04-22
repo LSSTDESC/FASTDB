@@ -280,7 +280,7 @@ Pitt-Google operates a differently than the other brokers, as it runs on Google 
 
 The Pitt-Google and Google Pub/Sub documentation both discuss string-based attribute filters, however, given the limited options available within that method of filtering, and the expected desire for more complex filters, the JavaScript UDF method should be used. 
 
-UDF filters are JavaScript functions which get passed a message object. The message contains both an ``attributes`` key with a few items that could be filtered on, and a ``data`` key. For the ``lsst-alerts-json`` Pitt-Google topic, the ``data`` key contains the alert information as set out by the LSST schema. `Other topics <https://mwvgroup.github.io/pittgoogle-client/listings.html#pub-sub-alert-streams>`_ contain subsets of the alert schema, in some cases with additional added data. Note that due to limitations in the work than can be done with a UDF filter, only the JSON streams are likely to be of any use. If this is an issue, reach out to the Pitt-Google team, as there may be workarounds available. 
+UDF filters are JavaScript functions which get passed a message object. The message contains both an ``attributes`` key with a few items that could be filtered on, and a ``data`` key. For the ``lsst-alerts-json`` Pitt-Google topic, the ``data`` key contains the alert information as set out by the LSST schema. `Other topics <https://mwvgroup.github.io/pittgoogle-client/listings.html#pub-sub-alert-streams>`_ contain subsets of the alert schema, in some cases with additional added data. Note that, due to limitations in the work than can be done with a UDF filter, only the JSON streams are likely to be of any use. If this is an issue, reach out to the Pitt-Google team, as there may be workarounds available. 
 
 .. code-block:: javascript
 
@@ -298,7 +298,7 @@ UDF filters are JavaScript functions which get passed a message object. The mess
       return message;
     }
 
-In order to create a new filtered topic for FASTDB to subscribe to, you should write a new filter (following the `tutorial <https://github.com/mwvgroup/pittgoogle-user-demos/blob/main/pubsub/README.md>`_) and then upstream it to Pitt-Google by creating a GitHub issue on the `broker repository <https://github.com/mwvgroup/Pitt-Google-Broker>`_. Provided the filter is accepted, Pitt-Google will create a new Topic which can be subscribed to by FASTDB.
+In order to create a new filtered topic for FASTDB to subscribe to, you should write a new filter (following the `tutorial <https://github.com/mwvgroup/pittgoogle-user-demos/blob/main/pubsub/README.md>`_) and then upstream it to Pitt-Google by creating a GitHub issue on the `broker repository <https://github.com/mwvgroup/Pitt-Google-Broker>`_. Provided the filter is accepted, the Pitt-Google team will go and create a new Topic which can be subscribed to by FASTDB.
 
 
 Useful Links
