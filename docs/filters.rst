@@ -101,7 +101,7 @@ Creating new filters
 This section details how to create new filters at the broker level for FASTDB to subscribe to, for all of the LSST brokers where that is available. Once you have created your filter, let Rob know the broker and the topic name to get FASTDB subscribed to it. 
 
 
-See the section above for the minimum required data that should be sent with the filtered alerts. Additional data that has been added by the broker will be pulled in by FASTDB automatically and stored in the ``diasource_brokerinfo`` table. 
+See the section above for the minimum required data that should be sent with the filtered alerts. Data outside of this additional minimum data will be placed into the ``diasource_extra`` table. Additional data that has been added to the alert by the broker will be pulled in by FASTDB automatically and stored in the ``diasource_brokerinfo`` table. 
 
 **NOTE:** Much of the broker code is still in progress (as of the writing of this), so make sure to check the linked tutorials for possible changes if you run into any difficulties.
 
