@@ -16,7 +16,8 @@ if ( match == null ) {
     window.alert( "Error!  Failed to parse URL" + window.location );
     die( "Reset password broken." );
 }
-const webapurl = match[2];
+// const webapurl = match[2];
+const webapurl = '@external_url@';
 
 rkAuth.started = false;
 rkAuth.init_interval = window.setInterval(

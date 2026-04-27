@@ -19,11 +19,6 @@ import simplejson
 import textwrap
 import logging
 import traceback
-# ****
-import pprint
-import numpy
-import numbers
-# ****
 
 import psycopg.sql as sql
 import db
@@ -277,19 +272,6 @@ class SourceImporter:
         else:
             with dbcon.cursor.copy( f"COPY {temptable}({','.join(writefields)}) FROM STDIN" ) as pgcopy:
                 for row in mongocursor:
-                    # ****
-                    if 'psfflux' in fields:
-                        if ( ( row['psfflux'] is None ) or
-                             ( isinstance( row['psfflux'], numbers.Real ) and
-                               ( numpy.isnan( row['psfflux'] ) or numpy.isinf( row['psfflux'] ) )
-                              )
-                            ):
-                            strio = io.StringIO()
-                            strio.write( "====================== row:\n" )
-                            pprint.pp( row, strio )
-                            jsondump = simplejson.dumps( row['psfflux'], allow_nan=True )
-                            strio.write( f"simplejson: {jsondump}" )
-                    # ****
                     # This is probably inefficient.  Generator to list to tuple.  python makes
                     #   writing this easy, but it's probably doing multiple gratuitous memory copies
                     data = [ None if row[f] is None
