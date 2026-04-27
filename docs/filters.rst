@@ -3,6 +3,11 @@
 ================
 Filters Overview
 ================
+
+.. contents::
+   :depth: 2
+   :local:
+
  
 This page discusses filters as they are used in the context of the LSST alert stream. Essentially, a filter takes a stream of alerts from a broker, and returns a subset of those alerts based on some scientific criteria. This is useful for narrowing down the vast stream of millions of alerts a day that the Rubin Observatory outputs to something that can be more easily digested and used for specific science cases. For example, a filter could output only objects that look like supernovae, or on objects in a certain area on the sky. 
 
@@ -83,55 +88,62 @@ Some of the requirements for filters include:
 
 
 
-
+Alert Schema Links
+^^^^^^^^^^^^^^^^^^
+* `Full alert schema (avsc format) <https://github.com/lsst/alert_packet/blob/main/python/lsst/alert/packet/schema/10/0/lsst.v10_0.alert.avsc>`_
+* `Full alert schema (schema browser) <https://sdm-schemas.lsst.io/apdb.html>`_
 
 
 Creating new filters
-====================
+^^^^^^^^^^^^^^^^^^^^
 
 
-This section details how to create new filters at the broker level for FASTDB to subscribe to, for all of the LSST brokers where that is available. Once you have created your filter, let Rob know the broker and the topic name to get FASTDB subscribed to it.
+This section details how to create new filters at the broker level for FASTDB to subscribe to, for all of the LSST brokers where that is available. Once you have created your filter, let Rob know the broker and the topic name to get FASTDB subscribed to it. 
+
+
+See the section above for the minimum required data that should be sent with the filtered alerts. Data outside of this additional minimum data will be placed into the ``diasource_extra`` table. Additional data that has been added to the alert by the broker will be pulled in by FASTDB automatically and stored in the ``diasource_brokerinfo`` table. 
 
 **NOTE:** Much of the broker code is still in progress (as of the writing of this), so make sure to check the linked tutorials for possible changes if you run into any difficulties.
 
 
 ALeRCE
-------
+======
 
 **Current status as of April 2026:** no immediate way to create new filters at the broker level. We think filtering would be handled through the 'step' mechanism, but this is unclear. 
 
 ALeRCE is a Kafka-based broker that provides Kafka topic streams that users can subscribe to via a variety of methods. They also have an API interface, a Python client, and a web-based explorer that allow you to access the last 48 hours of data on demand. 
 
 
-Useful Links:
-^^^^^^^^^^^^^
+Useful Links
+------------
 * `ALeRCE <https://science.alerce.online/>`_
 * `Creating a step <https://github.com/alercebroker/pipeline/tree/b58b866b410d4a414ef486d1b44ecb30f5a1aa80/libs/apf>`_
 
 
 AMPEL
------
+=====
 
-**Current status as of April 2026:** have to contact the broker maintainers in order to implement filters. At the moment it looks like filters are implemented in 'Tier 0', but FASTDB might want to have an option to have filters implemented in an additional post-existing-pipeline stage (unless you can implement a filter in Tier 0 and also get all the preprocessing info)
+**Current status as of April 2026:** have to contact the broker maintainers in order to implement filters. At the moment it looks like there are base filters implemented in 'Tier 0', before the enriching and processing of the data, but FASTDB might want to have an option to have filters implemented in an additional post-existing-pipeline stage, since it seems there is also some filtering happening in the final stages. 
 
-Useful Links:
-^^^^^^^^^^^^^
+Useful Links
+------------
 * `AMPEL Github <https://github.com/AmpelAstro/Ampel-LSST>`_
 * `AMPEL Documentation <https://ampelproject.github.io/>`_
+* `example filter <https://github.com/AmpelAstro/Ampel-HU-astro/blob/main/ampel/contrib/hu/t0/DecentVroFilter.py>`_
 
 
 ANTARES
--------
+=======
 
 The ANTARES broker runs an algorithm on its alerts that associates the alert with the nearest point of known past measurements, called a Locus. This is the object they use instead of the Alert object within the filters and send out via stream. They also filter out poor quality and bogus alerts, associate gravitational wave events, and look up associated objects. Finally, they apply the existing filters to the Locus object. The messages in the stream are the Locus objects, which have all `Locus properties <https://antares.noirlab.edu/properties>`_, as well as the alert and all past alerts associated with this object. 
 
-Useful Links: 
-^^^^^^^^^^^^^
+Useful Links
+------------
 * `Filter creation tutorial notebook <https://nsf-noirlab.gitlab.io/csdc/antares/devkit/notebooks/AntaresFilterDevKit/>`_
 * `Existing ANTARES filters <https://gitlab.com/nsf-noirlab/csdc/antares/devkit/-/tree/main/antares_devkit/filters?ref_type=heads>`_
 
-Steps to create a new LSST filter for ANTARES:
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Steps to create a new LSST filter for ANTARES
+---------------------------------------------
 
 1. Create a `GitLab <https://about.gitlab.com>`_ account if you don't already have one. You can use your GitHub account to create your GitLab account.
 2. Fork and clone https://gitlab.com/nsf-noirlab/csdc/antares/devkit
@@ -182,31 +194,33 @@ Steps to create a new LSST filter for ANTARES:
 9. Once your filter pull request has been approved and merged, send the topic name and broker to Rob. 
 
 Babamul
--------
+=======
 
-**Current status as of April 2026:** no immediate way to create filters on Babamul. You need an account to access some of their API and their Kafka documentation, and to use their Python client to consume alerts. There is some API documentation and minimal client documentation. 
+**Current status as of April 2026:** no immediate way to create filters on Babamul. It seems to have a specific set of `filter 'workers' <https://github.com/boom-astro/boom>`_, which is likely where new filters would be added in. Not all of the previous sources data seems to be kept in the alerts that get streamed, and it seems that the diaObject and diaSource data has been combined, so there's only one ra and dec per alert.
 
 
-Babamul is a Kafka-based broker, written in Rust. It seems to have a specific set of `filter 'workers' <https://github.com/boom-astro/boom>`_, which is likely where new filters would be added in. 
+Babamul is a Kafka-based broker, written in Rust. You need an account to access their Kafka documentation, and to use their Python client to consume alerts. There is some API documentation and minimal client documentation.    
 
-Useful Links:
-^^^^^^^^^^^^^
+
+Useful Links
+------------
 * `Babamul <https://babamul.caltech.edu/>`_
 * `Babamul client documentation <https://pypi.org/project/babamul/>`_
 * `Babamul streaming examples <https://github.com/boom-astro/babamul/blob/main/examples/>`_
+* `Babamul's 'BOOM' broker <https://github.com/boom-astro/boom>`_
 
 Fink
-----
+====
 
 The Fink broker is Kafka based. It streams alert data that has been enriched, for example with data from other catalogues and machine learning classification scores. 
 
-Useful Links:
-^^^^^^^^^^^^^
+Useful Links
+------------
 * `Creating a new Fink filter <https://doc.lsst.fink-broker.org/developers/filter_tutorial/>`_
 * `Existing Fink filters <https://github.com/astrolabsoftware/fink-filters/tree/master/fink_filters/rubin/livestream>`_
 
-Steps to create a new LSST filter for Fink:
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Steps to create a new LSST filter for Fink
+------------------------------------------
 
 1. Fork and clone https://github.com/astrolabsoftware/fink-filters.git
 2. Make a new folder in ``/fink_filters/rubin/livestream`` called ``filter_[name]``, where you replace ``[name]`` with the name of your filter. Make sure that your filter name doesn't already exist by taking a look at the other filters that already exist. 
@@ -246,30 +260,54 @@ This will load in the test dataset in ``datatest/rubin_test_data_10_0.parquet`` 
 
 
 Lasair
-------
+======
 
-**Current status as of April 2026:** can make filters using their online builder, using an SQL-style query. To convert this to an active filter, you need a Lasair account. This filter will then output a Kafka topic that you can subscribe to. There is an option to send only the fields that you have filtered on, or the whole alert (without the cutout images). 
+**Current status as of April 2026:** 
+their online builder allows you to make filters using an SQL-style query. To convert this to an active filter, you need to sign up for a Lasair account. This filter will then output a Kafka topic that you can subscribe to. 
+The alerts streamed to the topic can include only the fields that were filtered on, those fields and lightcurve data, or the entire alert packet (excepting the cutout images).
 
-Useful Links:
-^^^^^^^^^^^^^
+While the Kafka topic can be set up to provide the entire alert packet, only a subset of fields are available to filter on. These can be seen in the `Lasair schema browser <https://lasair.lsst.ac.uk/schema/>`_.
+
+Useful Links
+------------
 * `Lasair <https://lasair.lsst.ac.uk/>`_
 * `Making a Lasair filter <https://lasair-lsst.readthedocs.io/en/main/core_functions/make_filter.html>`_
+* `Streaming Lasair alerts with Kafka <https://lasair-lsst.readthedocs.io/en/main/core_functions/alert-streams.html>`_
 
 
 Pitt-Google
------------
+===========
 
 **Current status as of April 2026:** 
-
-Pitt-Google operates a differently than the other brokers, running on Google Cloud's Pub/Sub service instead of Kafka. This means that unlike other brokers, where Python is used to create filters that build upon a Kafka package, Pitt-Google filters use the Pub/Sub-native JavaScript. As of yet it is unclear whether these filters will need to be upstreamed to Pitt-Google who will create a new Pub/Sub topic for FASTDB to listen to; or whether there will be some other middleman "broker" which listens to the un-filtered Pitt-Google stream and re-broadcasts a set of filtered topics, and FASTDB will poll from there.
-
-At present there are only a few attributes which can easily be filtered on, which are best accessed by downloading a test alert from Pitt-Google with their Python client, and viewing the ``downloaded_alert.msg.attributes`` dictionary.
+Pitt-Google operates a differently than the other brokers, as it runs on Google Cloud's Pub/Sub service instead of Kafka. This means that unlike other brokers, where Python is used to create filters that build upon a Kafka package, Pitt-Google filters use the Pub/Sub-native JavaScript. 
 
 The Pitt-Google and Google Pub/Sub documentation both discuss string-based attribute filters, however, given the limited options available within that method of filtering, and the expected desire for more complex filters, the JavaScript UDF method should be used. 
 
-Links:
-^^^^^^
+UDF filters are JavaScript functions which get passed a message object. The message contains both an ``attributes`` key with a few items that could be filtered on, and a ``data`` key. For the ``lsst-alerts-json`` Pitt-Google topic, the ``data`` key contains the alert information as set out by the LSST schema. `Other topics <https://mwvgroup.github.io/pittgoogle-client/listings.html#pub-sub-alert-streams>`_ contain subsets of the alert schema, in some cases with additional added data. Note that, due to limitations in the work than can be done with a UDF filter, only the JSON streams are likely to be of any use. If this is an issue, reach out to the Pitt-Google team, as there may be workarounds available. 
+
+.. code-block:: javascript
+
+    function customFilter(message, _) {
+      // see the Google Pub/Sub documentation for more information about the second (metadata) argument
+
+      attributes = message.attributes; // a select few fields that could be filtered on
+      payload = JSON.parse(message.data); // the contents of the alert following the LSST schema
+
+      if (payload["diaSource"]["isNegative"]) {
+        return null; // return null to stop the message from being included in the stream
+      }
+
+      // you can also add new entries into the attributes or data
+      return message;
+    }
+
+In order to create a new filtered topic for FASTDB to subscribe to, you should write a new filter (following the `tutorial <https://github.com/mwvgroup/pittgoogle-user-demos/blob/main/pubsub/README.md>`_) and then upstream it to Pitt-Google by creating a GitHub issue on the `broker repository <https://github.com/mwvgroup/Pitt-Google-Broker>`_. Provided the filter is accepted, the Pitt-Google team will go and create a new Topic which can be subscribed to by FASTDB.
+
+
+Useful Links
+------------
 * `Pitt-Google tutorial on pulling and filtering alerts <https://github.com/mwvgroup/pittgoogle-user-demos/blob/main/pubsub/README.md>`_
 * `Pitt-Google client documentation <https://mwvgroup.github.io/pittgoogle-client/index.html>`_
-* `Pitt-Google broker documentation <https://pitt-broker.readthedocs.io/en/latest/broker/broker-overview.html>`_
+* `Pitt-Google broker repository <https://github.com/mwvgroup/Pitt-Google-Broker>`_
+* `Google Pub/Sub documentation on UDF filters <https://docs.cloud.google.com/pubsub/docs/smts/udfs-overview>`_
 
