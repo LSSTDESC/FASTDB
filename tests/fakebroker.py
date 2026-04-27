@@ -89,11 +89,6 @@ class Classifier:
         t1 = time.perf_counter()
         for msg in messages:
             t2 = time.perf_counter()
-            # ****
-            # import random
-            # import remote_pdb;
-            # remote_pdb.RemotePdb( '127.0.0.1', random.randint(4000,60000) ).set_trace()
-            ####
             alert = fastavro.schemaless_reader( io.BytesIO(msg), self.alertschema )
             # FOR TESTING PURPOSES
             # Pick out a source whose prvDiaSoruces flux will be set to null
@@ -102,6 +97,23 @@ class Classifier:
                 alert['prvDiaForcedSources'][0]['psfFlux'] = None
                 alert['prvDiaForcedSources'][0]['psfFluxErr'] = None
                 self.logger.warning( f"Set first prvDiaForcedSource flux to null for diasource {alert['diaSourceId']}" )
+
+            # FOR TESTING PURPOSES
+            # Pick a couple of objects to set diaObjectId to 0 and None
+            for matchdiaobjectid, setvalue in zip( [ 1981540, 1419122 ], [ 0, None ] ):
+                if alert['diaSource']['diaObjectId'] == matchdiaobjectid:
+                    self.logger.warning( f"Setting diaObjectid to {setvalue} for "
+                                         f"alert {alert['diaSource']['diaSourceId']}" )
+                    alert['diaSource']['diaObjectId'] = setvalue
+                    if alert['prvDiaSources'] is not None:
+                        for p in alert['prvDiaSources']:
+                            p['diaObjectId'] = setvalue
+                    if alert['prvDiaForcedSources'] is not None:
+                        for p in alert['prvDiaForcedSources']:
+                            # The lsst v10.0 schema doesn't allow for None diaObjectId in diaForcedSource
+                            # p['diaObjectId'] = setvalue
+                            p['diaObjectId'] = 0
+                    alert['diaObject'] = None
 
             alert['brokerName'] = self.brokername
             alert['classifierName'] = self.classifiername
