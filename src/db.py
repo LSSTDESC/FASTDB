@@ -8,6 +8,7 @@
 # import sys
 import os
 import uuid
+import time
 import collections
 import types
 import logging
@@ -17,38 +18,48 @@ from contextlib import contextmanager
 import numpy as np
 import psycopg
 import psycopg.rows
-import psycopg.sql
+from psycopg import sql
 import psycopg.types.json
 import pymongo
 
 import util
 from util import FDBLogger
 
-# These next three are for debugging.  They are used in DBCon.__init__.
-# For normal use, they should be False, as they bloat the logs a lot.
-# They will be ignored if the logging level of FGDBLogger is not DEBUG.
+# These next three are for debugging, as sometimes it's very useful to
+# see the actual queries being sent to the database, and to see what
+# parts of them are taking a long time in the database.  THe actual
+# messages are sent at the DEBUG level, so if FDBLogger isn't set to
+# that level, you won't see the messages.
 #
-# ALSO : use of alwaysexplain and alwaysanalyze makes us susceptible to
-# SQL injection attacks, so we REALLY don't want these set in production
-# databases!!!!!!!  They are for debugging purposes only.  Do not try
-# this at home.  Do not eat, multilate, or spindle.  Consult your doctor
-# if you do not feel extreme anxiety when using these.
+# For normal use, they should be False, as they bloat the logs a lot.
+# What's more, they will cause some failres.  (E.g., it turns out you
+# can't EXPLAIN a DROP, so having _alwaysexplain on causes some of our
+# tests to fail.)
+#
+# BUT, ALSO, CRUCIALLY : use of alwaysexplain and alwaysanalyze makes us
+# susceptible to SQL injection attacks, so we REALLY don't want these
+# set in production databases!!!!!!!  They are for debugging purposes
+# only.  Do not try this at home.  Do not eat, multilate, or spindle.
+# Consult your doctor if you do not feel extreme anxiety when using
+# these.
 #
 # explaining can slow down queries as sometimes it seems that
 # postgres really wants to think about what it's doing before giving you
 # a query plan (I don't know why; is it a pg_hint_plan thing?)
-#
-# We should replace them with configurable options.
 _echoqueries = False
 _alwaysexplain = False
 _alwaysanalyze = False
+
+# The next one is aspirational, not yet implemnted.
+_dumpmongopipeline = False
 
 # The tables here should be in the order they safe to drop.
 # (Insofar as it's safe to drop all your tables....)
 all_table_names = [ 'query_queue',
                     'spectruminfo', 'plannedspectra', 'wantedspectra',
                     'ppdb_alerts_sent', 'ppdb_diaforcedsource', 'ppdb_diasource', 'ppdb_diaobject', 'ppdb_host_galaxy',
-                    'diaforcedsource', 'diasource', 'diaobject', 'root_diaobject','host_galaxy',
+                    'diaforcedsource_extra', 'diaforcedsource', 'diasource_brokerinfo', 'diasource_extra', 'diasource',
+                    'diaobject_host_match', 'diaobject_position', 'diaobject', 'root_diaobject', 'host_galaxy',
                     'diasource_import_time',
                     'processing_version_alias', 'base_procver_of_procver',
                     'processing_version', 'base_processing_version',
@@ -65,25 +76,6 @@ dbhost = config.dbhost
 dbport = config.dbport
 dbuser = config.dbuser
 dbname = config.dbdatabase
-
-# For multiprcoessing debugging
-# import pdb
-# class ForkablePdb(pdb.Pdb):
-#     _original_stdin_fd = sys.stdin.fileno()
-#     _original_stdin = None
-
-#     def __init__(self):
-#         pdb.Pdb.__init__(self, nosigint=True)
-
-#     def _cmdloop(self):
-#         current_stdin = sys.stdin
-#         try:
-#             if not self._original_stdin:
-#                 self._original_stdin = os.fdopen(self._original_stdin_fd)
-#             sys.stdin = self._original_stdin
-#             self.cmdloop()
-#         finally:
-#             sys.stdin = current_stdin
 
 
 # ======================================================================
@@ -133,6 +125,19 @@ def DB( dbcon=None ):
         if conn is not None:
             conn.rollback()
             conn.close()
+
+
+class DBConTimings:
+    def __init__( self ):
+        self.reset()
+
+    def reset( self ):
+        self.last_query_time = None
+        self.last_commit_time = None
+        self.last_fetch_time = None
+        self.tot_query_time = 0.
+        self.tot_commit_time = 0.
+        self.tot_fetch_time = 0.
 
 
 class DBCon:
@@ -187,19 +192,28 @@ class DBCon:
         if con is not None:
             if isinstance( con, DBCon ):
                 self.con = con.con
+                self.timings = con.timings
+                self.echoqueries = con.echoqueries
+                self.alwaysexplain = con.alwaysexplain
+                self.alwaysanalyze = con.alwaysanalyze
             elif isinstance( con, psycopg.Connection ):
                 self.con = con
+                self.timings = DBConTimings()
+                self.echoqueries = _echoqueries
+                self.alwaysexplain = _alwaysexplain
+                self.alwaysanalyze = _alwaysanalyze
             else:
                 raise TypeError( f"con must be None, a DBCon, or a psycopg.Connection, not a {type(con)}" )
             self._con_is_mine = False
         else:
             self.con = psycopg.connect( dbname=dbname, user=dbuser, password=dbpasswd, host=dbhost, port=dbport )
             self._con_is_mine = True
+            self.timings = DBConTimings()
+            self.echoqueries = _echoqueries
+            self.alwaysexplain = _alwaysexplain
+            self.alwaysanalyze = _alwaysanalyze
 
         self.dictcursor = dictcursor
-        self.echoqueries = _echoqueries
-        self.alwaysexplain = _alwaysexplain
-        self.alwaysanalyze = _alwaysanalyze
         self.remake_cursor()
 
 
@@ -209,6 +223,14 @@ class DBCon:
 
     def __exit__( self, type, value, traceback ):
         self.close()
+
+    def reset_time_counters( self ):
+        self.last_query_time = None
+        self.last_fetch_time = None
+        self.last_commit_time = None
+        self.tot_query_time = 0.
+        self.tot_fetch_time = 0.
+        self.tot_commit_time = 0.
 
 
     def remake_cursor( self, dictcursor=None ):
@@ -249,6 +271,14 @@ class DBCon:
             self.con.close()
 
 
+    def rollback( self ):
+        """Rollback any ongoing transaction.
+
+        Also be all cavalier about python function calling overhead.
+
+        """
+        self.con.rollback()
+
     def commit( self ):
         """Commit changes to the database.
 
@@ -257,7 +287,11 @@ class DBCon:
         stick.
 
         """
+        t0 = time.perf_counter()
         self.con.commit()
+        t1 = time.perf_counter()
+        self.timings.last_commit_time = t1 - t0
+        self.timings.tot_commit_time += t1 - t0
         self.remake_cursor( self.curcursorisdict )  # ...is this necessary?
 
 
@@ -268,9 +302,11 @@ class DBCon:
 
         """
 
+        t0 = time.perf_counter()
+
         alreadydid = False
-        if not isinstance( q, ( psycopg.sql.SQL, psycopg.sql.Composed ) ):
-            q = psycopg.sql.SQL( q )
+        if not isinstance( q, ( sql.SQL, sql.Composed ) ):
+            q = sql.SQL( q )
 
         if FDBLogger.instance().get().level <= logging.DEBUG:
             echo = echo if echo is not None else self.echoqueries
@@ -282,13 +318,13 @@ class DBCon:
             nl = '\n'
             if explain:
                 FDBLogger.debug( "Explaining..." )
-                self.cursor.execute( psycopg.sql.SQL("EXPLAIN ") + q, subdict )
+                self.cursor.execute( sql.SQL("EXPLAIN ") + q, subdict )
                 rows = self.cursor.fetchall()
                 dex = 'QUERY PLAN' if self.curcursorisdict else 0
                 FDBLogger.debug( f"Query plan:\n{nl.join([r[dex] for r in rows])}" )
             if analyze:
                 FDBLogger.debug( "Doing EXPLAIN ANALYZE..." )
-                self.cursor.execute( psycopg.sql.SQL("EXPLAIN ANALYZE ") + q, subdict )
+                self.cursor.execute( sql.SQL("EXPLAIN ANALYZE ") + q, subdict )
                 alreadydid = True
                 rows = self.cursor.fetchall()
                 dex = 'QUERY PLAN' if self.curcursorisdict else 0
@@ -304,12 +340,16 @@ class DBCon:
         if ( FDBLogger.instance().get().level <= logging.DEBUG ) and ( echo or explain ):
             FDBLogger.debug( "Query complete." )
 
+        t1 = time.perf_counter()
+        self.timings.last_query_time = t1 - t0
+        self.timings.tot_query_time += t1 - t0
+
     def execute( self, q, subdict={}, silent=False, echo=None, explain=None ):
         """Runs a query, and returns either (rows, columns) or just rows.
 
         Parmaeters
         ----------
-          q : str or psycopg.sql.Composed
+          q : str or sql.Composed
             The query.  Use %(var)s in the string for a substitution, if
             necessary.  The key "var" must then show up in subdict.
 
@@ -346,19 +386,107 @@ class DBCon:
         """
         self.execute_nofetch( q, subdict, echo=echo, explain=explain, analyze=False )
         if self.curcursorisdict:
-            return self.cursor.fetchall()
+            if self.cursor.description is None:
+                return None
+            else:
+                t0 = time.perf_counter()
+                rval = self.cursor.fetchall()
+                t1 = time.perf_counter()
+                self.timings.last_fetch_time = t1 - t0
+                self.timings.tot_fetch_time += t1 - t0
+                return rval
         else:
             if self.cursor.description is None:
                 return None, None
+            t0 = time.perf_counter()
             rows = self.cursor.fetchall()
             cols = [ desc[0] for desc in self.cursor.description ]
+            t1 = time.perf_counter()
+            self.timings.last_fetch_time = t1 - t0
+            self.timings.tot_fetch_time += t1 - t0
             return rows, cols
 
 
 # ======================================================================
 
+def construct_pgsql_where_clause( searchspec, where="WHERE", **kwargs ):
+    # See spectrum.py::get_spectrum_info for an exmple
+
+    q = sql.SQL( "" )
+    subdict = {}
+
+    for field, fieldinfo in searchspec.items():
+        if field in kwargs:
+            if util.isSequence( kwargs[field] ):
+                if not fieldinfo[ 'mult' ]:
+                    raise ValueError( f"Field {field} can't be a list" )
+                q += sql.SQL( "{where} {field}=ANY(%({sfield})s)" ).format( where=sql.SQL(where),
+                                                                            field=sql.Identifier(field),
+                                                                            sfield=sql.SQL(field) )
+                subdict[field] = list( kwargs[field] )
+            else:
+                q += sql.SQL( "{where} {field}=%({sfield})s" ).format( where=sql.SQL(where),
+                                                                       field=sql.Identifier(field),
+                                                                       sfield=sql.SQL(field) )
+                subdict[field] = kwargs[field]
+            where = " AND"
+            del kwargs[field]
+
+        if f'{field}_contains' in kwargs:
+            if not fieldinfo['substr']:
+                raise ValueError( f'Field {field} doesn\'t work with "contains"' )
+            if util.isSequence( kwargs[f'{field}_contains'] ) and ( len( kwargs[f'{field}_contains'] ) > 0 ):
+                q += sql.SQL( "{where} (" ).format( where=sql.SQL(where) )
+                first = True
+                for i, val in enumerate( kwargs[f'{field}_contains'] ):
+                    if first:
+                        first = False
+                    else:
+                        q += sql.SQL( " OR " )
+                    q += ( sql.SQL( "{field} LIKE %({sfield}_contains_{i})s" )
+                           .format( field=sql.Identifier(field),
+                                    sfield=sql.SQL(field),
+                                    i=sql.SQL(str(i)) ) )
+                    subdict[f'{field}_contains_{i}'] = f'%{val}%'
+                q += sql.SQL( ")" )
+                where = " AND"
+            else:
+                q += sql.SQL( "{where} {field} LIKE %({sfield}_contains)s" ).format( where=sql.SQL(where),
+                                                                                           field=sql.Identifier(field),
+                                                                                           sfield=sql.SQL(field) )
+                subdict[f'{field}_contains'] = f"%{kwargs[f'{field}_contains']}%"
+                where = " AND"
+            del kwargs[f'{field}_contains']
+
+        if f'{field}_min' in kwargs:
+            if not fieldinfo['minmax']:
+                raise ValueError( f'Field {field} doesn\'t work with "min"' )
+            if util.isSequence( f'{field}_max' ):
+                raise ValueError( f"{field}_max can't be a list" )
+            q += sql.SQL( "{where} {field}>=%({sfield}_min)s" ).format( where=sql.SQL(where),
+                                                                        field=sql.Identifier(field),
+                                                                        sfield=sql.SQL(field) )
+            subdict['f{field}_min'] = kwargs[f'{field}_min']
+            del kwargs[f'{field}_min']
+
+        if f'{field}_max' in kwargs:
+            if not fieldinfo['minmax']:
+                raise ValueError( f'Field {field} doesn\'t work with "max"' )
+            if util.isSequence( f'{field}_max' ):
+                raise ValueError( f"{field}_max can't be a list" )
+            q += sql.SQL( "{where} {field}<=%({sfield}_max)s" ).format( where=sql.SQL(where),
+                                                                        field=sql.Identifier(field) )
+            subdict[f'{field}_max'] = kwargs[f'{field}_max']
+            where = " AND"
+            del kwargs[f'{field}_max']
+
+    return q, subdict, set(kwargs.keys())
+
+
+# ======================================================================
+
 @contextmanager
-def MG( client=None ):
+def MG( client=None, readonly=False ):
     """Get a mongo client in a context manager.
 
     It has read/write access to the broker message database (which is
@@ -378,12 +506,17 @@ def MG( client=None ):
     try:
         host = os.getenv( "MONGODB_HOST" )
         dbname = os.getenv( "MONGODB_DBNAME" )
-        user = os.getenv( "MONGODB_ALERT_WRITER_USER" )
-        password = os.getenv( "MONGODB_ALERT_WRITER_PASSWD" )
+        if readonly:
+            user = os.getenv( "MONGODB_ALERT_READER_USER" )
+            password = os.getenv( "MONGODB_ALERT_READER_PASSWD" )
+            errtext = "MONGODB_ALERT_READER_USER, MONGODB_ALERT_READER_PASSWD"
+        else:
+            user = os.getenv( "MONGODB_ALERT_WRITER_USER" )
+            password = os.getenv( "MONGODB_ALERT_WRITER_PASSWD" )
+            errtext = "MONGODB_ALERT_WRITER_USER, MONGODB_ALERT_WRITER_PASSWD"
         if any( i is None for i in [ host, dbname, user, password ] ):
-            raise RuntimeError( "Failed to make mongo client; make sure all env vars are set: "
-                                "MONGODB_HOST, MONGODB_DBNAME, MONGODB_ALERT_WRITER_USER, "
-                                "MONGODB_ALERT_WRITER_PASSWD" )
+            raise RuntimeError( f"Failed to make mongo client; make sure all env vars are set: "
+                                f"MONGODB_HOST, MONGODB_DBNAME, {errtext} " )
         client = pymongo.MongoClient( f"mongodb://{user}:{password}@{host}:27017/"
                                       f"{dbname}?authSource={dbname}" )
         yield client
@@ -398,6 +531,54 @@ def get_mongo_collection( mongoclient, collection_name ):
     mongodb = getattr( mongoclient, os.getenv( "MONGODB_DBNAME" ) )
     collection = getattr( mongodb, collection_name )
     return collection
+
+
+class MGCon:
+    def __init__( self, mg=None, readonly=False ):
+        global _dumpmongopipeline
+
+        if mg is not None:
+            if isinstance( mg, MGCon ):
+                self.client = mg.client
+            elif isinstance( mg, pymongo.MongClient ):
+                self.client = mg
+            else:
+                raise TypeError( f"mg must be None, a MGCon, or a pymongo.MongoClient, not a {type(mg)}" )
+            self._client_is_mine = False
+        else:
+            host = os.getenv( "MONGODB_HOST" )
+            dbname = os.getenv( "MONGODB_DBNAME" )
+            if readonly:
+                user = os.getenv( "MONGODB_ALERT_READER_USER" )
+                password = os.getenv( "MONGODB_ALERT_READER_PASSWD" )
+                errtext = "MONGODB_ALERT_READER_USER, MONGODB_ALERT_READER_PASSWD"
+            else:
+                user = os.getenv( "MONGODB_ALERT_WRITER_USER" )
+                password = os.getenv( "MONGODB_ALERT_WRITER_PASSWD" )
+                errtext = "MONGODB_ALERT_WRITER_USER, MONGODB_ALERT_WRITER_PASSWD"
+            if any( i is None for i in [ host, dbname, user, password ] ):
+                raise RuntimeError( f"Failed to make mongo client; make sure all env vars are set: "
+                                    f"MONGODB_HOST, MONGODB_DBNAME, {errtext} " )
+            self.client = pymongo.MongoClient( f"mongodb://{user}:{password}@{host}:27017/"
+                                               f"{dbname}?authSource={dbname}" )
+            self._client_is_mine = True
+
+        self._dumpmongopipeline = _dumpmongopipeline
+        self.db = getattr( self.client, os.getenv( "MONGODB_DBNAME" ) )
+
+    def __enter__( self ):
+        return self
+
+    def __exit__( self, type, value, traceback ):
+        self.close()
+
+    def close( self ):
+        if self._client_is_mine:
+            self.client.close()
+
+    def collection( self, collection_name ):
+        return getattr( self.db, collection_name )
+
 
 
 # ======================================================================
@@ -451,8 +632,15 @@ class ColumnMeta:
         self.column_name = column_name
         self.data_type = data_type
         self.column_default = column_default
-        self.is_nullable = is_nullable
         self.element_type = element_type
+        if not isinstance( is_nullable, bool ):
+            # Try to convert is_nullable to a bool
+            if is_nullable == 'YES':
+                self.is_nullable = True
+            elif is_nullable == 'NO':
+                self.is_nullable = False
+            else:
+                raise RuntimeError( "Postgres must have changed their information_schema spec." )
 
 
     def __getitem__( self, key ):
@@ -461,6 +649,21 @@ class ColumnMeta:
     @property
     def pytype( self ):
         return self.typedict[ self.data_type ]
+
+
+    def null_to_nan_if_necessary( self, pyobj, exception_on_non_float=False ):
+        if ( self.is_nullable ) or ( pyobj is not None ):
+            return pyobj
+
+        if self.data_type in { 'real', 'double_precision' }:
+            return np.nan
+
+        if exception_on_non_float:
+            raise ValueError( f"I don't know how to make a NaN for postgres data type {self.data_type}" )
+        else:
+            return pyobj
+
+        raise RuntimeError( "This should never happen." )
 
 
     def py_to_pg( self, pyobj ):
@@ -507,7 +710,6 @@ class ColumnMeta:
 
         return pgobj
 
-
     def __repr__( self ):
         if self.data_type == 'ARRAY':
             return f"ColumnMeta({self.column_name} [ARRAY({self.element_type})]"
@@ -547,12 +749,12 @@ class DBBase:
     # Often this can be left as is, but subclasses might want to override it.
     colconverters = {}
 
-    @property
-    def tablemeta( self ):
+    @classmethod
+    def tablemeta( cls ):
         """A dictionary of colum_name : ColumMeta."""
-        if self._tablemeta is None:
-            self.load_table_meta()
-        return self._tablemeta
+        if cls._tablemeta is None:
+            cls.load_table_meta()
+        return cls._tablemeta
 
     @property
     def pks( self ):
@@ -560,14 +762,20 @@ class DBBase:
 
 
     @classmethod
-    def all_columns_sql( cls, prefix=None ):
-        """Returns a psycopg.sql.SQL thingy with all columns comma separated."""
+    def all_columns_sql( cls, prefix=None, omit=[], asmap={} ):
+        """Returns a sql.SQL thingy with all columns comma separated."""
         if cls._tablemeta is None:
             cls.load_table_meta()
-        if prefix is None:
-            return psycopg.sql.SQL(',').join( psycopg.sql.Identifier(i) for i in cls._tablemeta.keys() )
-        else:
-            return psycopg.sql.SQL(',').join( psycopg.sql.Identifier(prefix, i) for i in cls._tablemeta.keys() )
+        mess = []
+        for col in cls._tablemeta.keys():
+            if col in omit:
+                continue
+            thing = sql.Identifier( col ) if prefix is None else sql.Identifier( prefix, col )
+            if col in asmap:
+                thing += sql.SQL( " AS " ) + sql.Identifier( asmap[col] )
+            mess.append( thing )
+
+        return sql.SQL(',').join( mess )
 
     @classmethod
     def load_table_meta( cls, dbcon=None ):
@@ -723,10 +931,10 @@ class DBBase:
 
         subdict = {}
         if columns is not None:
-            if any( c not in self.tablemeta for c in columns ):
+            if any( c not in self.tablemeta() for c in columns ):
                 raise ValueError( f"Not all of the columns in {columns} are in the table" )
         else:
-            columns = self.tablemeta.keys()
+            columns = self.tablemeta().keys()
 
         for col in columns:
             if hasattr( self, col ):
@@ -740,12 +948,55 @@ class DBBase:
                     #     get the default value.
                     # How to know which is the case?  Assume that if the column_default is None,
                     # then we're in case (1), but if it's not None, we're in case (2).
-                    if self.tablemeta[col]['column_default'] is None:
+                    if self.tablemeta()[col]['column_default'] is None:
                         subdict[ col ] = None
                 else:
-                    subdict[ col ] = self.tablemeta[ col ].py_to_pg( val )
+                    subdict[ col ] = self.tablemeta()[ col ].py_to_pg( val )
 
         return subdict
+
+
+    # def type_normalize_dict( self, row, fields=None, inplace=False ):
+    #     """Convert fields in a dictionary to the expected python types."""
+
+    #     if not isinstance( row, dict ):
+    #         raise TypeError( f"row must be a dict, not a {type(row)}" )
+
+    #     tablemeta = self.tablemeta
+    #     typedict = ColumnMeta.typedict
+
+    #     outrow = row if inplace else {}
+
+    #     if fields is None:
+    #         fields = list( row.keys() )
+
+    #     for field in fields:
+    #         if field not in tablemeta.keys():
+    #             raise ValueError( f"Unknown column {field} for table {self.__tablename__}" )
+
+    #         elif row['field'] is None:
+    #             if not tablemeta[field].is_nullable():
+    #                 raise ValueError( f"Got None for column {field} of table {self.__tablename__}, "
+    #                                   f"but this column is not nullable." )
+    #             outrow['field'] = None
+
+    #         elif tablemeta[field].data_type == "ARRAY":
+    #             if tablemeta[field].element_type not in typedict:
+    #                 raise ValueError( f"Table {self.__tablename__} column {field} is an array of type "
+    #                                   f"{tablemeta[field].element_type}, but I don't know how to deal with that." )
+    #             if not util.isSequence( row[field] ):
+    #                 raise TypeError( f"Table {self.__tablename__} column {field} is an array, but got "
+    #                                  f"a {type(row[field])}" )
+    #             outrow[field] = [ typedict[field]( r ) for r in row[field] )
+
+    #         elif tablemeta[field].data_type not in typedict:
+    #             raise ValueError( f"Table {self.__tablename__} column {field} has data type "
+    #                               f"{tablemeta[field].data_type} that I don't know how to handle" )
+
+    #         else:
+    #             outrow[field] = typedict[field]( row[field] )
+
+    #     return outrow
 
 
     @classmethod
@@ -1197,7 +1448,7 @@ class BaseProcessingVersion( DBBase ):
     _pk = [ 'id' ]
 
     @classmethod
-    def base_procver_id( cls, base_processing_version, dbcon=None ):
+    def base_procver_id( cls, base_processing_version, table=None, dbcon=None ):
         """Return the uuid of base_processing_version.
 
         Parameters
@@ -1207,6 +1458,10 @@ class BaseProcessingVersion( DBBase ):
             version of a UUID, UUIDifies it and returns it.  Otherwise,
             queries the database for the base processing version and returns
             the UUID.
+
+          table: str, default None
+            Required if base_processing_version is not a UUID.  Ignored
+            if base_processing_version is a UUID.
 
          dbcon: db.DBCon or psycopg2.connection or NOne
            Databse connection to use.  If None, and one is needed, will
@@ -1225,11 +1480,15 @@ class BaseProcessingVersion( DBBase ):
             return bpv
         except Exception:
             pass
+        if table is None:
+            raise ValueError( "table is required when base_processing_version is not a uuid" )
         with DBCon( dbcon ) as con:
-            rows, _cols = con.execute( "SELECT id FROM base_processing_version WHERE description=%(pv)s",
-                                       { 'pv': base_processing_version } )
+            rows, _cols = con.execute( "SELECT id FROM base_processing_version "
+                                       "WHERE description=%(pv)s AND _table=%(table)s",
+                                       { 'pv': base_processing_version, 'table': table } )
             if len(rows) == 0:
-                raise ValueError( f"Unknown base processing version {base_processing_version}" )
+                raise ValueError( f"Unknown base processing version {base_processing_version} "
+                                  f"for table {table}" )
             return rows[0][0]
 
 
@@ -1264,8 +1523,11 @@ class ProcessingVersion( DBBase ):
 
         """
 
-        if isinstance( processing_version, uuid.UUID ):
+        if isinstance( processing_version, ProcessingVersion ):
+            return processing_version.id
+        elif isinstance( processing_version, uuid.UUID ):
             return processing_version
+
         try:
             ipv = uuid.UUID( processing_version )
             return ipv
@@ -1283,7 +1545,7 @@ class ProcessingVersion( DBBase ):
             return rows[0][0]
 
 
-    def highest_prio_base_procver( self, dbcon=None ):
+    def highest_prio_base_procver( self, table, dbcon=None ):
         """Returns the highest priority base_processing_version associated with this processing version.
 
         Be careful with this.  If you don't fully understand the
@@ -1298,6 +1560,9 @@ class ProcessingVersion( DBBase ):
 
         Parameters
         ----------
+          table : str
+            The table whose base processing version we want.  Required
+
           dbcon : DBCon or psycopg.Connection, default None
             Database connection to use.  If not given, will open a new
             one and close it when done.
@@ -1311,13 +1576,31 @@ class ProcessingVersion( DBBase ):
             bpv = con.execute( "SELECT b.* FROM base_processing_version b\n"
                                "INNER JOIN base_procver_of_procver j ON j.base_procver_id=b.id\n"
                                "WHERE j.procver_id=%(pv)s\n"
+                               "  AND j._table=%(tab)s\n"
                                "ORDER BY j.priority DESC\n"
                                "LIMIT 1",
-                               { 'pv': self.id } )
+                               { 'pv': self.id, 'tab': table } )
             if len(bpv) == 0:
-                raise ValueError( f"Can't find base processing version for processing version {self.description}" )
+                raise ValueError( f"Can't find base processing version for processing version "
+                                  f"{self.description} and table {table}" )
             bpv = bpv[0]
             return BaseProcessingVersion( **bpv, noconvert=False )
+
+
+    def base_procvers( self, table, dbcon=None ):
+        """Return list BaseProcessingVersions sorted from high to low for this processing version and table."""
+
+        with DBCon( dbcon, dictcursor=True ) as con:
+            bpv = con.execute( "SELECT b.* FROM base_processing_version b\n"
+                               "INNER JOIN base_procver_of_procver j ON j.base_procver_id=b.id\n"
+                               "WHERE j.procver_id=%(pv)s\n"
+                               "  AND j._table=%(tab)s\n"
+                               "ORDER BY j.priority DESC",
+                               { 'pv': self.id, 'tab': table } )
+            if len(bpv) == 0:
+                return []
+            else:
+                return [ BaseProcessingVersion( **r, noconvert=False ) for r in bpv ]
 
 
 # ======================================================================
@@ -1326,14 +1609,6 @@ class ProcessingVersionAlias( DBBase ):
     __tablename__ = "processing_version_alias"
     _tablemeta = None
     _pk = [ 'description' ]
-
-
-# ======================================================================
-
-class HostGalaxy( DBBase ):
-    __tablename__ = "host_galaxy"
-    _tablemeta = None
-    _pk = [ 'id' ]
 
 
 # ======================================================================
@@ -1354,11 +1629,45 @@ class DiaObject( DBBase ):
 
 # ======================================================================
 
+class DiaObjectPosition( DBBase ):
+    __tablename__ = "diaobject_position"
+    _tablemeta = None
+    _pk= [ 'diaobjectid', 'base_procver_id' ]
+
+
+# ======================================================================
+
+class HostGalaxy( DBBase ):
+    __tablename__ = "host_galaxy"
+    _tablemeta = None
+    _pk = [ 'id' ]
+
+
+# ======================================================================
+
+class DiaObjectHostMatch( DBBase ):
+    __tablename__ = "diaobject_host_match"
+    _tablemeta = None
+    _pk = [ 'diaobjectid', 'host_galaxy_id', 'base_procver_id' ]
+
+
+# ======================================================================
+
 class DiaSource( DBBase ):
     __tablename__ = "diasource"
     _tablemeta = None
-    _pk = [ 'base_procver_id', 'diaobjectid', 'visit' ]
+    _pk = [ 'diasourceid', 'base_procver_id' ]
 
+
+# ======================================================================
+
+class DiaSourceExtra( DBBase ):
+    __tablename__ = "diasource_extra"
+    _tablemeta = None
+    _pk = [ 'diasourceid', 'base_procver_id' ]
+
+    # This is a mapping of the bit in the flags field
+    #   to the boolean in the lsst v10 alert
     _flags_bits = { 0x00000001: 'centroid_flag',
                     0x00000002: 'apFlux_flag',
                     0x00000004: 'apFlux_flag_apertureTruncated',
@@ -1379,6 +1688,8 @@ class DiaSource( DBBase ):
                     0x00020000: 'glint_trail',
                    }
 
+    # This is a mapping of the bit in the pixelflags field
+    #   to the boolean in the lsst v10 alert
     _pixelflags_bits = { 0x00000001: 'pixelFlags',
                          0x00000002: 'pixelFlags_bad',
                          0x00000004: 'pixelFlags_cr',
@@ -1404,10 +1715,26 @@ class DiaSource( DBBase ):
 
 # ======================================================================
 
+class DiaSourceBrokerInfo( DBBase ):
+    __tablename__ = "diasource_brokerinfo"
+    _tablemeta = None
+    _pk = [ 'brokername', 'topic', 'diasourceid', 'base_procver_id' ]
+
+
+# ======================================================================
+
 class DiaForcedSource( DBBase ):
     __tablename__ = "diaforcedsource"
     _tablemeta = None
-    _pk = [ 'base_procver_id', 'diaobjectid', 'visit' ]
+    _pk = [ 'diaforcedsourceid', 'base_procver_id' ]
+
+
+# ======================================================================
+
+class DiaForcedSourceExtra( DBBase ):
+    __tablename__ = "diaforcedsource_extra"
+    _tablemeta = None
+    _pk = [ 'diaforcedsourceid', 'base_procver_id' ]
 
 
 # ======================================================================

@@ -2,6 +2,8 @@ import sys
 import os
 import io
 import re
+import random
+import collections
 import time
 import yaml
 import datetime
@@ -12,15 +14,18 @@ import logging
 import argparse
 import multiprocessing
 import signal
+import simplejson
 
+import numpy as np
 import confluent_kafka
 import fastavro
-from pymongo import MongoClient
+import pymongo
 
+import db
 from kafka_consumer import KafkaConsumer
 
 # Default location of BrokerMessage schema
-_default_brokermessage_schemafile = "/fastdb/share/avsc/fastdb_9_0_2.BrokerMessage.avsc"
+_default_brokermessage_schemafile = "/fastdb/share/avsc/fastdb.v10_0_0.BrokerMessage.avsc"
 
 from concurrent.futures import ThreadPoolExecutor  # for pittgoogle
 import pittgoogle
@@ -31,6 +36,71 @@ _logdir = pathlib.Path( os.getenv( 'LOGDIR', '/logs' ) )
 
 class BrokerConsumer:
     """A class for consuming broker messages from brokers.
+
+    It populates the following collections in mongo, whose schema are
+    based on the postgres tables.  These are caches; source_importer.py
+    merges them into their permanent storage.  All of these collections
+
+       {mongodb_collection_base}_diaobject
+          { 'diaobjectid': long long [INDEX],
+            'savetime': datetime [INDEX],
+            'diaobjectposition: diaobject_position columns (omit: diaobjectid, base_procver_id, created_at)
+          }
+
+       {mongodb_collection_base}_diasource
+          { 'diasourceid': long long [INDEX],
+            'savetime': datetime [INDEX]
+            [ diasource columns (omit: base_procver_id) ]
+          }
+
+       {mongodb_collection_base}_diasource_extra,
+          { 'diasourceid': long long [INDEX],
+            'savetime': datetime [INDEX]
+            [ diasource_extra columns (omit: base_procver_id) ]
+          }
+
+       {mongodb_collection_base}_diaforcedsource
+          { 'diaforcedsourceid': long long [INDEX],
+            'savetime': datetime [INDEX],
+            [ diaforcedsource columns (omit: base_procver_id) ]
+          }
+
+       {mongodb_collection_base}_diaforcedsource_extra
+          { 'diaforcedsourceid': long long [INDEX],
+            'savetime': datetime [INDEX],
+            [ diaforcedsource_extra columns (omit: base_procver_id) ]
+          }
+
+       {mongodb_collection_base}_thumbnails
+          { 'diasourceid': long long [INDEX],
+            'savetime': datetime [INDEX],
+            'cutoutdifference': bytes,
+            'cutoutscience': bytes,
+            'cutouttemplate': bytes
+          }
+
+       {mongodb_collection_base}_brokerinfo
+          { 'brokername': str,
+            'topic': str,
+            'diasourceid': long long [INDEX],
+            'diaobjectid': long long,
+            'prv_diasourceid': array of long long or null,
+            'prv_diaforcedsourceid': array of long long or null,
+            'savetime': datetime [INDEX],
+            'msgtime': str,
+            'info': dict
+          }
+
+
+    Optionally, there's also {mongodb_collection_base}_alertcache that has:
+      { 'topic': str
+        'msgoffset': int?
+        'timestamp': datetime,
+        'savetime': datetime,
+        'msg': dict
+      }
+    (If this is included it doubles the amount of stuff saved in mongo!
+    This is really here only for debugging purposes.)
 
     This class will work as-is only if the broker is a kafka server
     requiring no authentication (though you may be able to get it to
@@ -52,11 +122,18 @@ class BrokerConsumer:
 
     """
 
-    def __init__( self, server, groupid, topics=None, updatetopics=False, extraconfig={},
-                  schemaless=True, schemafile=None, pipe=None, loggername="BROKER", loggername_prefix='',
-                  nomsg_sleeptime=5,
-                  mongodb_host=None, mongodb_dbname=None, mongodb_collection=None,
-                  mongodb_user=None, mongodb_password=None ):
+    _standard_lsst_alert_fields = [ 'diaSourceId', 'observation_reason', 'target_name',
+                                    'diaSource', 'prvDiaSources', 'prvDiaForcedSources',
+                                    'diaObject', 'ssSource', 'mpc_orbits',
+                                    'cutoutDifference', 'cutoutScience', 'cutoutTemplate' ]
+
+    def __init__( self, server, groupid, topics=None, schema_topic=None,
+                  updatetopics=False, extraconfig={},
+                  schemaless=False, schema_in_key=False, schemafile=None,
+                  brokername_for_alerts=None, brokername_key=None,
+                  mongodb_collection_base=None, cache_alerts=False, no_wrangle=False,
+                  pipe=None, loggername="BROKER", loggername_prefix='',
+                  consume_timeout=1, nomsg_sleeptime=5, batch_size=1000 ):
         """Create a connection to a kafka server and consumer broker messages.
 
         Note that you often (but not always) want to instantiate a subclass.
@@ -73,6 +150,12 @@ class BrokerConsumer:
             Topics to subscribe to.  If None, won't subscribe on object
             construction.
 
+          schema_topcis : list, str, or None
+            If not None, must be a list of the same length as topics (or
+            a str if topics is a str).  This is a topic that holds the
+            schema for the messages.  Doesn't make sense unless
+            schemaless is True.
+
           updatetopics : bool, default False
             True if topic list needs to be updated dynamically.  This is
             implemented by some subclasses, is not supported directly by
@@ -84,24 +167,66 @@ class BrokerConsumer:
             auto.offset.reset, or group.id; those are automatically
             constructed and sent.)
 
-          schemaless : bool, default True
+          schemaless : bool, default False
             If True, expecting schemaless avro messages.  If False,
             expecting embedded schema.  Ignored if you pass a handler to
-            poll.  Currently can't handle False.
+            poll.
+
+          schema_in_key : bool, default False
+            Ignored if schemaless is True.  If schemaless is False, this
+            means that in the kafka messages, the schem is expected to
+            be embedded in the message key (which is the way Fink does
+            it, different from fakebroker).
 
           schemafile : Path or str
-            The .avsc the that holds the schema of the messsages we'll be
-            ingesting.  Required if schemaless is True (which, right now, it
-            has to be).  The schema must be named properly for its namespace,
-            and any other schema in the same namespace referred to by that
-            .avsc file must be in the same directory with the right names.  If
-            not given, uses the location where it is find in the docker image
-            we use.
+            The .avsc the that holds the schema of the messsages we'll
+            be ingesting.  Required if schemaless is True.  The schema
+            must be named properly for its namespace, and any other
+            schema in the same namespace referred to by that .avsc file
+            must be in the same directory with the right names.  If not
+            given, uses the location where it is find in the docker
+            image we use.
+
+          brokername_for_alerts : str, default None
+            If given, then when the mongo database is populated, the
+            'brokername' field will have this value.  If neither this
+            nor brokername_key is given, then brokername will be
+            cls._brokername.
+
+          brokername_key : str, default None
+            If given, then when the mongo database is populated, the
+            'brokername' field will have the value from this key of the
+            message.  If neither this nor brokername_for_alerts is given,
+            then brokername will have the class name.
+
+          mongodb_collection_base : str, required
+            Will create several collections in the mongo database and write to them:
+              {mongodb_collection_base}_diaobject
+              {mongodb_collection_base}_diasource
+              {mongodb_collection_base}_diasource_extra
+              {mongodb_collection_base}_diaforcedsource
+              {mongodb_collection_base}_diaforcedsource_extra
+              {mongodb_collection_base}_thumbnails
+              {mongodb_collection_base}_brokerinfo
+              {mongodb_collection_base}_alertcache  [ empty unless cache_alerts is True ]
+
+          cache_alerts : bool, default False
+             If True, make almost-raw copies of the alerts into
+             {mongodb_collection_base}_alertcache, for debugging
+             purposes.  Only set this to True when you're debugging, as
+             it doubles the amount of stuff saved to the mongodb.
+
+          no_wrangle : bool, default False
+             Requires cache_alerts.  If true, the only the
+             {mongdb_collection_base}_alertcache collection will be
+             written, not the wrangled ones with parsed information.
+             Mostly useful for debugging purposes.  May not be
+             implemented in all subclasses.
 
           pipe : multiprocessing.Pipe or None
             If not None, a call to poll will regularly send hearbeats to
             this Pipe.  It will also poll the pipe for messages.
-            (Currentl;y ,the only message it will handle is a request to
+            (Currently ,the only message it will handle is a request to
             die.)
 
           loggername : str, default "BROKER"
@@ -110,25 +235,17 @@ class BrokerConsumer:
           loggername_prefix : str, default ""
             Used in headers of log messages
 
+          consume_timeout : int (float?), default 1
+            Number of seconds the kafka consumer should wait to see if it
+            can fill it's batch size of messages.
+
           nomsg_sleeptime : int, default 5
             The KafkaConsumer (src/kafkaconsumer.py) will sleep this
             many seconds between not finding any new messages and
             polling again to ask for new messages.
 
-          mongodb_host : str, default $MONGODB_HOST
-            The host where Mongo is running
-
-          mongodb_dbname : str, default $MONGODB_DBNAME
-            The database name
-
-          mongodb_collection : str, default $MONGODB_DEFAULT_COLLECTION
-            The collection
-
-          mongodb_user : str, default $MONGODB_ALERT_WRITER_USER
-            Username that can write alerts to mongodb_collection
-
-          mongodb_password : str, default $MONGODB_ALERT_WRITER_PASSWD
-            Password for mongodb_user.
+          batch_size : int, default 1000
+            Try to consume this many messages at once.
 
         """
 
@@ -144,8 +261,8 @@ class BrokerConsumer:
                                          f'%(levelname)s] - %(message)s' ),
                                        datefmt='%Y-%m-%d %H:%M:%S' )
         logout.setFormatter( formatter )
-        # self.logger.setLevel( logging.INFO )
-        self.logger.setLevel( logging.DEBUG )
+        self.logger.setLevel( logging.INFO )
+        # self.logger.setLevel( logging.DEBUG )
 
         self.countlogger = logging.getLogger( f"countlogger_{loggername_prefix}{loggername}" )
         self.countlogger.propagate = False
@@ -167,62 +284,84 @@ class BrokerConsumer:
         self.pipe = pipe
         self.server = server
         self.groupid = groupid
-        self.topics = topics
-        self._updatetopics = updatetopics
-        self.extraconfig = extraconfig
-        self.nomsg_sleeptime = nomsg_sleeptime
+        if self.groupid is None:
+            raise ValueError( "groupid is required" )
 
         self.schemaless = schemaless
-        if not self.schemaless:
-            self.countlogger.error( "CRASHING.  I only know how to handle schemaless streams." )
-            raise RuntimeError( "I only know how to handle schemaless streams" )
-        self.schemafile = schemafile
-        # ****
-        self.logger.warning( f"self.schemafile = {self.schemafile}" )
-        # ****
-        self.schema = fastavro.schema.load_schema( self.schemafile )
-
-        self.nmessagesconsumed = 0
-
-        mongoconfigs = [ ( 'mongodb_host', mongodb_host, 'MONGODB_HOST' ),
-                         ( 'mongodb_dbname', mongodb_dbname, 'MONGODB_DBNAME' ),
-                         ( 'mongodb_collection', mongodb_collection, 'MONGODB_DEFAULT_COLLECTION' ),
-                         ( 'mongodb_user', mongodb_user, 'MONGODB_ALERT_WRITER_USER' ),
-                         ( 'mongodb_password', mongodb_password, 'MONGODB_ALERT_WRITER_PASSWD' ) ]
-        missing = []
-        for mc in mongoconfigs:
-            setattr( self, mc[0], mc[1] if mc[1] is not None else os.getenv( mc[2] ) )
-            if getattr( self, mc[0] ) is None:
-                missing.append( mc )
-            else:
-                setattr( self, mc[0], urllib.parse.quote_plus( getattr( self, mc[0] ) ) )
-        if len( missing ) > 0:
-            strio = io.StringIO()
-            strio.write( "Must provide all of:\n" )
-            for mc in mongoconfigs:
-                strio.write( f"    * {mc[0]}, or set env var {mc[2]}\n" )
-            strio.write( f"Missing: {','.join( [ mc[0] for mc in missing ] ) }" )
-            self.logger.error( strio.getvalue () )
-            raise ValueError( "Incomplete mongo config" )
-
-        self.logger.info( f"Writing broker messages to monogdb {self.mongodb_dbname} "
-                          f"collection {self.mongodb_collection}" )
-
-
-    def create_connection( self, reset=False ):
-        countdown = 5
-        if reset:
-            self.countlogger.info( "*************** Resetting to start of broker kafka stream ***************" )
+        self.schema_in_key=schema_in_key
+        if schemafile is None:
+            self.schemafile = None
+            self.schema = None
         else:
-            self.countlogger.info( "*************** Connecting to kafka stream without reset  ***************" )
+            self.schemafile = schemafile
+            self.schema = fastavro.schema.load_schema( self.schemafile )
+
+        if isinstance( topics, str ):
+            self.topics = [ topics ]
+        elif isinstance( topics, collections.abc.Sequence ):
+            self.topics = list( topics )
+        elif topics is not None:
+            raise TypeError( f"topics must be a str or a list of str, got a {type(topics)}" )
+        self.topics = topics
+
+        if isinstance( schema_topic, str ):
+            if not self.schemaless:
+                raise ValueError( "Non-none schema_topic only makes sense for schemaless=True" )
+            self.schema_topic = schema_topic
+        elif schema_topic is None:
+            self.schema_topic = None
+        else:
+            raise TypeError( f"schema_topic must be str or None, got a {type(topics)}" )
+
+        self._updatetopics = updatetopics
+        if self._updatetopics:
+            raise NotImplementedError( "updatetopics not implemented" )
+
+        self.extraconfig = extraconfig
+        self.nomsg_sleeptime = nomsg_sleeptime
+        self.batch_size = batch_size
+        self.consume_timeout = consume_timeout
+        self.brokername_for_alerts = brokername_for_alerts
+        self.brokername_key = brokername_key
+
+
+        if ( not isinstance( mongodb_collection_base, str ) ) or ( len(mongodb_collection_base) == 0 ):
+            raise ValueError( "Must pass a non-0 length string as mongdb_collection_base" )
+        self.mongodb_collection_base = urllib.parse.quote_plus( mongodb_collection_base )
+        self.cache_alerts = cache_alerts
+        self.no_wrangle = no_wrangle
+        if self.no_wrangle and ( not self.cache_alerts ):
+            raise ValueError( "no_wrangle requires cache_alerts" )
+        self.ensure_collections()
+
+        self.logger.info( f"Writing broker messages to monogdb collections {self.mongodb_collection_base}*" )
+
+
+    def ensure_collections( self ):
+        with db.MGCon() as mg:
+            suffixes = { 'diaobject': [ ['diaobjectid'], ['savetime'] ],
+                         'diasource': [ ['diasourceid'], ['savetime'] ],
+                         'diasource_extra': [ ['diasourceid'], ['savetime'] ],
+                         'diaforcedsource': [ ['diaforcedsourceid'], ['savetime'] ],
+                         'diaforcedsource_extra': [ ['diaforcedsourceid'], ['savetime'] ],
+                         'thumbnails': [ ['diasourceid'], ['savetime'] ],
+                         'brokerinfo': [ ['brokername', 'topic', 'diasourceid'], ['savetime'] ],
+                         'alertcache': []
+                        }
+            for suffix, wantedindexes in suffixes.items():
+                if self.no_wrangle and ( suffix != 'alertcache' ):
+                    continue
+                col = mg.collection( f"{self.mongodb_collection_base}_{suffix}" )
+                for wantedindex in wantedindexes:
+                    if wantedindex not in [ list( i['key'].keys() ) for i in col.list_indexes() ]:
+                        col.create_index( [ (i, pymongo.ASCENDING) for i in wantedindex ] )
+
+
+    def _actually_create_connection( self, *args, **kwargs ):
+        countdown = 5
         while countdown >= 0:
             try:
-                self.consumer = KafkaConsumer( self.server, self.groupid, self.schemafile,
-                                               self.topics, reset=reset,
-                                               extraconsumerconfig=self.extraconfig,
-                                               consume_nmsgs=1000, consume_timeout=1,
-                                               nomsg_sleeptime=self.nomsg_sleeptime,
-                                               logger=self.logger )
+                consumer = KafkaConsumer( *args, **kwargs )
                 countdown = -1
             except Exception as e:
                 countdown -= 1
@@ -237,12 +376,68 @@ class BrokerConsumer:
                     self.logger.error( "Repeated exceptions connecting to broker, punting." )
                     self.countlogger.error( "Repeated exceptions connecting to broker, punting." )
                     raise RuntimeError( "Failed to connect to broker" )
+        return consumer
+
+
+    def create_connection( self, reset=False ):
+        if reset:
+            self.countlogger.info( "*************** Resetting to start of broker kafka stream ***************" )
+        else:
+            self.countlogger.info( "*************** Connecting to kafka stream without reset  ***************" )
+
+        if self.schema_topic is not None:
+            # Be paranoid that reset=True isn't really going to work, and put in a random group id so we'rea
+            #  always reading from the beginning of the stream.
+            barf = "".join( random.choices( 'abcdefghijlkmnopqrstuvwxyz', k=6 ) )
+            self.countlogger.info( "*************** Tryihng to get schema from schema topic   ***************" )
+            countdown = 5
+            consumer = self._actually_create_connection( self.server, f"{self.groupid}-schemapull-{barf}",
+                                                         topics=[ self.schema_topic ],
+                                                         reset=True,
+                                                         extraconsumerconfig=self.extraconfig,
+                                                         consume_nmsgs=1,
+                                                         consume_timeout=self.consume_timeout,
+                                                         nomsg_sleeptime=self.nomsg_sleeptime,
+                                                         logger=self.logger,
+                                                         countlogger=self.countlogger )
+
+            msg = None
+            countdown = 5
+            while ( msg is None ) and ( countdown > 0 ):
+                msg = consumer.consume_one_message( handler=None )
+                if msg is None:
+                    time.sleep( 1 )
+                countdown -= 1
+            if msg is None:
+                raise RuntimeError( f"Failed to get a message from schema topic {self.schema_topic}" )
+            if self.schema_in_key:
+                key = msg.key()
+                if isinstance( key, bytes ):
+                    key = key.decode( "utf-8" )
+                self.schema = fastavro.schema.parse_schema( simplejson.loads( key ) )
+            else:
+                raise RuntimeError( "ROB FIGURE OUT WHAT TO DO HERE" )
+            self.countlogger.info( f"Parsed schema from {self.schema_topic}" )
+
+        self.consumer = self._actually_create_connection( self.server, self.groupid,
+                                                          topics=self.topics,
+                                                          reset=reset,
+                                                          extraconsumerconfig=self.extraconfig,
+                                                          consume_nmsgs=self.batch_size,
+                                                          consume_timeout=self.consume_timeout,
+                                                          nomsg_sleeptime=self.nomsg_sleeptime,
+                                                          logger=self.logger,
+                                                          countlogger=self.countlogger )
 
         self.countlogger.info( "**************** Consumer connection opened *****************" )
 
     def close_connection( self ):
-        self.countlogger.info( "**************** Closing consumer connection ******************" )
-        self.consumer.close()
+        try:
+            self.countlogger.info( "**************** Closing consumer connection ******************" )
+            if self.consumer is not None:
+                self.consumer.close()
+        except Exception as ex:
+            self.countlogger.error( f"Got exception trying to close consumer, ignoring it: {str(ex)}" )
         self.consumer = None
 
     def update_topics( self, *args, **kwargs ):
@@ -255,50 +450,322 @@ class BrokerConsumer:
         for topic in self.topics:
             self.consumer.reset_to_start( topic )
 
+    @classmethod
+    def add_flags( cls, dictobj, key, flagmap, row ):
+        if not any( field in row for field in flagmap.values() ):
+            return
+        val = 0
+        for mask, field in flagmap.items():
+            if ( field in row ) and ( row[field] ):
+                val |= mask
+        dictobj[ key ] = val
+
+    @classmethod
+    def _filter_dict_to_table( cls, alertdict, tablemeta ):
+        outdict = {}
+        for field, value in alertdict.items():
+            colname = field.lower()
+            if colname in tablemeta.keys():
+                colinfo = tablemeta[colname]
+                if not colinfo.is_nullable:
+                    value = colinfo.null_to_nan_if_necessary( value )
+                outdict[colname] = value
+        return outdict
+
+    @classmethod
+    def _wrangle_object( cls, msg, metamsg ):
+        obj = { 'diaobjectid': msg['diaSource']['diaObjectId'],
+                'savetime': metamsg['savetime'],
+                'diaobjectposition': None }
+        if ( ( msg['diaObject'] is not None ) and
+             all( ( i in msg['diaObject'] ) and ( i is not None ) for i in ['ra', 'dec'] )
+            ):
+            obj['diaobjectposition'] = {
+                'ra': msg['diaObject']['ra'],
+                'dec': msg['diaObject']['dec'],
+                'raerr': msg['diaObject']['raErr'] if 'raErr' in msg['diaObject'] else None,
+                'decerr': msg['diaObject']['decErr'] if 'decErr' in msg['diaObject'] else None,
+                'ra_dec_cov': msg['diaObject']['ra_dec_Cov'] if 'ra_dec_Cov' in msg['diaObject'] else None
+            }
+        return obj
+
+    @classmethod
+    def _wrangle_diasource( cls, submsg, metamsg, msg ):
+        out = cls._filter_dict_to_table( submsg, db.DiaSource.tablemeta() )
+        # This next field is used in one of our tests....
+        out['msg_diasourceid'] = msg['diaSourceId']
+        out['savetime'] = metamsg['savetime']
+        return out
+
+    @classmethod
+    def _wrangle_diasource_extra( cls, submsg, metamsg, msg ):
+        out = cls._filter_dict_to_table(submsg, db.DiaSourceExtra.tablemeta() )
+        if ( ( len(out) == 0 )
+             and ( not any( i in submsg for i in [ db.DiaSourceExtra._flags_bits.values() ] ) )
+             and ( not any( i in submsg for i in [ db.DiaSourceExtra._pixelflags_bits.values() ] ) )
+            ):
+            return None
+        out['savetime'] = metamsg['savetime']
+        # a couple fields that are composed from mutiple fileds from the alert
+        cls.add_flags( out, 'flags', db.DiaSourceExtra._flags_bits, submsg )
+        cls.add_flags( out, 'pixelflags', db.DiaSourceExtra._pixelflags_bits, submsg )
+        return out
+
+    @classmethod
+    def _wrangle_diaforcedsource( cls, submsg, metamsg, msg ):
+        out = cls._filter_dict_to_table( submsg, db.DiaForcedSource.tablemeta() )
+        # This next field is used in one of our tests....
+        out['msg_diasourceid'] = msg['diaSourceId']
+        out['savetime'] = metamsg['savetime']
+        return out
+
+    @classmethod
+    def _wrangle_diaforcedsource_extra( cls, submsg, metamsg, msg ):
+        out = cls._filter_dict_to_table( submsg, db.DiaForcedSourceExtra.tablemeta() )
+        if len( out ) == 0:
+            return None
+        out['savetime'] = metamsg['savetime']
+        return out
+
+    def _wrangle_all_standard_lsst_fields( self, metamsg, msg ):
+        obj = self._wrangle_object( msg, metamsg )
+        # Basic sanity check
+        try:
+            np.int64( obj['diaobjectid'] )
+        except Exception as ex:
+            self.countlogger.error( f"Got an alert with diaSource.diaObjectId={obj['diaobjectid']} "
+                                    f"(type {type(obj['diaobjectid'])}), which isn't "
+                                    f"a 64-bit integer.  Skipping this alert!  Exception: {ex}" )
+            return None
+
+        # TODO : more sanity checks.
+
+        sources = [ self._wrangle_diasource( msg['diaSource'], metamsg, msg ) ]
+        ext = self._wrangle_diasource_extra( msg['diaSource'], metamsg, msg )
+        sources_extra = [] if ext is None else [ ext ]
+
+        if ( 'prvDiaSources' in msg ) and ( msg['prvDiaSources'] is not None ):
+            sources.extend( [ self._wrangle_diasource( p, metamsg, msg ) for p in msg['prvDiaSources'] ] )
+            sources_extra.extend( [ self._wrangle_diasource_extra( p, metamsg, msg )
+                                    for p in msg['prvDiaSources'] if p is not None ] )
+
+        forcedsources = []
+        forcedsources_extra = []
+        if ( 'prvDiaForcedSources' in msg ) and ( msg['prvDiaForcedSources'] is not None ):
+            forcedsources.extend( [ self._wrangle_diaforcedsource( p, metamsg, msg )
+                                    for p in msg['prvDiaForcedSources'] ] )
+            forcedsources_extra.extend( [ self._wrangle_diaforcedsource_extra( p, metamsg, msg )
+                                          for p in msg['prvDiaForcedSources'] if p is not None ] )
+
+        if any( ( f in msg and f is not None ) for f in [ 'cutoutDifference', 'cutoutScience', 'cutoutTemplate' ] ):
+            thumbnails = { 'diasourceid': msg['diaSource']['diaSourceId'],
+                           'savetime': metamsg['savetime'] }
+            thumbnails.update( { f.lower(): msg[f] if f in msg else None
+                                 for f in ['cutoutDifference', 'cutoutScience', 'cutoutTemplate' ] } )
+        else:
+            thumbnails = None
+
+        return { 'object': obj,
+                 'sources': sources,
+                 'sources_extra': sources_extra,
+                 'forcedsources': forcedsources,
+                 'forcedsources_extra': forcedsources_extra,
+                 'thumbnails': thumbnails }
+
+
+    def alert_wrangler( self, messagebatch ):
+        """Convert the alert structure from what we get to what we want to stuff in the mongo db.
+
+        Subclasses should override this to customize the behavior for
+        each broker.  This default assumes the message came in following
+        the fastdb*brokerMessage schema.
+
+        Parmameters
+        -----------
+          messagebatch: list of... something
+            A list of whatever it is that the broker sends.  Nomrmally
+            this is going to be a sequence of avro messages, and that's
+            what this class expects.  Subclasses may potentially do
+            something very different.
+
+        Returns
+        -------
+         dictionary of lists: objects, sources_extra, forcedsources, forcedsources_extra, thumbnailses, brokerinfos
+
+           These are suitable for stuffing into the respedctive mongo collections
+
+        """
+
+        objects = []
+        sources = []
+        sources_extra = []
+        forcedsources = []
+        forcedsources_extra = []
+        thumbnailses = []
+        brokerinfos = []
+        for i in range( len(messagebatch) ):
+            metamsg = messagebatch[i]
+            msg = metamsg['msg']
+            stuff = self._wrangle_all_standard_lsst_fields( metamsg, msg )
+            if stuff is None:
+                # It was a bad alert that we're going to skip
+                continue
+            if stuff['object'] is not None:
+                objects.append( stuff['object'] )
+            sources.extend( stuff['sources'] )
+            sources_extra.extend( stuff['sources_extra'] )
+            forcedsources.extend( stuff['forcedsources'] )
+            forcedsources_extra.extend( stuff['forcedsources_extra'] )
+            if stuff['thumbnails'] is not None:
+                thumbnailses.append( stuff['thumbnails'] )
+
+            brokerinfos.append(
+                { 'brokername': metamsg['brokername'],
+                  'topic': metamsg['topic'],
+                  'diasourceid': msg['diaSourceId'],
+                  'diaobjectid': msg['diaSource']['diaObjectId'],
+                  'prv_diasourceid': ( None if msg['prvDiaSources'] is None
+                                       else [ m['diaSourceId'] for m in msg['prvDiaSources'] ] ),
+                  'prv_diaforcedsourceid': ( None if msg['prvDiaForcedSources'] is None
+                                             else [ m['diaForcedSourceId'] for m in msg['prvDiaForcedSources'] ] ),
+                  'savetime': metamsg['savetime'],
+                  'msgtime': metamsg['timestamp'],
+                  'info': { k:v for k, v in msg.items() if k not in self._standard_lsst_alert_fields }
+                 }
+            )
+
+        return { 'objects': objects,
+                 'sources': sources,
+                 'sources_extra': sources_extra,
+                 'forcedsources': forcedsources,
+                 'forcedsources_extra': forcedsources_extra,
+                 'thumbnailses': thumbnailses,
+                 'brokerinfos': brokerinfos }
+
     def handle_message_batch( self, msgs ):
         messagebatch = []
         self.countlogger.info( f"Handling {len(msgs)} messages; consumer has received "
                                f"{self.consumer.tot_handled} messages." )
         now = datetime.datetime.now( tz=datetime.UTC )
+        t0 = time.perf_counter()
         for msg in msgs:
             timestamptype, timestamp = msg.timestamp()
 
             if timestamptype == confluent_kafka.TIMESTAMP_NOT_AVAILABLE:
                 timestamp = None
             else:
-                timestamp = datetime.datetime.fromtimestamp( timestamp / 1000, tz=datetime.UTC )
+                timestamp = datetime.datetime.fromtimestamp( timestamp / 1000 )
 
+            key = msg.key()
             payload = msg.value()
-            if not self.schemaless:
-                self.countlogger.error( "I only know how to handle schemaless streams" )
-                raise RuntimeError( "I only know how to handle schemaless streams" )
-            alert = fastavro.schemaless_reader( io.BytesIO( payload ), self.schema )
-            messagebatch.append( { 'topic': msg.topic(),
+            if self.schemaless:
+                alert = fastavro.schemaless_reader( io.BytesIO( payload ), self.schema )
+            else:
+                if self.schema_in_key:
+                    if isinstance( key, bytes ):
+                        key = key.decode( "utf-8" )
+                    parsed_schema = fastavro.schema.parse_schema( simplejson.loads( key ) )
+                    alert = fastavro.schemaless_reader( io.BytesIO( payload ), parsed_schema )
+                else:
+                    # ...there may be a better way than instantiating a new reader for every
+                    #   message.  Figure it out.
+                    reader = fastavro.read.reader( io.BytesIO( payload ) )
+                    alertlist = [ m for m in reader ]
+                    if len(alertlist) != 1:
+                        raise RuntimeError( "This should never happen." )
+                    alert = alertlist[0]
+
+            if self.brokername_for_alerts is not None:
+                bname = self.brokername_for_alerts
+            elif self.brokername_key is not None:
+                bname = alert[ self.brokername_key ]
+            else:
+                bname = self._brokername
+
+            messagebatch.append( { 'brokername': bname,
+                                   'topic': msg.topic(),
                                    'msgoffset': msg.offset(),
                                    'timestamp': timestamp,
                                    'savetime': now,
                                    'msg': alert } )
 
-        nadded = self.mongodb_store( messagebatch )
-        self.countlogger.info( f"...added {nadded} messages to mongodb {self.mongodb_dbname} "
-                               f"collection {self.mongodb_collection}" )
+        t1 = time.perf_counter()
+        if self.no_wrangle:
+            wrangled = {}
+        else:
+            wrangled = self.alert_wrangler( messagebatch )
+        t2 = time.perf_counter()
+        nadded = self.mongodb_store( messagebatch=messagebatch, **wrangled )
+        t3 = time.perf_counter()
+
+        strio = io.StringIO()
+        strio.write( f"...added to mongodb:\n"
+                     f"              {nadded['diaobject']} diaobject\n"
+                     f"              {nadded['diasource']} diasource\n"
+                     f"              {nadded['diasource_extra']} diasource_extra\n"
+                     f"              {nadded['diaforcedsource']} diaforcedsource\n"
+                     f"              {nadded['diaforcedsource_extra']} diaforcedsource_extra\n"
+                     f"              {nadded['thumbnails']} thumbnails\n"
+                     f"              {nadded['brokerinfo']} brokerinfo"
+                    )
+        if self.cache_alerts:
+            strio.write( f"\n              {nadded['alertcache']} cached alerts" )
+        strio.write( f"\n   ...parse time: {t1-t0:.3f}\n" )
+        strio.write( f"   ...wrangle time: {t2-t1:.3f}\n" )
+        strio.write( f"   ...store time: {t3-t2:.3f}" )
+        self.countlogger.info( strio.getvalue() )
 
 
-    def mongodb_store(self, messagebatch=None):
-        if messagebatch is None:
-            return 0
-        connstr = ( f"mongodb://{self.mongodb_user}:{self.mongodb_password}@{self.mongodb_host}:27017/"
-                    f"?authSource={self.mongodb_dbname}" )
-        self.logger.debug( f"mongodb connection string {connstr}" )
-        client = MongoClient( connstr )
-        db = getattr( client, self.mongodb_dbname )
-        collection = db[ self.mongodb_collection ]
-        results = collection.insert_many( messagebatch )
-        return len( results.inserted_ids )
+    def mongodb_store( self, objects=[], sources=[], sources_extra=[],
+                       forcedsources=[], forcedsources_extra=[],
+                       thumbnailses=[], brokerinfos=[], messagebatch=[] ):
+        # ****
+        self.logger.debug( f"mongodb_store called with:\n"
+                           f"    ....{len(objects)} objects\n"
+                           f"    ....{len(sources)} sources\n"
+                           f"    ....{len(sources_extra)} sources_extra\n"
+                           f"    ....{len(forcedsources)} forcedsources\n"
+                           f"    ....{len(forcedsources_extra)} forcedsources_extra\n"
+                           f"    ....{len(brokerinfos)} brokerinfos\n"
+                           f"    ....{len(messagebatch)} messagebatch\n" )
+        # ****
+        inserted = {}
+        with db.MGCon() as mg:
+            for arr, suffix in zip( [ objects, sources, sources_extra,
+                                      forcedsources, forcedsources_extra,
+                                      thumbnailses, brokerinfos ],
+                                    [ 'diaobject', 'diasource', 'diasource_extra',
+                                      'diaforcedsource', 'diaforcedsource_extra',
+                                      'thumbnails', 'brokerinfo' ] ):
+                if len( arr ) > 0:
+                    if self.no_wrangle:
+                        inserted[suffix] = 0
+                    else:
+                        col = mg.collection( f'{self.mongodb_collection_base}_{suffix}' )
+                        results = col.insert_many( arr, ordered=False )
+                        inserted[suffix] = len( results.inserted_ids )
+                else:
+                    inserted[suffix] = 0
+            if self.cache_alerts:
+                if len(messagebatch) > 0:
+                    col = mg.collection( f'{self.mongodb_collection_base}_alertcache' )
+                    results = col.insert_many( messagebatch, ordered=False )
+                    inserted['alertcache'] = len( results.inserted_ids )
+                else:
+                    inserted['alertcache'] = 0
+
+        # ****
+        import pprint
+        strio = io.StringIO()
+        strio.write( "mongodb_store returning:\n" )
+        pprint.pp( inserted, stream=strio )
+        self.logger.debug( strio.getvalue() )
+        # ****
+        return inserted
 
 
     def poll( self, reset=False, restart_time=datetime.timedelta(minutes=30),
-              notopic_sleeptime=300, max_restarts=None ):
+              notopic_sleeptime=300, max_restarts=None, max_msgs=None ):
         """Poll the server, saving consumed messages to the Mongo DB.
 
         Parameters
@@ -327,128 +794,206 @@ class BrokerConsumer:
             poll loop runs indefinitely (or until a "die" message is sent
             over the pipe).
 
+          max_msgs: int, default None
+            If given, exit after ingesting this many messages
+
         TODO : separate max_restarts from polling from max_restarts from
         topic not existing, because the timeouts for the two are likely very
         different.
 
         """
 
+        tstart = datetime.datetime.now()
+        try:
+            self.create_connection( reset )
+            n_restarts = 0
+            max_exceptions = 5
+            num_exceptions = 0
+            while True:
+                if self._updatetopics:
+                    self.update_topics()
+                strio = io.StringIO("")
+                if len(self.consumer.topics) == 0:
+                    self.logger.info( f"No topics, will wait {notopic_sleeptime}s and reconnect." )
+                    time.sleep( notopic_sleeptime )
+                else:
+                    self.logger.info( f"Subscribed to topics: {self.consumer.topics}; starting poll loop." )
+                    self.countlogger.info( f"Subscribed to topics: {self.consumer.topics}; starting poll loop." )
+                    try:
+                        happy = self.consumer.poll_loop( handler=self.handle_message_batch, pipe=self.pipe,
+                                                         stopafter=restart_time,
+                                                         stopafternmessages=max_msgs,
+                                                         stopafternsleeps=None )
+                        if happy:
+                            strio.write( f"Reached poll timeout and/or message limit for {self.server}; "
+                                         f"handled {self.consumer.tot_handled} messages.  " )
+                        else:
+                            strio.write( f"Poll loop received die command after handling "
+                                         f"{self.consumer.tot_handled} messages.  Exiting.  " )
+                            self.logger.info( strio.getvalue() )
+                            self.countlogger.info( strio.getvalue() )
+                            tot_handled = self.consumer.tot_handled
+                            self.close_connection()
+                            if self.pipe is not None:
+                                self.pipe.send( { "message": "died", "nconsumed": -1,
+                                                  "tot_handled": tot_handled,
+                                                  "runtime": datetime.datetime.now() - tstart } )
+                            return
 
-        self.create_connection( reset )
-        n_restarts = 0
-        while True:
-            if self._updatetopics:
-                self.update_topics()
-            strio = io.StringIO("")
-            if len(self.consumer.topics) == 0:
-                self.logger.info( f"No topics, will wait {notopic_sleeptime}s and reconnect." )
-                time.sleep( notopic_sleeptime )
-            else:
-                self.logger.info( f"Subscribed to topics: {self.consumer.topics}; starting poll loop." )
-                self.countlogger.info( f"Subscribed to topics: {self.consumer.topics}; starting poll loop." )
-                try:
-                    happy = self.consumer.poll_loop( handler=self.handle_message_batch, pipe=self.pipe,
-                                                     stopafter=restart_time,
-                                                     stopafternmessages=None, stopafternsleeps=None )
-                    if happy:
-                        strio.write( f"Reached poll timeout for {self.server}; "
-                                     f"handled {self.consumer.tot_handled} messages. " )
-                    else:
-                        strio.write( f"Poll loop received die command after handling "
-                                     f"{self.consumer.tot_handled} messages.  Exiting." )
-                        self.logger.info( strio.getvalue() )
-                        self.countlogger.info( strio.getvalue() )
-                        self.close_connection()
-                        return
+                    except Exception as e:
+                        otherstrio = io.StringIO("")
+                        traceback.print_exc( file=otherstrio )
+                        num_exceptions += 1
+                        if num_exceptions >= max_exceptions:
+                            self.close_connection()
+                            strio.write( f"Exception polling: {str(e)}.  Exiting after {num_exceptions} exceptions.\n"
+                                         f"{otherstrio.getValue()}" )
+                            self.logger.error( strio.getvalue() )
+                            tot_handled = self.consumer.tot_handled
+                            self.close_connection()
+                            if self.pipe is not None:
+                                self.pipe.send( { "message": "too many exceptions", "nconsumed": -1,
+                                                  "tot_handled": tot_handled,
+                                                  "runtime": datetime.datetime.now() - tstart } )
+                            return
+                        else:
+                            strio.write( f"Exception polling: {str(e)}; will restart consumer.\n"
+                                         f"{otherstrio.getvalue()}" )
+                            self.logger.warning( strio.getvalue() )
 
-                except Exception as e:
-                    otherstrio = io.StringIO("")
-                    traceback.print_exc( file=otherstrio )
-                    self.logger.warning( otherstrio.getvalue() )
-                    strio.write( f"Exception polling: {str(e)}. " )
-
-            if ( self.pipe is not None ) and ( self.pipe.poll() ):
-                msg = self.pipe.recv()
-                if ( 'command' in msg ) and ( msg['command'] == 'die' ):
-                    if len( strio.getvalue() ) > 0:
-                        self.logger.info( strio.getvalue() )
-                        self.countlogger.info( strio.getvalue() )
-                    self.logger.info( "Exiting broker poll due to die command." )
-                    self.countlogger.info( "Exiting broker poll due to die command." )
+                if ( max_restarts is not None ) and ( n_restarts >= max_restarts ):
+                    strio.write( f"Exiting after {n_restarts} restarts." )
+                    self.logger.info( strio.getvalue() )
+                    self.countlogger.info( strio.getvalue() )
+                    tot_handled = self.consumer.tot_handled
                     self.close_connection()
+                    if self.pipe is not None:
+                        self.pipe.send( { "message": "exited", "nconsumed": -1,
+                                          "tot_handled": tot_handled,
+                                          "runtime": datetime.datetime.now() - tstart } )
                     return
 
-            if ( max_restarts is not None ) and ( n_restarts >= max_restarts ):
-                strio.write( f"Exiting after {n_restarts} restarts." )
+                strio.write( "Reconnecting to server.\n" )
                 self.logger.info( strio.getvalue() )
                 self.countlogger.info( strio.getvalue() )
                 self.close_connection()
-                return
+                # TODO : think about automatic topic updating
+                # if self._updatetopics:
+                #     self.consumer.topics = None
+                # Only want to reset the at most first time we connect!
+                # If we disconnect and reconnect in the loop, we want to
+                # pick up where we left off.
+                self.create_connection( reset=False )
+                n_restarts += 1
 
-            strio.write( "Reconnecting to server.\n" )
-            self.logger.info( strio.getvalue() )
-            self.countlogger.info( strio.getvalue() )
+        except Exception as ex:
+            self.logger.error( f"Unhandled exception in BrokerConsumer.poll: {ex}" )
+            strio = io.StringIO("")
+            strio.write( f"Unhandled exception in BrokerConsumer.poll: {ex}\n" )
+            traceback.print_exc( file=strio )
+            self.countlogger.error( strio.getvalue() )
             self.close_connection()
-            # TODO : think about automatic topic updating
-            # if self._updatetopics:
-            #     self.consumer.topics = None
-            # Only want to reset the at most first time we connect!  If
-            # we disconnect and reconnect in the loop below, we want to
-            # pick up where we left off.
-            self.create_connection( reset=False )
-            n_restarts += 1
+            if self.pipe is not None:
+                self.pipe.send( { "message": "unhandled exception", "nconsumed": -1,
+                                  "exception": str(ex),
+                                  "tot_handled": self.consumer.tot_handled if self.consumer is not None else "n/a",
+                                  "runtime": datetime.datetime.now() - tstart } )
+            return
+
+
+
+# ======================================================================
+
+class FinkConsumer(BrokerConsumer):
+    _brokername = 'Fink'
+
+    def __init__( self, server='kafka-lsst.fink-broker.org:24499', groupid=None, **kwargs ):
+        if 'schemaless' not in kwargs:
+            kwargs['schemaless'] = False
+            if ( 'schema_in_key' in kwargs ) and ( kwargs['schema_in_key'] ):
+                raise ValueError( "schema_in_key True is inconsistent with schemaless=True" )
+        if 'schema_in_key' not in kwargs:
+            kwargs['schema_in_key'] = True
+        super().__init__( server, groupid, **kwargs )
+        self.logger.info( f"Fink group id is {groupid}" )
+
+
+# ======================================================================
+
+class AMPELConsumer(BrokerConsumer):
+    _brokername = "AMPEL"
+
+    def __init__( self, server='kafka.scimma.org', groupid=None,
+                  username=None, password=None,
+                  usernamefile="/secrets/scimma_username", passwordfile="/screts/scimma_password",
+                  **kwargs ):
+
+        extraconfig = {}
+        if 'extraconfig' in kwargs:
+            extraconfig = kwargs[ 'extraconfig' ]
+            del kwargs[ 'extraconfig' ]
+
+        if username is None:
+            with open( usernamefile ) as ifp:
+                username = ifp.readline().strip()
+        if password is None:
+            with open( passwordfile ) as ifp:
+                password = ifp.readline().strip()
+
+        if ( not isinstance( groupid, str ) ) or ( groupid[0:len(username)] != username ):
+            raise ValueError( f"groupid must start with {username}" )
+
+        extraconfig.update( { 'sasl.mechanism': 'SCRAM-SHA-512',
+                              'security.protocol': 'SASL_SSL',
+                              'sasl.username': username,
+                              'sasl.password': password } )
+
+        super().__init__( server, groupid, schemaless=False, extraconfig=extraconfig, **kwargs )
+        self.logger.info( f"AMPEL group id is {groupid}" )
 
 
 # ======================================================================
 # THIS IS VESTIGAL FROM ELASTICC2.  Needs to be updated!
 
 class AntaresConsumer(BrokerConsumer):
-    _brokername = 'antares'
+    _brokername = 'ANTARES'
 
-    def __init__( self, grouptag=None,
-                  usernamefile='/secrets/antares_username', passwdfile='/secrets/antares_passwd',
-                  loggername="ANTARES", antares_topic='elasticc2-st1-ddf-full', **kwargs ):
-        raise RuntimeError( "Left over from ELAsTiCC2; needs to be updated." )
-        server = "kafka.antares.noirlab.edu:9092"
-        groupid = "elasticc-lbnl" + ( "" if grouptag is None else "-" + grouptag )
-        topics = [ antares_topic ]
-        updatetopics = False
-        with open( usernamefile ) as ifp:
-            username = ifp.readline().strip()
-        with open( passwdfile ) as ifp:
-            passwd = ifp.readline().strip()
+    def __init__( self, server='kafka.antares.noirlab.edu:9092', groupid=None,
+                  username=None, password=None,
+                  usernamefile='/secrets/antares_username', passwordfile='/secrets/antares_passwd',
+                  cafile='/fastdb/share/antares-ca.pem',
+                  **kwargs ):
+        extraconfig = {}
+        if 'extraconfig' in kwargs:
+            extraconfig = kwargs[ 'extraconfig' ]
+            del kwargs[ 'extgraconfig' ]
+
+        if username is None:
+            with open( usernamefile ) as ifp:
+                username = ifp.readline().strip()
+        if password is None:
+            with open( passwordfile ) as ifp:
+                password = ifp.readline().strip()
+
+        # Reference for the config:
+        #   https://api.antares.noirlab.edu/v1/client/config/streaming/default
+        #   https://gitlab.com/nsf-noirlab/csdc/antares/client/-/blob/master/antares_client/stream.py
+
         extraconfig = {
-            "api.version.request": True,
-            "broker.version.fallback": "0.10.0.0",
-            "api.version.fallback.ms": "0",
+            # "api.version.request": True,
+            # "broker.version.fallback": "0.10.0.0",
+            # "api.version.fallback.ms": "0",
             "enable.auto.commit": True,
             "security.protocol": "SASL_SSL",
-            "sasl.mechanism": "PLAIN",
+            "sasl.mechanisms": "PLAIN",
             "sasl.username": username,
-            "sasl.password": passwd,
-            "ssl.ca.location": str( _rundir / "antares-ca.pem" ),
+            "sasl.password": password,
+            "ssl.endpoint.identification.algorithm": "none",
+            "ssl.ca.location": cafile,
             "auto.offset.reset": "earliest",
         }
-        super().__init__( server, groupid, topics=topics, updatetopics=updatetopics,
-                          extraconfig=extraconfig, loggername=loggername, **kwargs )
+        super().__init__( server, groupid, schemaless=False, extraconfig=extraconfig, **kwargs )
         self.logger.info( f"Antares group id is {groupid}" )
-
-
-# ======================================================================
-# THIS IS VESTIGAL FROM ELASTICC2.  Needs to be updated!
-
-class FinkConsumer(BrokerConsumer):
-    _brokername = 'fink'
-
-    def __init__( self, grouptag=None, loggername="FINK", fink_topic='fink_elasticc-2022fall', **kwargs ):
-        raise RuntimeError( "Left over from ELAsTiCC2; needs to be updated." )
-        server = "134.158.74.95:24499"
-        groupid = "elasticc-lbnl" + ( "" if grouptag is None else "-" + grouptag )
-        topics = [ fink_topic ]
-        updatetopics = False
-        super().__init__( server, groupid, topics=topics, updatetopics=updatetopics,
-                          loggername=loggername, **kwargs )
-        self.logger.info( f"Fink group id is {groupid}" )
 
 
 # ======================================================================
@@ -487,7 +1032,7 @@ class AlerceConsumer(BrokerConsumer):
         self.badtopics = [ 'lc_classifier_balto_20230807' ]
 
     def update_topics( self, *args, **kwargs ):
-        now = datetime.datetime.now()
+        now = datetime.datetime.now( tz=datetime.UTC )
         datestrs = []
         for ddays in range(self.early_offset, 3):
             then = now + datetime.timedelta( days=ddays )
@@ -504,13 +1049,19 @@ class AlerceConsumer(BrokerConsumer):
 
 # =====================================================================
 
-class PittGoogleBroker(BrokerConsumer):
+class PittGoogleConsumer(BrokerConsumer):
     """Pitt-Google-Hernandez Broker
 
     cf: https://mwvgroup.github.io/pittgoogle-client/api-reference/pubsub.html
 
-    """
+    Known topic names:
+       'alerts' : full lsst alert stream
+       'loop' : the same alert repeated every second, for testing
+       'supernnoa'
+       'upsilon'
+       'variability'
 
+    """
 
     _brokername = 'pitt-google'
 
@@ -518,97 +1069,182 @@ class PittGoogleBroker(BrokerConsumer):
         self,
         server_not_used: str = "",
         groupid: str = "default_pittgooglebroker_fastdb_groupid",
+        survey: str = "lsst",
+        topic_name: str = None,
+        testid: bool | str = False,
         max_workers: int = 8,  # max number of ThreadPoolExecutor workers
-        batch_maxn: int = 1000,  # max number of messages in a batch
-        batch_maxwait: int = 5,  # max seconds to wait between messages before processing a batch
         loggername: str = "PITTGOOGLE",
         **kwargs
     ):
-        super().__init__(server=None, groupid=None, loggername=loggername, **kwargs)
+        if 'brokername_for_alerts' in kwargs:
+            brokername_for_alerts = kwargs['brokername_for_alerts']
+            del kwargs['brokername_for_alerts']
+        else:
+            brokername_for_alerts = 'Pitt-Google'
 
-        neededconfig = [ 'name', 'survey', 'google_cloud_project', 'google_cloud_key_file' ]
-        if any( i not in self.extraconfig for i in neededconfig ):
-            raise ValueError( f"need in extraconfig: {neededconfig}" )
+        if topic_name is None:
+            raise ValueError( "Need to pass topic_name" )
 
-        testid = self.extraconfig['testid'] if 'testid' in self.extraconfig else False
+        super().__init__(server=None, groupid='not_used', brokername_for_alerts=brokername_for_alerts,
+                         loggername=loggername, **kwargs)
 
-        auth = pittgoogle.auth.Auth( GOOGLE_CLOUD_PROJECT=self.extraconfig['google_cloud_project'],
-                                     GOOGLE_APPLICATION_CREDENTIALS=self.extraconfig['google_cloud_key_file'] )
-        topic = pittgoogle.Topic.from_cloud( name=self.extraconfig['name'],
-                                             survey=self.extraconfig['survey'],
-                                             testid=testid,
-                                             projectid=pittgoogle.ProjectIds().pittgoogle )
-        subscription = pittgoogle.pubsub.Subscription(name=groupid,
-                                                      topic=topic,
-                                                      auth=auth,
-                                                      schema_name="lsst")
-        self.topic = subscription.topic.name
+        # I would prefer it if I could pass the arguments explicitly as function arguments, but
+        #  I haven't figured out how ot get that to work, and it may not work with
+        #  pittgoogle.Topic.from_cloud.
+        if ( ( os.getenv("GOOGLE_CLOUD_PROJECT") is None )
+             or ( os.getenv("GOOGLE_APPLICATION_CREDENTIALS" ) is None )
+            ):
+            raise ValueError( "Need to set env vars GOOGLE_CLOUD_PROJECT and GOOGLE_APPLICATION_CREDENTIALS" )
 
-        # if the subscription doesn't already exist, this will create one
-        subscription.touch()
-
-        self.consumer = pittgoogle.pubsub.Consumer(
-            subscription=subscription,
-            msg_callback=self.handle_message,
-            batch_callback=self.handle_message_batch,
-            batch_maxn=batch_maxn,
-            batch_max_wait_between_messages=batch_maxwait,
-            executor=ThreadPoolExecutor(
-                max_workers=max_workers,
-                initializer=self.worker_init,
-                initargs=(),
-                # initargs=(
-                #     self,
-                #     self.schema,
-                #     subscription.topic.name,
-                #     self.logger,
-                #     self.countlogger
-                # ),
-            ),
-        )
+        self._survey = survey
+        self._name = topic_name
+        self._testid = testid
+        self._max_workers = max_workers
+        self._groupid = groupid
+        self.tot_n_messages_consumed = 0
 
     def worker_init(self):
         """Initializer for the ThreadPoolExecutor."""
-        self.logger.info( "In worker_init" )
+        self.logger.info( "PittGoogleConsumer starting a new ThreadPoolExecutor worker to handle messages" )
 
     def handle_message(self, alert: pittgoogle.pubsub.Alert) -> pittgoogle.pubsub.Response:
         """Callback that will process a single message. This will run in a background thread."""
 
-        self.logger.info( "In handle_message" )
+        self.logger.debug( "In handle_message" )
 
-        self.logger.warning( f"alert is a {type(alert)}, alert.msg is a {type(alert.msg)} and is {alert.msg}" )
+        # NOTE -- start reading alert.msg.data at byte 5 because the first 4 bytes
+        #   are a schema ID of some sort.
+        parsedalert = fastavro.schemaless_reader(io.BytesIO(alert.msg.data[5:]), self.schema)
+
+        if self.brokername_for_alerts is not None:
+            bname = self.brokername_for_alerts
+        elif self.brokername_key is not None:
+            bname = parsedalert[ self.brokername_key ]
+        else:
+            bname = self._brokername
+
         message = {
-            # NOTE -- start reading alert.msg.data at byte 5 because the first 4 bytes
-            #   are a schema ID of some sort.
-            "msg": fastavro.schemaless_reader(io.BytesIO(alert.msg.data[5:]), self.schema),
+            "brokername": bname,
             "topic": self.topic,
-            # this is a DatetimeWithNanoseconds, a subclass of datetime.datetime
-            # https://googleapis.dev/python/google-api-core/latest/helpers.html
-            "timestamp": alert.msg.publish_time.astimezone(datetime.UTC),
             # there is no offset in pubsub
             # if this cannot be null, perhaps the message id would work?
             "msgoffset": alert.msg.message_id,
-            "savetime": datetime.datetime.now(tz=datetime.UTC)
+            # this is a DatetimeWithNanoseconds, a subclass of datetime.datetime
+            # https://googleapis.dev/python/google-api-core/latest/helpers.html
+            "timestamp": alert.msg.publish_time.astimezone(datetime.UTC),
+            "savetime": datetime.datetime.now( tz=datetime.UTC ),
+            "msg": parsedalert
         }
 
+        self.logger.debug( "Returning from handle_message" )
         return pittgoogle.pubsub.Response(result=message, ack=True)
+
 
     def handle_message_batch(self, messagebatch: list) -> None:
         """Callback that will process a batch of messages. This will run in the main thread."""
 
-        self.logger.info( "In handle_message_batch" )
-        # import pdb; pdb.set_trace()
+        self.logger.info( f"In handle_message_batch, received {len(messagebatch)} messages" )
+        t0 = time.perf_counter()
+        if self.no_wrangle:
+            wrangled = {}
+        else:
+            wrangled = self.alert_wrangler( messagebatch )
+        t1 = time.perf_counter()
+        nadded = self.mongodb_store( messagebatch=messagebatch, **wrangled )
+        t2 = time.perf_counter()
+        self.tot_n_messages_consumed += len(messagebatch)
+        self.countlogger.info( f"...added {len(messagebatch)} messages to mongodb collections "
+                               f"{self.mongodb_collection_base}*\n"
+                               f"    ...{nadded}\n"
+                               f"    ...wrangle time: {t1-t0:.3f}\n"
+                               f"    ...store time: {t2-t1:.3f}\n" )
 
-        nadded = self.mongodb_store( messagebatch )
-        self.countlogger.info( f"...added {nadded} messages to mongodb {self.mongodb_dbname} "
-                               f"collection {self.mongodb_collection}" )
 
+    def poll(self, reset=None, restart_time=None, max_restarts=None, max_msgs=None, **kwargs ):
+        if len(kwargs) > 0:
+            raise RuntimeError( f"Parameters unknown to PittGoogleConsumer.poll: {list(kwargs.keys())}" )
+        if reset is not None:
+            self.logger.warning( "reset is not known by PittGoogleConsumer.poll, ignorig it" )
 
-    # ROB TODO : think about **kwargs here, maybe we should do something with the standard values
-    def poll(self, **kwargs):
-        # this blocks indefinitely or until a fatal error
-        # use Control-C to exit
-        self.consumer.stream( pipe=self.pipe, heartbeat=60 )
+        currenttotconsumed = 0
+        restarts = 0
+        tstart = datetime.datetime.now()
+        try:
+            while True:
+                topic = pittgoogle.Topic.from_cloud( name=self._name,
+                                                     survey=self._survey,
+                                                     testid=self._testid,
+                                                     projectid='pitt-alert-broker' )
+                subscription = pittgoogle.Subscription( name=self._groupid,
+                                                        topic=topic,
+                                                        schema_name="lsst" )
+                self.topic = subscription.topic.name
+
+                # if the subscription doesn't already exist, this will create one
+                subscription.touch()
+
+                self.consumer = pittgoogle.pubsub.Consumer(
+                    subscription=subscription,
+                    msg_callback=self.handle_message,
+                    batch_callback=self.handle_message_batch,
+                    batch_maxn=self.batch_size,
+                    batch_max_wait_between_messages=self.consume_timeout,
+                    logger=self.countlogger,
+                    executor=ThreadPoolExecutor(
+                        max_workers=self._max_workers,
+                        initializer=self.worker_init,
+                        initargs=(),
+                        # initargs=(
+                        #     self,
+                        #     self.schema,
+                        #     subscription.topic.name,
+                        #     self.logger,
+                        #     self.countlogger
+                        # ),
+                    ),
+                )
+
+                self.countlogger.info( f"Launching a pittgoogle stream, topic={self.topic}..." )
+
+                result = self.consumer.stream( pipe=self.pipe, heartbeat=60,
+                                                  max_runtime=restart_time, max_nmsgs=max_msgs )
+                currenttotconsumed += result['totprocessed']
+                self.countlogger.info( f"...pittgoogle stream consumed {result['totprocessed']} messages; "
+                                       f"this call to poll consumed {currenttotconsumed} messages, "
+                                       f"overall {self.tot_n_messages_consumed} messages." )
+                if result[ "status" ] == "die":
+                    self.logger.info( "PittGoogleConsumer.poll exiting becasue of die command." )
+                    self.countlogger.info( "PittGoogleConsumer.poll exiting becasue of die command." )
+                    if self.pipe is not None:
+                        self.pipe.send( { "message": "died", "nconsumed": -1,
+                                          "tot_handled": self.tot_n_messages_consumed,
+                                          "runtime": datetime.datetime.now() - tstart } )
+                    return
+                elif ( max_restarts is not None ) and ( restarts >= max_restarts ):
+                    self.countlogger.info( f"PittGoogleConsumer.poll exiting after {restarts} restarts." )
+                    self.logger.info( f"PittGoogleConsumer.poll exiting after {restarts} restarts." )
+                    if self.pipe is not None:
+                        self.pipe.send( { "message": "exited", "nconsumed": -1,
+                                          "tot_handled": self.tot_n_messages_consumed,
+                                          "runtime": datetime.datetime.now() - tstart } )
+                    return
+                else:
+                    self.countlogger.info( f"PittGoogleConsumer.poll restarting the stream "
+                                           f"after {restarts} previous restarts..." )
+                restarts += 1
+
+        except Exception as ex:
+            self.logger.error( f"Unhandled exception in PittGoogleConsumer.poll: {ex}" )
+            strio = io.StringIO("")
+            strio.write( f"Unhandled exception in PittGoogleConsumer.poll: {ex}\n" )
+            traceback.print_exc( file=strio )
+            self.countlogger.error( strio.getvalue() )
+            if self.pipe is not None:
+                self.pipe.send( { "message": "unhandled exception", "nconsumed": -1,
+                                  "exception": str(ex),
+                                  "tot_handled": self.tot_n_messages_consumed,
+                                  "runtime": datetime.datetime.now() - tstart } )
+            return
 
 
 class BrokerConsumerLauncher:
@@ -631,7 +1267,7 @@ class BrokerConsumerLauncher:
 
     """
 
-    def __init__( self, configfile, barf='', verbose=False, logtag=None, shutdown_graceperiod=20 ):
+    def __init__( self, configfile, barf='', barf2=None, verbose=False, logtag=None, shutdown_graceperiod=20 ):
         """Create a BrokerConsumerLauncher.
 
         Parmaeters
@@ -673,6 +1309,7 @@ class BrokerConsumerLauncher:
 
         self.config = configfile
         self.barf = barf
+        self.barf2 = barf if barf2 is None else barf2
         self.verbose = verbose
         self.logtag = logtag
 
@@ -682,26 +1319,14 @@ class BrokerConsumerLauncher:
         self.shutdown_graceperiod=20
 
 
-    def _launch_broker( self, brokerinfo ):
+    @classmethod
+    def _launch_broker( cls, brokerinfo ):
         # Ignore signals; the main process will tell us to die when we need to
         signal.signal( signal.SIGTERM, lambda sig, stack: True )
         signal.signal( signal.SIGINT, lambda sig, stack: True )
 
-        bc = brokerinfo['class']( brokerinfo['server'],
-                                  brokerinfo['groupid'],
-                                  topics=brokerinfo['topics'],
-                                  updatetopics=brokerinfo['updatetopics'],
-                                  extraconfig=brokerinfo['extraconfig'],
-                                  schemafile=brokerinfo['schemafile'],
-                                  pipe=brokerinfo['childpipe'],
-                                  mongodb_collection=brokerinfo['collection'],
-                                  loggername=brokerinfo['loggername'],
-                                  loggername_prefix=brokerinfo['loggername_prefix']
-                                 )
-        bc.poll( restart_time=brokerinfo['restart_time'],
-                 max_restarts=brokerinfo['max_restarts'],
-                 notopic_sleeptime=brokerinfo['notopic_sleeptime']
-                )
+        bc = brokerinfo['class']( **brokerinfo['kwargs'] )
+        bc.poll( **brokerinfo['pollkwargs'] )
 
 
     def __call__( self ):
@@ -725,63 +1350,109 @@ class BrokerConsumerLauncher:
             logger.warning( "I am surprised, I already have handlers.  Logger is mysterious." )
         logger.setLevel( logging.DEBUG if self.verbose else logging.INFO )
 
+        brokers = {}
+        clsmap = { 'BrokerConsumer': BrokerConsumer,
+                   'FinkConsumer': FinkConsumer,
+                   'PittGoogleConsumer': PittGoogleConsumer }
+
         config = yaml.safe_load( open( self.config ) )
         # ****
         # logger.debug( f"Loaded config: {config}" )
         # ****
+        if ( ( not isinstance( config, dict ) ) or
+             ( 'brokers' not in config ) or
+             ( not isinstance( config['brokers'], dict ) )
+            ):
+            raise ValueError( "Config must be a dictionary with key brokers, and config['brokers'] must be a dict." )
+        missing = set( config.keys() ) - { 'brokers' }
+        if len(missing) > 0:
+            logger.warning( f"Unparsed root-level keys in config: {missing}" )
 
-        schemafile = config[ 'schemafile' ]
+        for brokername, brokerinfo in config[ 'brokers' ].items():
+            if not isinstance( brokerinfo, dict ):
+                raise ValueError( "Each value of the brokers dict must itself be a dict" )
 
-        brokers = []
-        clsmap = { 'BrokerConsumer': BrokerConsumer,
-                   'PittGoogleBroker': PittGoogleBroker }
+            # There is some parsing we have to do the yaml. *Most* of
+            #   the keys are things that are passed in the kwargs to the
+            #   broker class constructor, but there are a handful of
+            #   things that need to be pulled out for editing, and we
+            #   need to substitute {barf} and {barf2} for the barf(s)
+            #   passed to the BrokerConsumerLauncher constructor (needed
+            #   for tests, might also sometimes be useful in
+            #   production).
 
-        # Parse the config for all brokers before launching anything, so that if we get an exception
-        #   we won't have started subprocesses.
-        for broker in config[ 'brokers' ]:
-            cls = clsmap[ broker['class'] ]
-            name = broker['name']
-            server = broker['server'].replace( "{barf}", self.barf )
-            topics = [ t.replace("{barf}", self.barf) for t in broker['topics'] ]
-            groupid = broker['groupid'].replace( "{barf}", self.barf )
-            collection = broker['collection'].replace( "{barf}", self.barf ) if 'collection' in broker else None
-            loggername = broker['loggername'].replace( "{barf}", self.barf )
-            loggername_prefix = broker['loggername_prefix'].replace( "{barf}", self.barf )
-            schm = schemafile if 'schemafile' not in broker else broker['schemafile']
-            updatetopics = False if 'updatetopics' not in broker else broker['updatetopics']
-            restart_time = datetime.timedelta( minutes=(broker['restart_time_min'] if 'restart_time_min' in broker
-                                                        else 30 ) )
-            max_restarts = broker['max_restarts'] if 'max_restarts' in broker else None
-            notopic_sleeptime = broker['notopic_sleeptime_sec'] if 'notopic_sleeptime_sec' in broker else 10
-            extraconfig = {} if 'extraconfig' not in broker else broker['extraconfig']
-            brokerinfo = { 'class': cls,
-                           'name': name,
-                           'server': server,
-                           'topics': topics,
-                           'groupid': groupid,
-                           'schemafile': schm,
-                           'updatetopics': updatetopics,
-                           'restart_time': restart_time,
-                           'max_restarts': max_restarts,
-                           'notopic_sleeptime': notopic_sleeptime,
-                           'extraconfig': extraconfig,
-                           'collection': collection,
-                           'loggername': loggername,
-                           'loggername_prefix': loggername_prefix }
-            brokers.append( brokerinfo )
+            cls = clsmap[ brokerinfo['class'] ]
+            name = brokername
 
-        for broker in brokers:
-            logger.info( f"Launching a {broker['class']} looking at server {broker['server']} "
-                         f"with group id {broker['groupid']} listening to topics {broker['topics']}"
-                         f"{' (will be updated)' if updatetopics else ''}, "
-                         f"saving to collection {broker['collection']}" )
+            if 'mongodb_collection_base' not in brokerinfo:
+                raise ValueError( "Every broker must have a mongodb_collection_base" )
+
+            if 'extraconfigjson' in brokerinfo:
+                if brokerinfo['extraconfigjson'] is not None:
+                    if ( 'extraconfig' in brokerinfo ) and ( brokerinfo['extraconfig'] is not None ):
+                        raise ValueError( "Can't have non-null for both extraconfig and extraconfigjson" )
+                    brokerinfo['extraconfig'] = simplejson.loads( brokerinfo['extraconfigjson'] )
+                del brokerinfo['extraconfigjson']
+
+            if ( 'extraconfig' in brokerinfo ) and ( brokerinfo['extraconfig'] is None ):
+                del brokerinfo['extraconfig']
+
+            pollkwargs = {}
+            if ( 'pollkwargs' in brokerinfo ) and ( brokerinfo['pollkwargs'] is not None ):
+                for k, v in brokerinfo['pollkwargs'].items():
+                    if isinstance( v, str ):
+                        pollkwargs[k] = v.replace( "{barf}", self.barf ).replace( "{barf2}", self.barf2 )
+                    elif isinstance( v, list ):
+                        pollkwargs[k] = [ i.replace("{barf}", self.barf).replace( "{barf2}", self.barf2 )
+                                          if isinstance(i, str) else i
+                                          for i in v ]
+                    else:
+                        pollkwargs[k] = v
+                if 'restart_time_min' in pollkwargs:
+                    if pollkwargs['restart_time_min'] is not None:
+                        pollkwargs['restart_time'] = datetime.timedelta( minutes=pollkwargs['restart_time_min'] )
+                    del pollkwargs['restart_time_min']
+
+            kwargs = {}
+            for k, v in brokerinfo.items():
+                if k in [ 'class', 'pollkwargs']:
+                    continue
+                if isinstance( v, str ):
+                    kwargs[k] = v.replace( "{barf}", self.barf ).replace( "{barf2}", self.barf2 )
+                elif isinstance( v, list ):
+                    kwargs[k] = [ i.replace("{barf}", self.barf).replace( "{barf2}", self.barf2 )
+                                  if isinstance(i, str) else i
+                                  for i in v ]
+                else:
+                    kwargs[k] = v
+
+            brokers[name] = { 'class': cls,
+                              'name': name,
+                              'kwargs': kwargs,
+                              'pollkwargs': pollkwargs,
+                              'nfails': 0
+                             }
+
+        for broker in brokers.values():
+            strio = io.StringIO()
+            strio.write( f"Launching a {broker['class']}" )
+            if 'server' in broker['kwargs']:
+                strio.write( f" looking at server {broker['kwargs']['server']}" )
+            if 'groupid' in broker['kwargs']:
+                strio.write( f" with group id {broker['kwargs']['groupid']}" )
+            if 'topics' in broker['kwargs']:
+                strio.write( f" listening to topics {broker['kwargs']['topics']}" )
+                if ( 'updatetopics' in broker['kwargs'] ) and broker['kwargs']['updatetopics']:
+                    strio.write( " (will be updated)" )
+            strio.write( f" saving to collections {broker['kwargs']['mongodb_collection_base']}*" )
+            logger.info( strio.getvalue() )
             parentconn, childconn = multiprocessing.Pipe()
             broker['pipe'] = parentconn
-            broker['childpipe'] = childconn
-            proc = multiprocessing.Process( target=lambda: self._launch_broker( brokerinfo ) )
+            broker['kwargs']['pipe'] = childconn
+            proc = multiprocessing.Process( target=self._launch_broker, args=[broker] )
             broker['process'] = proc
-            broker['lastheartbeat'] = time.monotonic()
             proc.start()
+            broker['lastheartbeat'] = time.monotonic()
 
         # Catch INT and TERM signals so we can try to shut down cleanly.
         self.mustdie = False
@@ -799,65 +1470,177 @@ class BrokerConsumerLauncher:
 
         heartbeatwait = 2
         toolongsilent = 300
+        max_n_fails = 5
         while not self.mustdie:
             try:
-                pipelist = [ b['pipe'] for b in brokers ]
+                pipelist = [ b['pipe'] for b in brokers.values() ]
                 _whichpipe = multiprocessing.connection.wait( pipelist, timeout=heartbeatwait )
                 # ****
                 # logger.debug( f"broker pipe wait timed out, got: {_whichpipe}" )
                 # ****
 
                 brokerstorestart = set()
-                for broker in brokers:
+                brokerstodelete = set()
+                for brokername, broker in brokers.items():
                     try:
                         while broker['pipe'].poll():
                             msg = broker['pipe'].recv()
-                            if ( 'message' not in msg ) or ( msg['message'] != 'ok' ):
-                                logger.error( f"Got unexpected message from {broker['name']}, will restart. "
-                                              f"(Message={msg}" )
-                                brokerstorestart.add( broker )
-                            else:
-                                logger.debug( f"Got heartbeat from {broker['name']}" )
+                            if ( not isinstance( msg, dict ) ) or ( 'message' not in msg ):
+                                logger.error( f"Got unexpected message from {brokername}, marking it for restart." )
+                                logger.debug( str(msg) )
+                                broker['nfails'] += 1
+                                brokerstorestart.add( brokername )
+
+                            elif msg['message'] == 'ok':
                                 broker['lastheartbeat'] = time.monotonic()
+                                logger.debug( f"Got heartbeat from {brokername}; it claims to have handled "
+                                              f"a total of {msg['tot_handled']} messages "
+                                              f"over {str(msg['runtime'])}" )
+
+                            elif msg['message'] == 'too many exceptions':
+                                logger.error( f"Too many exceptions for {brokername}, going to give up on it. "
+                                              f"It claims to have handled {msg['tot_handled']} messages "
+                                              f"over {str(msg['runtime'])}" )
+                                brokerstodelete.add( brokername )
+
+                            elif msg['message'] == 'died':
+                                logger.warning( f"Consumer {brokername} claims to have received the die command.  "
+                                                f"This surprises me, because I was supposed to send it, and didn't. "
+                                                f"But, OK, whatever.  Removing it from the list of broker "
+                                                f"consumers I'm tracking." )
+                                brokerstodelete.add( brokername )
+
+                            elif msg['message'] == 'exited':
+                                logger.info( f"Consumer {brokername} exited cleanly, probably because it hit "
+                                             f"the configured number of maximum internal restarts.  Remove it "
+                                             f"from the list of broker consumers I'm tracking." )
+                                brokerstodelete.add( brokername )
+
+                            elif msg['message'] == 'unhandled exception':
+                                logger.error( f"Consumer {brokername} got an unhandled exception: {msg['exception']}. "
+                                              f"Marking it for restart." )
+                                broker['nfails'] += 1
+                                brokerstorestart.add( brokername )
+
+                            else:
+                                logger.error( f"Got message '{msg['message']}' from {name}, which probably means "
+                                              f"there's a coding error, because I don't understand it. Marking "
+                                              f"the consumer for restart." )
+                                broker['nfails'] += 1
+                                brokerstorestart.add( brokername )
+
                     except Exception as ex:
-                        logger.error( f"Got exception listening for heartbeat from {broker['name']}; will restart." )
+                        logger.error( f"Got exception listening for heartbeat from {brokername}; will restart." )
                         logger.debug( str(ex) )
                         brokerstorestart.add( broker )
 
-                for broker in brokers:
+                for brokername, broker in brokers.items():
                     # ****
-                    # logger.debug( f"At {time.monotonic()} broker {broker['name']} "
+                    # logger.debug( f"At {time.monotonic()} broker {brokername} "
                     #               f"heartbeat = {broker['lastheartbeat']}" )
                     # ****
-                    dt = time.monotonic() - broker['lastheartbeat']
-                    if dt > toolongsilent:
-                        logger.error( f"It's been {dt:.0f} seconds since last heartbeat from {broker['name']}; "
-                                      f"will restart." )
-                        brokerstorestart.add( broker )
+                    if brokername not in brokerstodelete:
+                        dt = time.monotonic() - broker['lastheartbeat']
+                        if dt > toolongsilent:
+                            logger.error( f"It's been {dt:.0f} seconds since last heartbeat from {brokername}; "
+                                          f"will restart." )
+                            brokerstorestart.add( brokername )
 
-                for broker in brokerstorestart:
-                    logger.warning( f"Killing and restarting process for {broker['name']}" )
-                    broker['process'].kill()
-                    broker['pipe'].close()
-                    del broker['process']
-                    parentconn, childconn = multiprocessing.Pipe()
-                    broker['pipe'] = parentconn
-                    broker['childpipe'] = childconn
-                    proc = multiprocessing.Process( target=lambda: self._launch_broker( broker ) )
-                    broker['process'] = proc
-                    broker['lastheartbeat'] = time.monotonic()
-                    proc.start()
+                for todel in brokerstodelete:
+                    if todel in brokers:
+                        try:
+                            brokers[todel]['process'].terminate()
+                            brokers[todel]['process'].kill()
+                            brokers[todel]['process'].close()
+                            brokers[todel]['pipe'].close()
+                        except Exception as ex:
+                            logger.error( f"Exception trying to kill the process: {ex}" )
+                        del brokers[todel]
+                    if todel in brokerstorestart:
+                        brokerstorestart.discard( todel )
+
+                for brokername in brokerstorestart:
+                    broker = brokers[brokername]
+                    if broker['nfails'] >= max_n_fails:
+                        logger.error( f"Consumer {brokername} has had {broker['nfails']} failures, "
+                                      f"killing it and giving up on it instead of restarting it." )
+                        try:
+                            broker['process'].terminate()
+                            broker['process'].kill()
+                            broker['process'].close()
+                            broker['pipe'].close()
+                        except Exception as ex:
+                            logger.error( f"Exception trying to kill the process: {ex}" )
+                        del brokers[brokername]
+                    else:
+                        logger.warning( f"Killing and restarting process for {brokername}" )
+                        try:
+                            broker['process'].terminate()
+                            broker['process'].kill()
+                            broker['process'].close()
+                            broker['pipe'].close()
+                        except Exception as ex:
+                            logger.error( f"Exception trying to kill the process: {ex}" )
+                        parentconn, childconn = multiprocessing.Pipe()
+                        broker['pipe'] = parentconn
+                        broker['kwargs']['pipe'] = childconn
+                        proc = multiprocessing.Process( target=self._launch_broker, args=[broker] )
+                        broker['process'] = proc
+                        broker['lastheartbeat'] = time.monotonic()
+                        proc.start()
+
+                if len( brokers ) == 0:
+                    logger.info( "All broker consumers have exited one way or another; shutting down." )
+                    self.mustdie = True
 
             except Exception as ex:
                 logger.exception( ex )
                 logger.error( "brokerconsumer main process got an exception, going to shut down" )
                 self.mustdie = True
 
-        logger.warning( f"Shutting down.  Sending die to all processes and waiting {self.shutdown_graceperiod}s" )
-        for broker in brokers:
-            broker['pipe'].send( { "command": "die" } )
-        time.sleep( self.shutdown_graceperiod )
-        logger.warning( "Exiting" )
+        if len(brokers) > 0:
+            logger.warning( f"Shutting down.  Sending die to all remaining consumer processes and "
+                            f"giving them {self.shutdown_graceperiod}s to acknowledge." )
+            for broker in brokers.values():
+                broker['pipe'].send( { "command": "die" } )
+
+            tstartshutdown = time.monotonic()
+            while ( len(brokers) > 0 ) and ( time.monotonic() - tstartshutdown <= self.shutdown_graceperiod ):
+                pipelist = [ b['pipe'] for b in brokers.values() ]
+                _whichpipe = multiprocessing.connection.wait( pipelist, 1 )
+                brokerstodel = set()
+                for brokername, broker in brokers.items():
+                    if broker['pipe'].poll():
+                        msg = broker['pipe'].recv()
+                        if isinstance(msg, dict) and ( 'message' in msg ) and ( msg['message'] == 'died' ):
+                            brokerstodel.add( brokername )
+                        else:
+                            logger.warning( f"Got a message other than 'died' from {brokername} while waiting for "
+                                            f"them all to shut down; continuing to listen for 'died'." )
+                for brokername in brokerstodel:
+                    broker['process'].join()
+                    broker['process'].close()
+                    broker['pipe'].close()
+                    del brokers[brokername]
+
+            if len( brokers ) > 0:
+                logger.warning( f'{len(brokers)} consumers never responded to the die command.  Killing them and '
+                                f'waiting {self.shutdown_graceperiod}s to give them one last chance to clean up' )
+                for brokername, broker in brokers.items():
+                    try:
+                        broker['process'].terminate()
+                        broker['process'].kill()
+                    except Exception as ex:
+                        logger.error( f"Exception trying to kill the process for {brokername}: {ex}" )
+                time.sleep( self.shutdown_graceperiod )
+                for broker in brokers.values():
+                    try:
+                        broker['process'].close()
+                        broker['pipe'].close()
+                    except Exception as ex:
+                        logger.error( f"Exception trying to clean up after {brokername}: {ex}" )
+
+        logger.info( "Exiting BrokerConsumerLauncher." )
         return
 
 
@@ -867,8 +1650,6 @@ def main():
                                       description="Listen to broker streams and save broker messages",
                                       formatter_class=argparse.ArgumentDefaultsHelpFormatter )
     parser.add_argument( 'config', help='YAML file with config of brokers to listen to' )
-    parser.add_argument( '-c', '--collection', default=None,
-                         help="Collection in mongo database to store alerts; defaults to $MONGODB_DEFAULT_COLLECTION" )
     parser.add_argument( '-b', '--barf', default='abcdef',
                          help=( "String of random characters for group and topic names.  (Used in tests.)"
                                 "Will have no effect if you never put {barf} in your config file." ) )
@@ -878,13 +1659,11 @@ def main():
 
     mongodb_host = os.getenv( "MONGODB_HOST" )
     mongodb_dbname = os.getenv( "MONGODB_DBNAME" )
-    mongodb_collection = args.collection if args.collection is not None else os.getenv( "MONGODB_DEFAULT_COLLECTION" )
     mongodb_user = os.getenv( "MONGODB_ALERT_WRITER_USER" )
     mongodb_password = os.getenv( "MONGODB_ALERT_WRITER_PASSWD" )
-    if any ( [ i is None for i in [ mongodb_host, mongodb_dbname, mongodb_collection,
-                                    mongodb_user, mongodb_password ] ] ):
+    if any ( i is None for i in [ mongodb_host, mongodb_dbname, mongodb_user, mongodb_password ] ):
         raise ValueError( "Must set all the following env vars: MONGODB_HOST, MONGODB_DBNAME, "
-                          "MONGODB_DEFAULT_COLLECTION, MONGODB_ALERT_WRITER_USER, MONGODB_ALERT_WRITER_PASSWD" )
+                          "MONGODB_ALERT_WRITER_USER, MONGODB_ALERT_WRITER_PASSWD" )
 
     bcl = BrokerConsumerLauncher( args.config, barf=args.barf, verbose=args.verbose )
     bcl()

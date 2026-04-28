@@ -4,10 +4,10 @@
 # You probably want to build for both targets webserver and shell
 #
 # Rob, use:
-#   DOCKER_BUILDKIT=1 docker build --target webserver -t registry.nersc.gov/m1727/raknop/fastdb-webap:rknop-dev .
-#   DOCKER_BUILDKIT=1 docker build --target shell -t registry.nersc.gov/m1727/raknop/fastdb-shell:rknop-dev .
+#   docker build --target webserver -t registry.nersc.gov/m1727/raknop/fastdb-webap:...
+#   docker build --target shell -t registry.nersc.gov/m1727/raknop/fastdb-shell:...
 
-FROM debian:bookworm-20250630 AS base
+FROM debian:trixie-20260223 AS base
 LABEL maintainer="Rob Knop <rknop@pobox.com>"
 
 SHELL ["/bin/bash", "-c"]
@@ -36,17 +36,16 @@ RUN ln -s /usr/bin/python3 /usr/bin/python
 ENV LESS=-XLRi
 
 
-# Install mongosh (which adds >250MB to the docker image :( )
+# Install mongosh (which adds >300MB to the docker image :( ) and mongodb-dbatabase-tools (another 150MB)
 
 RUN curl -fsSL https://www.mongodb.org/static/pgp/server-8.0.asc | \
    gpg -o /usr/share/keyrings/mongodb-server-8.0.gpg \
    --dearmor
 
-RUN echo "deb [ signed-by=/usr/share/keyrings/mongodb-server-8.0.gpg ] http://repo.mongodb.org/apt/debian bookworm/mongodb-org/8.0 main" | tee /etc/apt/sources.list.d/mongodb-org-8.0.list
-
+RUN echo "deb [ signed-by=/usr/share/keyrings/mongodb-server-8.0.gpg ] https://repo.mongodb.org/apt/ubuntu noble/mongodb-org/8.0 multiverse" | tee /etc/apt/sources.list.d/mongodb-org-8.0.list
 RUN apt-get update \
   && DEBIAN_FRONTEND="noninteractive" TZ="UTC" apt-get -y install -y --no-install-recommends \
-          mongodb-mongosh \
+          mongodb-mongosh mongodb-database-tools \
   && apt-get clean \
   && rm -rf /var/lib/apt/lists/*
 
@@ -64,34 +63,49 @@ RUN python3 -mvenv /venv
 
 RUN source /venv/bin/activate && \
     pip --no-cache install \
-       apscheduler==3.11.0 \
-       astropy==7.0.1 \
-       confluent_kafka==2.8.2 \
-       fastavro==1.10.0 \
-       flask==3.1.0 \
+       apscheduler==3.11.2 \
+       astropy==7.2.0 \
+       confluent_kafka==2.13.2 \
+       "fastavro>=1.10.0,<2.0.0" \
+       fink-client==10.1 \
+       flask==3.1.3 \
        flask-session==0.8.0 \
        flask-sock==0.7.0 \
-       gevent==24.11.1 \
-       gunicorn==23.0.0 \
-       nested-pandas==0.4.6 \
-       numpy==2.2.4 \
-       pandas==2.2.3 \
+       gevent==25.9.1 \
+       gunicorn==25.1.0 \
+       minio==7.2.20 \
+       nested-pandas==0.6.8 \
+       numpy==2.4.3 \
+       pandas==2.3.3 \
        pittgoogle-client==0.3.19 \
-       polars==1.29.0 \
-       psycopg==3.2.6 \
-       pycryptodome==3.22.0 \
-       pymongo==4.11.3 \
-       pytest==8.3.5 \
+       polars==1.38.1 \
+       psycopg==3.3.3 \
+       pycryptodome==3.23.0 \
+       pymongo==4.16.0 \
+       pytest==9.0.2 \
        pytest-timestamper==0.0.10 \
        python-dateutil==2.9.0.post0 \
-       pytz==2025.1 \
+       pytz==2026.1.post1 \
        remote-pdb==2.1.0 \
-       requests==2.32.3 \
-       simplejson==3.20.1
+       requests==2.32.5 \
+       simplejson==3.20.2
 
 # Our own customization of pubsub
 COPY pubsub.patch /tmp/pubsub.patch
-RUN patch /venv/lib/python3.11/site-packages/pittgoogle/pubsub.py /tmp/pubsub.patch
+RUN patch /venv/lib/python3.13/site-packages/pittgoogle/pubsub.py /tmp/pubsub.patch
+
+# We have to install fink-client manually because right now it pins its
+#  requirement to fastavro 1.9.4, but I have failed to pip install
+#  fastavro 1.9.4 (is it a python 3.13 thing?)
+
+# WORKDIR /usr/src
+# RUN git clone https://github.com/astrolabsoftware/fink-client.git
+# RUN cat fink-client/requirements.txt | perl -pe 's/fastavro==1.9.4/fastavro>=1.9.4/' > fink-client/requirements-new.txt
+# RUN mv fink-client/requirements-new.txt fink-client/requirements.txt
+# RUN cd fink-client \
+#     && source /venv/bin/activate \
+#     && pip install .
+
 
 # ======================================================================
 # This is for the test webserver.  It installs crappy keys so you

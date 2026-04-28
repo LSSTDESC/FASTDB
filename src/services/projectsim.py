@@ -69,7 +69,7 @@ class AlertReconstructor:
 
         if make_cutouts:
             bio = io.BytesIO()
-            rng = np.random.get_default_generator()
+            rng = np.random.default_rng()
             fits.writeto( bio, rng.normal(loc=100., scale=10., size=(cutout_size, cutout_size)).astype( np.float32 ) )
             self.fitsdata = bio.getvalue()
         else:
@@ -118,7 +118,7 @@ class AlertReconstructor:
                      'parentDiaSourceId', 'midpointMjdTai', 'ra', 'raErr', 'dec', 'decErr', 'ra_dec_Cov',
                      'x', 'xErr', 'y', 'yErr', 'apFlux', 'apFluxErr', 'snr',
                      'psfFlux', 'psfFluxErr', 'psfFluxLnL', 'psfChi2', 'psfNdata',
-                     'scienceflux', 'scienceFluxErr', 'templateFlux', 'templateFluxErr',
+                     'scienceFlux', 'scienceFluxErr', 'templateFlux', 'templateFluxErr',
                      'ixx', 'iyy', 'ixy', 'ixxPSF', 'iyyPSF', 'ixyPSF',
                      'extendedness', 'realibility', 'band',
                      'timeProcessedMjdTai', 'timeWithddrawnMjdTai', 'bboxSize' }
@@ -137,10 +137,10 @@ class AlertReconstructor:
                     curdict[col] = None
 
             # diasource has some pixel flags that are converted to a bitmask in the database
-            for mask, field in db.DiaSource._flags_bits.items():
+            for mask, field in db.DiaSourceExtra._flags_bits.items():
                 curdict[field] = bool( row[columns['flags']] & mask )
 
-            for mask, field in db.DiaSource._pixelflags_bits.items():
+            for mask, field in db.DiaSourceExtra._pixelflags_bits.items():
                 curdict[field] = bool( row[columns['pixelflags']] & mask )
 
             dicts.append( curdict )
@@ -260,7 +260,7 @@ class AlertReconstructor:
                       "prvDiaForcedSources": previous_forced_sources if len(previous_forced_sources) > 0 else None,
                       "diaObject": diaobject,
                       "ssSource": None,
-                      "MPCORB": None,
+                      "mpc_orbits": None,
                       "cutoutDifference": self.fitsdata,
                       "cutoutScience": self.fitsdata,
                       "cutoutTemplate": self.fitsdata }
@@ -379,11 +379,21 @@ class AlertSender:
             alerts once they exist, parallelize that part of the
             process.)
 
+          make_cutouts : bool, default False
+             If True, then FITS images with gratuitous data will be
+             included in the cutout* fields.  (It's just noise, don't
+             try to actually interpret it.)
+
+          cutout_size : int, default 41
+             If make_cutouts is True, then this is the square size of
+             the coutout data included.
+
         """
         self.kafka_server = kafka_server
         self.kafka_topic = kafka_topic
         self.reconstruct_procs = int( reconstruct_procs )
-
+        self.make_cutouts = make_cutouts
+        self.cutout_size = cutout_size
 
     def interruptor( self, signum, frame ):
         _logger.error( "Got an interupt signal, cleaning up and exiting." )
@@ -484,7 +494,7 @@ class AlertSender:
 
 
     def __call__( self, addeddays=1, throughday=None, reallysend=False, flush_every=1000, log_every=10000,
-                  catch_int_and_term=False, make_cutouts=False, cutout_size=21 ):
+                  catch_int_and_term=False ):
         """Send alerts.
 
         Launches AlertReconstructor subprocesses to build the alert
@@ -518,15 +528,6 @@ class AlertSender:
              handlers to catch INT and TERM signals, and shut down
              cleanly.  This is not True by default because our tests
              need it to be False.
-
-          make_cutouts : bool, default False
-             If True, then FITS images with gratuitous data will be
-             included in the cutout* fields.  (It's just noise, don't
-             try to actually interpret it.)
-
-          cutout_size : int, default 41
-             If make_cutouts is True, then this is the square size of
-             the coutout data included.
 
         """
 
@@ -571,8 +572,8 @@ class AlertSender:
             for i in range( self.reconstruct_procs ):
                 parentconn, childconn = multiprocessing.Pipe()
                 proc = multiprocessing.Process( target=lambda: launch_reconstructor( childconn,
-                                                                                     make_cutouts,
-                                                                                     cutout_size ),
+                                                                                     self.make_cutouts,
+                                                                                     self.cutout_size ),
                                                 daemon=True )
                 proc.start()
                 self.procinfo[ proc.pid ] = { 'proc': proc,
@@ -720,6 +721,8 @@ def main():
                          help="Number of alert reconstruction subprocesses to run." )
     parser.add_argument( "--do", action='store_true', default=False,
                          help="Actually stream alerts (otherwise, just test reconstructing them)." )
+    parser.add_argument( "-c", "--cutouts", action='store_true', default=False,
+                         help="Add random data to the alert cutouts fields" )
     parser.add_argument( "-a", "--added-days", type=float, default=None,
                          help="Send alerts for this many days of detections past the last alert sent." )
     parser.add_argument( "-d", "--through-day", type=float, default=None,
@@ -734,7 +737,8 @@ def main():
     if ( args.added_days is None ) == ( args.through_day is None ):
         raise ValueError( "Must specify at least but only one of --added-days and --through-day" )
 
-    sender = AlertSender( args.kafka_server, args.kafka_topic, reconstruct_procs=args.processes )
+    sender = AlertSender( args.kafka_server, args.kafka_topic, reconstruct_procs=args.processes,
+                          make_cutouts=args.cutouts )
 
     sender( addeddays=args.added_days, throughday=args.through_day, reallysend=args.do,
             flush_every=args.flush_every, log_every=args.log_every,

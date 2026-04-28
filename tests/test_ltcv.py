@@ -1,667 +1,783 @@
+import io
+import time
 import pytest
+
 import numpy as np
+import pandas
 
 import db
 import ltcv
+from util import FDBLogger
 
 
-def test_get_object_infos( set_of_lightcurves ):
+def test_get_object_infos( set_of_lightcurves, procver_collection ):
+    bpvs, _pvs, _pvinfo = procver_collection
     roots = set_of_lightcurves
 
-    info = ltcv.get_object_infos( [ 200, 201, 202 ], return_format='pandas' )
+    info = ltcv.get_object_infos( [ 200, 201, 202 ], return_format='pandas',
+                                  processing_version='pvc_pv2', position_processing_version='pvc_pv1' )
     assert info.index.name == 'diaobjectid'
-    assert set(info.columns.values) == set( [ i for i in db.DiaObject().tablemeta.keys() if i != 'diaobjectid' ] )
+    assert set(info.columns.values) == { 'rootid', 'obj_base_procver', 'pos_base_procver',
+                                         'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' }
     assert len(info) == 3
     assert list( info.index.values ) == [ 200, 201, 202 ]
-    assert info.rootid.values.tolist() == [ roots[i]['root'].id for i in [0, 1, 2] ]
+    assert info.rootid.values.tolist() == [ roots[i]['root'].id for i in [ 0, 1, 2 ] ]
+    # Since we gave a position processing versoin that was inconsistent with the diaobject
+    #   processing version, none of the position fields should be filled.
+    assert all( all( ( i is None ) or pandas.isna(i) for i in info[col] )
+                for col in ['pos_base_procver', 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov'] )
 
-    jsinfo = ltcv.get_object_infos( [ 200, 201, 202 ], return_format='json' )
+    # Make sure we get position information if we use the position processing default
+    #   to the processing version
+    info = ltcv.get_object_infos( [ 200, 201, 202 ], return_format='pandas', processing_version='pvc_pv2' )
+    assert list( info.index.values ) == [ 200, 201, 202 ]
+    assert all( all( ( i is not None ) and ( not pandas.isna(i) ) for i in info[col] )
+                for col in ['pos_base_procver', 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov'] )
+    assert info.loc[ 200, 'pos_base_procver'] == bpvs['bpv2a_diaobject_position_60030'].description
+    assert info.loc[ 201, 'pos_base_procver'] == bpvs['bpv2a_diaobject_position_60030'].description
+    assert info.loc[ 202, 'pos_base_procver'] == bpvs['bpv2_diaobject_position_60080'].description
+    info2 = ltcv.get_object_infos( [ 200, 201, 202 ], return_format='pandas', processing_version='pvc_pv2',
+                                   position_processing_version='pvc_pv2' )
+    assert info2.equals( info )
+
+    # Make sure json return gives the same stuff
+    jsinfo = ltcv.get_object_infos( [ 200, 201, 202 ], processing_version='pvc_pv2', return_format='json' )
     assert jsinfo['diaobjectid'] == [ 200, 201, 202 ]
     info.reset_index( inplace=True )
     for col in info.columns:
-        assert ( info.loc[ :, col ].values == np.array( jsinfo[col] ) ).all()
+        if col in { 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' }:
+            assert np.array( info.loc[:, col].values ) == pytest.approx( np.array( jsinfo[col] ), rel=1e-5 )
+        else:
+            assert ( np.array( info.loc[:, col].values ) == np.array( jsinfo[col] ) ).all()
 
-    info = ltcv.get_object_infos( [ roots[i]['root'].id for i in [0, 1, 2] ] )
     # TODO : right now there are no diaobjects in the default processing version!  Fix that in Issue #70.
-    assert info['diaobjectid'] == []
+    info = ltcv.get_object_infos( [ roots[i]['root'].id for i in [0, 1, 2] ], return_format='pandas' )
+    assert list( info.index.values ) == [ 200, 201, 202, 2011 ]
+    assert all( b == bpvs['bpv2_diaobject'].description for b in info['obj_base_procver'] )
+    assert info.loc[ 200, 'pos_base_procver' ] == bpvs['bpv2a_diaobject_position_60030'].description
+    assert info.loc[ 201, 'pos_base_procver' ] == bpvs['bpv2a_diaobject_position_60030'].description
+    assert info.loc[ 2011, 'pos_base_procver' ] is None
+    assert info.loc[ 202, 'pos_base_procver' ] == bpvs['bpv2_diaobject_position_60080'].description
 
-    info = ltcv.get_object_infos( [ roots[i]['root'].id for i in [0, 1, 2] ], processing_version='pvc_pv2' )
-    assert info['diaobjectid'] == [ 200, 201, 202 ]
+    info2 = ltcv.get_object_infos( [ roots[i]['root'].id for i in [0, 1, 2] ], processing_version='pvc_pv2',
+                                   return_format='pandas' )
+    assert ( info2.rootid == info.rootid ).all()
+    assert ( info2.obj_base_procver == info.obj_base_procver ).all()
+    # The None/<NA> values aren't comparing as equal, probably because of the whole "all nan tests are False" thing
+    assert ( info2.loc[ [ 200, 201, 202 ], : ] == info.loc[ [ 200, 201, 202], : ] ).all().all()
 
-    info = ltcv.get_object_infos( [ 200, 201, 202 ], columns=['ra', 'dec'] )
-    assert info['diaobjectid'] == [ 200, 201, 202 ]
-    assert set( info.keys() ) == { 'diaobjectid', 'ra', 'dec' }
+    info = ltcv.get_object_infos( [ 200, 201, 202 ], columns=['ra', 'dec'], processing_version='pvc_pv2',
+                                  return_format='pandas' )
+    assert info.index.values.tolist() == [ 200, 201, 202 ]
+    assert set( info.keys() ) == { 'ra', 'dec' }
 
+    # Test passing base_procvers
+    with pytest.raises( ValueError, match="Must supply a position processing.version with base_procvers" ):
+        info  = ltcv.get_object_infos( [ roots[i]['root'].id for i in [0, 1, 2] ], return_format='pandas',
+                                       base_procvers=[ bpvs[i].id
+                                                       for i in [ 'realtime_diaobject', 'bpv1_diaobject' ] ] )
+    info = ltcv.get_object_infos( [ roots[i]['root'].id for i in [0, 1, 2] ], return_format='pandas',
+                                  base_procvers=[ bpvs[i].id for i in [ 'realtime_diaobject', 'bpv1_diaobject' ] ],
+                                  position_processing_version='realtime' )
+    assert set( info.rootid ) == set( roots[i]['root'].id for i in [0, 1, 2] )
+    assert set( info.index.values ) == { 0, 1, 2, 100 }
+    for objid in [ 0, 1, 2 ]:
+        assert not pandas.isna( info.loc[ objid, 'ra' ] )
+        assert not pandas.isna( info.loc[ objid, 'dec' ] )
+    for col in [ 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ]:
+        assert pandas.isna( info.loc[ 100, col ] )
+
+    info = ltcv.get_object_infos(  [ roots[i]['root'].id for i in [0, 1, 2] ], return_format='pandas',
+                                   base_procvers=[ bpvs[i].id for i in [ 'realtime_diaobject', 'bpv2_diaobject' ] ],
+                                   position_processing_version='pvc_pv2' )
+    assert set( info.rootid ) == set( roots[i]['root'].id for i in [0, 1, 2] )
+    assert set( info.index.values ) == { 0, 1, 2, 200, 201, 2011, 202 }
+    for objid in [ 200, 201, 202 ]:
+        assert not pandas.isna( info.loc[ objid, 'ra' ] )
+        assert not pandas.isna( info.loc[ objid, 'dec' ] )
+    for objid in [ 0, 1, 2, 2011 ]:
+        for col in [ 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ]:
+            assert pandas.isna( info.loc[ objid, col ] )
+
+    # Test passing an object id table
     with db.DBCon() as dbcon:
         dbcon.execute( "CREATE TEMP TABLE tempthing(diaobjectid bigint)", explain=False )
         dbcon.execute( "INSERT INTO tempthing(diaobjectid) VALUES ( 200 )" )
         dbcon.execute( "INSERT INTO tempthing(diaobjectid) VALUES ( 202 )" )
-        info = ltcv.get_object_infos( objids_table='tempthing', dbcon=dbcon )
-        assert info['diaobjectid'] == [ 200, 202 ]
+        info = ltcv.get_object_infos( objids_table='tempthing', dbcon=dbcon, processing_version='pvc_pv2',
+                                      return_format='pandas' )
+        assert info.index.values.tolist() == [ 200, 202 ]
+        assert all( info['rootid'] == [ roots[i]['root'].id for i in [ 0, 2 ] ] )
+        assert all ( all( ( i is not None ) and ( not pandas.isna(i) ) for i in info[col] )
+                     for col in [ 'pos_base_procver', 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ] )
+        # If we pass an inconjsistent processing version, we should get nothing back
+        info = ltcv.get_object_infos( objids_table='tempthing', dbcon=dbcon, processing_version='pvc_pv3',
+                                      return_format='pandas' )
+        assert len( info ) == 0
 
+        dbcon.execute( "DROP TABLE tempthing" )
+        dbcon.execute( "CREATE TEMP TABLE tempthing(rootid uuid)", explain=False )
+        dbcon.execute( "INSERT INTO tempthing(rootid) VALUES (%(id)s)", { 'id': roots[1]['root'].id } )
+        dbcon.execute( "INSERT INTO tempthing(rootid) VALUES (%(id)s)", { 'id': roots[3]['root'].id } )
+        info = ltcv.get_object_infos( objids_table='tempthing', dbcon=dbcon, processing_version='pvc_pv2',
+                                      return_format='pandas' )
+        assert info.index.values.tolist() == [ 201, 203, 2011 ]
+        info = ltcv.get_object_infos( objids_table='tempthing', dbcon=dbcon, processing_version='realtime',
+                                      return_format='pandas' )
+        assert info.index.values.tolist() == [ 1 ]
+        assert all( all( ( i is not None ) and ( not pandas.isna(i) ) for i in info[col] )
+                    for col in [ 'pos_base_procver', 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ] )
+
+        # If the temp table has both rootid and diaobjectid, it should use diaobjectid.  Test this
+        # By passing an inconsistent input
+        dbcon.execute( "DROP TABLE tempthing" )
+        dbcon.execute( "CREATE TABLE tempthing(rootid uuid, diaobjectid bigint)" )
+        dbcon.execute( "INSERT INTO tempthing VALUES (%(id)s, 200)", { 'id': roots[1]['root'].id } )
+        dbcon.execute( "INSERT INTO tempthing VALUES (%(id)s, 202)", { 'id': roots[3]['root'].id } )
+        info = ltcv.get_object_infos( objids_table='tempthing', dbcon=dbcon, processing_version='pvc_pv2',
+                                     return_format='pandas' )
+        assert info.index.values.tolist() == [ 201, 203, 2011 ]
+
+        # Check failures
         with pytest.raises( ValueError, match='objids_table requires dbcon' ):
-            ltcv.get_object_infos( objids_table='tempthing' )
+            ltcv.get_object_infos( objids_table='tempthing', processing_version='pvc_pv2' )
 
         with pytest.raises( ValueError, match='objids_table and objids cannot be used together' ):
-            ltcv.get_object_infos( objids_table='tempthing', objids=[0, 1, 2], dbcon=dbcon )
+            ltcv.get_object_infos( objids_table='tempthing', objids=[0, 1, 2], dbcon=dbcon,
+                                   processing_version='pvc_pv2' )
 
         with pytest.raises( ValueError, match='objids_table and objids cannot be used together' ):
-            ltcv.get_object_infos( [0, 1, 2], objids_table='tempthing', dbcon=dbcon )
-
-        with pytest.raises( ValueError, match='Cannot pass processing_version when passing objids_table' ):
-            ltcv.get_object_infos( objids_table='tempthing', processing_version='pvc_pv2', dbcon=dbcon )
+            ltcv.get_object_infos( [0, 1, 2], objids_table='tempthing', dbcon=dbcon,
+                                   processing_version='pvc_pv2' )
 
 
-def test_object_ltcv( procver_collection, set_of_lightcurves ):
+def find_bpv_key( bpvs, bpvid ):
+    for k, value in bpvs.items():
+        if value.id == bpvid:
+            return k
+    return None
+
+
+def compare_pandas_to_json( pdltcvs, jsltcvs, pdobjinfo, jsobjinfo ):
+    for thisltcv in jsltcvs:
+        rootid = thisltcv['rootid']
+        subpd = pdltcvs.xs( rootid, level='rootid' ).reset_index()
+        for col in subpd.columns:
+            cond = np.array( [ ( p == pytest.approx(val, rel=1e-12) )
+                                 if col in ['mjd', 'det_ra', 'det_dec']
+                               else ( p == pytest.approx(val, rel=1e-6) )
+                                 if col in ['flux', 'fluxerr', 'det_raerr', 'det_decerr' ]
+                               else ( p == pytest.approx(val, abs=0.0001/3600.) )
+                                 if col == 'det_ra_dec_cov'
+                               else ( p == val )
+                               for p, val in zip( subpd[col], thisltcv[col] )
+                              ] )
+            assert ( cond
+                     |
+                     ( pandas.isna( subpd[col] ) & ( np.array( [ i is None for i in thisltcv[col] ] ) ) )
+                    ).all()
+
+    if jsobjinfo is not None:
+        assert pdobjinfo.index.names == ['diaobjectid']
+        pdobjinfo.reset_index( inplace=True )
+        for k, v in jsobjinfo.items():
+            cond = np.array( [ ( p == pytest.approx(val, rel=1e-12) )
+                                 if k in [ 'ra', 'dec' ]
+                               else ( p == pytest.approx(val, rel=1e-6 ) )
+                                 if k in [ 'raerr', 'decerr' ]
+                               else ( p == pytest.approx(val, abs=0.0001/3600.) )
+                                 if k == 'ra_dec_cov'
+                               else ( p == val )
+                               for p, val in zip( pdobjinfo[k], v )
+                              ] )
+            assert ( cond
+                     |
+                     ( pandas.isna( pdobjinfo[k] ) & ( np.array( [ i is None for i in v ] ) ) )
+                    ).all()
+
+
+def test_object_ltcv( set_of_lightcurves, procver_collection, lightcurve_checker ):
+    check_ltcv = lightcurve_checker
     roots = set_of_lightcurves
-    _bpvs, pvs = procver_collection
+    _bpvs, pvs, _pvinfo = procver_collection
 
-    # The fixture loads up lightcurves every 2.5 days
+    pvs_and_obs = [ { 'pv': 'pvc_pv1', 'obj': 100, 'exproot': [0], 'expobj': [100] },
+                    { 'pv': 'pvc_pv1', 'obj': 200, 'exproot': [0], 'expobj': [100] },
+                    { 'pv': 'pvc_pv1', 'obj': roots[0]['root'].id, 'exproot': [0], 'expobj': [100] },
+                    { 'pv': pvs['pv1'], 'obj': 100, 'exproot': [0], 'expobj': [100] },
+                    { 'pv': 'pvc_pv2', 'obj': 201, 'exproot': [1], 'expobj': [201, 2011] },
+                    { 'pv': 'pvc_pv2', 'obj': roots[1]['root'].id, 'exproot': [1], 'expobj': [201, 2011] },
+                    { 'pv': None, 'obj': 201, 'exproot': [1], 'expobj': [201, 2011] },
+                    { 'pv': 'realtime', 'obj': 1, 'exproot': [1], 'expobj': [1] }
+                   ]
 
-    # Try to get the object lightcurve for the second object of roots[0] using pv1
-    # Should get detections starting 60000, forced starting 50090,
-    # sources through 60015 and forced through 60010 in bpv1a, then sources through 60030
-    # and forced through 60050 in bpv1
+    extras = [
+        {},
+        { 'mjd_now': 60041. },
+        { 'bands': 'r' },
+        { 'bands': ['r'] },
+        { 'include_source_positions': 1 },
+        { 'return_object_info': 1 },
+        { 'return_object_info': 1, 'include_object_positions': 1 },
+        { 'return_object_info': 1, 'include_base_procver': 1 },
+        { 'return_object_info': 1, 'include_base_procver': 1, 'include_object_positions': 1 },
+        { 'use_weighted_source_positions': 1, 'include_base_procver': 1 },
+        { 'use_weighted_source_positions': 1, 'include_object_positions': 1 },
+        { 'use_weighted_source_positions': 1, 'include_object_positions': 1, 'return_object_info': 1 },
+        { 'use_weighted_source_positions': 1, 'include_source_positions': 1,
+          'return_object_info': 1, 'include_object_positions': 1 },
+        { 'always_use_weighted_source_positions': 1, 'include_source_positions': 1,
+          'return_object_info': 1, 'include_object_positions': 1 },
+        { 'mjd_now': 60061., 'always_use_weighted_source_positions': 1, 'include_base_procver': 1,
+          'include_source_positions': 1, 'include_object_positions': 1, 'return_object_info': 1 },
+    ]
 
-    sources = ltcv.object_ltcv( pvs['pv1'].id, roots[0]['objs'][2]['obj'].diaobjectid,
-                                return_format='pandas', which='detections', include_base_procver=True )
-    forced = ltcv.object_ltcv( pvs['pv1'].id, roots[0]['objs'][2]['obj'].diaobjectid,
-                               return_format='pandas', which='forced', include_base_procver=True )
-    df = ltcv.object_ltcv( pvs['pv1'].id, roots[0]['objs'][2]['obj'].diaobjectid,
-                           return_format='pandas', which='patch', include_base_procver=True )
+    t0 = time.perf_counter()
+    tjs = 0
+    tpd = 0
+    n = 0
+    for ltcvreq in pvs_and_obs:
+        for which in [ None, 'patch', 'detections', 'forced' ]:
+            for extra in extras:
+                kwargs = extra.copy()
+                if ltcvreq['pv'] is not None:
+                    kwargs['processing_version'] = ltcvreq['pv']
+                if which is not None:
+                    kwargs['which'] = which
 
-    assert len(sources) == 13
-    assert len(forced) == 15
-    assert len(df) == 17
+                n += 1
+                tj0 = time.perf_counter()
+                jsres = ltcv.object_ltcv( diaobjectid=ltcvreq['obj'], return_format='json', **kwargs )
+                tjs += time.perf_counter() - tj0
 
-    assert np.all( ( sources.mjd >= 60000 ) & ( sources.mjd <= 60030 ) )
-    assert np.all( sources[ sources.mjd <= 60015 ].base_procver == 'pvc_bpv1a' )
-    assert np.all( sources[ sources.mjd > 60015 ].base_procver == 'pvc_bpv1' )
-    assert np.all( sources.isdet )
-    assert np.all( forced[ forced.mjd <= 60010 ].base_procver == 'pvc_bpv1a' )
-    assert np.all( forced[ forced.mjd > 60010 ].base_procver == 'pvc_bpv1' )
-    assert np.all( forced[ ( forced.mjd >= 60000 ) & ( forced.mjd <= 60030 ) ].isdet )
-    assert np.all( ~forced[ ( forced.mjd < 60000 ) | ( forced.mjd > 60030 ) ].isdet )
-    assert np.all( df[ df.mjd <= 60010 ].base_procver == 'pvc_bpv1a' )
-    assert np.all( df[ df.mjd > 60010 ].base_procver == 'pvc_bpv1' )
-    assert np.all( df[ df.mjd > 60025 ].ispatch )
-    assert np.all( ~df[ df.mjd <= 60025 ].ispatch )
-    assert np.all( df[ ( df.mjd >= 60000 ) & ( df.mjd <= 60030 ) ].isdet )
-    assert np.all( ~df[ ( df.mjd < 60000 ) | ( df.mjd > 60030 ) ].isdet )
+                n += 1
+                tp0 = time.perf_counter()
+                pdres = ltcv.object_ltcv( diaobjectid=ltcvreq['obj'], return_format='pandas', **kwargs )
+                tpd += time.perf_counter() - tp0
 
+                if which is None:
+                    kwargs['which'] = 'patch'
+                if ltcvreq['pv'] is not None:
+                    del kwargs['processing_version']
 
-    # If we ask for roots[1] from pv1, we shouldn't get anything.
-    # (Also trying using the root object this time.)
+                # Verfify the dict returns are right
+                check_ltcv( 'pv2' if ltcvreq['pv'] is None else ltcvreq['pv'],
+                            ltcvreq['exproot'], ltcvreq['expobj'], jsres, single=True, **kwargs )
 
-    with pytest.raises( RuntimeError, match="Could not find object for diaobjectid" ):
-        df = ltcv.object_ltcv( pvs['pv1'].id, roots[1]['root'].id, return_format='pandas', which='patch',
-                               include_base_procver=True )
+                # Make sure pandas return is consistent
+                if isinstance( pdres, tuple ):
+                    jsltcv = jsres[0]
+                    pdltcv = pdres[0]
+                    jsobjinfo = jsres[1]
+                    pdobjinfo = pdres[1]
+                else:
+                    jsltcv = jsres
+                    pdltcv = pdres
+                    jsobjinfo = None
+                    pdobjinfo = None
 
-    # But if we ask for roots[1] from pv2, we should get stuff.  In this case, patch and forced
-    # should be the same
+                compare_pandas_to_json( pdltcv, [jsltcv], pdobjinfo, jsobjinfo )
 
-    sources = ltcv.object_ltcv( pvs['pv2'].id, roots[1]['root'].id, return_format='pandas',
-                                which='detections', include_base_procver=True )
-    forced = ltcv.object_ltcv( pvs['pv2'].id, roots[1]['root'].id, return_format='pandas',
-                               which='forced', include_base_procver=True )
-    df = ltcv.object_ltcv( pvs['pv2'].id, roots[1]['root'].id, return_format='pandas',
-                           which='patch', include_base_procver=True )
-    assert ( df.loc[ :, [ c for c in df.columns if c!='ispatch'] ] == forced ).all().all()
-    assert ( ~df.ispatch ).all()
-    assert len( df[ df.isdet ] ) == len( sources )
-    assert df[ df.isdet ].isdet.all()
-    assert ( ~df[ df.ispatch ].ispatch ).all()
-    assert ( df.base_procver == 'pvc_bpv2a' ).all()
-
-    # Make sure json output is consistent
-
-    j_sources = ltcv.object_ltcv( pvs['pv2'].id, roots[1]['root'].id, return_format='json',
-                                  which='detections', include_base_procver=True )
-    j_forced = ltcv.object_ltcv( pvs['pv2'].id, roots[1]['root'].id, return_format='json',
-                                 which='forced', include_base_procver=True )
-    j_df = ltcv.object_ltcv( pvs['pv2'].id, roots[1]['root'].id, return_format='json',
-                             which='patch', include_base_procver=True )
-
-    for js, pd in zip( [ j_sources, j_forced, j_df ], [ sources, forced, df ] ):
-        assert isinstance( js, dict )
-        for col in pd.columns:
-            assert ( pd[col] == np.array( js[col] ) ).all()
-
-    # Make sure we can pass a string processing version
-
-    df2 = ltcv.object_ltcv( 'pvc_pv2', roots[1]['root'].id, return_format='pandas',
-                            which='patch', include_base_procver=True )
-    assert ( df == df2 ).all().all()
-
-    # Test mjd_now
-    df = ltcv.object_ltcv( pvs['pv2'].id, roots[1]['root'].id, return_format='pandas',
-                           which='patch', include_base_procver=True, mjd_now=60040 )
-    assert ( df.mjd <= 60040 ).all()
-    assert len( df ) == 13
+    FDBLogger.info( f"{n} calls in {time.perf_counter()-t0:.2f} sec; js time={tjs:.2f}, pd time={tpd:.2f}" )
 
 
-def test_many_object_ltcvs( procver_collection, set_of_lightcurves ):
+def test_many_object_ltcvs( procver_collection, set_of_lightcurves, lightcurve_checker ):
+    # TODO : beef up these tests, think about more edge cases
     roots = set_of_lightcurves
-    _bpvs, pvs = procver_collection
+    check_ltcv = lightcurve_checker
 
-    # First, reproduce the tests from test_object_ltcv.  We'll ask for two lightcurves,
-    #   but only one is going to be present.
+    ltcvlist = [
+        # Object 1 is not in pv1, so ony expect object 0 back
+        ( 'pvc_pv1', [ str(roots[i]['root'].id) for i in [0, 1] ], [0], [100], 'pv1' ),
+        ( 'pvc_pv1', [100, 101], [0], [100], 'pv1' ),
+        # pvc_pv2 should be the default
+        ( None, [ str(roots[i]['root'].id) for i in [0, 2] ], [0, 2], [200, 202], 'pv2' ),
+        # If we ask for diaobjects that are in the wrong processing version, we still get
+        #   back the corresponding ones from the sources in this processing version
+        ( 'pvc_pv2', [0, 2], [0, 2], [200, 202], 'pv2' ),
+        ( 'pvc_pv2', [0, 1, 2], [0, 1, 2], [200, 201, 2011, 202], 'pv2' ),
+        ( 'realtime', [0, 1, 2], [0, 1, 2], [0, 1, 2], 'realtime' ),
+    ]
 
-    sources = ltcv.many_object_ltcvs( pvs['pv1'].id, [ roots[i]['root'].id for i in [0,1] ],
-                                      return_format='pandas', which='detections', include_base_procver=True )
-    forced = ltcv.many_object_ltcvs( pvs['pv1'].id, [ roots[i]['root'].id for i in [0,1] ],
-                                     return_format='pandas', which='forced', include_base_procver=True )
-    df = ltcv.many_object_ltcvs( pvs['pv1'].id, [ roots[i]['root'].id for i in [0,1] ],
-                                 return_format='pandas', which='patch', include_base_procver=True )
+    extras = [
+        {},
+        { 'mjd_now': 60041. },
+        { 'bands': 'r' },
+        { 'bands': ['r'] },
+        { 'include_source_positions': 1 },
+        { 'return_object_info': 1 },
+        { 'return_object_info': 1, 'include_object_positions': 1 },
+        { 'return_object_info': 1, 'include_base_procver': 1 },
+        { 'return_object_info': 1, 'include_base_procver': 1, 'include_object_positions': 1 },
+        { 'use_weighted_source_positions': 1, 'include_base_procver': 1 },
+        { 'use_weighted_source_positions': 1, 'include_object_positions': 1 },
+        { 'use_weighted_source_positions': 1, 'include_object_positions': 1, 'return_object_info': 1 },
+        { 'use_weighted_source_positions': 1, 'include_source_positions': 1,
+          'return_object_info': 1, 'include_object_positions': 1 },
+        { 'always_use_weighted_source_positions': 1, 'include_source_positions': 1,
+          'return_object_info': 1, 'include_object_positions': 1 },
+        { 'mjd_now': 60061., 'always_use_weighted_source_positions': 1, 'include_base_procver': 1,
+          'include_source_positions': 1, 'include_object_positions': 1, 'return_object_info': 1 },
+    ]
 
-    assert sources.index.get_level_values( 'diaobjectid' ).unique().values == np.array( [100] )
-    assert forced.index.get_level_values( 'diaobjectid' ).unique().values == np.array( [100] )
-    assert df.index.get_level_values( 'diaobjectid' ).unique().values == np.array( [100] )
+    t0 = time.perf_counter()
+    tjs = 0
+    tpd = 0
+    n = 0
+    with db.DBCon() as dbcon:
+        dbcon.echoqueries = True
+        dbcon.alwaysexplain = True
+        dbcon.alwaysanalyze = True
+        for ltcvreq in ltcvlist:
+            for which in [ None, 'patch', 'detections', 'forced' ]:
+                for extra in extras:
+                    kwargs = extra.copy()
+                    kwargs['objids'] = ltcvreq[1]
+                    if ltcvreq[0] is not None:
+                        kwargs['processing_version'] = ltcvreq[0]
+                    if which is not None:
+                        kwargs['which'] = which
 
-    sources.reset_index( inplace=True )
-    sources.drop( 'diaobjectid', axis='columns', inplace=True )
-    forced.reset_index( inplace=True )
-    forced.drop( 'diaobjectid', axis='columns', inplace=True )
-    df.reset_index( inplace=True )
-    df.drop( 'diaobjectid', axis='columns', inplace=True )
+                    n += 1
+                    tj0 = time.perf_counter()
+                    jsres = ltcv.many_object_ltcvs( return_format='json', dbcon=dbcon, **kwargs )
+                    dbcon.rollback()
+                    tjs += time.perf_counter() - tj0
 
-    # These checks are (sorta) copied from test_object_ltcv
-    assert len(sources) == 13
-    assert len(forced) == 15
-    assert len(df) == 17
+                    n += 1
+                    tp0 = time.perf_counter()
+                    pdres = ltcv.many_object_ltcvs( return_format='pandas', dbcon=dbcon, **kwargs )
+                    dbcon.rollback()
+                    tpd += time.perf_counter() - tp0
 
-    assert np.all( ( sources.mjd >= 60000 ) & ( sources.mjd <= 60030 ) )
-    assert np.all( sources[ sources.mjd <= 60015 ].base_procver == 'pvc_bpv1a' )
-    assert np.all( sources[ sources.mjd > 60015 ].base_procver == 'pvc_bpv1' )
-    assert np.all( sources.isdet )
-    assert np.all( forced[ forced.mjd <= 60010 ].base_procver == 'pvc_bpv1a' )
-    assert np.all( forced[ forced.mjd > 60010 ].base_procver == 'pvc_bpv1' )
-    assert np.all( forced[ ( forced.mjd >= 60000 ) & ( forced.mjd <= 60030 ) ].isdet )
-    assert np.all( ~forced[ ( forced.mjd < 60000 ) | ( forced.mjd > 60030 ) ].isdet )
-    assert np.all( df[ df.mjd <= 60010 ].base_procver == 'pvc_bpv1a' )
-    assert np.all( df[ df.mjd > 60010 ].base_procver == 'pvc_bpv1' )
-    assert np.all( df[ df.mjd > 60025 ].ispatch )
-    assert np.all( ~df[ df.mjd <= 60025 ].ispatch )
-    assert np.all( df[ ( df.mjd >= 60000 ) & ( df.mjd <= 60030 ) ].isdet )
-    assert np.all( ~df[ ( df.mjd < 60000 ) | ( df.mjd > 60030 ) ].isdet )
+                    del kwargs['objids']
+                    if which is None:
+                        kwargs['which'] = 'patch'
+                    if ltcvreq[0] is not None:
+                        del kwargs['processing_version']
 
-    # Now ask for two lightcurves where we expect to get two lightcurves
-    sources = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['root'].id for i in [0,2] ],
-                                      return_format='pandas', which='detections', include_base_procver=True )
-    forced = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['root'].id for i in [0,2] ],
-                                     return_format='pandas', which='forced', include_base_procver=True )
-    df = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['root'].id for i in [0,2] ],
-                                 return_format='pandas', which='patch', include_base_procver=True )
-    # We know we're going to be sorted by diaobjectid
-    assert ( sources.index.get_level_values( 'diaobjectid' ).unique().values == np.array( [200, 202] ) ).all()
-    assert ( forced.index.get_level_values( 'diaobjectid' ).unique().values == np.array( [200, 202] ) ).all()
-    assert ( df.index.get_level_values( 'diaobjectid' ).unique().values == np.array( [200, 202] ) ).all()
-    assert len( sources ) == 30
-    assert len( sources.xs( 200, level='diaobjectid' ) ) == 13
-    assert len( sources.xs( 202, level='diaobjectid' ) ) == 17
-    assert len( forced ) == 54
-    assert len( forced.xs( 200, level='diaobjectid' ) ) == 25
-    assert len( forced.xs( 202, level='diaobjectid' ) ) == 29
-    assert len( df ) == 54
-    assert len( df.xs( 200, level='diaobjectid' ) ) == 25
-    assert len( df.xs( 202, level='diaobjectid' ) ) == 29
-    tmp = df.drop( 'ispatch', axis='columns' )
-    assert ( tmp == forced ).all().all()
+                    # Verify the "json" (really, list/dict) return is right
+                    check_ltcv( ltcvreq[4], ltcvreq[2], ltcvreq[3], jsres, **kwargs )
 
-    # Make sure the dict returns are consistent
-    sourcesjs = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['root'].id for i in [0,2] ],
-                                        return_format='json', which='detections', include_base_procver=True )
-    forcedjs = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['root'].id for i in [0,2] ],
-                                       return_format='json', which='forced', include_base_procver=True )
-    dfjs = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['root'].id for i in [0,2] ],
-                                   return_format='json', which='patch', include_base_procver=True )
-    assert list( sourcesjs.keys() ) == [ 200, 202 ]
-    assert list( forcedjs.keys() ) == [ 200, 202 ]
-    assert list( dfjs.keys() ) == [ 200, 202 ]
-    for js, pd in zip( [ sourcesjs, forcedjs, dfjs ], [ sources, forced, df ] ):
-        for objid in [ 200, 202 ]:
-            subpd = pd.xs( objid, level='diaobjectid' ).reset_index()
-            subjs = js[ objid ]
-            for col in subpd.columns:
-                assert ( subpd[col] == np.array( subjs[col] ) ).all()
+                    # Make sure pandas return is consistent
+                    if isinstance( pdres, tuple ):
+                        jsltcvs = jsres[0]
+                        pdltcvs = pdres[0]
+                        jsobjinfo = jsres[1]
+                        pdobjinfo = pdres[1]
+                    else:
+                        jsltcvs = jsres
+                        pdltcvs = pdres
+                        jsobjinfo = None
+                        pdobjinfo = None
 
-    # Make sure the lightcurves are actually right
-    for diaobjectid in df.index.get_level_values( 'diaobjectid' ).unique():
-        rdex = [ roots[i]['objs'][1]['obj'].diaobjectid for i in range(len(roots)) ].index( diaobjectid )
-        tmpsources = sources.xs( diaobjectid, level='diaobjectid' ).reset_index()
-        tmpforced = forced.xs( diaobjectid, level='diaobjectid' ).reset_index()
-        tmpdf = df.xs( diaobjectid, level='diaobjectid' ).reset_index()
+                    compare_pandas_to_json( pdltcvs, jsltcvs, pdobjinfo, jsobjinfo )
 
-        assert all( s.mjd == pytest.approx( roots[rdex]['objs'][1]['src']['bpv2'][j].midpointmjdtai, abs=1./3600./24. )
-                    for j, s in enumerate( tmpsources.itertuples() ) )
-        assert all( s.band == roots[rdex]['objs'][1]['src']['bpv2'][j].band
-                    for j, s in enumerate( tmpsources.itertuples() ) )
-        assert all( s.flux == pytest.approx( roots[rdex]['objs'][1]['src']['bpv2'][j].psfflux, rel=1e-6 )
-                    for j, s in enumerate( tmpsources.itertuples() ) )
-        assert all( s.fluxerr == pytest.approx( roots[rdex]['objs'][1]['src']['bpv2'][j].psffluxerr, rel=1e-6 )
-                    for j, s in enumerate( tmpsources.itertuples() ) )
-        assert all( tmpsources.isdet )
-        assert all( tmpsources.base_procver == 'pvc_bpv2a' )
-
-        assert all( s.mjd == pytest.approx( roots[rdex]['objs'][1]['frc']['bpv2'][j].midpointmjdtai, abs=1./3600./24. )
-                    for j, s in enumerate( tmpforced.itertuples() ) )
-        assert all( s.band == roots[rdex]['objs'][1]['frc']['bpv2'][j].band
-                    for j, s in enumerate( tmpforced.itertuples() ) )
-        assert all( s.flux == pytest.approx( roots[rdex]['objs'][1]['frc']['bpv2'][j].psfflux, rel=1e-6 )
-                    for j, s in enumerate( tmpforced.itertuples() ) )
-        assert all( s.fluxerr == pytest.approx( roots[rdex]['objs'][1]['frc']['bpv2'][j].psffluxerr, rel=1e-6 )
-                    for j, s in enumerate( tmpforced.itertuples() ) )
-        assert all( tmpforced.isdet[j] if ( tmpforced.mjd[j] >= tmpsources.mjd.min() and
-                                            tmpforced.mjd[j] <= tmpsources.mjd.max() )
-                    else not tmpforced.isdet[j]
-                    for j in range( len(tmpforced) ) )
-        assert all( tmpforced.base_procver == 'pvc_bpv2a' )
-
-        assert all( s.mjd == pytest.approx( roots[rdex]['objs'][1]['frc']['bpv2'][j].midpointmjdtai, abs=1./3600./24. )
-                    for j, s in enumerate( tmpdf.itertuples() ) )
-        assert all( s.band == roots[rdex]['objs'][1]['frc']['bpv2'][j].band
-                    for j, s in enumerate( tmpdf.itertuples() ) )
-        assert all( s.flux == pytest.approx( roots[rdex]['objs'][1]['frc']['bpv2'][j].psfflux, rel=1e-6 )
-                    for j, s in enumerate( tmpdf.itertuples() ) )
-        assert all( s.fluxerr == pytest.approx( roots[rdex]['objs'][1]['frc']['bpv2'][j].psffluxerr, rel=1e-6 )
-                    for j, s in enumerate( tmpdf.itertuples() ) )
-        assert all( tmpdf.isdet[j] if ( tmpdf.mjd[j] >= tmpsources.mjd.min() and
-                                        tmpdf.mjd[j] <= tmpsources.mjd.max() )
-                    else not tmpdf.isdet[j]
-                    for j in range( len(tmpdf) ) )
-        assert all( ~tmpdf.ispatch )
-        assert all( tmpdf.base_procver == 'pvc_bpv2a' )
-
-
-    # make sure that if we ask using the right diaobjectid, we get the same things back
-    sources2 = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['objs'][1]['obj'].diaobjectid for i in [0,2] ],
-                                       return_format='pandas', which='detections', include_base_procver=True )
-    forced2 = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['objs'][1]['obj'].diaobjectid for i in [0,2] ],
-                                      return_format='pandas', which='forced', include_base_procver=True )
-    df2 = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['objs'][1]['obj'].diaobjectid for i in [0,2] ],
-                                  return_format='pandas', which='patch', include_base_procver=True )
-    assert ( sources == sources2 ).all().all()
-    assert ( forced == forced2 ).all().all()
-    assert ( df == df2 ).all().all()
-
-    # But we get nothing back if we ask for the wrong diaobjectid
-    sources2 = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['objs'][0]['obj'].diaobjectid for i in [0,2] ],
-                                       return_format='pandas', which='detections', include_base_procver=True )
-    forced2 = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['objs'][0]['obj'].diaobjectid for i in [0,2] ],
-                                      return_format='pandas', which='forced', include_base_procver=True )
-    df2 = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['objs'][0]['obj'].diaobjectid for i in [0,2] ],
-                                  return_format='pandas', which='patch', include_base_procver=True )
-    assert len(sources2) == 0
-    assert len(forced2) == 0
-    assert len(df2) == 0
-
-    # test mjd_now
-    assert not ( sources.index.get_level_values( level='mjd' ) <= 60041. ).all()
-    assert not ( forced.index.get_level_values( level='mjd' ) <= 60041. ).all()
-    assert not ( df.index.get_level_values( level='mjd' ) <= 60041. ).all()
-    sources = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['root'].id for i in [0,2] ],
-                                      return_format='pandas', which='detections', include_base_procver=True,
-                                      mjd_now=60041. )
-    forced = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['root'].id for i in [0,2] ],
-                                     return_format='pandas', which='forced', include_base_procver=True,
-                                     mjd_now=60041. )
-    df = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['root'].id for i in [0,2] ],
-                                 return_format='pandas', which='patch', include_base_procver=True,
-                                 mjd_now=60041. )
-    assert ( sources.index.get_level_values( level='mjd' ) <= 60041. ).all()
-    assert ( forced.index.get_level_values( level='mjd' ) <= 60041. ).all()
-    assert ( df.index.get_level_values( level='mjd' ) <= 60041. ).all()
-
-
-    # Make sure bands works
-    sources = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['root'].id for i in [0,2] ],
-                                      return_format='pandas', which='detections', include_base_procver=True,
-                                      bands='r' )
-    forced = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['root'].id for i in [0,2] ],
-                                     return_format='pandas', which='forced', include_base_procver=True,
-                                     bands=[ 'r' ] )
-    df = ltcv.many_object_ltcvs( pvs['pv2'].id, [ roots[i]['root'].id for i in [0,2] ],
-                                 return_format='pandas', which='patch', include_base_procver=True,
-                                 bands='r' )
-    assert len(sources) == 14
-    assert len(forced) == 26
-    assert len(df) == 26
-    assert ( sources.band == 'r' ).all()
-    assert ( forced.band == 'r' ).all()
-    assert ( df.band == 'r' ).all()
-    tmp = df.drop( 'ispatch', axis='columns' )
-    assert ( tmp == forced ).all().all()
+        FDBLogger.info( f"{n} calls, {time.perf_counter()-t0:.2f}s; t_js={tjs:.2f}, t_pd={tpd:.2f}, "
+                        f"t_query={dbcon.timings.tot_query_time:.2f}, t_commit={dbcon.timings.tot_commit_time:.2f}, "
+                        f"t_fetch={dbcon.timings.tot_fetch_time:.2f}" )
 
 
 # There is another test of ltcv_object_search that uses loaded SNANA data
 #   in test_ltcv_object_search.py
 def test_object_search( set_of_lightcurves ):
+    roots = set_of_lightcurves
     with pytest.raises( ValueError, match="Unknown search keywords: {'foo'}" ):
         _ = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas', foo='bar' )
+
+    # TODO -- tests without ignore_object_processing_version
 
     # Search on ra/dec
 
     # A 17" search around (42,13) should find diaobjectids 200 and 201
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
-                             ra=42., dec=13., radius=17. )
+                             ra=42., dec=13., radius=17., ignore_object_processing_version=True )
     assert len(df) == 2
-    assert set( df.diaobjectid ) == { 200, 201 }
-    assert df[ df.diaobjectid==200 ].ra.values[0] == 42.
-    assert df[ df.diaobjectid==200 ].dec.values[0] == 13.
-    assert df[ df.diaobjectid==200 ].numdet.values[0] == 13
-    assert df[ df.diaobjectid==200 ].firstdetmjd.values[0] == 60000.
-    assert df[ df.diaobjectid==200 ].firstdetband.values[0] == 'i'
-    assert df[ df.diaobjectid==200 ].lastdetmjd.values[0] == 60030.
-    assert df[ df.diaobjectid==200 ].lastdetband.values[0] == 'i'
-    assert df[ df.diaobjectid==200 ].maxdetmjd.values[0] == 60010.
-    assert df[ df.diaobjectid==200 ].maxdetband.values[0] == 'i'
-    assert df[ df.diaobjectid==200 ].lastforcedmjd.values[0] == 60050.
-    assert df[ df.diaobjectid==200 ].lastforcedband.values[0] == 'i'
-    assert df[ df.diaobjectid==200 ].numdetinwindow.values[0] is None
-    assert df[ df.diaobjectid==201 ].ra.values[0] == 42.
-    assert df[ df.diaobjectid==201 ].dec.values[0] == 13.0036
-    assert df[ df.diaobjectid==201 ].numdet.values[0] == 17
-    assert df[ df.diaobjectid==201 ].firstdetmjd.values[0] == 60020.
-    assert df[ df.diaobjectid==201 ].firstdetband.values[0] == 'r'
-    assert df[ df.diaobjectid==201 ].lastdetmjd.values[0] == 60060.
-    assert df[ df.diaobjectid==201 ].lastdetband.values[0] == 'r'
-    assert df[ df.diaobjectid==201 ].maxdetmjd.values[0] == 60035.
-    assert df[ df.diaobjectid==201 ].maxdetband.values[0] == 'r'
-    assert df[ df.diaobjectid==201 ].lastforcedmjd.values[0] == 60080.
-    assert df[ df.diaobjectid==201 ].lastforcedband.values[0] == 'r'
-    assert df[ df.diaobjectid==201 ].numdetinwindow.values[0] is None
+    assert set( df.rootid ) == { roots[0]['root'].id, roots[1]['root'].id }
+    assert df[ df.rootid==roots[0]['root'].id ].ra.values[0] == pytest.approx( 42., abs=0.2/3600. )
+    assert df[ df.rootid==roots[0]['root'].id ].dec.values[0] == pytest.approx( 13., abs=0.2/3600. )
+    assert df[ df.rootid==roots[0]['root'].id ].numdet.values[0] == 13
+    assert df[ df.rootid==roots[0]['root'].id ].firstdetmjd.values[0] == 60000.
+    assert df[ df.rootid==roots[0]['root'].id ].firstdetband.values[0] == 'i'
+    assert df[ df.rootid==roots[0]['root'].id ].lastdetmjd.values[0] == 60030.
+    assert df[ df.rootid==roots[0]['root'].id ].lastdetband.values[0] == 'i'
+    assert df[ df.rootid==roots[0]['root'].id ].maxdetmjd.values[0] == 60010.
+    assert df[ df.rootid==roots[0]['root'].id ].maxdetband.values[0] == 'i'
+    assert df[ df.rootid==roots[0]['root'].id ].lastforcedmjd.values[0] == 60050.
+    assert df[ df.rootid==roots[0]['root'].id ].lastforcedband.values[0] == 'i'
+    assert df[ df.rootid==roots[0]['root'].id ].numdetinwindow.values[0] is None
+    assert df[ df.rootid==roots[1]['root'].id ].ra.values[0] == pytest.approx( 42., abs=0.2/3600. )
+    assert df[ df.rootid==roots[1]['root'].id ].dec.values[0] == pytest.approx( 13.0036, abs=0.2/3600. )
+    assert df[ df.rootid==roots[1]['root'].id ].numdet.values[0] == 17
+    assert df[ df.rootid==roots[1]['root'].id ].firstdetmjd.values[0] == 60020.
+    assert df[ df.rootid==roots[1]['root'].id ].firstdetband.values[0] == 'r'
+    assert df[ df.rootid==roots[1]['root'].id ].lastdetmjd.values[0] == 60060.
+    assert df[ df.rootid==roots[1]['root'].id ].lastdetband.values[0] == 'r'
+    assert df[ df.rootid==roots[1]['root'].id ].maxdetmjd.values[0] == 60035.
+    assert df[ df.rootid==roots[1]['root'].id ].maxdetband.values[0] == 'r'
+    assert df[ df.rootid==roots[1]['root'].id ].lastforcedmjd.values[0] == 60080.
+    assert df[ df.rootid==roots[1]['root'].id ].lastforcedband.values[0] == 'r'
+    assert df[ df.rootid==roots[1]['root'].id ].numdetinwindow.values[0] is None
 
     # Check that json return works
     j = ltcv.object_search( processing_version='pvc_pv3', return_format='json',
-                            ra=42., dec=13., radius=17. )
+                            ra=42., dec=13., radius=17., ignore_object_processing_version=True  )
     for col in df.columns:
         # == isn't working in the None case... ?  Weird.  Different kind of None?
         if col == 'numdetinwindow':
             assert all( n is None for n in j[col] )
             assert all( n is None for n in df[col].values )
         else:
-            assert ( df[col] == np.array( j[col] ) ).all()
+            # Convert the pandas column to np.array so None=None will be true
+            assert ( np.array( df[col] ) == np.array( j[col] ) ).all()
 
     # Quick check that just_objids works
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
-                             ra=42., dec=13., radius=17., just_objids=True )
-    assert df.columns == [ 'diaobjectid' ]
-    assert set( df.diaobjectid ) == { 200, 201 }
+                             ra=42., dec=13., radius=17., just_objids=True, ignore_object_processing_version=True  )
+    assert df.columns == [ 'rootid' ]
+    assert set( df.rootid ) == { roots[0]['root'].id, roots[1]['root'].id }
     j = ltcv.object_search( processing_version='pvc_pv3', return_format='json',
-                            ra=42., dec=13., radius=17., just_objids=True )
-    assert list( j.keys() ) == [ 'diaobjectid' ]
-    assert set( j['diaobjectid'] ) == { 200, 201 }
+                            ra=42., dec=13., radius=17., just_objids=True, ignore_object_processing_version=True  )
+    assert list( j.keys() ) == [ 'rootid' ]
+    assert set( j['rootid'] ) == { roots[0]['root'].id, roots[1]['root'].id }
 
     # Quick check that noforced works.  Well, sort of.  It tests that we don't
     #   get the forced columns back, but doesn't test that the function actually
     #   skipped searching that table.  But, whatevs.
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
-                             ra=42., dec=13., radius=17., noforced=True )
-    assert set( df.diaobjectid ) == { 200, 201 }
+                             ra=42., dec=13., radius=17., noforced=True, ignore_object_processing_version=True  )
+    assert set( df.rootid ) == { roots[0]['root'].id, roots[1]['root'].id }
     assert all( i not in df.columns for i in [ 'lastforcedmjd', 'lastforcedband',
                                                'lastforcedflux', 'lastforcedfluxerr' ] )
     j = ltcv.object_search( processing_version='pvc_pv3', return_format='json',
-                            ra=42., dec=13., radius=17., noforced=True )
-    assert set( j['diaobjectid'] ) == { 200, 201 }
+                            ra=42., dec=13., radius=17., noforced=True, ignore_object_processing_version=True  )
+    assert set( j['rootid'] ) == { roots[0]['root'].id, roots[1]['root'].id }
     assert all( i not in j.keys() for i in [ 'lastforcedmjd', 'lastforcedband',
                                              'lastforcedflux', 'lastforcedfluxerr' ] )
 
     # Quick bigger search; should get 3 of the 4 objects, ginormous search all of them
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
-                             ra=42., dec=13., radius=1800. )
+                             ra=42., dec=13., radius=1800., ignore_object_processing_version=True  )
     assert len(df) == 3
-    assert set( df.diaobjectid ) == { 200, 201, 202 }
+    assert set( df.rootid ) == set( roots[i]['root'].id for i in range(3) )
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
-                             ra=42., dec=13., radius=7200. )
+                             ra=42., dec=13., radius=7200., ignore_object_processing_version=True  )
     assert len(df) == 4
-    assert set( df.diaobjectid ) == { 200, 201, 202, 203 }
+    assert set( df.rootid ) == set( roots[i]['root'].id for i in range(4) )
 
     # If we ask for pvc_pv1, we should only find diaobject 200, and it should have different latest thingies
     df = ltcv.object_search( processing_version='pvc_pv1', return_format='pandas',
-                             ra=42., dec=13., radius=7200. )
+                             ra=42., dec=13., radius=7200., ignore_object_processing_version=True  )
     assert len(df) == 1
-    assert set( df.diaobjectid ) == { 100 }
-    assert df.ra.values[0] == 42.
-    assert df.dec.values[0] == 13.
+    assert set( df.rootid ) == { roots[0]['root'].id }
+    assert df.ra.values[0] == pytest.approx( 42., abs=0.2/3600. )
+    assert df.dec.values[0] == pytest.approx( 13., abs=0.4/3600. ) # , abs=0.2/3600. )
     assert df.numdet.values[0] == 13
     assert df.lastforcedmjd.values[0] == 60025.
 
     # Try an earlier mjd_now
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
-                             ra=42., dec=13., radius=17., mjd_now=60026. )
+                             ra=42., dec=13., radius=17., mjd_now=60026., ignore_object_processing_version=True  )
     assert len(df) == 2
-    assert set( df.diaobjectid ) == { 200, 201 }
-    assert df[ df.diaobjectid==200 ].ra.values[0] == 42.
-    assert df[ df.diaobjectid==200 ].dec.values[0] == 13.
-    assert df[ df.diaobjectid==200 ].numdet.values[0] == 11
-    assert df[ df.diaobjectid==200 ].firstdetmjd.values[0] == 60000.
-    assert df[ df.diaobjectid==200 ].firstdetband.values[0] == 'i'
-    assert df[ df.diaobjectid==200 ].lastdetmjd.values[0] == 60025.
-    assert df[ df.diaobjectid==200 ].lastdetband.values[0] == 'i'
-    assert df[ df.diaobjectid==200 ].maxdetmjd.values[0] == 60010.
-    assert df[ df.diaobjectid==200 ].maxdetband.values[0] == 'i'
-    assert df[ df.diaobjectid==200 ].lastforcedmjd.values[0] == 60025.
-    assert df[ df.diaobjectid==200 ].lastforcedband.values[0] == 'i'
-    assert df[ df.diaobjectid==200 ].numdetinwindow.values[0] is None
-    assert df[ df.diaobjectid==201 ].ra.values[0] == 42.
-    assert df[ df.diaobjectid==201 ].dec.values[0] == 13.0036
-    assert df[ df.diaobjectid==201 ].numdet.values[0] == 3
-    assert df[ df.diaobjectid==201 ].firstdetmjd.values[0] == 60020.
-    assert df[ df.diaobjectid==201 ].firstdetband.values[0] == 'r'
-    assert df[ df.diaobjectid==201 ].lastdetmjd.values[0] == 60025.
-    assert df[ df.diaobjectid==201 ].lastdetband.values[0] == 'r'
-    assert df[ df.diaobjectid==201 ].maxdetmjd.values[0] == 60025.
-    assert df[ df.diaobjectid==201 ].maxdetband.values[0] == 'r'
-    assert df[ df.diaobjectid==201 ].lastforcedmjd.values[0] == 60025.
-    assert df[ df.diaobjectid==201 ].lastforcedband.values[0] == 'r'
+    assert set( df.rootid ) == { roots[0]['root'].id, roots[1]['root'].id }
+    assert df[ df.rootid==roots[0]['root'].id ].ra.values[0] == pytest.approx( 42., abs=0.2/3600. )
+    assert df[ df.rootid==roots[0]['root'].id ].dec.values[0] == pytest.approx( 13., abs=0.2/3600. )
+    assert df[ df.rootid==roots[0]['root'].id ].numdet.values[0] == 11
+    assert df[ df.rootid==roots[0]['root'].id ].firstdetmjd.values[0] == 60000.
+    assert df[ df.rootid==roots[0]['root'].id ].firstdetband.values[0] == 'i'
+    assert df[ df.rootid==roots[0]['root'].id ].lastdetmjd.values[0] == 60025.
+    assert df[ df.rootid==roots[0]['root'].id ].lastdetband.values[0] == 'i'
+    assert df[ df.rootid==roots[0]['root'].id ].maxdetmjd.values[0] == 60010.
+    assert df[ df.rootid==roots[0]['root'].id ].maxdetband.values[0] == 'i'
+    assert df[ df.rootid==roots[0]['root'].id ].lastforcedmjd.values[0] == 60025.
+    assert df[ df.rootid==roots[0]['root'].id ].lastforcedband.values[0] == 'i'
+    assert df[ df.rootid==roots[0]['root'].id ].numdetinwindow.values[0] is None
+    assert df[ df.rootid==roots[1]['root'].id ].ra.values[0] == pytest.approx( 42., abs=0.2/3600. )
+    assert df[ df.rootid==roots[1]['root'].id ].dec.values[0] == pytest.approx( 13.0036, abs=0.2/3600. )
+    assert df[ df.rootid==roots[1]['root'].id ].numdet.values[0] == 3
+    assert df[ df.rootid==roots[1]['root'].id ].firstdetmjd.values[0] == 60020.
+    assert df[ df.rootid==roots[1]['root'].id ].firstdetband.values[0] == 'r'
+    assert df[ df.rootid==roots[1]['root'].id ].lastdetmjd.values[0] == 60025.
+    assert df[ df.rootid==roots[1]['root'].id ].lastdetband.values[0] == 'r'
+    assert df[ df.rootid==roots[1]['root'].id ].maxdetmjd.values[0] == 60025.
+    assert df[ df.rootid==roots[1]['root'].id ].maxdetband.values[0] == 'r'
+    assert df[ df.rootid==roots[1]['root'].id ].lastforcedmjd.values[0] == 60025.
+    assert df[ df.rootid==roots[1]['root'].id ].lastforcedband.values[0] == 'r'
 
     # Throw in a window
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
-                             ra=42., dec=13., radius=17., window_t0=60010, window_t1=60025 )
+                             ra=42., dec=13., radius=17., window_t0=60010, window_t1=60025,
+                             ignore_object_processing_version=True  )
     assert len(df) == 2
-    assert set( df.diaobjectid ) == { 200, 201 }
-    assert df[ df.diaobjectid==200 ].numdetinwindow.values[0] == 7
-    assert df[ df.diaobjectid==201 ].numdetinwindow.values[0] == 3
+    assert set( df.rootid ) == { roots[0]['root'].id, roots[1]['root'].id }
+    assert df[ df.rootid==roots[0]['root'].id ].numdetinwindow.values[0] == 7
+    assert df[ df.rootid==roots[1]['root'].id ].numdetinwindow.values[0] == 3
     # All of the following is cut and paste from the first search above
-    assert df[ df.diaobjectid==200 ].ra.values[0] == 42.
-    assert df[ df.diaobjectid==200 ].dec.values[0] == 13.
-    assert df[ df.diaobjectid==200 ].numdet.values[0] == 13
-    assert df[ df.diaobjectid==200 ].firstdetmjd.values[0] == 60000.
-    assert df[ df.diaobjectid==200 ].firstdetband.values[0] == 'i'
-    assert df[ df.diaobjectid==200 ].lastdetmjd.values[0] == 60030.
-    assert df[ df.diaobjectid==200 ].lastdetband.values[0] == 'i'
-    assert df[ df.diaobjectid==200 ].maxdetmjd.values[0] == 60010.
-    assert df[ df.diaobjectid==200 ].maxdetband.values[0] == 'i'
-    assert df[ df.diaobjectid==200 ].lastforcedmjd.values[0] == 60050.
-    assert df[ df.diaobjectid==200 ].lastforcedband.values[0] == 'i'
-    assert df[ df.diaobjectid==201 ].ra.values[0] == 42.
-    assert df[ df.diaobjectid==201 ].dec.values[0] == 13.0036
-    assert df[ df.diaobjectid==201 ].numdet.values[0] == 17
-    assert df[ df.diaobjectid==201 ].firstdetmjd.values[0] == 60020.
-    assert df[ df.diaobjectid==201 ].firstdetband.values[0] == 'r'
-    assert df[ df.diaobjectid==201 ].lastdetmjd.values[0] == 60060.
-    assert df[ df.diaobjectid==201 ].lastdetband.values[0] == 'r'
-    assert df[ df.diaobjectid==201 ].maxdetmjd.values[0] == 60035.
-    assert df[ df.diaobjectid==201 ].maxdetband.values[0] == 'r'
-    assert df[ df.diaobjectid==201 ].lastforcedmjd.values[0] == 60080.
-    assert df[ df.diaobjectid==201 ].lastforcedband.values[0] == 'r'
+    assert df[ df.rootid==roots[0]['root'].id ].ra.values[0] == pytest.approx( 42., abs=0.2/3600. )
+    assert df[ df.rootid==roots[0]['root'].id ].dec.values[0] == pytest.approx( 13., abs=0.2/3600. )
+    assert df[ df.rootid==roots[0]['root'].id ].numdet.values[0] == 13
+    assert df[ df.rootid==roots[0]['root'].id ].firstdetmjd.values[0] == 60000.
+    assert df[ df.rootid==roots[0]['root'].id ].firstdetband.values[0] == 'i'
+    assert df[ df.rootid==roots[0]['root'].id ].lastdetmjd.values[0] == 60030.
+    assert df[ df.rootid==roots[0]['root'].id ].lastdetband.values[0] == 'i'
+    assert df[ df.rootid==roots[0]['root'].id ].maxdetmjd.values[0] == 60010.
+    assert df[ df.rootid==roots[0]['root'].id ].maxdetband.values[0] == 'i'
+    assert df[ df.rootid==roots[0]['root'].id ].lastforcedmjd.values[0] == 60050.
+    assert df[ df.rootid==roots[0]['root'].id ].lastforcedband.values[0] == 'i'
+    assert df[ df.rootid==roots[1]['root'].id ].ra.values[0] == pytest.approx( 42., abs=0.2/3600. )
+    assert df[ df.rootid==roots[1]['root'].id ].dec.values[0] == pytest.approx( 13.0036, abs=0.2/3600. )
+    assert df[ df.rootid==roots[1]['root'].id ].numdet.values[0] == 17
+    assert df[ df.rootid==roots[1]['root'].id ].firstdetmjd.values[0] == 60020.
+    assert df[ df.rootid==roots[1]['root'].id ].firstdetband.values[0] == 'r'
+    assert df[ df.rootid==roots[1]['root'].id ].lastdetmjd.values[0] == 60060.
+    assert df[ df.rootid==roots[1]['root'].id ].lastdetband.values[0] == 'r'
+    assert df[ df.rootid==roots[1]['root'].id ].maxdetmjd.values[0] == 60035.
+    assert df[ df.rootid==roots[1]['root'].id ].maxdetband.values[0] == 'r'
+    assert df[ df.rootid==roots[1]['root'].id ].lastforcedmjd.values[0] == 60080.
+    assert df[ df.rootid==roots[1]['root'].id ].lastforcedband.values[0] == 'r'
 
     # Now filter on numdetinwindow
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
                              ra=42., dec=13., radius=17., window_t0=60010, window_t1=60025,
-                             min_window_numdetections=4 )
+                             min_window_numdetections=4, ignore_object_processing_version=True  )
     assert len(df) == 1
-    assert set( df.diaobjectid ) == { 200 }
+    assert set( df.rootid ) == { roots[0]['root'].id }
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
                              ra=42., dec=13., radius=17., window_t0=60010, window_t1=60025,
-                             max_window_numdetections=5 )
+                             max_window_numdetections=5, ignore_object_processing_version=True  )
     assert len(df) == 1
-    assert set( df.diaobjectid ) == { 201 }
+    assert set( df.rootid ) == { roots[1]['root'].id }
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
                              ra=42., dec=13., radius=17., window_t0=60010, window_t1=60025,
-                             min_window_numdetections=4, max_window_numdetections=5 )
+                             min_window_numdetections=4, max_window_numdetections=5,
+                             ignore_object_processing_version=True  )
     assert len(df) == 0
 
 
     # Filter on first detection
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
-                             mint_firstdetection=60010 )
+                             mint_firstdetection=60010, ignore_object_processing_version=True )
     assert len(df) == 3
-    assert set( df.diaobjectid ) == { 201, 202, 203 }
+    assert set( df.rootid ) == set( roots[i]['root'].id for i in [ 1, 2, 3 ] )
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
-                             maxt_firstdetection=60030 )
+                             maxt_firstdetection=60030, ignore_object_processing_version=True )
     assert len(df) == 2
-    assert set( df.diaobjectid ) == { 200, 201 }
+    assert set( df.rootid ) == set( roots[i]['root'].id for i in [ 0, 1 ] )
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
-                             mint_firstdetection=60010, maxt_firstdetection=60030 )
+                             mint_firstdetection=60010, maxt_firstdetection=60030,
+                             ignore_object_processing_version=True )
     assert len(df) == 1
-    assert set( df.diaobjectid ) == { 201 }
+    assert set( df.rootid ) == { roots[1]['root'].id }
 
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
-                             minmag_firstdetection=25.6 )
+                             minmag_firstdetection=25.6, ignore_object_processing_version=True )
     assert len(df) == 2
-    assert set( df.diaobjectid ) == { 200, 203 }
+    assert set( df.rootid ) == set( roots[i]['root'].id for i in [ 0, 3 ] )
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
-                             maxmag_firstdetection=25.9 )
+                             maxmag_firstdetection=25.9, ignore_object_processing_version=True )
     assert len(df) == 3
-    assert set( df.diaobjectid ) == { 201, 202, 203 }
+    assert set( df.rootid ) == set( roots[i]['root'].id for i in [ 1, 2, 3 ] )
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
-                             minmag_firstdetection=25.6, maxmag_firstdetection=25.9 )
+                             minmag_firstdetection=25.6, maxmag_firstdetection=25.9,
+                             ignore_object_processing_version=True )
     assert len(df) == 1
-    assert set( df.diaobjectid ) == { 203 }
+    assert set( df.rootid ) == { roots[3]['root'].id }
 
     # Filter on last detection
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
-                             mint_lastdetection=60035 )
+                             mint_lastdetection=60035, ignore_object_processing_version=True )
     assert len( df ) == 3
-    assert set( df.diaobjectid ) == { 201, 202, 203 }
+    assert set( df.rootid ) == { roots[i]['root'].id for i in [ 1, 2, 3 ] }
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
-                             maxt_lastdetection=60065 )
+                             maxt_lastdetection=60065, ignore_object_processing_version=True )
     assert len( df ) == 3
-    assert set( df.diaobjectid ) == { 200, 201, 203 }
+    assert set( df.rootid ) == { roots[i]['root'].id for i in [ 0, 1, 3] }
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
-                             mint_lastdetection=60035, maxt_lastdetection=60065 )
+                             mint_lastdetection=60035, maxt_lastdetection=60065,
+                             ignore_object_processing_version=True  )
     assert len( df ) == 2
-    assert set( df.diaobjectid ) == { 201, 203 }
+    assert set( df.rootid ) == { roots[i]['root'].id for i in [ 1, 3 ] }
 
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
-                             minmag_lastdetection=25.5 )
+                             minmag_lastdetection=25.5, ignore_object_processing_version=True )
     assert len(df) == 3
-    assert set( df.diaobjectid ) == { 200, 202, 203 }
+    assert set( df.rootid ) == { roots[i]['root'].id for i in [ 0, 2, 3 ] }
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
-                             maxmag_lastdetection=25.8 )
+                             maxmag_lastdetection=25.8, ignore_object_processing_version=True )
     assert len(df) == 2
-    assert set( df.diaobjectid ) == { 201, 202 }
+    assert set( df.rootid ) == { roots[i]['root'].id for i in [ 1, 2 ] }
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
-                             minmag_lastdetection=25.5, maxmag_lastdetection=25.8 )
+                             minmag_lastdetection=25.5, maxmag_lastdetection=25.8,
+                             ignore_object_processing_version=True )
     assert len(df) == 1
-    assert set( df.diaobjectid ) == { 202 }
+    assert set( df.rootid ) == { roots[2]['root'].id }
 
     # Filter on max detection
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
-                             mint_maxdetection=60020 )
+                             mint_maxdetection=60020, ignore_object_processing_version=True )
     assert len(df) == 3
-    assert set( df.diaobjectid ) == { 201, 202, 203 }
+    assert set( df.rootid ) == { roots[i]['root'].id for i in [ 1, 2, 3 ] }
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
-                             maxt_maxdetection=60052 )
+                             maxt_maxdetection=60052, ignore_object_processing_version=True )
     assert len(df) == 3
-    assert set( df.diaobjectid ) == { 200, 201, 202 }
+    assert set( df.rootid ) == { roots[i]['root'].id for i in [ 0, 1, 2 ] }
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
-                             mint_maxdetection=60020, maxt_maxdetection=60052 )
+                             mint_maxdetection=60020, maxt_maxdetection=60052,
+                             ignore_object_processing_version=True )
     assert len(df) == 2
-    assert set( df.diaobjectid ) == { 201, 202 }
+    assert set( df.rootid ) == { roots[i]['root'].id for i in [ 1, 2 ] }
 
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
-                             minmag_maxdetection=22.5 )
+                             minmag_maxdetection=22.5, ignore_object_processing_version=True )
     assert len(df) == 3
-    assert set( df.diaobjectid ) == { 200, 202, 203 }
+    assert set( df.rootid ) == { roots[i]['root'].id for i in [ 0, 2, 3 ] }
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
-                             maxmag_maxdetection=24.5 )
+                             maxmag_maxdetection=23.8, ignore_object_processing_version=True )
     assert len(df) == 3
-    assert set( df.diaobjectid ) == { 200, 201, 202 }
+    assert set( df.rootid ) == { roots[i]['root'].id for i in [ 1, 2, 3 ] }
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas',
-                             minmag_maxdetection=22.5, maxmag_maxdetection=24.5 )
+                             minmag_maxdetection=22.5, maxmag_maxdetection=23.8,
+                             ignore_object_processing_version=True )
     assert len(df) == 2
-    assert set( df.diaobjectid ) == { 200, 202 }
+    assert set( df.rootid ) == { roots[i]['root'].id for i in [ 2, 3 ] }
 
     # To filter on lastmag, we need to use mjd_now, because the fixture filled out
     #   forced photometry all down to mag 32.
-    df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas', mjd_now=60056. )
-    df.set_index( 'diaobjectid', inplace=True )
-    dexen = np.array( [ 200, 201, 202, 203 ] )
+    df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas', mjd_now=60056.,
+                             ignore_object_processing_version=True )
+    df.set_index( 'rootid', inplace=True )
+    dexen = np.array( roots[i]['root'].id for i in range(4) )
     assert list( df.loc[ dexen, 'lastforcedmjd' ] ) == [ 60050., 60055., 60055., 60055. ]
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas', mjd_now=60056.,
-                             min_lastmag=24. )
-    assert len(df) == 3
-    assert set( df.diaobjectid ) == { 200, 201, 203 }
-    df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas', mjd_now=60056.,
-                             max_lastmag=24.8 )
+                             min_lastmag=24., ignore_object_processing_version=True )
     assert len(df) == 2
-    assert set( df.diaobjectid ) == { 201, 202 }
+    assert set( df.rootid ) == { roots[i]['root'].id for i in [ 0, 1 ] }
     df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas', mjd_now=60056.,
-                             min_lastmag= 24., max_lastmag=24.8 )
+                             max_lastmag=24.8, ignore_object_processing_version=True )
+    assert len(df) == 3
+    assert set( df.rootid ) == { roots[i]['root'].id for i in [ 1, 2, 3 ] }
+    df = ltcv.object_search( processing_version='pvc_pv3', return_format='pandas', mjd_now=60056.,
+                             min_lastmag= 24., max_lastmag=24.8, ignore_object_processing_version=True )
     assert len(df) == 1
-    assert set( df.diaobjectid ) == { 201 }
+    assert set( df.rootid ) == { roots[1]['root'].id }
 
+    strio = io.StringIO()
+    strio.write( "Average timings:" )
+    for k, v in ltcv._object_search_timings.items():
+        n = ltcv._object_search_timings_count[ k ]
+        strio.write( f"    {k:>34s} : {v/n:8.5f}\n" )
+    FDBLogger.debug( strio.getvalue() )
 
     # TODO : test statbands.  (It is tested in test_ltcv_object_search.py)
     # (...and a good thing too, becasue it was broken.)
 
 
-def test_get_hot_ltcvs( set_of_lightcurves ):
-    # TODO : test hostdf (fixture doesn't currently load any hosts)
-
+def test_get_hot_ltcvs( set_of_lightcurves, lightcurve_checker ):
     # ...not sure how to test this without mjd_now since it uses the current time,
     #    and that will be different based on when this is run
 
-    df, objdf, _ = ltcv.get_hot_ltcvs( 'pvc_pv3', detected_since_mjd=60035, mjd_now=60056 )
-    assert set( df.index.names ) == { 'diaobjectid', 'mjd' }
-    assert set( df.columns ) == { 'visit', 'band', 'flux', 'fluxerr', 'isdet' }
-    assert set( df.index.get_level_values('diaobjectid') ) == { 201, 202, 203 }
-    assert set( objdf.index.get_level_values('diaobjectid') ) == set( df.index.get_level_values('diaobjectid') )
+    check_ltcv = lightcurve_checker
 
-    df, objdf, _ = ltcv.get_hot_ltcvs( 'pvc_pv3', detected_since_mjd=60035, mjd_now=60046 )
-    assert set( df.index.get_level_values('diaobjectid') ) == { 201, 202 }
-    assert set( objdf.index.get_level_values('diaobjectid') ) == set( df.index.get_level_values('diaobjectid') )
+    ltcvinfo = [
+        { 'kwargs': { 'mjd_now': 60056., 'detected_since_mjd': 60035. },
+          'passprocver': 'pvc_pv2',
+          'testprocver': 'pv2',
+          'exproot': [1, 2, 3],
+          'expobj': [201, 2011, 202, 203]
+         },
+        { 'kwargs': { 'mjd_now': 60046., 'detected_since_mjd': 60035., },
+          'passprocver': 'pvc_pv2',
+          'testprocver': 'pv2',
+          'exproot': [1, 2],
+          'expobj': [201, 2011, 202],
+         },
+        { 'kwargs': { 'mjd_now': 60021., 'detected_in_last_days': 2 },
+          'passprocver': 'pvc_pv2',
+          'testprocver': 'pv2',
+          'exproot': [0, 1],
+          'expobj': [200, 201, 2011]
+         },
+        { 'kwargs': { 'mjd_now': 60041., 'detected_in_last_days': 2 },
+          'passprocver': 'pvc_pv2',
+          'testprocver': 'pv2',
+          'exproot': [1, 2],
+          'expobj': [201, 2011, 202]
+         },
+        # detected in last days defaults to 30
+        { 'kwargs': { 'mjd_now': 60085. },
+          'passprocver': 'pvc_pv2',
+          'testprocver': 'pv2',
+          'exproot': [1, 2, 3],
+          'expobj': [201, 2011, 202, 203]
+         },
+        { 'kwargs': { 'mjd_now': 60095. },
+          'passprocver': 'pvc_pv2',
+          'testprocver': 'pv2',
+          'exproot': [2],
+          'expobj': [202]
+         },
+        { 'kwargs': { 'mjd_now': 60061. },
+          'passprocver': 'realtime',
+          'testprocver': 'realtime',
+          'exproot': [1, 2],
+          'expobj': [1, 2]
+         },
+        { 'kwargs': { 'mjd_now': 60061. },
+          'passprocver': None,
+          'testprocver': 'realtime',
+          'exproot': [1, 2],
+          'expobj': [1, 2]
+         }
+    ]
 
-    df, objdf, _ = ltcv.get_hot_ltcvs( 'pvc_pv3', detected_in_last_days=2, mjd_now=60021 )
-    assert set( df.index.get_level_values('diaobjectid') ) == { 200, 201 }
-    assert set( objdf.index.get_level_values('diaobjectid') ) == set( df.index.get_level_values('diaobjectid') )
+    extras = [
+        {},
+        { 'include_object_positions': 1 },
+        { 'include_object_positions': 0 },
+        { 'include_source_positions': 1 },
+        { 'include_object_positions': 1, 'include_source_positions': 1 },
+        { 'include_base_procver': 1 },
+        { 'include_base_procver': 1, 'include_object_positions': 1 },
+        { 'use_weighted_source_positions': 1, 'include_object_positions': 1, 'include_base_procver': 1 },
+        { 'always_use_weighted_source_positions': 1, 'include_object_positions': 1, 'include_base_procver': 1 },
+        { 'always_use_weighted_source_positions': 1, 'include_object_positions': 1 },
+    ]
 
-    df, objdf, _ = ltcv.get_hot_ltcvs( 'pvc_pv3', detected_in_last_days=2, mjd_now=60041 )
-    assert set( df.index.get_level_values('diaobjectid') ) == { 201, 202 }
-    assert set( objdf.index.get_level_values('diaobjectid') ) == set( df.index.get_level_values('diaobjectid') )
+    n = 0
+    t0 = time.perf_counter()
+    tjs = 0
+    tpd = 0
+    for lc in ltcvinfo:
+        for source_patch in [ True, False, None ]:
+            for extra in extras:
+                kwargs = extra.copy()
+                kwargs.update( lc['kwargs'] )
 
-    # detected_in_last_days defaults to 30
-    df, objdf, _ = ltcv.get_hot_ltcvs( 'pvc_pv3', mjd_now=60085 )
-    assert set( df.index.get_level_values('diaobjectid') ) == { 201, 202, 203 }
-    assert set( objdf.index.get_level_values('diaobjectid') ) == set( df.index.get_level_values('diaobjectid') )
-    df, objdf, _ = ltcv.get_hot_ltcvs( 'pvc_pv3', mjd_now=60095 )
-    assert set( df.index.get_level_values('diaobjectid') ) == { 202 }
-    assert set( objdf.index.get_level_values('diaobjectid') ) == set( df.index.get_level_values('diaobjectid') )
+                if lc['passprocver'] is not None:
+                    kwargs['processing_version'] = lc['passprocver']
+                if source_patch is not None:
+                    kwargs['source_patch'] = source_patch
 
-    # Now let's look a the pulled forced photometry
-    df, _, _ = ltcv.get_hot_ltcvs( 'pvc_pv3', detected_in_last_days=2, mjd_now=60041 )
-    assert ( df.index.get_level_values('mjd') <= 60041. ).all()
-    assert ( df.reset_index().groupby( 'diaobjectid' ).max().mjd == 60040. ).all()
-    assert len( df.xs( 201, level='diaobjectid' ) ) == 13
-    assert len( df.xs( 202, level='diaobjectid' ) ) == 5
-    # ...should I look at the actual values?  I should.
+                n += 1
+                tj0 = time.perf_counter()
+                jsres = ltcv.get_hot_ltcvs( return_format='json', **kwargs )
+                tjs += time.perf_counter() - tj0
 
-    # Test source patch.  Gotta use pvc_pv1 for this.  (I guess we coulda also used realtime.)
+                n += 1
+                tp0 = time.perf_counter()
+                pdres = ltcv.get_hot_ltcvs( return_format='pandas', **kwargs )
+                tpd += time.perf_counter() - tp0
 
-    df, objdf, _ = ltcv.get_hot_ltcvs( 'pvc_pv1', mjd_now=60031 )
-    assert set( df.index.get_level_values('diaobjectid') ) == { 100 }
-    assert set( objdf.index.get_level_values('diaobjectid') ) == set( df.index.get_level_values('diaobjectid') )
-    assert df.index.get_level_values('mjd').max() == 60025.
+                for yank in [ 'processing_version', 'source_patch', 'detected_since_mjd', 'detected_in_last_days' ]:
+                    if yank in kwargs:
+                        del kwargs[yank]
+                kwargs['which'] = 'patch' if source_patch in ( True, None ) else 'forced'
+                if 'include_object_positions' not in kwargs:
+                    # get_hot_ltcvs has a different default from many_object_ltcvs
+                    kwargs['include_object_positions'] = True
+                check_ltcv( lc['testprocver'], lc['exproot'], lc['expobj'], jsres,
+                            return_object_info=True, **kwargs )
 
-    df2, objdf2, _ = ltcv.get_hot_ltcvs( 'pvc_pv1', mjd_now=60031, source_patch=True )
-    assert set( df2.columns ) == { 'visit', 'band', 'flux', 'fluxerr', 'isdet', 'ispatch' }
-    assert set( df2.index.get_level_values('diaobjectid') ) == { 100 }
-    assert set( objdf2.index.get_level_values('diaobjectid') ) == set( df2.index.get_level_values('diaobjectid') )
-    assert df2.index.get_level_values('mjd').max() == 60030.
-    assert len(df2) == len(df) + 2
-    assert ( df == df2.loc[ df2.index.get_level_values('mjd') <= 60025., df2.columns != 'ispatch' ] ).all().all()
-    assert df2[ df2.index.get_level_values('mjd') > 60025. ].isdet.all()
-    assert not df2[ df2.index.get_level_values('mjd') <= 20025. ].ispatch.any()
-    assert df2[ df2.index.get_level_values('mjd') > 60025. ].ispatch.all()
+                compare_pandas_to_json( pdres[0], jsres[0], pdres[1], jsres[1] )
+
+    FDBLogger.info( f"{n} calls in {time.perf_counter()-t0:.2f} sec; js time={tjs:.2f}, pd time={tpd:.2f}" )

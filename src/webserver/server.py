@@ -1,4 +1,5 @@
 import logging
+import textwrap
 
 from psycopg import sql
 import flask
@@ -11,7 +12,7 @@ import webserver.rkauth_flask as rkauth_flask
 import webserver.dbapp as dbapp
 import webserver.ltcvapp as ltcvapp
 import webserver.spectrumapp as spectrumapp
-from webserver.baseview import BaseView
+from webserver.baseview import BaseView, FASTDBWebException
 
 # ======================================================================
 # Global config
@@ -58,7 +59,7 @@ class ProcVer( BaseView ):
         with db.DBCon() as con:
             pvid = db.ProcessingVersion.procver_id( procver, dbcon=con )
             if pvid is None:
-                return f"Unknown processing version {procver}", 500
+                return f"Unknown processing version {procver}", 422
 
             retval = { 'status': 'ok', 'id': None, 'description': None, 'aliases': [], 'base_procvers': [] }
             row, _ = con.execute( "SELECT id,description FROM processing_version WHERE id=%(pv)s", { 'pv': pvid } )
@@ -69,12 +70,17 @@ class ProcVer( BaseView ):
                                    { 'pv': pvid } )
             retval['aliases'] = [ r[0] for r in rows ]
 
-            rows, _ = con.execute( "SELECT description FROM base_processing_version b "
-                                   "INNER JOIN base_procver_of_procver j ON b.id=j.base_procver_id "
-                                   "WHERE j.procver_id=%(pv)s "
-                                   "ORDER BY j.priority DESC",
+            rows, _ = con.execute( "SELECT _table, ARRAY_AGG(description), ARRAY_AGG(priority)\n"
+                                   "FROM (\n"
+                                   "  SELECT b.description,b._table,j.priority\n"
+                                   "  FROM base_processing_version b\n"
+                                   "  INNER JOIN base_procver_of_procver j ON b.id=j.base_procver_id\n"
+                                   "  WHERE j.procver_id=%(pv)s\n"
+                                   "  ORDER BY b._table,j.priority DESC\n"
+                                   ") subq\n"
+                                   "GROUP BY _table",
                                    { 'pv': pvid } )
-            retval['base_procvers'] = [ r[0] for r in rows ]
+            retval['base_procvers'] = { r[0]: [ [ d, p ] for d, p in zip(r[1], r[2]) ] for r in rows }
 
             return retval
 
@@ -82,18 +88,23 @@ class ProcVer( BaseView ):
 # ======================================================================
 
 class BaseProcVer( BaseView ):
-    def do_the_things( self, procver ):
+    def do_the_things( self, procver, table=None ):
         with db.DBCon() as con:
-            pvid = db.BaseProcessingVersion.base_procver_id( procver )
-            if pvid is None:
-                return f"Unknown base processing version {procver}", 500
+            try:
+                pvid = db.BaseProcessingVersion.base_procver_id( procver, table )
+            except Exception as ex:
+                raise FASTDBWebException( str(ex) )
 
-            retval = { 'status': 'ok', 'id': None, 'description': None, 'procvers': [] }
-            row, _ = con.execute( "SELECT id,description FROM base_processing_version WHERE id=%(pv)s",
+            row, _ = con.execute( "SELECT id,description,_table FROM base_processing_version WHERE id=%(pv)s",
                                   { 'pv': pvid } )
-            retval['id'] = row[0][0]
-            retval['description'] = row[0][1]
+            if len(row) == 0:
+                return f"Unknown base processing version {procver}", 422
 
+            retval = { 'status': 'ok',
+                       'id': row[0][0],
+                       'description': row[0][1],
+                       'table': row[0][2]
+                      }
             rows, _ = con.execute( "SELECT description FROM processing_version p "
                                    "INNER JOIN base_procver_of_procver j ON p.id=j.procver_id "
                                    "WHERE j.base_procver_id=%(pv)s "
@@ -110,36 +121,52 @@ class CountThings( BaseView ):
     def do_the_things( self, which, procver='default' ):
         global app
 
-        tablemap = { 'object': ( 'diaobject', ( 'rootid', ) ),
-                     'source': ( 'diasource', ( 'diaobjectid', 'visit' ) ),
-                     'forced': ( 'diaforcedsource', ( 'diaobjectid', 'visit' ) ) }
-        tablemap['diaobject'] = tablemap['object']
-        tablemap['diasource'] = tablemap['source']
-        tablemap['diaforcedsource'] = tablemap['forced']
+        synonyms = { 'rootid': [ 'rootid', 'rootobject', 'rootdiaobject' ],
+                     'diaobject': [ 'object', 'diaobject'],
+                     'diasource': [ 'source', 'diasource' ],
+                     'diaforcedsource': [ 'forced', 'forcedsource' ,'diaforcedsource' ]
+                    }
 
-        if which not in tablemap:
-            return f"Unknown thing to count: {which}", 500
-        table = tablemap[ which ][0]
-        objfields = tablemap[ which ][1]
+        thingtocount = None
+        for k, v in synonyms.items():
+            if which in v:
+                thingtocount = k
+                break
+        if thingtocount is None:
+            return f"Unknown thing to count: {which}", 422
 
         estimate = False
         if flask.request.is_json:
             data = flask.request.json
             estimate = ( 'estimate' in data ) and ( data['estimate'] )
-            # IN PROGRESS
 
         with db.DBCon() as dbcon:
             pvid = db.ProcessingVersion.procver_id( procver )
 
-            baseq = sql.SQL(
-                """
-                  SELECT DISTINCT ON({pk}) t.base_procver_id FROM {table} t
-                  INNER JOIN base_procver_of_procver pv ON t.base_procver_id=pv.base_procver_id
-                                                       AND pv.procver_id={pvid}
-                  ORDER BY {pk},pv.priority DESC
-                """
-            ).format( pk=sql.SQL(',').join( sql.Identifier(i) for i in objfields ),
-                      table=sql.Identifier(table), pvid=pvid )
+            if thingtocount in ( 'rootid', 'diaobject' ):
+                distinct = 'diaobjectid' if thingtocount=='diaobject' else 'rootid'
+                indexes = [ 'o idx_diaobject_procver' ]
+                baseq = sql.SQL( textwrap.dedent(
+                    """\
+                    SELECT DISTINCT ON({distinct}) {distinct} FROM diaobject o
+                    INNER JOIN base_procver_of_procver pv ON o.base_procver_id=pv.base_procver_id
+                                                         AND pv.procver_id={pvid}
+                    ORDER BY {distinct}, pv.priority DESC
+                    """
+                ) ).format( distinct=sql.Identifier("o", distinct), pvid=pvid )
+            else:
+                indexes = [ f's idx_{thingtocount}_base_procver_id', f'o idx_{thingtocount}_diaobjectid' ]
+                baseq = sql.SQL( textwrap.dedent(
+                    """\
+                    SELECT DISTINCT ON(o.rootid, s.visit) {idfield} FROM {table} s
+                    INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id
+                                                         AND pv.procver_id={pvid}
+                    INNER JOIN diaobject o ON o.diaobjectid=s.diaobjectid
+                    ORDER BY o.rootid, s.visit, pv.priority DESC
+                    """
+                ) ).format( table=sql.Identifier(thingtocount),
+                            idfield=sql.Identifier("s", f"{thingtocount}id" ),
+                            pvid=pvid )
 
             if estimate:
                 # THIS DOES A REALLY TERRIBLE JOB.
@@ -163,13 +190,15 @@ class CountThings( BaseView ):
                 #   workers, to make it faster.  For this count query,
                 #   this is probably not going to be a problem, but it
                 #   is of course scary.
-                q = sql.SQL( f"/*+ IndexScan(t idx_{table}_procver) Parallel(t 4) */\n"
-                             f"SELECT COUNT(*) FROM (\n{{baseq}}\n) subq" ).format( baseq=baseq )
+                q = sql.SQL( "/*+ " )
+                q += sql.SQL(" ").join( sql.SQL( f"IndexScan({i})" ) for i in indexes )
+                q += sql.SQL( " Parallel(t 4) */\n" )
+                q += sql.SQL( "SELECT COUNT(*) FROM (\n{baseq}\n) subq" ).format( baseq=baseq )
                 rows, _ = dbcon.execute( q )
                 count = rows[0][0]
 
             return { 'status': 'ok',
-                     'table': table,
+                     'table': thingtocount,
                      'isestimate': estimate,
                      'count': count }
 
@@ -186,18 +215,21 @@ class GetDiaObjectInfo( BaseView ):
             data = flask.request.json
             if ( ( procver is not None ) and ( 'processing_version' in data ) and
                  ( data['processing_version'] != procver ) ):
-                raise ValueError( f"Conflicting processing versions; {procver} specified in the URL, "
-                                  f"but {data['processing_version']} passed in the body!" )
+                raise FASTDBWebException( f"Conflicting processing versions; {procver} specified in the URL, "
+                                          f"but {data['processing_version']} passed in the body!" )
             procver = data['processing_version' ] if 'processing_version' in data else procver
             procver = 'default' if procver is None else procver
 
             if ( objid is not None ) and ( 'objectids' in data ):
-                raise ValueError( "Error, object id given in both URL and body.  Only do one." )
+                raise FASTDBWebException( "Error, object id given in both URL and body.  Only do one." )
             objid = data['objectids'] if objid is None else objid
             columns = data['columns'] if 'columns' in data else None
 
         procver = 'default' if procver is None else procver
-        return ltcv.get_object_infos( objid, processing_version=procver, columns=columns, return_format='json' )
+        try:
+            return ltcv.get_object_infos( objid, processing_version=procver, columns=columns, return_format='json' )
+        except Exception as ex:
+            raise FASTDBWebException( str(ex) )
 
 
 # ======================================================================
@@ -206,7 +238,7 @@ class ObjectSearch( BaseView ):
     def do_the_things( self, processing_version='default' ):
         global app
         if not flask.request.is_json:
-            raise TypeError( "POST data was not JSON; send search criteria as a JSON dict" )
+            raise FASTDBWebException( "POST data was not JSON; send search criteria as a JSON dict" )
         searchdata = flask.request.json
 
         FDBLogger.debug( f"ObjectSearch on processing version {processing_version} with search data {searchdata}" )
@@ -275,13 +307,14 @@ urls = {
     "/getprocvers": GetProcVers,
     "/procver/<procver>": ProcVer,
     "/baseprocver/<procver>": BaseProcVer,
+    "/baseprocver/<procver>/<table>": BaseProcVer,
     "/count/<which>": CountThings,
     "/count/<which>/<procver>": CountThings,
     "/getdiaobjectinfo": GetDiaObjectInfo,
     "/getdiaobjectinfo/<procver>": GetDiaObjectInfo,
     "/getdiaobjectinfo/<procver>/<objid>": GetDiaObjectInfo,
     "/objectsearch": ObjectSearch,
-    "/objectsearch/<processing_version>": ObjectSearch
+    "/objectsearch/<processing_version>": ObjectSearch,
 }
 
 usedurls = {}

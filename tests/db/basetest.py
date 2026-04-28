@@ -2,6 +2,7 @@ import pytest
 import uuid
 
 import psycopg
+import psycopg.sql
 
 from db import DB
 
@@ -56,9 +57,9 @@ class BaseTestDB:
         obj1 = self.cls()
         obj2 = self.cls()
 
-        assert set( obj1.tablemeta.keys() ) == self.columns
+        assert set( obj1.tablemeta().keys() ) == self.columns
         assert obj2._tablemeta is not None
-        assert obj2._tablemeta == obj1.tablemeta
+        assert obj2._tablemeta == obj1.tablemeta()
 
     def test_instantiate( self, basetest_setup ):
         # Test basic instantiation
@@ -78,6 +79,54 @@ class BaseTestDB:
             q, subdict = self.obj1._construct_pk_query_where( me=self.obj1 )
             cursor.execute( f"SELECT * FROM {self.cls.__tablename__} {q}", subdict )
             assert cursor.rowcount == 1
+
+    def test_all_columns_sql( self, obj1_inserted, obj2_inserted ):
+        with DB() as dbcon:
+            cursor = dbcon.cursor( row_factory=psycopg.rows.dict_row )
+            cursor.execute( psycopg.sql.SQL( "SELECT " ) + self.cls.all_columns_sql() +
+                            psycopg.sql.SQL( " FROM " ) + psycopg.sql.Identifier( self.cls.__tablename__ ) )
+            rows = cursor.fetchall()
+            assert len(rows) == 2
+            assert set( rows[0].keys() ) == set( self.columns )
+            assert ( all( rows[0][k] == self.dict1[k] for k in self.dict1.keys() )
+                     or
+                     all( rows[1][k] == self.dict1[k] for k in self.dict1.keys() ) )
+
+            collist = list( self.columns )
+
+            cursor.execute( psycopg.sql.SQL( "SELECT " ) + self.cls.all_columns_sql( omit=collist[:1] ) +
+                            psycopg.sql.SQL( " FROM " ) + psycopg.sql.Identifier( self.cls.__tablename__ ) )
+            rows = cursor.fetchall()
+            assert len(rows) == 2
+            assert set( rows[0].keys() ) == set( collist[1:] )
+            assert ( all( rows[0][k] == self.dict1[k] for k in collist[1:] )
+                     or
+                     all( rows[1][k] == self.dict1[k] for k in collist[1:] ) )
+
+            cursor.execute( psycopg.sql.SQL( "SELECT " ) +
+                            self.cls.all_columns_sql( asmap={ collist[0]: 'foo' }  ) +
+                            psycopg.sql.SQL( " FROM " ) + psycopg.sql.Identifier( self.cls.__tablename__ ) )
+            rows = cursor.fetchall()
+            assert len(rows) == 2
+            assert set( rows[0].keys() ) == { 'foo' }.union( set( collist[1:] ) )
+            assert ( ( rows[0]['foo'] == self.dict1[ collist[0] ] )
+                     or
+                     ( rows[1]['foo'] == self.dict1[ collist[0] ] ) )
+            assert ( all( rows[0][k] == self.dict1[k] for k in collist[1:] )
+                     or
+                     all( rows[1][k] == self.dict1[k] for k in collist[1:] ) )
+
+            cursor.execute( psycopg.sql.SQL( "SELECT " ) +
+                            self.cls.all_columns_sql( prefix="kaglorky" ) +
+                            psycopg.sql.SQL( " FROM " ) + psycopg.sql.Identifier( self.cls.__tablename__ ) +
+                            psycopg.sql.SQL( " kaglorky" ) )
+            rows = cursor.fetchall()
+            assert len(rows) == 2
+            assert set( rows[0].keys() ) == set( self.columns )
+            assert ( all( rows[0][k] == self.dict1[k] for k in self.dict1.keys() )
+                     or
+                     all( rows[1][k] == self.dict1[k] for k in self.dict1.keys() ) )
+
 
     def test_full_udpate( self, obj1_inserted, obj2_inserted ):
         if len( self.columns ) == len( self.cls._pk ):
@@ -172,7 +221,7 @@ class BaseTestDB:
             'real': -666.,
             'dobule precision': -666.
         }
-        missing = [ bs[ self.obj1.tablemeta[k]['data_type'] ] for k in self.obj1._pk ]
+        missing = [ bs[ self.obj1.tablemeta()[k]['data_type'] ] for k in self.obj1._pk ]
         them = self.cls.get_batch( [ self.obj1.pks, missing ] )
         assert len(them) == 1
         assert them[0].pks == self.obj1.pks

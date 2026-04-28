@@ -1,0 +1,20 @@
+brokers:
+  pitt-google:
+    class: PittGoogleConsumer
+    # Every time groupid, it's a new subscription.  If you change
+    # filters, need to change groupid to make a new subscription.
+    groupid: rknop-fastdb-test-{barf}
+    schemafile: /fastdb/share/avsc/lsst.v10_0.alert.avsc
+    mongodb_collection_base: pittgoogle_launcher_test
+    brokername_for_alerts: "Pitt-Google"
+    cache_alerts: true
+    loggername: PITTGOOGLE
+    loggername_prefix: ""
+    consume_timeout: 1.1
+    batch_size: 10
+    survey: lsst
+    topic_name: loop
+    max_workers: 2
+    pollkwargs:
+      restart_time_min: 0.16667
+      max_restarts: 1

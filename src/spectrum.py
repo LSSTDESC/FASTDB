@@ -1,3 +1,5 @@
+# EDITING OF THIS MODULE IS IN PROGRESS, IT'S CURRENTLY BROKEN
+
 import sys
 import io
 import datetime
@@ -6,6 +8,7 @@ import logging
 
 import pandas
 import astropy.time
+# from psycopg import sql
 
 import db
 import util
@@ -15,7 +18,8 @@ import util
 _show_way_too_much_debug_info = False
 
 
-def what_spectra_are_wanted( procver='realtime', wantsince=None, requester=None, notclaimsince=None,
+def what_spectra_are_wanted( procver='realtime', position_procver=None,
+                             wantsince=None, requester=None, notclaimsince=None,
                              nospecsince=None, detsince=None, lim_mag=None, lim_mag_band=None,
                              mjdnow=None, logger=None ):
     """Find out what spectra have been requested.
@@ -47,6 +51,10 @@ def what_spectra_are_wanted( procver='realtime', wantsince=None, requester=None,
         there isn't any photometry of this processing version, will look
         for the object of this processing version.  If there's no object
         either, then that's an error.
+
+      position_procver : str, default None
+        The processing version for diaobject positions.  If not given,
+        will use what was passed in procver.
 
       wantsince : datetime or None
         If not None, only get spectra that have been requested since this time.
@@ -92,7 +100,7 @@ def what_spectra_are_wanted( procver='realtime', wantsince=None, requester=None,
     -------
       pandas.DataFrame with columns:
          root_diaobject_id
-         diabojectid
+         diabojectid [ WARNING -- these aren't unique, so this is just a "random" one ]
          requester
          priority
          ra
@@ -115,6 +123,7 @@ def what_spectra_are_wanted( procver='realtime', wantsince=None, requester=None,
 
     with db.DBCon() as con:
         procver = util.procver_id( procver, dbcon=con )
+        posprocver = procver if position_procver is None else util.procverid( position_procver, dbcon=con )
 
         # Create a temporary table with things that are wanted but that have not been claimed.
         #
@@ -220,15 +229,15 @@ def what_spectra_are_wanted( procver='realtime', wantsince=None, requester=None,
                   "  SELECT DISTINCT ON(t.root_diaobject_id,requester,priority)\n"
                   "    t.root_diaobject_id, requester, priority\n"
                   "  FROM tmp_wanted_no_spec t\n"
-                  "  INNER JOIN diaobject o ON t.root_diaobject_id=o.rootid\n"
                   "  INNER JOIN (\n"
-                  "    SELECT DISTINCT ON(src.diaobjectid,src.visit) src.diaobjectid\n"
+                  "    SELECT DISTINCT ON(src.diasourceid) src.diaobjectid, obj.rootid\n"
                   "    FROM diasource src\n"
+                  "    INNER JOIN diaobject obj ON src.diaobjectid=obj.diaobjectid\n"
                   "    INNER JOIN base_procver_of_procver pv ON src.base_procver_id=pv.base_procver_id\n"
                   "      AND pv.procver_id=%(procver)s\n"
                   "    WHERE src.midpointmjdtai>=%(detsince)s AND src.midpointmjdtai<=%(now)s\n"
-                  "    ORDER BY src.diaobjectid,src.visit,pv.priority DESC\n"
-                  "  ) s ON o.diaobjectid=s.diaobjectid\n"
+                  "    ORDER BY src.diasourceid,pv.priority DESC\n"
+                  "  ) s ON t.root_diaobject_id=s.rootid\n"
                   "  ORDER BY root_diaobject_id,requester,priority\n"
                   ")" )
             con.execute_nofetch( q, { 'detsince': detsince, 'procver': procver, 'now': mjdnow } )
@@ -266,18 +275,18 @@ def what_spectra_are_wanted( procver='realtime', wantsince=None, requester=None,
               "           s.band AS band, s.midpointmjdtai AS mjd,\n"
               "           CASE WHEN s.psfflux>0 THEN -2.5*LOG(s.psfflux)+31.4 ELSE 99 END AS mag\n"
               "    FROM tmp_wanted_detected t\n"
-              "    INNER JOIN diaobject o ON t.root_diaobject_id=o.rootid\n"
               "    INNER JOIN (\n"
-              "      SELECT DISTINCT ON (src.diaobjectid,src.visit) src.diaobjectid,src.midpointmjdtai,\n"
-              "                                                     src.psfflux,src.band\n"
+              "      SELECT DISTINCT ON (src.diasourceid) obj.rootid,src.diaobjectid,src.midpointmjdtai,\n"
+              "                                           src.psfflux,src.band\n"
               "      FROM diasource src\n"
+              "      INNER JOIN diaobject obj ON src.diaobjectid=obj.diaobjectid\n"
               "      INNER JOIN base_procver_of_procver pv ON src.base_procver_id=pv.base_procver_id\n"
               "        AND pv.procver_id=%(procver)s\n"
               "      WHERE src.midpointmjdtai<=%(now)s\n" )
         if lim_mag_band is not None:
             q += "      AND src.band=%(band)s "
-        q += ( "      ORDER BY src.diaobjectid, src.visit, pv.priority DESC\n"
-               "    ) s ON o.diaobjectid=s.diaobjectid\n"
+        q += ( "      ORDER BY src.diasourceid, pv.priority DESC\n"
+               "    ) s ON t.root_diaobject_id=s.rootid\n"
                "    ORDER BY t.root_diaobject_id,mjd DESC\n"
                "  ) subq\n"
                ")" )
@@ -309,18 +318,18 @@ def what_spectra_are_wanted( procver='realtime', wantsince=None, requester=None,
               "           f.band AS band, f.midpointmjdtai AS mjd,\n"
               "           CASE WHEN f.psfflux>0 THEN -2.5*LOG(f.psfflux)+31.4 ELSE NULL END AS mag\n"
               "    FROM tmp_wanted_detected t\n"
-              "    INNER JOIN diaobject o ON t.root_diaobject_id=o.rootid\n"
               "    INNER JOIN (\n"
-              "      SELECT DISTINCT ON (frc.diaobjectid,frc.visit) frc.diaobjectid,frc.midpointmjdtai,\n"
-              "                                                     frc.band,frc.psfflux\n"
+              "      SELECT DISTINCT ON (frc.diaforcedsourceid) obj.rootid,frc.diaobjectid,frc.midpointmjdtai,\n"
+              "                                                 frc.band,frc.psfflux\n"
               "      FROM diaforcedsource frc\n"
+              "      INNER JOIN diaobject obj ON frc.diaobjectid=obj.diaobjectid\n"
               "      INNER JOIN base_procver_of_procver pv ON frc.base_procver_id=pv.base_procver_id\n"
               "        AND pv.procver_id=%(procver)s\n"
               "      WHERE frc.midpointmjdtai<=%(now)s\n" )
         if lim_mag_band is not None:
             q += "        AND frc.band=%(band)s\n"
-        q += ( "      ORDER BY frc.diaobjectid, frc.visit, pv.priority DESC\n"
-               "    ) f ON o.diaobjectid=f.diaobjectid\n"
+        q += ( "      ORDER BY frc.diaforcedsourceid, pv.priority DESC\n"
+               "    ) f ON t.root_diaobject_id=f.rootid\n"
                "    ORDER BY t.root_diaobject_id,mjd DESC\n"
                "  ) AS subq\n"
                ")" )
@@ -338,18 +347,23 @@ def what_spectra_are_wanted( procver='realtime', wantsince=None, requester=None,
                 sio.write( f"{str(row[0]):36s} {row[1]:8.2f} {row[2]:6s} {row[3]:6.2f}\n" )
             logger.debug( sio.getvalue() )
 
-        # Get object info; base this off of the latest detection table so we know
-        #   which diaobjectid to use, in case there are multiple diaobjects for
-        #   the root diaobject.
+        # Get object position
         con.execute_nofetch( "CREATE TEMP TABLE tmp_object_info( root_diaobject_id UUID, diaobjectid bigint,\n"
                              "                                   ra double precision, dec double precision )",
                              explain=False, analyze=False )
         q = ( "INSERT INTO tmp_object_info (\n"
-              "  SELECT DISTINCT ON (t.root_diaobject_id) t.root_diaobject_id, t.diaobjectid, o.ra, o.dec\n"
+              "  SELECT DISTINCT ON (t.root_diaobject_id) t.root_diaobject_id, t.diaobjectid, p.ra, p.dec\n"
               "  FROM tmp_latest_detection t\n"
-              "  INNER JOIN diaobject o ON t.diaobjectid=o.diaobjectid\n"
+              "  LEFT JOIN (\n"
+              "    SELECT DISTINCT ON (obj.rootid) obj.rootid, pos.ra, pos.dec\n"
+              "    FROM diaobject_position pos\n"
+              "    INNER JOIN diaobject obj ON pos.diaobjectid=obj.diaobjectid\n"
+              "    INNER JOIN base_procver_of_procver pv ON pos.base_procver_id=pv.base_procver_id\n"
+              "                                         AND pv.procver_id=%(procver)s\n"
+              "  ) p ON t.root_diaobject_id=p.rootid\n"
+              "  ORDER BY t.root_diaobject_id\n"
               ")\n" )
-        con.execute_nofetch( q )
+        con.execute_nofetch( q, { 'procver': posprocver } )
 
         rows, _cols = con.execute( "SELECT COUNT(*) FROM tmp_object_info" )
         logger.debug( f"{rows[0][0]} rows in tmp_object_info" )
@@ -374,7 +388,27 @@ def what_spectra_are_wanted( procver='realtime', wantsince=None, requester=None,
               "LEFT JOIN tmp_latest_detection s ON t.root_diaobject_id=s.root_diaobject_id "
               "LEFT JOIN tmp_latest_forced f ON t.root_diaobject_id=f.root_diaobject_id" )
         rows, cols = con.execute( q )
-        df = pandas.DataFrame( rows, columns=cols )
+        # Have to be anal because pandas has this very disturbing tendency to convert
+        #   bigints to doubles, and by default doesn't handle NULL columns.  (It will
+        #   make NULLS into NA, which triggers a conversion from bigint to double.)
+        bigint_cols = [ 'diaobjectid' ]
+        int_cols = [ 'priority' ]
+        double_cols = [ 'ra', 'dec', 'src_mjd', 'frced_mjd' ]
+        float_cols = [ 'src_mag' ]
+        serieses = {}
+        for i, col in enumerate(cols):
+            if col in bigint_cols:
+                series = pandas.Series( [ r[i] for r in rows ], dtype="int64[pyarrow]" )
+            elif col in int_cols:
+                series = pandas.Series( [ r[i] for r in rows ], dtype="int32[pyarrow]" )
+            elif col in double_cols:
+                series = pandas.Series( [ r[i] for r in rows ], dtype="float64[pyarrow]" )
+            elif col in float_cols:
+                series = pandas.Series( [ r[i] for r in rows ], dtype="float32[pyarrow]" )
+            else:
+                series = pandas.Series( [ r[i] for r in rows ] )
+            serieses[ col ] = series
+        df = pandas.DataFrame( serieses )
 
     # Filter by limiting magnitude if necessary
     if lim_mag is not None:
@@ -399,8 +433,7 @@ def what_spectra_are_wanted( procver='realtime', wantsince=None, requester=None,
     return df
 
 
-def get_spectrum_info( root_diaobject_ids=None, facility=None, mjd_min=None, mjd_max=None, classid=None,
-                       z_min=None, z_max=None, since=None, logger=None ):
+def get_spectrum_info( logger=None, **kwargs ):
     if logger is None:
         logger = logging.getLogger( __name__ )
         logger.propagate = False
@@ -412,58 +445,96 @@ def get_spectrum_info( root_diaobject_ids=None, facility=None, mjd_min=None, mjd
             logout.setFormatter( formatter )
             logger.setLevel( logging.INFO )
 
-    with db.DB() as con:
-        cursor = con.cursor()
-        where = "WHERE"
-        q = "SELECT * FROM spectruminfo "
-        subdict = {}
+    # with db.DBCon() as con:
+    #     q = sql.SQL( "SELECT * FROM spectruminfo " )
 
-        if root_diaobject_ids is not None:
-            if util.isSequence( root_diaobject_ids ):
-                q += f"{where} root_diaobject_id=ANY(%(ids)s) "
-                subdict['ids'] = [ str(i) for i in root_diaobject_ids ]
-            else:
-                q += f"{where} root_diaobject_id=%(id)s "
-                subdict['id'] = str(root_diaobject_ids)
-            where = "AND"
+    #     # Backwards compatibility
+    #     if 'since' in kwargs:
+    #         kwargs['inserted_at_min'] = kwargs['since']
+    #         del kwargs['since']
+    #     if 'root_diaobject_ids' in kwargs:
+    #         kwargs['root_diaobject_id'] = kwargs['root_diaobject_ids']
+    #         del kwargs['root_diaobject_ids']
 
-        if facility is not None:
-            q += f"{where} facility=%(fac)s "
-            subdict['fac'] = facility
-            where = "AND"
+    #     # searchspec = {
+    #     #     'root_diaobject_id':  { 'mult': True,  'substr': False, 'minmax': False },
+    #     #     'facility':           { 'mult': True,  'substr': True,  'minmax': True },
+    #     #     'mjd':                { 'mult': False, 'substr': False, 'minmax': True },
+    #     #     'z':                  { 'mult': False, 'substr': False, 'minmax': True },
+    #     #     'class_description':  { 'mult': True,  'substr': True,  'minmax': False },
+    #     #     'classid':            { 'mult': True,  'substr': False, 'minmax': True }
+    #     # }
 
-        if mjd_min is not None:
-            q += f"{where} mjd>=%(mjdmin)s "
-            subdict['mjdmin'] = mjd_min
-            where = "AND"
+    #     # for field, fieldinfo in searchspec:
+    #     #     if field in kwargs:
+    #     #         if util.isSequence( kwargs[field] ):
+    #     #             if not fieldinfo[ 'mult' ]:
+    #     #                 raise ValueError( f"Field {field} can't be a list" )
+    #     #             q += sql.SQL( "{where} {field}=ANY(%(field)s)" ).format( where=sql.SQL(where),
+    #     #                                                                      field=sql.Identifier(field) )
+    #     #             subdict['field'] = list( kwargs[field] )
+    #     #         else:
+    #     #             q += sql.SQL( f"{where} {field}=%(field)s" ).format( where=sql.SQL(where),
+    #     #                                                                  field=sql.Identifier(field) )
+    #     #             subdict['field'] = kwargs[field]
+    #     #         where = " AND "
 
-        if mjd_max is not None:
-            q += f"{where} mjd<=%(mjdmax)s "
-            subdict['mjdmax'] = mjd_max
-            where = "AND"
+    #     #     if f'field_contains' in kwargs:
+    #     #         if not fieldinfo['mult']:
+    #     #             raise ValueError( f'Field {field} doesn\'t work with "contains"' )
+    #     #         q += sql.SQL( f"{where} {field}="%%%(field)s%%" ).format( field=
 
-        if classid is not None:
-            q += f"{where} classid=%(class)s "
-            subdict['class'] = classid
-            where = "AND"
 
-        if z_min is not None:
-            q += f"{where} z>=%(zmin)s "
-            subdict['zmin'] = z_min
-            where = "AND"
 
-        if z_max is not None:
-            q += f"{where} z<=%(zmax)s "
-            subdict['zmax'] = z_max
-            where = "AND"
 
-        if since is not None:
-            q += f"{where} inserted_at>=%(since)s "
-            subdict['since'] = since
-            where = "AND"
 
-        cursor.execute( q, subdict )
-        columns = [ col.name for col in cursor.description ]
-        df = pandas.DataFrame( cursor.fetchall(), columns=columns )
 
-    return df
+    #     if root_diaobject_ids is not None:
+    #         if util.isSequence( root_diaobject_ids ):
+    #             q += sql.SQL( f"{where} root_diaobject_id=ANY(%(ids)s) " )
+    #             subdict['ids'] = [ str(i) for i in root_diaobject_ids ]
+    #         else:
+    #             q += sql.SQL( f"{where} root_diaobject_id=%(id)s " )
+    #             subdict['id'] = str(root_diaobject_ids)
+    #         where = "AND"
+
+    #     if facility is not None:
+    #         q += sql.SQL( f"{where} facility=%(fac)s " )
+    #         subdict['fac'] = facility
+    #         where = "AND"
+
+    #     if mjd_min is not None:
+    #         q += sql.SQL( f"{where} mjd>=%(mjdmin)s " )
+    #         subdict['mjdmin'] = mjd_min
+    #         where = "AND"
+
+    #     if mjd_max is not None:
+    #         q += sql.SQL( f"{where} mjd<=%(mjdmax)s " )
+    #         subdict['mjdmax'] = mjd_max
+    #         where = "AND"
+
+    #     if classid is not None:
+    #         q += sql.SQL( f"{where} classid=%(class)s " )
+    #         subdict['class'] = classid
+    #         where = "AND"
+
+    #     if z_min is not None:
+    #         q += sql.SQL( f"{where} z>=%(zmin)s " )
+    #         subdict['zmin'] = z_min
+    #         where = "AND"
+
+    #     if z_max is not None:
+    #         q += sql.SQL( f"{where} z<=%(zmax)s " )
+    #         subdict['zmax'] = z_max
+    #         where = "AND"
+
+    #     if since is not None:
+    #         q += sql.SQL( f"{where} inserted_at>=%(since)s " )
+    #         subdict['since'] = since
+    #         where = "AND"
+
+    #     cursor.execute( q, subdict )
+    #     columns = [ col.name for col in cursor.description ]
+    #     df = pandas.DataFrame( cursor.fetchall(), columns=columns )
+
+    # return df

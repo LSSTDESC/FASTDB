@@ -18,9 +18,12 @@ def test_load_snana_fits():
 
         with db.DB() as conn:
             cursor = conn.cursor()
-            cursor.execute( "SELECT COUNT(*) FROM host_galaxy" )
-            assert cursor.fetchone()[0] == 356
+            # host galaxies not currently supported
+            # cursor.execute( "SELECT COUNT(*) FROM host_galaxy" )
+            # assert cursor.fetchone()[0] == 356
             cursor.execute( "SELECT COUNT(*) FROM diaobject" )
+            assert cursor.fetchone()[0] == 346
+            cursor.execute( "SELECT COUNT(*) FROM diaobject_position" )
             assert cursor.fetchone()[0] == 346
             cursor.execute( "SELECT COUNT(*) from diasource" )
             assert cursor.fetchone()[0] == 1862
@@ -34,7 +37,8 @@ def test_load_snana_fits():
     finally:
         with db.DB() as conn:
             cursor = conn.cursor()
-            for tab in [ 'host_galaxy', 'diaobject', 'diasource', 'diaforcedsource', 'root_diaobject' ]:
+            for tab in [ 'diasource_extra', 'diasource', 'diaforcedsource_extra', 'diaforcedsource',
+                         'diaobject_position', 'diaobject', 'root_diaobject', 'host_galaxy' ]:
                 cursor.execute( f"TRUNCATE TABLE {tab} CASCADE" )
             cursor.execute( "SELECT id FROM processing_version WHERE description='test_procver'" )
             pid = cursor.fetchone()

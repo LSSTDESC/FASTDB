@@ -1,6 +1,5 @@
 import pytest
 import sys
-import os
 import pathlib
 import random
 import time
@@ -55,12 +54,12 @@ def fakebroker( barf ):
         broker = FakeBroker( "kafka-server:9092", [ f"alerts-{barf}" ],
                              "kafka-server:9092", f"classifications-{barf}",
                              group_id=f"fakebroker-{barf}", notopic_sleeptime=1,
-                             reset=False, verbose=False )
+                             reset=False, verbose=False, send_schemaless=False )
         proc = multiprocessing.Process( target=broker )
         logger.info( "Starting fakebroker." )
         proc.start()
 
-        yield True
+        yield proc
 
     finally:
         if proc is not None:
@@ -71,7 +70,7 @@ def fakebroker( barf ):
 
 @pytest.fixture( scope='module' )
 def alerts_30days_sent( snana_fits_ppdb_loaded, barf ):
-    sender = AlertSender( 'kafka-server', f"alerts-{barf}" )
+    sender = AlertSender( 'kafka-server', f"alerts-{barf}", make_cutouts=True )
     nsent = sender( addeddays=30, reallysend=True )
     assert nsent == 77
 
@@ -105,29 +104,32 @@ def alerts_30days_sent_and_classified( alerts_30days_sent, fakebroker ):
 # This one is slow because it includes the previous one, and has its own sleeps
 @pytest.fixture( scope='module' )
 def alerts_30days_sent_and_brokermessage_consumed( barf, alerts_30days_sent_and_classified ):
-    mongodb_dbname = None
-    mongodb_collection = None
-
     try:
         brokertopic = f'classifications-{barf}'
-        mongodb_dbname = os.getenv( 'MONGODB_DBNAME' )
-        mongodb_collection = f'fastdb_{barf}'
+        mongodb_collection_base = 'fastdb_alertcycle_test'
 
-        bc = BrokerConsumer( 'kafka-server', f'BrokerConsumer-{barf}', topics=brokertopic,
-                             mongodb_collection=mongodb_collection, nomsg_sleeptime=1 )
+        bc = BrokerConsumer( 'kafka-server', f'BrokerConsumer-{barf}',
+                             topics=brokertopic, brokername_key='brokerName',
+                             mongodb_collection_base=mongodb_collection_base, nomsg_sleeptime=1 )
         bc.poll( restart_time=datetime.timedelta(seconds=3), max_restarts=1, notopic_sleeptime=2 )
 
         yield datetime.datetime.now( tz=datetime.UTC )
 
     finally:
         # Clear out the mongodb collection that BrokerConsumer will have filled
-        if ( mongodb_dbname is not None ) and ( mongodb_collection is not None ):
-            with db.MG() as mongoclient:
-                brokermessages = getattr( mongoclient, mongodb_dbname )
-                if mongodb_collection in brokermessages.list_collection_names():
-                    coll = getattr( brokermessages, mongodb_collection )
-                    coll.drop()
-                assert mongodb_collection not in brokermessages.list_collection_names()
+        with db.MGCon() as mg:
+            knowncollections = list( mg.db.list_collection_names() )
+            for suffix in [ 'diaobject', 'diasource', 'diasource_extra',
+                            'diaforcedsource', 'diaforcedsource_extra',
+                            'thumbnails', 'brokerinfo' ]:
+                if f'{mongodb_collection_base}_{suffix}' in knowncollections:
+                    col = mg.collection( f'{mongodb_collection_base}_{suffix}' )
+                    col.drop()
+            knowncollections = list( mg.db.list_collection_names() )
+            for suffix in [ 'diaobject', 'diasource', 'diasource_extra',
+                            'diaforcedsource', 'diaforcedsource_extra',
+                            'thumbnails', 'brokerinfo' ]:
+                assert f'{mongodb_collection_base}_{suffix}' not in knowncollections
 
 
 # The purpose of this fixture is to send out more alerts after
@@ -135,7 +137,7 @@ def alerts_30days_sent_and_brokermessage_consumed( barf, alerts_30days_sent_and_
 #   by a BrokerConsumer
 @pytest.fixture( scope='module' )
 def alerts_60moredays_sent( snana_fits_ppdb_loaded, alerts_30days_sent_and_brokermessage_consumed, barf ):
-    sender = AlertSender( 'kafka-server', f"alerts-{barf}" )
+    sender = AlertSender( 'kafka-server', f"alerts-{barf}", make_cutouts=True )
     nsent = sender( addeddays=60, reallysend=True )
     assert nsent == 104
 
@@ -150,19 +152,19 @@ def alerts_60moredays_sent_and_brokermessage_consumed( barf, alerts_60moredays_s
 
     try:
         brokertopic = f'classifications-{barf}'
-        mongodb_collection = f'fastdb_{barf}'
+        mongodb_collection_base= 'fastdb_alertcycle_test'
 
         # Using the same group_id as the last BrokerConsumer, so it should
         #   pick up messages where the last one left off... if kafka
         #   works as I understand.
-        bc = BrokerConsumer( 'kafka-server', f'BrokerConsumer-{barf}', topics=brokertopic,
-                             mongodb_collection=mongodb_collection, nomsg_sleeptime=1 )
+        bc = BrokerConsumer( 'kafka-server', f'BrokerConsumer-{barf}', topics=brokertopic, brokername_key='brokerName',
+                             mongodb_collection_base=mongodb_collection_base, nomsg_sleeptime=1 )
         bc.poll( restart_time=datetime.timedelta(seconds=3), max_restarts=1, notopic_sleeptime=2 )
 
         yield datetime.datetime.now( tz=datetime.UTC )
 
     finally:
-        # Don't clear out the mongodb collection, because the
+        # Don't clear out the mongodb collections, because the
         # alerts_30days_sent_and_brokermessage_consumed fixture
         # (which is required by the alerts_60moredays_sent fixture
         # that this fixtured rquire) will do that cleanup.
@@ -187,11 +189,14 @@ def alerts_90days_sent_received_and_imported( procver_collection ):
         # We have to wipe out the database because we're about to restore it!
         with db.DB() as conn:
             cursor = conn.cursor()
+            cursor.execute( "DELETE FROM diaforcedsource_extra" )
             cursor.execute( "DELETE FROM diaforcedsource" )
+            cursor.execute( "DELETE FROM diasource_brokerinfo" )
             cursor.execute( "DELETE FROM diasource" )
+            cursor.execute( "DELETE FROM diaobject_position" )
             cursor.execute( "DELETE FROM diaobject" )
             cursor.execute( "DELETE FROM root_diaobject" )
-            cursor.execute( "DELETE FROM host_galaxy" )
+            # cursor.execute( "DELETE FROM host_galaxy" )
             conn.commit()
 
         args = [ 'pg_restore', '-h', 'postgres', '-U', 'postgres', '-d', 'fastdb', '-a',
@@ -204,20 +209,48 @@ def alerts_90days_sent_received_and_imported( procver_collection ):
             nobj = cursor.fetchone()[0]
             cursor.execute( "SELECT COUNT(*) FROM root_diaobject" )
             nroot = cursor.fetchone()[0]
+            cursor.execute( "SELECT COUNT(*) FROM diaobject_position" )
+            npos = cursor.fetchone()[0]
             cursor.execute( "SELECT COUNT(*) FROM diasource" )
             nsrc = cursor.fetchone()[0]
+            cursor.execute( "SELECT COUNT(*) FROM diasource_extra" )
+            assert cursor.fetchone()[0] == nsrc
+            cursor.execute( "SELECT COUNT(*) FROM diasource_brokerinfo" )
+            ninfo = cursor.fetchone()[0]
             cursor.execute( "SELECT COUNT(*) FROM diaforcedsource" )
             nfrc = cursor.fetchone()[0]
-        yield nobj, nroot, nsrc,nfrc
+            cursor.execute( "SELECT COUNT(*) FROM diaforcedsource_extra" )
+            assert cursor.fetchone()[0] == nfrc
+
+        # O.M.G.
+        # '--archive <filename>' didn't work
+        # '--archive=<filename>' does work
+        # so much facepalm
+        args = [ 'mongorestore', '-h', 'mongodb', '-u', 'admin', '-p', 'fragile',
+                 '--authenticationDatabase', 'admin', '-vvvv', '--gzip',
+                 '--archive=elasticc2_test_data/alerts_90days_sent_received_and_imported.mongodump' ]
+        res = subprocess.run( args, capture_output=True )
+        assert res.returncode == 0
+        with db.MG() as mongoclient:
+            collection = db.get_mongo_collection( mongoclient, 'source_thumbnails' )
+            assert collection.count_documents( {} ) == nsrc
+
+        yield nobj, nroot, npos, nsrc, nfrc, ninfo
     finally:
         with db.DB() as conn:
             cursor = conn.cursor()
+            cursor.execute( "DELETE FROM diaforcedsource_extra" )
             cursor.execute( "DELETE FROM diaforcedsource" )
+            cursor.execute( "DELETE FROM diasource_brokerinfo" )
+            cursor.execute( "DELETE FROM diasource_extra" )
             cursor.execute( "DELETE FROM diasource" )
+            cursor.execute( "DELETE FROM diaobject_position" )
             cursor.execute( "DELETE FROM diaobject" )
             cursor.execute( "DELETE FROM root_diaobject" )
-            cursor.execute( "DELETE FROM host_galaxy" )
+            # cursor.execute( "DELETE FROM host_galaxy" )
             conn.commit()
+        with db.MGCon() as mg:
+            mg.collection( "source_thumbnails" ).delete_many( {} )
 
 
 # The fixture below should have (approximately!) the same result as the
@@ -227,7 +260,11 @@ def alerts_90days_sent_received_and_imported( procver_collection ):
 # way as the previous fixture.  However, wheras the previous one just
 # quickly restores a previously-generated result to the database, the
 # fixture below goes through all of the steps of generating alerts,
-# classifying alerts, loading the database, etc.
+# classifying alerts, loading the database, etc.  That takes time (like
+# a minute or so), not because the processing per se is slow, but
+# because they're run in asynchronous services that have built-in sleep
+# times, so the fixtures put in enough waits to be sure that all the
+# necessary sleep times have timed out.
 #
 # You can use the fixture below to generate the data file needed for the
 # fixture above.  To do this, run (in the tests directory):
@@ -235,14 +272,21 @@ def alerts_90days_sent_received_and_imported( procver_collection ):
 #   RUN_FULL90DAYS=1 pytest -v --trace services/test_sourceimporter.py::test_full90days
 #
 # When you get to the pdb prompt at the beginning of that test, in
-# another shell in the container, cd into the tests directory and run:
+# another shell in the container, cd into the tests directory and run both of:
 #
 #    PGPASSWORD=fragile pg_dump -h postgres -U postgres fastdb -F c -a  \
 #       -f elasticc2_test_data/alerts_90days_sent_received_and_imported.pgdump \
-#       -t root_diaobject -t diaobject -t host_galaxy -t diasource -t diaforcedsource
+#       -t root_diaobject -t diaobject -t diaobject_position  \
+#       -t diasource -t diasource_extra -t diasource_brokerinfo \
+#       -t diaforcedsource -t diaforcedsource_extra
 #
-# That will create the file
-#   elasticc2_test_data/alerts_90days_sent_receved_and_imported.pgdump
+#    mongodump -h mongodb -u admin -p fragile --authenticationDatabase=admin \
+#       --db=brokeralert --collection=source_thumbnails --gzip \
+#       --archive=elasticc2_test_data/alerts_90days_sent_received_and_imported.mongodump
+#
+# That will create two files:
+#   elasticc2_test_data/alerts_90days_sent_received_and_imported.pgdump
+#   elasticc2_test_data/alerts_90days_sent_received_and_imported.mongodump
 # underneath the tests directory.  If you do this, and the changes need
 # to be committed to git, you will also need to run:
 #
@@ -260,26 +304,33 @@ def alerts_90days_sent_received_and_imported( procver_collection ):
 @pytest.fixture( scope='module' )
 def fully_do_alerts_90days_sent_received_and_imported( barf, procver_collection,
                                                        alerts_60moredays_sent_and_brokermessage_consumed ):
-    bpv, _pv = procver_collection
+    bpv, _pv, _pvinfo = procver_collection
     from services.source_importer import SourceImporter
-    from services.dr_importer import DRImporter
-    collection_name = f'fastdb_{barf}'
+    mongodb_collection_base = 'fastdb_alertcycle_test'
     try:
-        si = SourceImporter( bpv['realtime'].id, bpv['realtime'].id )
-        with db.MG() as mongoclient:
-            collection = db.get_mongo_collection( mongoclient, collection_name )
-            nobj, nroot, nsrc, nfrc = si.import_from_mongo( collection )
-        dri = DRImporter( bpv['realtime'].id )
-        dri.import_host_info()
-        yield nobj, nroot, nsrc, nfrc
+        si = SourceImporter( object_base_processing_version=bpv['realtime_diaobject'].id,
+                             object_position_base_processing_version=bpv['realtime_diaobject_position_60000'].id,
+                             source_base_processing_version=bpv['realtime_diasource'].id,
+                             forcedsource_base_processing_version=bpv['realtime_diaforcedsource'].id,
+                             collection_base_name=mongodb_collection_base )
+        nobj, nroot, npos, nsrc, nfrc, ninfo = si.import_from_mongo()
+        yield nobj, nroot, npos, nsrc, nfrc, ninfo
     finally:
         with db.DB() as conn:
             cursor = conn.cursor()
+            cursor.execute( "DELETE FROM diaforcedsource_extra" )
             cursor.execute( "DELETE FROM diaforcedsource" )
+            cursor.execute( "DELETE FROM diasource_brokerinfo" )
+            cursor.execute( "DELETE FROM diasource_extra" )
             cursor.execute( "DELETE FROM diasource" )
+            cursor.execute( "DELETE FROM diaobject_position" )
             cursor.execute( "DELETE FROM diaobject" )
             cursor.execute( "DELETE FROM root_diaobject" )
-            cursor.execute( "DELETE FROM host_galaxy" )
+            # cursor.execute( "DELETE FROM host_galaxy" )
             cursor.execute( "DELETE FROM diasource_import_time WHERE collection=%(col)s",
-                            { 'col': collection_name } )
+                            { 'col': mongodb_collection_base } )
             conn.commit()
+        with db.MG() as mongoclient:
+            collection = db.get_mongo_collection( mongoclient, "source_thumbnails" )
+            collection.delete_many( {} )
+        # Other fixtures will remove the mongodb collections that brokerconsumer made

@@ -1,0 +1,177 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shell
+  namespace: desc-fastdb
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      workload.user.cattle.io/workloadselector: deployment-desc-fastdb-shell
+  strategy:
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+    type: RollingUpdate
+  template:
+    metadata:
+      annotations:
+        field.cattle.io/ports: '[[]]'
+        nersc.gov/collab_uids: "99895"
+        nersc.gov/gid: "95089"
+        nersc.gov/gids: 60152,57177,95089,96414,99895
+        nersc.gov/roles: user
+        nersc.gov/uid: "95089"
+        nersc.gov/username: raknop
+      creationTimestamp: null
+      labels:
+        workload.user.cattle.io/workloadselector: deployment-desc-fastdb-shell
+    spec:
+      affinity: {}
+      containers:
+      - name: shell
+        image: registry.nersc.gov/m1727/raknop/fastdb-shell:20260225b
+        env:
+        - name: MONGODB_HOST
+          value: mongodb
+        - name: MONGODB_DBNAME
+          value: brokeralert
+        - name: MONGODB_COLLECTION
+          value: alerts
+        - name: MONGODB_ADMIN_USER
+          valueFrom:
+            secretKeyRef:
+              key: mongodb_admin
+              name: secrets
+              optional: false
+        - name: MONGODB_ADMIN_PASSWD
+          valueFrom:
+            secretKeyRef:
+              key: mongodb_admin_passwd
+              name: secrets
+              optional: false
+        - name: MONGODB_ALERT_WRITER_USER
+          valueFrom:
+            secretKeyRef:
+              key: mongodb_alert_writer
+              name: secrets
+              optional: false
+        - name: MONGODB_ALERT_WRITER_PASSWD
+          valueFrom:
+            secretKeyRef:
+              key: mongodb_alert_writer_password
+              name: secrets
+              optional: false
+        - name: MONGODB_ALERT_READER_USER
+          valueFrom:
+            secretKeyRef:
+              key: mongodb_alert_reader
+              name: secrets
+              optional: false
+        - name: MONGODB_ALERT_READER_PASSWD
+          valueFrom:
+            secretKeyRef:
+              key: mongodb_alert_reader_password
+              name: secrets
+              optional: false
+        imagePullPolicy: IfNotPresent
+        resources: {}
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            add:
+            - NET_BIND_SERVICE
+            drop:
+            - ALL
+          privileged: false
+          readOnlyRootFilesystem: false
+          runAsNonRoot: true
+          runAsUser: 95089
+        stdin: true
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        tty: true
+        volumeMounts:
+        - mountPath: /secrets
+          name: secrets
+        - mountPath: /fastdb
+          name: fastdb-install
+        - mountPath: /query_results
+          name: fastdb-query-results
+        - mountPath: /sessions
+          name: fastdb-sessions
+        - mountPath: /code
+          name: fastdb-checkout
+        - mountPath: /logs
+          name: fastdb-brokerconsumer-logs
+        - mountPath: /pg_dump
+          name: pgdump
+        # - mountPath: /mongodata
+        #   name: mongodb-datadir
+      dnsConfig: {}
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext:
+        fsGroup: 57177
+      terminationGracePeriodSeconds: 30
+      imagePullSecrets:
+        - name: registry-nersc
+      volumes:
+      - name: secrets
+        secret:
+          defaultMode: 292
+          optional: false
+          secretName: secrets
+      - hostPath:
+          path: /global/cfs/cdirs/desc-td/SOFTWARE/fastdb_deployment/production/install
+          type: Directory
+        name: fastdb-install
+      - hostPath:
+          path: /global/cfs/cdirs/desc-td/SOFTWARE/fastdb_deployment/production/FASTDB
+          type: Directory
+        name: fastdb-checkout
+      - hostPath:
+          path: /global/cfs/cdirs/desc-td/SOFTWARE/fastdb_deployment/production/query_results
+          type: Directory
+        name: fastdb-query-results
+      - hostPath:
+          path: /global/cfs/cdirs/desc-td/SOFTWARE/fastdb_deployment/production/sessions
+          type: Directory
+        name: fastdb-sessions
+      - hostPath:
+          path: /global/cfs/cdirs/desc-td/SOFTWARE/fastdb_deployment/production/brokerconsumer_logs
+          type: Directory
+        name: fastdb-brokerconsumer-logs
+      - hostPath:
+          path: /global/cfs/cdirs/desc-td/SOFTWARE/fastdb_deployment/production/pg_dump
+          type: Directory
+        name: pgdump
+      # - name: mongodb-datadir
+      #   persistentVolumeClaim:
+      #     claimName: desc-fastdb-mongodb-pvc-20260224
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: shell
+  namespace: desc-fastdb
+spec:
+  clusterIP: None
+  clusterIPs:
+    - None
+  ports:
+  - name: default
+    port: 42
+    protocol: TCP
+    targetPort: 42
+  selector:
+    workload.user.cattle.io/workloadselector: deployment-desc-fastdb-shell
+  sessionAffinity: None
+  type: ClusterIP
+status:
+  loadBalancer: {}
+---

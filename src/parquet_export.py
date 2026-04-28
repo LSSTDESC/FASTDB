@@ -31,6 +31,8 @@ def create_diaobject_sources_query(connection, procver, diaobjs=None, offset=Non
 
     """
 
+    raise RuntimeError( "create_diaobject_sources_query needs to be updated for unreliable diaobjectid" )
+
     if ( diaobjs is not None ) and ( ( offset is not None ) or ( limit is not None ) ):
         raise ValueError( "Can only specify either diabojs or offset/limit, not both." )
 
@@ -108,6 +110,8 @@ def dump_to_parquet(filehandler, procver, diaobjs=None, offset=None, limit=None,
     create a truly gigantic parquet file!
 
     """
+
+    raise RuntimeError( "dump_to_parquet needs to be updated for unreliable diaobjectid" )
 
     with db.DBCon(connection) as conn:
         # Previously, we made a temporary view and then extracted that.

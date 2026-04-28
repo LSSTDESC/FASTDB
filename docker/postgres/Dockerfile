@@ -1,24 +1,24 @@
 #
-# DOCKER_BUILDKIT=1 docker build --target postgres -t <image>:<label> .
+# docker build --build-arg NERSCSPIN=1 --target postgres -t <image>:<label> .
 #
 # Rob, use:
-#   DOCKER_BUILDKIT=1 docker build --target postgres -t registry.nersc.gov/m1727/raknop/fastdb-postgres:rknop-dev .
+#   docker build --build-arg NERSCSPIN=1 --target postgres -t registry.nersc.gov/m1727/raknop/fastdb-postgres:... .
 #
+# BUT WARNING, the current (as of 2026-03-16) production FASTDB uses an
+#   older version with postgres 15, so be ready to do the database
+#   version migration if you're going to deploy this.
 
-FROM debian:bookworm-20250630 AS base
+FROM debian:trixie-20260223 AS base
 LABEL maintainer="Rob Knop <raknop@lbl.gov>"
 
 SHELL ["/bin/bash", "-c"]
 
 RUN apt-get update \
-  && apt-get install -y curl ca-certificates gnupg lsb-release \
-  && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /usr/share/keyrings/pgdg.gpg \
-  && echo "deb [signed-by=/usr/share/keyrings/pgdg.gpg] http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
-  && apt-get update \
-  && DEBIAN_FRONTEND="noninteractive" TZ="UTC" apt-get -y install --no-install-recommends \
-     postgresql-15 postgresql-client-15 pgbackrest pgtop libssl3 libreadline8 zlib1g netcat-openbsd \
-     libzstd1 liblz4-1 \
-     tmux emacs-nox less procps \
+  && DEBIAN_FRONTEND="nointeractive" apt-get -y upgrade \
+  && DEBIAN_FRONTEND="noninteractive" TZ="UTC" apt-get -y install -y --no-install-recommends \
+      postgresql-17 postgresql-client-17 pgbackrest pgtop libssl3 libreadline8 zlib1g netcat-openbsd \
+      libzstd1 liblz4-1 \
+      tmux emacs-nox less procps \
   && apt-get clean \
   && rm -rf /var/lib/apt/lists/*
 
@@ -46,18 +46,18 @@ WORKDIR /build
 
 RUN apt-get update \
   && DEBIAN_FRONTEND="noninteractive" TZ="UTC" apt-get -y install -y --no-install-recommends \
-      make git gcc libssl-dev libreadline-dev zlib1g-dev libzstd-dev liblz4-dev curl \
-      postgresql-server-dev-15 ca-certificates pkg-config
+      make flex git gcc libssl-dev libreadline-dev zlib1g-dev libzstd-dev liblz4-dev curl \
+      postgresql-server-dev-17 ca-certificates pkg-config
 
 RUN git clone https://github.com/segasai/q3c.git
 RUN cd q3c \
   && make \
   && make install
 
-RUN curl -L https://github.com/ossc-db/pg_hint_plan/archive/refs/tags/REL15_1_5_1.tar.gz \
-         -o pg_hint_plan-REL15_1_5_1.tar.gz \
-  && tar -xpf pg_hint_plan-REL15_1_5_1.tar.gz \
-  && cd pg_hint_plan-REL15_1_5_1 \
+RUN curl -L https://github.com/ossc-db/pg_hint_plan/archive/refs/tags/REL17_1_7_1.tar.gz \
+         -o pg_hint_plan-REL17_1_7_1.tar.gz \
+  && tar -xpf pg_hint_plan-REL17_1_7_1.tar.gz \
+  && cd pg_hint_plan-REL17_1_7_1 \
   && make \
   && make install
 
@@ -75,7 +75,7 @@ ENV PG_PARQUET_VERSION=0.4.3
 ENV PGRX_VERSION=0.16.0
 RUN curl https://sh.rustup.rs -sSf | sh -s -- --no-modify-path --profile minimal --default-toolchain stable -y
 RUN cargo install --locked cargo-pgrx --version ${PGRX_VERSION}
-RUN cargo pgrx init --pg15 $(which pg_config)
+RUN cargo pgrx init --pg17 $(which pg_config)
 
 RUN cd /opt/rust \
   && curl -LOJ https://github.com/CrunchyData/pg_parquet/archive/refs/tags/v${PG_PARQUET_VERSION}.tar.gz \
@@ -86,24 +86,25 @@ RUN cd /opt/rust \
 # ======================================================================
 FROM base AS conf
 
-COPY --from=build /usr/lib/postgresql/15/lib/q3c.so /usr/lib/postgresql/15/lib/q3c.so
-COPY --from=build /usr/lib/postgresql/15/lib/bitcode/q3c /usr/share/postgresql/lib/bitcode/q3c
-COPY --from=build /usr/lib/postgresql/15/lib/bitcode/q3c.index.bc /usr/share/postgresql/lib/bitcode/q3c.index.bc
-COPY --from=build /usr/share/postgresql/15/extension/q3c* /usr/share/postgresql/15/extension/
-COPY --from=build /usr/lib/postgresql/15/lib/pg_hint_plan.so usr/lib/postgresql/15/lib/pg_hint_plan.so
-COPY --from=build /usr/lib/postgresql/15/lib/bitcode/pg_hint_plan /usr/share/postgresql/lib/bitcode/pg_hint_plan
-COPY --from=build /usr/lib/postgresql/15/lib/bitcode/pg_hint_plan.index.bc /usr/share/postgresql/lib/bitcode/pg_hint_plan.index.bc
-COPY --from=build /usr/share/postgresql/15/extension/pg_hint_plan* /usr/share/postgresql/15/extension/
-COPY --from=build /usr/lib/postgresql/15/lib/pg_parquet.so /usr/lib/postgresql/15/lib/
-COPY --from=build /usr/share/postgresql/15/extension/pg_parquet* /usr/share/postgresql/15/extension/
+COPY --from=build /usr/lib/postgresql/17/lib/q3c.so /usr/lib/postgresql/17/lib/q3c.so
+COPY --from=build /usr/lib/postgresql/17/lib/bitcode/q3c /usr/share/postgresql/lib/bitcode/q3c
+COPY --from=build /usr/lib/postgresql/17/lib/bitcode/q3c.index.bc /usr/share/postgresql/lib/bitcode/q3c.index.bc
+COPY --from=build /usr/share/postgresql/17/extension/q3c* /usr/share/postgresql/17/extension/
+COPY --from=build /usr/lib/postgresql/17/lib/pg_hint_plan.so usr/lib/postgresql/17/lib/pg_hint_plan.so
+COPY --from=build /usr/lib/postgresql/17/lib/bitcode/pg_hint_plan /usr/share/postgresql/lib/bitcode/pg_hint_plan
+COPY --from=build /usr/lib/postgresql/17/lib/bitcode/pg_hint_plan.index.bc /usr/share/postgresql/lib/bitcode/pg_hint_plan.index.bc
+COPY --from=build /usr/share/postgresql/17/extension/pg_hint_plan* /usr/share/postgresql/17/extension/
+COPY --from=build /usr/lib/postgresql/17/lib/pg_parquet.so /usr/lib/postgresql/17/lib/
+COPY --from=build /usr/share/postgresql/17/extension/pg_parquet* /usr/share/postgresql/17/extension/
 
-RUN echo "host all all 0.0.0.0/0 md5" >> /etc/postgresql/15/main/pg_hba.conf
+RUN echo "host all all 0.0.0.0/0 md5" >> /etc/postgresql/17/main/pg_hba.conf
 
 # Have to configure postgres for different amounts of memory for NERSC Spin
 # and github CI
 ARG NERSCSPIN=0
-COPY postgresql.conf /etc/postgresql/15/main/postgresql.conf
-RUN cd /etc/postgresql/15/main \
+RUN cp -p /etc/postgresql/17/main/postgresql.conf /etc/postgresql/17/main/postgresql.conf.orig
+COPY postgresql.conf /etc/postgresql/17/main/postgresql.conf
+RUN cd /etc/postgresql/17/main \
  && if [ "$NERSCSPIN" = "1" ] ; then \
       cat postgresql.conf | sed 's/${config_shared_buffers}/32GB/; s/${config_temp_buffers}/4GB/; s/${config_work_mem}/4GB/; s/${config_maintenance_work_mem}/4GB/;' > postgresql.conf.new; \
     else \

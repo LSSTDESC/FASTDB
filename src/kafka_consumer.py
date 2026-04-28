@@ -32,10 +32,10 @@ def _close_kafka_consumer( obj ):
 class KafkaConsumer:
     """Consume messages from a kafka server using a confluent_kafka.Consumer."""
 
-    def __init__( self, server, groupid, schema=None, topics=None, reset=False,
+    def __init__( self, server, groupid, schemaless=False, schema=None, topics=None, reset=False,
                   extraconsumerconfig={},
                   consume_nmsgs=100, consume_timeout=1, nomsg_sleeptime=1,
-                  logger=_logger ):
+                  logger=_logger, countlogger=None ):
         """Constructor.
 
         Parameters
@@ -47,9 +47,15 @@ class KafkaConsumer:
             The group id to send to the server.  Servers remember which
             messages a given groupid has consumed.
 
+          schemaless : bool, default False
+            Are messages consumed with embedded schema or without?
+            Ignored if you aren't using the echoing message handler; you
+            deal with parsing schema and messages in your own handler.
+
           schema : str or Path, or None
             Path to the avro schema to load.  Only needed if you
-            use the echoing message handler.
+            use the echoing message handler; otherwise, your own
+            handler deals with the schema itself.
 
           topics : list of str, default None
             Topics to subscribe to; if [] or None, does no initial subscription.
@@ -78,6 +84,8 @@ class KafkaConsumer:
 
           logger: logging.Logger (optional)
 
+          countlogger: logging.Logger (optional and really in the weeds)
+
         """
 
         self.logger = logger
@@ -91,6 +99,7 @@ class KafkaConsumer:
         else:
             raise TypeError( f"topics must be either a string or a list, not a {type(topics)}" )
 
+        self.schemaless = schemaless
         self.schema = fastavro.schema.load_schema( schema ) if schema is not None else None
         self.consume_nmsgs = consume_nmsgs
         self.consume_timeout = consume_timeout
@@ -105,6 +114,9 @@ class KafkaConsumer:
         consumerconfig.update( extraconsumerconfig )
         self.logger.debug( f"Initializing Kafka consumer with\n{json.dumps(consumerconfig, indent=4)}" )
         self.logger.debug( f"Topics given at KafkaConsumer init: {self.topics}" )
+        if countlogger is not None:
+            countlogger.info( f"Initializing Kafka consumer with\n{json.dumps(consumerconfig, indent=4)}" )
+            countlogger.info( f"Topics given at KafkaConsumer init: {self.topics}" )
         self.consumer = confluent_kafka.Consumer( consumerconfig )
         atexit.register( _close_kafka_consumer, self )
 
@@ -332,7 +344,7 @@ class KafkaConsumer:
                 self.handle_time += tperf2 - tperf1
 
             runtime = datetime.datetime.now() - t0
-            if ( ( ( stopafternmessages is not None ) and ( nconsumed > stopafternmessages ) )
+            if ( ( ( stopafternmessages is not None ) and ( nconsumed >= stopafternmessages ) )
                  or
                  ( ( stopafter is not None ) and ( runtime > stopafter ) )
                 ):

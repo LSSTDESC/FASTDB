@@ -8,7 +8,7 @@ from util import asUUID
 
 
 # This also tests "get"
-def test_insert( test_user, src1, src1_pv2 ):
+def test_insert( test_user, obj1_src1, obj1_src1_pv2 ):
     queryid = uuid.uuid4()
     try:
         qq = QueryQueue(

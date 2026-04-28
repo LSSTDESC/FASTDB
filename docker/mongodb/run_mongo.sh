@@ -32,6 +32,83 @@ else
     echo
 fi
 
+# ...I should probably just write a perl script to do this instead
+#    of using bash.  (My perl is very rusty, haven't done hardcore
+#    perl in many years except for things like the command line
+#    pipe you see below.)
+# The indexs are separated by semicolons, and the fields within one index (if multiple) are
+#   separated by commas.
+# The *first* index is unique, subsequent ones are not.  (Hack!)
+declare -A cols=( ["source_thumbnails"]="diasourceid,base_procver_id", \
+                  ["all_alerts_diaobject"]="diaobjectid;savetime", \
+                  ["all_alerts_diasource"]="diasourceid;diaobjectid;savetime", \
+                  ["all_alerts_diasource_extra"]="diasourceid;savetime", \
+                  ["all_alerts_diaforcedsource"]="diaforcedsourceid;diaobjectid;savetime", \
+                  ["all_alerts_diaforcedsource_extra"]="diaforcedsourceid;savetime", \
+                  ["all_alerts_brokerinfo"]="diasourceid,brokername,topic;savetime;diasourceid", \
+                  ["all_alerts_thumbnails"]="diasourceid;savetime" )
+
+for col in "${!cols[@]}"; do
+    # Check if the expected collection exists
+    if [ `mongosh --eval "use $MONGODB_DBNAME" --eval "db.getCollectionNames()" | grep -v Warning | perl -ne 's/\[\s*//g; s/\s*\]//g; @them=split(/,\s+/, $_); foreach $i (@them) { print "$i\n" }' | grep -c "'${col}'"` -eq 0 ]; then
+        echo
+        echo "*** Creating ${col} collection ***"
+        mongosh --eval "use $MONGODB_DBNAME" \
+                --eval "db.createCollection( \"$col\" )"
+        first=1
+        # bash syntax is so mysterious.  The space before the } is significant here.
+        # (Indeed, this next line is basically me cargo-culting.)
+        indices=(${cols[$col]//;/ })
+        for index in "${indices[@]}"; do
+            fields=(${index//,/ })
+            fieldspec="{"
+            indexname="idx_${col}"
+            firstfield=1
+            for field in "${fields[@]}"; do
+                if [ $firstfield ]; then
+                    firstfield=""
+                else
+                    fieldspec="${fieldspec},"
+                fi
+                fieldspec="${fieldspec} \"${field}\": 1"
+                indexname="${indexname}_${field}"
+            done
+            fieldspec="${fieldspec} }"
+            if [ $first ]; then
+                first=""
+                fieldspec="${fieldspec}, { unique: true, name: \"${indexname}\" }"
+            else
+                fieldspec="${fieldspec}, { unique: false, name: \"${indexname}\" }"
+            fi
+            echo "*** Creating index ${indexname} on collection ${col} ***"
+            mongosh --eval "use $MONGODB_DBNAME" \
+                    --eval "db.${col}.createIndex( ${fieldspec} )"
+        done
+        echo "*** Done creating collection ${col}"
+    else
+        echo "*** Collection ${col} exists ***"
+    fi
+done
+    
+
+# # Make sure that expected collections with indexes exist; create them if they don't
+# if [ `mongosh --eval "use $MONGODB_DBNAME" --eval "db.getCollectionNames()" | grep -v Warning | perl -ne 's/\[\s*//g; s/\s*\]//g; @them=split(/,\s+/, $_); foreach $i (@them) { print "$i\n" }' | grep -c source_thumbnails` -eq 0 ]; then
+#     echo
+#     echo "*** Creating source_thumbnails collection ***"
+#     echo
+#     mongosh --eval "use $MONGODB_DBNAME" \
+#             --eval 'db.createCollection( "source_thumbnails" )' \
+#             --eval 'db.source_thumbnails.createIndex( { "diasourceid": 1, "base_procver_id": 1 }, { unique: true, name: "idx_source_thumbnails" } )'
+#     echo
+#     echo "*** Done creating source_thumbnails collection ***"
+#     echo
+# else
+#     echo
+#     echo "***Mongo collection source_thumbnails exists***"
+#     echo
+# fi
+
+
 # Kill the running mongodb
 # (This seems to leave behind a defunct process.  I'm not happy about that, but things seem to be working...?)
 # (...or not.  When I did it interactively, it left behind a zombie process, but when running for real it doesn't.)

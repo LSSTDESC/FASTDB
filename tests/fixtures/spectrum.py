@@ -93,7 +93,10 @@ def reported_spectra( set_of_lightcurves ):
                      'facility': 'test facility',
                      'mjd': 60031.,
                      'z': 0.25,
-                     'classid': 42
+                     'classid': 42,
+                     'ra': roots[1]['root'].ra,
+                     'dec': roots[1]['root'].dec,
+                     'is_host': False
                     } ]
 
     try:
@@ -121,19 +124,28 @@ def more_reported_spectra( set_of_lightcurves, reported_spectra ):
                      'facility': 'another test facility',
                      'mjd': 60020.,
                      'z': 0.1,
-                     'classid': 42
+                     'classid': 42,
+                     'ra': roots[0]['root'].ra,
+                     'dec': roots[0]['root'].dec,
+                     'is_host': False
                     },
                    { 'root_diaobject_id': roots[0]['root'].id,
                      'facility': 'test facility',
                      'mjd': 60025.,
                      'z': 0.11,
-                     'classid': 13
+                     'classid': 13,
+                     'ra': roots[0]['root'].ra,
+                     'dec': roots[0]['root'].dec,
+                     'is_host': False
                     },
                    { 'root_diaobject_id': roots[2]['root'].id,
                      'facility': 'test facility',
                      'mjd': 60050.,
                      'z': 0.33,
-                     'classid': 666
+                     'classid': 666,
+                     'ra': roots[2]['root'].ra,
+                     'dec': roots[2]['root'].dec,
+                     'is_host': False
                     } ]
     try:
         with db.DBCon() as con:

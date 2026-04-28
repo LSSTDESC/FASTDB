@@ -18,7 +18,8 @@ def check_df_contents( df, procver, statbands=None ):
 
     with db.DB() as con:
         cursor = con.cursor()
-        procverid = procver.highest_prio_base_procver( dbcon=con ).id
+        srcprocverid = procver.highest_prio_base_procver( dbcon=con, table='diasource' ).id
+        frcprocverid = procver.highest_prio_base_procver( dbcon=con, table='diaforcedsource' ).id
 
         assert all( df.lastdetmjd >= df.firstdetmjd )
         assert all( df.lastforcedmjd >= df.lastdetmjd )
@@ -30,52 +31,56 @@ def check_df_contents( df, procver, statbands=None ):
             assert all( i in statbands for i in df.lastforcedband )
 
         for row in df.itertuples():
-            q = ( "SELECT psfflux, psffluxerr, midpointmjdtai, band "
-                  "FROM diasource "
-                  "WHERE diaobjectid=%(o)s AND base_procver_id=%(pv)s " )
+            q = ( "SELECT s.psfflux, s.psffluxerr, s.midpointmjdtai, s.band "
+                  "FROM diasource s "
+                  "INNER JOIN diaobject o ON s.diaobjectid=o.diaobjectid "
+                  "WHERE o.rootid=%(o)s AND s.base_procver_id=%(pv)s " )
             if statbands is not None:
-                q += "AND band=ANY(%(bands)s) "
-            q += "ORDER BY psfflux DESC LIMIT 1"
-            cursor.execute( q, { 'o': row.diaobjectid, 'pv': procverid, 'bands': statbands } )
+                q += "AND s.band=ANY(%(bands)s) "
+            q += "ORDER BY s.psfflux DESC LIMIT 1"
+            cursor.execute( q, { 'o': row.rootid, 'pv': srcprocverid, 'bands': statbands } )
             dbrow = cursor.fetchone()
             assert dbrow[2] == pytest.approx( row.maxdetmjd, abs=1e-5 )
             assert dbrow[3] == row.maxdetband
             assert dbrow[0] == pytest.approx( row.maxdetflux, rel=1e-5 )
             assert dbrow[1] == pytest.approx( row.maxdetfluxerr, rel=1e-5 )
 
-            q = ( "SELECT psfflux, psffluxerr, midpointmjdtai, band "
-                  "FROM diasource "
-                  "WHERE diaobjectid=%(o)s AND base_procver_id=%(pv)s " )
+            q = ( "SELECT s.psfflux, s.psffluxerr, s.midpointmjdtai, s.band "
+                  "FROM diasource s "
+                  "INNER JOIN diaobject o ON s.diaobjectid=o.diaobjectid "
+                  "WHERE o.rootid=%(o)s AND s.base_procver_id=%(pv)s " )
             if statbands is not None:
-                q += "AND band=ANY(%(bands)s) "
-            q += "ORDER BY midpointmjdtai DESC LIMIT 1"
-            cursor.execute( q, { 'o': row.diaobjectid, 'pv': procverid, 'bands': statbands } )
+                q += "AND s.band=ANY(%(bands)s) "
+            q += "ORDER BY s.midpointmjdtai DESC LIMIT 1"
+            cursor.execute( q, { 'o': row.rootid, 'pv': srcprocverid, 'bands': statbands } )
             dbrow = cursor.fetchone()
             assert dbrow[3] == row.lastdetband
             assert dbrow[2] == pytest.approx( row.lastdetmjd, abs=1e-5 )
             assert dbrow[0] == pytest.approx( row.lastdetflux, rel=1e-5 )
             assert dbrow[1] == pytest.approx( row.lastdetfluxerr, rel=1e-5 )
 
-            q = ( "SELECT psfflux, psffluxerr, midpointmjdtai, band "
-                  "FROM diasource "
-                  "WHERE diaobjectid=%(o)s AND base_procver_id=%(pv)s " )
+            q = ( "SELECT s.psfflux, s.psffluxerr, s.midpointmjdtai, s.band "
+                  "FROM diasource s "
+                  "INNER JOIN diaobject o ON s.diaobjectid=o.diaobjectid "
+                  "WHERE o.rootid=%(o)s AND s.base_procver_id=%(pv)s " )
             if statbands is not None:
-                q += "AND band=ANY(%(bands)s) "
-            q += "ORDER BY midpointmjdtai LIMIT 1"
-            cursor.execute( q, { 'o': row.diaobjectid, 'pv': procverid, 'bands': statbands } )
+                q += "AND s.band=ANY(%(bands)s) "
+            q += "ORDER BY s.midpointmjdtai LIMIT 1"
+            cursor.execute( q, { 'o': row.rootid, 'pv': srcprocverid, 'bands': statbands } )
             dbrow = cursor.fetchone()
             assert dbrow[3] == row.firstdetband
             assert dbrow[2] == pytest.approx( row.firstdetmjd, abs=1e-5 )
             assert dbrow[0] == pytest.approx( row.firstdetflux, rel=1e-5 )
             assert dbrow[1] == pytest.approx( row.firstdetfluxerr, rel=1e-5 )
 
-            q = ( "SELECT psfflux, psffluxerr, midpointmjdtai, band "
-                  "FROM diaforcedsource "
-                  "WHERE diaobjectid=%(o)s AND base_procver_id=%(pv)s " )
+            q = ( "SELECT f.psfflux, f.psffluxerr, f.midpointmjdtai, f.band "
+                  "FROM diaforcedsource f "
+                  "INNER JOIN diaobject o ON f.diaobjectid=o.diaobjectid "
+                  "WHERE o.rootid=%(o)s AND f.base_procver_id=%(pv)s " )
             if statbands is not None:
-                q += "AND band=ANY(%(bands)s) "
-            q += "ORDER BY midpointmjdtai DESC LIMIT 1"
-            cursor.execute( q, { 'o': row.diaobjectid, 'pv': procverid, 'bands': statbands } )
+                q += "AND f.band=ANY(%(bands)s) "
+            q += "ORDER BY f.midpointmjdtai DESC LIMIT 1"
+            cursor.execute( q, { 'o': row.rootid, 'pv': frcprocverid, 'bands': statbands } )
             dbrow = cursor.fetchone()
             assert dbrow[3] == row.lastforcedband
             assert dbrow[2] == pytest.approx( row.lastforcedmjd, abs=1e-5 )
@@ -85,7 +90,7 @@ def check_df_contents( df, procver, statbands=None ):
 
 # NOTE : this tests functionality that's also tested in test_ltcv.py.
 # It's kept here because this works on some SNANA-loaded ELAsTiCC2 sample
-# data, whereas thet est in test_ltcv.py works entirely on constructed
+# data, whereas the test in test_ltcv.py works entirely on constructed
 # fake data from conftest.py.
 #
 # The test_user fixture is in this next test not becasue it's needed for
@@ -100,7 +105,7 @@ def check_df_contents( df, procver, statbands=None ):
 # This is separated out from test_ltcv.py since it uses a different fixture... at least for now
 def test_object_search( procver_collection, test_user, snana_fits_maintables_loaded_module ):
     """This test tests lots of the keywords, but doesn't test every conceivable combination because n² is big."""
-    _bpv, pv = procver_collection
+    _bpv, pv, _pvinfo = procver_collection
 
     with pytest.raises( ValueError, match="Unknown search keywords: {'foo'}" ):
         ltcv.object_search( pv['pv1'].description, foo=5 )
@@ -111,12 +116,16 @@ def test_object_search( procver_collection, test_user, snana_fits_maintables_loa
     # Do an absurdly large radial query to see if we get more than one
     jsonresults = ltcv.object_search( pv['pv1'].description, return_format='json',
                                       ra=185.45, dec=-34.95, radius=5.3*3600. )
-    assert set( jsonresults.keys() ) == { 'diaobjectid', 'ra', 'dec', 'numdet', 'numdetinwindow',
+    assert set( jsonresults.keys() ) == { 'rootid', 'ra', 'dec', 'numdet', 'numdetinwindow',
                                           'firstdetmjd', 'firstdetband', 'firstdetflux', 'firstdetfluxerr',
                                           'lastdetmjd', 'lastdetband', 'lastdetflux', 'lastdetfluxerr',
                                           'maxdetmjd', 'maxdetband', 'maxdetflux', 'maxdetfluxerr',
-                                          'lastforcedmjd', 'lastforcedband', 'lastforcedflux', 'lastforcedfluxerr' }
-    assert set( jsonresults['diaobjectid']) == { 1340712, 1822149, 2015822 }
+                                          'lastforcedmjd', 'lastforcedband', 'lastforcedflux', 'lastforcedfluxerr',
+                                          'obj_base_procver', 'pos_base_procver' }
+    with db.DBCon( dictcursor=True ) as con:
+        rows = con.execute( "SELECT diaobjectid FROM diaobject WHERE rootid=ANY(%(roots)s)",
+                            { "roots": jsonresults['rootid'] } )
+        assert set( r['diaobjectid'] for r in rows ) == { 1340712, 1822149, 2015822 }
 
     # Also get the pandas response, make sure it's the same as json
     results = ltcv.object_search( pv['pv1'].description, return_format='pandas',
@@ -124,7 +133,7 @@ def test_object_search( procver_collection, test_user, snana_fits_maintables_loa
     assert len(results) == 3
     assert set( results.columns ) == set( jsonresults.keys() )
     for row in results.itertuples():
-        dex = jsonresults['diaobjectid'].index( row.diaobjectid )
+        dex = jsonresults['rootid'].index( row.rootid )
         for col in results.columns:
             assert jsonresults[col][dex] == getattr( row, col )
 
@@ -148,7 +157,7 @@ def test_object_search( procver_collection, test_user, snana_fits_maintables_loa
     # Because we searched more bands, at least one of the lightcurves should have more detections
     bigger = False
     for row in resultsrg.itertuples():
-        bigger = bigger or ( resultsr[resultsr.diaobjectid==row.diaobjectid].numdet.values[0] < row.numdet )
+        bigger = bigger or ( resultsr[resultsr.rootid==row.rootid].numdet.values[0] < row.numdet )
     assert bigger
     assert all( r.maxdetband in ('r', 'g') for r in resultsrg.itertuples() )
     assert all( r.lastdetband in ('r', 'g') for r in resultsrg.itertuples() )

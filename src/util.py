@@ -1,32 +1,36 @@
 __all__ = [ "FDBLogger", "parse_bool", "env_as_bool", "asUUID", "isSequence",
             "float_or_none_from_dict", "int_or_none_from_dict",
             "datetime_or_none_from_dict_mjd_or_timestring", "mjd_or_none_from_dict_mjd_or_timestring",
+            "datetime_to_utc",
             "parse_sexigesimal", "float_or_none_from_dict_float_or_dms", "float_or_none_from_dict_float_or_hms",
-             "mjd_from_mjd_or_datetime_or_timestring", "get_alert_schema", "procver_id" ]
+             "mjd_from_mjd_or_datetime_or_timestring", "laboriously_construct_pandas",
+             "get_alert_schema", "procver_id" ]
 
 import sys
 import os
 import re
 import datetime
+import pytz
 import pathlib
 import logging
 import numbers
+import itertools
 import uuid
 import collections.abc
 import multiprocessing
 
+import numpy as np
+import pandas
 import fastavro
 import astropy.time
 import rkwebutil
 
-import db
-
-_fastdb_schema_namespace = 'fastdb_9_0_2'
-_lsst_schema_namespace = 'lsst.v9_0'
+_fastdb_schema_namespace = 'fastdb.v10_0_0'
+_lsst_schema_namespace = 'lsst.v10_0'
 
 _default_datefmt = '%Y-%m-%d %H:%M:%S'
-_default_log_level = logging.DEBUG
-# _default_log_level = logging.INFO
+# _default_log_level = logging.DEBUG
+_default_log_level = logging.INFO
 # Normally you don't want to show milliseconds, because it's additional gratuitous information
 #  that makes log output lines longer.  But, if you're debugging timing stuff, you might want
 #  temporarily to set this to True.
@@ -346,7 +350,255 @@ def mjd_from_mjd_or_datetime_or_timestring( d ):
         return astropy.time.Time( rkwebutil.asDateTime( d ), format='datetime' ).mjd
 
 
+def datetime_to_utc( t, with_tz=False, now_on_none=False ):
+    # mongodb doesn't seem to know about timezones and stores everythning UTC.
+    # Try to adapt.  If we get a timezone unaware datetime, assume it's already UTC.
+    # https://xkcd.com/1883/
+
+    if t is None:
+        if not now_on_none:
+            return None
+
+        t = datetime.datetime.now( tz=datetime.UTC )
+
+    else:
+        if isinstance( t, str ):
+            t = datetime.datetime.fromisoformat( t )
+        elif not isinstance( t, datetime.datetime ):
+            raise TypeError( f"Must pass time parameters as datetime or a ISO string that can be "
+                             f"parsed to a datetime; got a {type(t)}" )
+
+        if t.tzinfo is not None:
+            t = t.astimezone( datetime.UTC )
+        else:
+            t= pytz.timezone( 'UTC' ).localize( t )
+
+    if not with_tz:
+        t.replace( tzinfo=None )
+
+    return t
+
+
+def pandas_to_list( values ):
+    # Function calling overhead makes me a little quasy.  In C this would have been an inline or macro.
+    return [ ( None if isinstance(v, pandas.api.typing.NAType) else v )
+             for v in values ]
+
+
+def laboriously_construct_pandas( data, columns=None, int16cols=[], int32cols=[], int64cols=[],
+                                  floatcols=[], doublecols=[], boolcols=[], keyname=None, indices=None,
+                                  ignore_missing_cols=False ):
+    """Convert one of three python structures to a pandas DataFrame.
+
+    Two of these structures nominally could be constrcuted by just
+    feeding them to pandas.DataFrame.  However, that will do bad things.
+    If any of the int64 fields have None in the list, they will be
+    converted to doubles by Pandas, because by default it only knows how
+    to do NaN for floating point values.  That will destroy the int64
+    values, as a double only has 53 bits of precision.  Instead, we have
+    to use pyarrow column types, which do allow for nulls, but pandas
+    does not have the ability to pass types for multiple columns at
+    once.  As such, we have to build several Series objects, each with
+    the type we want, and then stitch them together into a DataFrame.
+
+    The four structures it can take are (in example form):
+
+      First, these two:
+
+        { 'a': [ 1, 2, 3 ], 'b': [ 4, 5, 6 ] }
+
+        [ { 'a': 1, 'b': 4 }, { 'a': 2, 'b': 5 }, { 'a': 3, 'b': 6 } ]
+
+      will yield exaclty the same data frame, with two coulumns 'a' and 'b' and 3 rows.
+
+      These two next two *require* keyname and indices to be non-none.
+
+      { 'first': { 'a': [ 1, 2, 3 ], 'b': [4, 5, 6], 'c': [7, 8, 9] },
+        'second': { 'a': [1, 2], 'b': [10, None], 'c': [ 2.718, 3.141 ] }
+      }
+
+      [ { 'which': 'first', 'a': [1, 2, 3], 'b': [4, 5, 6], 'c': [7, 8, 9] },
+        { 'which': 'second', 'a': [1, 2], 'b': [ 10, None ], 'c': [2.718, 3.141] }
+      ]
+
+      The latter is the natural structure for the return from
+      ltcv.py::many_object_ltcvs.  In both of these cases, if you pass
+      keyname='which', indices=['a'], int32cols=['b'], floatcols['c']),
+      the resultant dataframe would have a multi-index with levels
+      'which' and 'a', and would look like:
+
+                       b      c
+          which  a
+          first  1     4    7.0
+                 2     5    8.0
+                 3     6    9.0
+          second 1    10  2.718
+                 2  <NA>  3.141
+
+
+        with df.b.dtype=int32[pyarrow] and df.c.dtype=float[pyarrow].
+
+    With all data types, it is strongly recommended to indicate the
+    types of all columns by including the colum names in the int16cols,
+    int32cols, int64cols, floatcols, doublecols, and boolcols arguments
+    (all lists of names).  If there are any columns not in one of those
+    lists, it will be an exception unless ignore_missingm_cols is True.
+    (If there are any string columns, then you must set
+    ignore_missing_cols to False and just not include the string columns
+    in the lists passed to the type arguments.)
+
+    (Note: pandas does not have a nullable bool datatype, even using
+    pyarrows types, so boolean columns are converted to in16 columns
+    with 1 for True, 0 for False, and <NA> for None.)
+
+    """
+    FDBLogger.debug( "Laboriously construting a pandas dataframe..." )
+
+    serieses = {}
+
+    def get_dtypes( columns ):
+        dtypes = {}
+        missing = set()
+        for col in columns:
+            # Pandas doesn't seem to have a bool type that one can nullify, so turn it into an int
+            if ( col in int16cols ) or ( col in boolcols ):
+                dtype = "int16[pyarrow]"
+            elif col in int32cols:
+                dtype = "int32[pyarrow]"
+            elif col in int64cols:
+                dtype = "int64[pyarrow]"
+            elif col in floatcols:
+                dtype = "float32[pyarrow]"
+            elif col in doublecols:
+                dtype = "float64[pyarrow]"
+            else:
+                dtype = None
+                if not ignore_missing_cols:
+                    missing.add( col )
+            dtypes[col] = dtype
+
+        if len( missing ) > 0:
+            raise ValueError( f"Unknown columns: {missing}" )
+
+        return dtypes
+
+
+    if len(data) == 0:
+        if columns is None:
+            FDBLogger.debug( "...there were no columns." )
+            return pandas.DataFrame( {} )
+        else:
+            dtypes= get_dtypes( columns )
+            serieses = { c: pandas.Series( [], dtype=dtypes[c] ) for c in columns }
+
+    elif isSequence( data ):
+        if all( isinstance( row, dict ) for row in data ):
+            if columns is not None:
+                raise ValueError( "Cannot pass columns with a list of dictionaries" )
+            keys = set( data[0].keys() )
+            if any( set( r.keys() != keys for r in data ) ):
+                raise ValueError( "List of dicts must all have the same keys" )
+            columns = list( data[0].keys() )
+            dtypes = get_dtypes( columns )
+
+            if keyname is not None:
+                if keyname not in columns:
+                    raise ValueError( "If you pass a keyname with a list of dicts, then keyname must be "
+                                      "one of keys in each dict." )
+                if len(columns) < 3:
+                    raise ValueError( "Passing a keyname with a list of dicts requires at least three "
+                                      "keys in each dictionary." )
+                if any( isSequence( row[keyname] ) for row in data ):
+                    raise ValueError( "If you pass a list of dicts with a keyname, then the values of "
+                                      "that key in each dict must be a scalar." )
+                if not all( all( isinstance(row[col], list) for col in columns if col != keyname )
+                            for row in data ):
+                    raise ValueError( f"All values for all elements of the dictionary except {keyname} "
+                                      f"in every element of the list must be a list." )
+
+                col0 = columns[0] if columns[0] != keyname else columns[1]
+
+                if not all( all( len(row[col])==len(row[col0]) for col in columns if col != keyname )
+                            for row in data ):
+                    raise ValueError( f"All values for all elements of the dictionary except {keyname} "
+                                      f"in each element of the list by lists of the same length." )
+
+                serieses = { c: pandas.Series( itertools.chain.from_iterable( row[c] for row in data ),
+                                               dtype=dtypes[c] )
+                             for c in columns if c != keyname }
+                serieses[keyname] = pandas.Series(
+                    itertools.chain.from_iterable( [row[keyname]] * len(row[col0]) for row in data ),
+                    dtype=dtypes[keyname] )
+
+            else:
+                serieses = { c: pandas.Series( ( r[c] for r in data ), dtype=dtypes[c] ) for c in columns }
+
+        elif all( isSequence( row ) for row in data ):
+            numcols = len( data[0] )
+            if any( len(row) != numcols for row in data ):
+                raise ValueError( "List of lists, all rows must have the same length" )
+            if columns is not None:
+                if not isSequence( columns ):
+                    raise TypeError( "columns must be a list" )
+                if len(columns) != numcols:
+                    raise ValueError( "columns must have the same length as each row" )
+            else:
+                columns = [ f"column_{i}" for i in range(numcols) ]
+
+            dtypes = get_dtypes( columns )
+            serieses = { c: pandas.Series( ( r[i] for r in data ), dtype=dtypes[c] )
+                         for i, c in enumerate(columns) }
+
+    elif isinstance( data, dict ):
+        if columns is not None:
+            raise ValueError( "columns inconsistent with passing a dictionary" )
+
+        if all( isinstance( row, dict ) for row in data.values() ):
+            # This is a key -> { col: list } structure
+            if keyname is None:
+                raise ValueError( "Need a keyname" )
+            columns = list( data[ list(data.keys())[0] ].keys() )
+            if any( ( ( c is None ) or ( pandas.isna(c) ) ) for c in columns ):
+                raise ValueError( "No dictionary key can be None" )
+            if not all( set( row.keys() ) == set( columns ) for row in data.values() ):
+                raise ValueError( "Improperly constructed dictionary" )
+            if not all( all( isinstance( v, (list, np.array) ) for v in row.values() ) for row in data.values() ):
+                raise ValueError( "Improperly constructed dictionary" )
+
+            col0 = columns[0]
+            allcolumns = columns.copy()
+            allcolumns.insert( 0, keyname )
+            dtypes = get_dtypes( allcolumns )
+            serieses = { c: pandas.Series( itertools.chain.from_iterable( row[c] for row in data.values() ),
+                                                                          dtype=dtypes[c] )
+                                           for c in columns }
+            serieses[keyname] = pandas.Series( itertools.chain.from_iterable( [k] * len(v[col0])
+                                                                              for k, v in data.items() ) )
+        else:
+            if not all( isSequence( row ) for row in data.values() ):
+                raise TypeError( "All dictionary values must be lists" )
+            columns = list( data.keys() )
+            dtypes = get_dtypes( columns )
+            serieses = { c: pandas.Series( v, dtype=dtypes[c] ) for c, v in data.items() }
+
+    df = pandas.DataFrame( serieses )
+
+    if indices is not None:
+        if not isSequence( indices ):
+            indices = [ indices ]
+        else:
+            indices = list( indices )
+        if keyname is not None:
+            indices.insert( 0, keyname )
+        df.set_index( indices, inplace=True )
+
+    FDBLogger.debug( "...done laboriously constructing a pandas dataframe." )
+
+    return df
+
+
 def get_alert_schema( schemadir=None ):
+
     """Return a dictionary of { name: schema }, plus 'alert_schema_file': Path }"""
 
     schemadir = pathlib.Path( "/fastdb/share/avsc" if schemadir is None else schemadir )
@@ -356,13 +608,13 @@ def get_alert_schema( schemadir=None ):
     diasource_schema = fastavro.schema.load_schema( schemadir / f"{_lsst_schema_namespace}.diaSource.avsc" )
     diaforcedsource_schema = fastavro.schema.load_schema( schemadir /
                                                           f"{_lsst_schema_namespace}.diaForcedSource.avsc" )
-    MPCORB_schema = fastavro.schema.load_schema( schemadir / f"{_lsst_schema_namespace}.MPCORB.avsc" )
     sssource_schema = fastavro.schema.load_schema( schemadir / f"{_lsst_schema_namespace}.ssSource.avsc" )
+    mpc_orbits_schema = fastavro.schema.load_schema( schemadir / f"{_lsst_schema_namespace}.mpc_orbits.avsc" )
     named_schemas = { f'{_lsst_schema_namespace}.diaObject': diaobject_schema,
                       f'{_lsst_schema_namespace}.diaSource': diasource_schema,
                       f'{_lsst_schema_namespace}.diaForcedSource': diaforcedsource_schema,
-                      f'{_lsst_schema_namespace}.MPCORB': MPCORB_schema,
-                      f'{_lsst_schema_namespace}.ssSource': sssource_schema
+                      f'{_lsst_schema_namespace}.ssSource': sssource_schema,
+                      f'{_lsst_schema_namespace}.mpc_orbits': mpc_orbits_schema,
                      }
     alert_schema = fastavro.schema.load_schema( schemadir / f"{_lsst_schema_namespace}.alert.avsc",
                                                 named_schemas=named_schemas )
@@ -373,8 +625,8 @@ def get_alert_schema( schemadir=None ):
              'diaobject': fastavro.schema.parse_schema( diaobject_schema ),
              'diasource': fastavro.schema.parse_schema( diasource_schema ),
              'diaforcedsource': fastavro.schema.parse_schema( diaforcedsource_schema ),
-             'MPCORB': fastavro.schema.parse_schema( MPCORB_schema ),
              'sssource': fastavro.schema.parse_schema( sssource_schema ),
+             'mpc_orbits': fastavro.schema.parse_schema( mpc_orbits_schema ),
              'brokermessage': fastavro.schema.parse_schema( brokermessage_schema ),
              'alert_schema_file': schemadir / f"{_lsst_schema_namespace}.alert.avsc",
              'brokermessage_schema_file': schemadir / f"{_fastdb_schema_namespace}.BrokerMessage.avsc"
@@ -382,8 +634,12 @@ def get_alert_schema( schemadir=None ):
 
 
 def procver_id( *args, **kwargs ):
+    # import db here to avoid circular imports
+    import db
     return db.ProcessingVersion.procver_id( *args, **kwargs )
 
 
 def base_procver_id( *args, **kwargs ):
+    # import db here to avoid circular imports
+    import db
     return db.BaseProcessingVersion.base_procver_id( *args, **kwargs )
