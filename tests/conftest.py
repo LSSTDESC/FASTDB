@@ -1385,6 +1385,6 @@ def lightcurve_checker( set_of_lightcurves, procver_collection ):
                                     # Fixture didn't put any correlations in
                                     assert infos['ra_dec_cov'][dex] == pytest.approx( ra_dec_cov, abs=0.0001/3600. )
                                 else:
-                                    assert all( infos[i][dex] is None
+                                    assert all( ( infos[i][dex] is None ) or np.isnan( infos[i][dex] )
                                                 for i in ( 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ) )
     return check_ltcv_res

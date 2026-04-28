@@ -42,8 +42,6 @@ RUN curl -fsSL https://www.mongodb.org/static/pgp/server-8.0.asc | \
    gpg -o /usr/share/keyrings/mongodb-server-8.0.gpg \
    --dearmor
 
-# Installing the bookworm mongosh because last I checked, there wasn't a mongodb-database-tools
-#    package available for trixie
 RUN echo "deb [ signed-by=/usr/share/keyrings/mongodb-server-8.0.gpg ] http://repo.mongodb.org/apt/debian trixie/mongodb-org/8.0 main" | tee /etc/apt/sources.list.d/mongodb-org-8.0.list
 
 RUN apt-get update \
@@ -54,7 +52,7 @@ RUN apt-get update \
 
 # ...mongodb-database-tools isn't always in the archive I just added!  It's missing for
 #   trixie, and even for bookworm it's missing for arm64.  This mongo
-#   archive is kind of a disaster.  Installation of it has been moved to build.
+#   archive is kind of a disaster.  Installation of mongodump and mongorestore has been moved to build.
 
 
 # ======================================================================

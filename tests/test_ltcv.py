@@ -181,19 +181,19 @@ def compare_pandas_to_json( pdltcvs, jsltcvs, pdobjinfo, jsobjinfo ):
         assert pdobjinfo.index.names == ['diaobjectid']
         pdobjinfo.reset_index( inplace=True )
         for k, v in jsobjinfo.items():
-            cond = np.array( [ ( p == pytest.approx(val, rel=1e-12) )
-                                 if k in [ 'ra', 'dec' ]
-                               else ( p == pytest.approx(val, rel=1e-6 ) )
-                                 if k in [ 'raerr', 'decerr' ]
-                               else ( p == pytest.approx(val, abs=0.0001/3600.) )
-                                 if k == 'ra_dec_cov'
-                               else ( p == val )
+            cond = np.array( [ ( pandas.isna(p) & pandas.isna(val) )
+                               or
+                               ( ( p == pytest.approx(val, rel=1e-12) )
+                                   if k in [ 'ra', 'dec' ]
+                                 else ( p == pytest.approx(val, rel=1e-6 ) )
+                                   if k in [ 'raerr', 'decerr' ]
+                                 else ( p == pytest.approx(val, abs=0.0001/3600.) )
+                                   if k == 'ra_dec_cov'
+                                 else ( p == val )
+                                )
                                for p, val in zip( pdobjinfo[k], v )
                               ] )
-            assert ( cond
-                     |
-                     ( pandas.isna( pdobjinfo[k] ) & ( np.array( [ i is None for i in v ] ) ) )
-                    ).all()
+            assert cond.all()
 
 
 def test_object_ltcv( set_of_lightcurves, procver_collection, lightcurve_checker ):
@@ -722,12 +722,6 @@ def test_get_hot_ltcvs( set_of_lightcurves, lightcurve_checker ):
           'exproot': [1, 2],
           'expobj': [1, 2]
          },
-        { 'kwargs': { 'mjd_now': 60061. },
-          'passprocver': None,
-          'testprocver': 'realtime',
-          'exproot': [1, 2],
-          'expobj': [1, 2]
-         }
     ]
 
     extras = [

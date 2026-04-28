@@ -592,8 +592,8 @@ def test_read_mongo_sources( alerts_30days_sent_and_brokermessage_consumed, sour
         # The null one will have been thrown out by brokerconsumer, but not the 0
         assert 0 in [ d['diaobjectid'] for d in docs ]
         allmgsourceids = set( d['diasourceid'] for d in docs )
-        assert len(allmgsourceids) == 73    # Would have been 77 if brokerconsumer didn't throw out null diaobjectid
-        mgsourceids = set( d['diasourceid'] for d in docs if d['diaobjectid'] != 0 )
+        assert len(allmgsourceids) == 77
+        mgsourceids = set( d['diasourceid'] for d in docs if d['diaobjectid'] not in [0, None] )
         assert mgsourceids == srcids
         col = mg.collection( 'fastdb_alertcycle_test_diasource_extra' )
         docs = list( col.find( {}, projection= { 'diasourceid': 1 } ) )
@@ -622,7 +622,7 @@ def test_read_mongo_previous_forced_sources( alerts_30days_sent_and_brokermessag
         docs = list( col.find( {}, projection={ 'diaforcedsourceid': 1, 'diaobjectid': 1 } ) )
         assert 0 in [ d['diaobjectid'] for d in docs ]
         allmgfrcids = set( d['diaforcedsourceid'] for d in docs )
-        assert len(allmgfrcids) == 133  # Would have been 148 if brokerconsumer didn't throw out null diaobjectid
+        assert len(allmgfrcids) == 148
         mgfrcids = set( d['diaforcedsourceid'] for d in docs if d['diaobjectid'] != 0 )
         assert mgfrcids == frcids
         col = mg.collection( 'fastdb_alertcycle_test_diaforcedsource_extra' )
@@ -645,19 +645,19 @@ def test_read_mongo_brokerinfo( alerts_30days_sent_and_brokermessage_consumed, s
     with db.MGCon() as mg:
         col = mg.collection( 'fastdb_alertcycle_test_brokerinfo' )
         docs = list( col.find( {} ) )
-        mginfoids = set( ( d['brokername'], d['topic'], d['diasourceid'] ) for d in docs if d['diaobjectid'] != 0 )
+        mginfoids = set( ( d['brokername'], d['topic'], d['diasourceid'] ) for d in docs
+                         if d['diaobjectid'] not in [0, None] )
         assert pginfoids == mginfoids
         for doc in docs:
-            if doc['diaobjectid'] == 0:
-                continue
-            pginfo = [ p for p in pginfos if ( ( p['brokername'] == doc['brokername'] ) and
-                                               ( p['topic'] == doc['topic'] ) and
-                                               ( p['diasourceid'] == doc['diasourceid'] ) ) ]
-            assert len(pginfo) == 1
-            pginfo = pginfo[0]
-            assert pginfo['prv_diasourceid'] == doc['prv_diasourceid']
-            assert pginfo['prv_diaforcedsourceid'] == doc['prv_diaforcedsourceid']
-            assert pginfo['info'] == doc['info']
+            if doc['diaobjectid'] not in [0, None]:
+                pginfo = [ p for p in pginfos if ( ( p['brokername'] == doc['brokername'] ) and
+                                                   ( p['topic'] == doc['topic'] ) and
+                                                   ( p['diasourceid'] == doc['diasourceid'] ) ) ]
+                assert len(pginfo) == 1
+                pginfo = pginfo[0]
+                assert pginfo['prv_diasourceid'] == doc['prv_diasourceid']
+                assert pginfo['prv_diaforcedsourceid'] == doc['prv_diaforcedsourceid']
+                assert pginfo['info'] == doc['info']
 
 
 def test_import_objects( import_first30days_objects, bad_diaobjects ):
@@ -723,7 +723,7 @@ def test_import_sources( import_first30days_sources, bad_diaobjects ):
 
         mgallsourceids = set( s['diasourceid'] for s in mgsources )
         assert set( t['diasourceid'] for t in mgthumbnails ) == mgallsourceids
-        mgsourceids = set( s['diasourceid'] for s in mgsources if s['diaobjectid'] != 0 )
+        mgsourceids = set( s['diasourceid'] for s in mgsources if s['diaobjectid'] not in [0, None] )
         assert mgsourceids == srcids
 
         for source in sources:
@@ -920,8 +920,7 @@ def test_import_only_30days_after_90days_consumed( import_only_30days_after_90da
 
     # Let's really make sure all 90 days were consumed
     with db.MGCon() as mg:
-        # would have been 362 if brokerconsumer didn't throw out null diaobjectid
-        assert mg.collection( 'fastdb_alertcycle_test_brokerinfo' ).count_documents( {} ) == 354
+        assert mg.collection( 'fastdb_alertcycle_test_brokerinfo' ).count_documents( {} ) == 362
 
     with db.DBCon() as pqconn:
         check_database_contents( 30, dbcon=pqconn )

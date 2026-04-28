@@ -57,5 +57,10 @@ def test_fakebroker( barf, snana_fits_ppdb_loaded, alerts_30days_sent_and_classi
             cursor.execute( "SELECT s.diaobjectid, s.visit "
                             "FROM ppdb_diasource s "
                             "INNER JOIN ppdb_alerts_sent a ON s.diaobjectid=a.diaobjectid AND s.visit=a.visit" )
-            dbids = [ f"{row[0]}_{row[1]}" for row in cursor.fetchall() ]
+            # Have to hack a bit because of diaobjectId edits that fakebroker did for purposes of
+            #   our source importer tests
+            dbids = [ ( f"None_{row[1]}" if row[0]==1419122
+                        else f"0_{row[1]}" if row[0]==1981540
+                        else f"{row[0]}_{row[1]}" )
+                      for row in cursor.fetchall() ]
         assert set( f"{a['diaSource']['diaObjectId']}_{a['diaSource']['visit']}" for a in brokeralerts ) == set( dbids )
