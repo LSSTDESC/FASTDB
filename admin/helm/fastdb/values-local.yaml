@@ -1,0 +1,122 @@
+# FASTDB Local (Kind) Environment Values
+# Usage: helm install fastdb ./helm/fastdb -f ./helm/fastdb/values-local.yaml
+
+global:
+  namespace: rearmstr-dev
+  environment: local
+
+  # Images built by docker-compose and loaded into Kind via kind load.
+  # imagePullPolicy: Never means K8s uses the local store only — no registry contact.
+  imageRegistry: "ghcr.io/lsstdesc"
+  imageTag: "test20251201"
+  imagePullPolicy: Never
+  imagePullSecrets: []
+
+# Use PVC for database storage, hostPath for code (via Kind extraMounts)
+volumes:
+  type: pvc  # PVCs for database storage
+  storageClass: ""
+
+  # Code is mounted via Kind extraMounts
+  codeHostPath: true  # Enable hostPath for /fastdb-install and /fastdb-db
+
+# Local development secrets (not for production!)
+secrets:
+  postgres:
+    password: "fragile"
+    roPassword: "readonly1234"
+    replicatorPassword: "repl1c4t0r"
+  secretKey: "fragilesecretkey"
+
+  mongodb:
+    adminUser: "admin"
+    adminPassword: "fragile"
+    readerUser: "alertreader"
+    readerPassword: "reader"
+    writerUser: "alertwriter"
+    writerPassword: "writer"
+
+# PostgreSQL
+postgres:
+  enabled: true
+  persistence:
+    size: 10Gi
+
+  # NodePort for external access
+  externalAccess:
+    enabled: true
+    type: NodePort
+    nodePort: 30432
+
+  pgbackrest:
+    enabled: true
+    repo1:
+      endpoint: minio-site1
+    repo2:
+      enabled: true
+      endpoint: minio-site2
+
+# Standby enabled for local testing
+postgresStandby:
+  enabled: true
+  persistence:
+    size: 10Gi
+
+# MongoDB
+mongodb:
+  enabled: true
+  persistence:
+    size: 5Gi
+
+# Web application with NodePort
+webap:
+  enabled: true
+  externalAccess:
+    enabled: true
+    type: NodePort
+    nodePort: 30080
+  # Kind's local-path provisioner only supports ReadWriteOnce
+  volumes:
+    sessions:
+      accessMode: ReadWriteOnce
+    queryResults:
+      accessMode: ReadWriteOnce
+    logs:
+      accessMode: ReadWriteOnce
+
+# Shell pod for debugging
+shell:
+  enabled: true
+
+# Query runner
+queryrunner:
+  enabled: true
+
+# Mailhog with NodePort
+mailhog:
+  enabled: true
+  externalAccess:
+    enabled: true
+    type: NodePort
+    nodePort: 30025
+
+# Database migrations
+createdb:
+  enabled: true
+
+# Deploy MinIO pods in the Kind cluster
+minio:
+  enabled: true  
+  credentials:
+    accessKey: minioadmin
+    secretKey: minioadmin
+  site1:
+    service:
+      type: NodePort
+      nodePortS3: 30090
+      nodePortConsole: 30091
+  site2:
+    service:
+      type: NodePort
+      nodePortS3: 30092
+      nodePortConsole: 30093

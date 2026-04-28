@@ -1,0 +1,172 @@
+{{- if .Values.postgres.enabled }}
+{{- $namespace := include "fastdb.namespace" . }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "fastdb.labels" . | nindent 4 }}
+    app: postgres
+spec:
+  replicas: {{ .Values.postgres.replicas }}
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      {{- include "fastdb.imagePullSecrets" . | nindent 6 }}
+      initContainers:
+      - name: volume-mount-hack
+        image: busybox
+        command:
+          - sh
+          - -c
+          - |
+            mkdir -p /pgdata/pgdata
+            chown -R 100:108 /pgdata
+            chmod 700 /pgdata/pgdata
+        securityContext:
+          runAsUser: 0
+        volumeMounts:
+        - name: postgres-data
+          mountPath: /pgdata
+      containers:
+      - name: postgres
+        image: {{ include "fastdb.image" (dict "image" .Values.postgres.image "global" .Values.global) }}
+        imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+        {{- if .Values.postgres.securityContext.runAsUser }}
+        securityContext:
+          runAsUser: {{ .Values.postgres.securityContext.runAsUser }}
+          runAsNonRoot: {{ .Values.postgres.securityContext.runAsNonRoot }}
+          allowPrivilegeEscalation: {{ .Values.postgres.securityContext.allowPrivilegeEscalation }}
+          capabilities:
+            drop:
+            - ALL
+          privileged: false
+          readOnlyRootFilesystem: false
+        {{- end }}
+        env:
+        - name: POSTGRES_DATA_DIR
+          value: /var/lib/postgresql/data/pgdata
+        {{- if .Values.postgres.pgbackrest.enabled }}
+        - name: FASTDB_ARCHIVE_ENABLED
+          value: "true"
+        - name: PGBACKREST_REPO1_S3_KEY
+          valueFrom:
+            secretKeyRef:
+              name: pgbackrest-s3-creds
+              key: repo1-access-key
+        - name: PGBACKREST_REPO1_S3_KEY_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: pgbackrest-s3-creds
+              key: repo1-secret-key
+        {{- if .Values.postgres.pgbackrest.repo2.enabled }}
+        - name: PGBACKREST_REPO2_S3_KEY
+          valueFrom:
+            secretKeyRef:
+              name: pgbackrest-s3-creds
+              key: repo2-access-key
+        - name: PGBACKREST_REPO2_S3_KEY_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: pgbackrest-s3-creds
+              key: repo2-secret-key
+        {{- end }}
+        {{- end }}
+        ports:
+        - containerPort: 5432
+        volumeMounts:
+        - name: postgres-data
+          mountPath: /var/lib/postgresql/data
+        - name: pgbackrest-ca
+          mountPath: /etc/pgbackrest-ca
+          readOnly: true
+        - name: secrets
+          mountPath: /secrets
+          readOnly: true
+        - name: dshm
+          mountPath: /dev/shm
+        {{- if .Values.postgres.pgbackrest.enabled }}
+        - name: pgbackrest-conf
+          mountPath: /etc/pgbackrest/pgbackrest.conf
+          subPath: pgbackrest.conf
+          readOnly: true
+        - name: certs
+          mountPath: /certs
+          readOnly: true
+        {{- end }}
+      volumes:
+      - name: postgres-data
+        persistentVolumeClaim:
+          claimName: {{ $namespace }}-postgres-pvc
+      - name: secrets
+        secret:
+          secretName: secrets
+      - name: pgbackrest-ca
+        secret:
+          secretName: pgbackrest-ca
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          sizeLimit: {{ .Values.postgres.sharedMemory }}
+      {{- if .Values.postgres.pgbackrest.enabled }}
+      - name: pgbackrest-conf
+        configMap:
+          name: pgbackrest-conf
+      - name: certs
+        secret:
+          secretName: minio-certs
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "fastdb.labels" . | nindent 4 }}
+    app: postgres
+spec:
+  selector:
+    app: postgres
+  ports:
+  - name: postgres
+    port: {{ .Values.postgres.service.port }}
+    targetPort: 5432
+  type: {{ .Values.postgres.service.type }}
+{{- if .Values.postgres.externalAccess.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-external
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "fastdb.labels" . | nindent 4 }}
+    app: postgres
+  {{- with .Values.postgres.externalAccess.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  selector:
+    app: postgres
+  ports:
+  - name: postgres
+    port: 5432
+    targetPort: 5432
+    {{- if eq .Values.postgres.externalAccess.type "NodePort" }}
+    nodePort: {{ .Values.postgres.externalAccess.nodePort }}
+    {{- end }}
+  type: {{ .Values.postgres.externalAccess.type }}
+  {{- if eq .Values.postgres.externalAccess.type "LoadBalancer" }}
+  allocateLoadBalancerNodePorts: false
+  {{- end }}
+{{- end }}
+{{- end }}

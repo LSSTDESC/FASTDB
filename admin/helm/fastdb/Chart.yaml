@@ -1,0 +1,13 @@
+apiVersion: v2
+name: fastdb
+description: FASTDB - Fast Astronomical Source Transient Database
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - astronomy
+  - database
+  - LSST
+  - transients
+maintainers:
+  - name: FASTDB Team

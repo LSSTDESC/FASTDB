@@ -16,7 +16,7 @@ SHELL ["/bin/bash", "-c"]
 RUN apt-get update \
   && DEBIAN_FRONTEND="nointeractive" apt-get -y upgrade \
   && DEBIAN_FRONTEND="noninteractive" TZ="UTC" apt-get -y install -y --no-install-recommends \
-      postgresql-17 postgresql-client-17 pgtop libssl3 libreadline8 zlib1g netcat-openbsd \
+      postgresql-17 postgresql-client-17 pgbackrest pgtop libssl3 libreadline8 zlib1g netcat-openbsd \
       libzstd1 liblz4-1 \
       tmux emacs-nox less procps \
   && apt-get clean \
@@ -25,6 +25,9 @@ RUN apt-get update \
 RUN mkdir -p /var/lib/postgresql/data \
   && chmod 700 /var/lib/postgresql/data \
   && chown postgres:postgres /var/lib/postgresql/data
+
+RUN mkdir -p /etc/pgbackrest /var/log/pgbackrest /var/lib/pgbackrest \
+    && chown postgres:postgres /var/log/pgbackrest /var/lib/pgbackrest
 
 RUN cat /etc/locale.gen | perl -pe 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' > /etc/locale.gen.new \
     && mv /etc/locale.gen.new /etc/locale.gen
@@ -110,7 +113,7 @@ RUN cd /etc/postgresql/17/main \
  && mv postgresql.conf.new postgresql.conf
  
 
-ENV POSTGRES_DATA_DIR=/var/lib/postgresql/data
+ENV POSTGRES_DATA_DIR=/var/lib/postgresql/data/pgdata
 
 # ======================================================================
 FROM conf AS postgres
@@ -140,3 +143,14 @@ ADD run_pgdump.sh /home/pgdump/run_pgdump.sh
 
 USER postgres
 ENTRYPOINT [ "/bin/bash", "/home/pgdump/run_pgdump.sh" ]
+
+# ======================================================================
+FROM conf AS standby
+
+COPY run_standby.sh /tmp/run_standby.sh
+RUN cp /tmp/run_standby.sh /run_standby.sh && chmod 755 /run_standby.sh
+
+RUN mkdir -p /tmp/postgres_temp && chown -R postgres:postgres /tmp/postgres_temp
+
+USER postgres
+CMD ["bash", "/run_standby.sh"]

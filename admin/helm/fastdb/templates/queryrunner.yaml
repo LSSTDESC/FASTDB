@@ -1,0 +1,57 @@
+{{- if .Values.queryrunner.enabled }}
+{{- $namespace := include "fastdb.namespace" . }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: queryrunner
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "fastdb.labels" . | nindent 4 }}
+    app: queryrunner
+spec:
+  replicas: {{ .Values.queryrunner.replicas }}
+  selector:
+    matchLabels:
+      app: queryrunner
+  template:
+    metadata:
+      labels:
+        app: queryrunner
+    spec:
+      {{- include "fastdb.imagePullSecrets" . | nindent 6 }}
+      containers:
+      - name: queryrunner
+        image: {{ include "fastdb.image" (dict "image" .Values.queryrunner.image "global" .Values.global) }}
+        imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+        volumeMounts:
+        - name: secrets
+          mountPath: /secrets
+          readOnly: true
+        - name: query-results
+          mountPath: /query_results
+        {{- if .Values.volumes.codeHostPath }}
+        - name: fastdb-install
+          mountPath: /fastdb
+        {{- else if .Values.volumes.codePvc.enabled }}
+        - name: code
+          mountPath: /fastdb
+        {{- end }}
+      volumes:
+      - name: secrets
+        secret:
+          secretName: secrets
+      - name: query-results
+        persistentVolumeClaim:
+          claimName: {{ $namespace }}-query-results-pvc
+      {{- if .Values.volumes.codeHostPath }}
+      - name: fastdb-install
+        hostPath:
+          path: /fastdb-install
+          type: Directory
+      {{- else if .Values.volumes.codePvc.enabled }}
+      - name: code
+        persistentVolumeClaim:
+          claimName: {{ $namespace }}-code-pvc
+      {{- end }}
+{{- end }}

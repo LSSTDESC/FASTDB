@@ -1,0 +1,183 @@
+{{- if .Values.postgresStandby.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-standby
+  namespace: {{ include "fastdb.namespace" . }}
+  labels:
+    app: postgres-standby
+
+spec:
+  replicas: {{ .Values.postgresStandby.replicas | default 1 }}
+
+  selector:
+    matchLabels:
+      app: postgres-standby
+
+  strategy:
+    type: Recreate
+
+  template:
+    metadata:
+      labels:
+        app: postgres-standby
+
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      {{- if .Values.postgresStandby.waitForPrimary.enabled }}
+      initContainers:
+        - name: wait-for-primary
+          image: busybox
+          securityContext:
+            runAsUser: 0
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for primary postgres..."
+              until nc -z postgres {{ .Values.postgres.service.port | default 5432 }}; do
+                echo "Primary not ready, sleeping 5s..."
+                sleep 5
+              done
+              echo "Primary is up, waiting extra 30s..."
+              sleep 30
+              echo "Proceeding with standby startup."
+      {{- end }}
+
+      containers:
+        - name: postgres-standby
+          image: {{ include "fastdb.image" (dict "image" .Values.postgresStandby.image "global" .Values.global) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+
+          securityContext:
+            runAsUser: {{ .Values.postgres.securityContext.runAsUser }}
+            runAsNonRoot: {{ .Values.postgres.securityContext.runAsNonRoot }}
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            privileged: false
+            readOnlyRootFilesystem: false
+
+          env:
+            - name: FASTDB_STANDBY_WAIT_FOR_PRIMARY
+              value: {{ .Values.postgresStandby.waitForPrimary.enabled | default false | quote }}
+            - name: FASTDB_STANDBY_REMOTE_RESTORE
+              value: {{ .Values.postgresStandby.remoteRestore.enabled | default false | quote }}
+
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+            
+            - name: PGBACKREST_REPO1_S3_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: pgbackrest-s3-creds
+                  key: repo1-access-key
+
+            - name: PGBACKREST_REPO1_S3_KEY_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: pgbackrest-s3-creds
+                  key: repo1-secret-key
+
+            {{- if .Values.postgres.pgbackrest.repo2.enabled }}
+            - name: PGBACKREST_REPO2_S3_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: pgbackrest-s3-creds
+                  key: repo2-access-key
+
+            - name: PGBACKREST_REPO2_S3_KEY_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: pgbackrest-s3-creds
+                  key: repo2-secret-key
+            {{- end }}
+
+          ports:
+            - containerPort: 5432
+
+          volumeMounts:
+            - name: standby-data
+              mountPath: /var/lib/postgresql/data
+            - name: secrets
+              mountPath: /secrets
+              readOnly: true
+            - name: pgbackrest-ca
+              mountPath: /etc/pgbackrest-ca
+              readOnly: true         
+            - name: pgbackrest-conf
+              mountPath: /etc/pgbackrest/pgbackrest.conf
+              subPath: pgbackrest.conf
+              readOnly: true
+
+            - name: dshm
+              mountPath: /dev/shm
+
+          {{- with .Values.postgresStandby.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+
+      volumes:
+        - name: standby-data
+          persistentVolumeClaim:
+            claimName: standby-data
+
+        - name: secrets
+          secret:
+            secretName: secrets
+
+        - name: pgbackrest-conf
+          configMap:
+            name: pgbackrest-conf
+
+        - name: pgbackrest-ca
+          secret:
+            secretName: pgbackrest-ca
+
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: {{ .Values.postgresStandby.sharedMemory | default "1Gi" }}
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: standby-data
+  namespace: {{ include "fastdb.namespace" . }}
+
+spec:
+  accessModes:
+    - {{ .Values.postgresStandby.persistence.accessMode | default "ReadWriteOnce" }}
+
+  {{- if .Values.volumes.storageClass }}
+  storageClassName: {{ .Values.volumes.storageClass }}
+  {{- end }}
+
+  resources:
+    requests:
+      storage: {{ .Values.postgresStandby.persistence.size | default "10Gi" }}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-standby
+  namespace: {{ include "fastdb.namespace" . }}
+
+spec:
+  selector:
+    app: postgres-standby
+
+  ports:
+    - port: 5432
+      targetPort: 5432
+
+  type: ClusterIP
+{{- end }}

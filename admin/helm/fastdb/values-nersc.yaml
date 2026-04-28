@@ -1,0 +1,101 @@
+# FASTDB SLAC S3DF Environment Values
+# Usage: helm install fastdb ./helm/fastdb -f ./helm/fastdb/values-slac.yaml --set global.namespace=your-namespace
+
+global:
+  namespace: rearmstr-dev  # Override with --set global.namespace=ccosta-dev
+  environment: dev
+
+  # GitHub Container Registry
+  imageRegistry: "ghcr.io/rearmstr"
+  imageTag: "test20251201"
+  imagePullPolicy: Always
+  imagePullSecrets:
+    - name: ghcr-secret
+
+  namespaceLabels:
+    owner: ""  # Override with --set global.namespaceLabels.owner=username
+    environment: dev
+
+# Use PVC-based storage
+volumes:
+  type: pvc
+  storageClass: ""  # Use default storage class
+
+# Secrets - should be overridden or managed externally
+secrets:
+  postgres:
+    password: "fragile"
+    roPassword: "readonly1234"
+    replicatorPassword: "repl1c4t0r"
+  secretKey: "fragilesecretkey"
+
+  mongodb:
+    adminUser: "admin"
+    adminPassword: "fragile"
+    readerUser: "alertreader"
+    readerPassword: "reader"
+    writerUser: "alertwriter"
+    writerPassword: "writer"
+
+# PostgreSQL with WAL archiving and LoadBalancer
+postgres:
+  enabled: true
+  persistence:
+    size: 10Gi
+
+  # Security context
+  securityContext:
+    runAsUser: 100
+    runAsNonRoot: true
+    allowPrivilegeEscalation: false
+
+  # LoadBalancer for external access
+  externalAccess:
+    enabled: true
+    type: LoadBalancer
+    annotations:
+      metallb.io/address-pool: sdf-services
+  
+  pgbackrest:
+    enabled: true
+    repo1:
+      endpoint: https://minio-site1.rearmstr-dev.development.svc.spin.nersc.org
+      storagePort: 443
+      caFile: /etc/pgbackrest-ca/ca.crt
+    repo2:
+      enabled: false
+      endpoint: minio-site2
+
+# Standby not enabled by default for SLAC
+postgresStandby:
+  enabled: false
+
+# MongoDB disabled for SLAC (postgres-only setup)
+mongodb:
+  enabled: false
+
+# Web application disabled for SLAC postgres-only setup
+webap:
+  enabled: false
+
+# Shell disabled
+shell:
+  enabled: false
+
+# Query runner disabled
+queryrunner:
+  enabled: false
+
+# Mailhog disabled
+mailhog:
+  enabled: false
+
+# Database migrations
+createdb:
+  enabled: false
+
+minio:
+  enabled: true 
+  credentials:
+    accessKey: minioadmin
+    secretKey: minioadmin

@@ -1,0 +1,37 @@
+{{- if .Values.postgres.pgbackrest.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pgbackrest-conf
+  namespace: {{ .Values.global.namespace }}
+data:
+  pgbackrest.conf: |
+    [global]
+    repo1-type=s3
+    repo1-s3-bucket={{ .Values.postgres.pgbackrest.repo1.bucket }}
+    repo1-s3-endpoint={{ .Values.postgres.pgbackrest.repo1.endpoint }}
+    repo1-s3-region={{ .Values.postgres.pgbackrest.repo1.region }}
+    repo1-path={{ .Values.postgres.pgbackrest.repo1.path }}
+    repo1-s3-uri-style={{ .Values.postgres.pgbackrest.repo1.uriStyle }}
+    repo1-storage-port={{ .Values.postgres.pgbackrest.repo1.storagePort }}
+    repo1-storage-ca-file={{ .Values.postgres.pgbackrest.repo1.caFile }}
+    repo1-retention-full={{ .Values.postgres.pgbackrest.retention.full }}
+    {{- if .Values.postgres.pgbackrest.repo2.enabled }}
+    repo2-type=s3
+    repo2-s3-bucket={{ .Values.postgres.pgbackrest.repo2.bucket }}
+    repo2-s3-endpoint={{ .Values.postgres.pgbackrest.repo2.endpoint }}
+    repo2-s3-region={{ .Values.postgres.pgbackrest.repo2.region }}
+    repo2-path={{ .Values.postgres.pgbackrest.repo2.path }}
+    repo2-s3-uri-style={{ .Values.postgres.pgbackrest.repo2.uriStyle }}
+    repo2-storage-port={{ .Values.postgres.pgbackrest.repo2.storagePort }}
+    repo2-storage-ca-file={{ .Values.postgres.pgbackrest.repo2.caFile }}
+    repo2-retention-full={{ .Values.postgres.pgbackrest.retention.full }}
+    {{- end }}
+    compress-type=gz
+    log-level-console=info
+    log-level-file=detail
+    process-max=2
+
+    [fastdb]
+    pg1-path=/var/lib/postgresql/data/pgdata
+{{- end }}

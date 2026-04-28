@@ -1,0 +1,241 @@
+{{- if .Values.minio.enabled }}
+#
+# MinIO Site 1
+#
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio-site1
+  namespace: {{ include "fastdb.namespace" . }}
+  labels:
+    app: minio-site1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: minio-site1
+  template:
+    metadata:
+      labels:
+        app: minio-site1
+    spec:
+      containers:
+        - name: minio
+          image: minio/minio
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            privileged: false
+            readOnlyRootFilesystem: false
+          command: ["minio", "server"]
+          args: ["/data", "--console-address", ":9001"]
+          env:
+            - name: MINIO_ROOT_USER
+              value: {{ .Values.minio.credentials.accessKey | quote }}
+            - name: MINIO_ROOT_PASSWORD
+              value: {{ .Values.minio.credentials.secretKey | quote }}
+            - name: MINIO_SERVER_URL
+              value: "https://minio-site1.rearmstr-dev.development.svc.spin.nersc.org"
+            - name: MINIO_BROWSER_REDIRECT_URL
+              value: "https://minio-site1-console.rearmstr-dev.development.svc.spin.nersc.org"
+          ports:
+            - containerPort: 9000
+              name: s3
+            - containerPort: 9001
+              name: console
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            tcpSocket:
+              port: 9000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: minio-site1-data
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio-site1
+  namespace: {{ include "fastdb.namespace" . }}
+spec:
+  type: {{ .Values.minio.site1.service.type }}
+  selector:
+    app: minio-site1
+  ports:
+    - name: s3
+      port: {{ .Values.minio.site1.port }}
+      targetPort: 9000
+      {{- if eq .Values.minio.site1.service.type "NodePort" }}
+      nodePort: {{ .Values.minio.site1.service.nodePortS3 }}
+      {{- end }}
+    - name: console
+      port: {{ .Values.minio.site2.consolePort }}
+      targetPort: 9001
+      {{- if eq .Values.minio.site1.service.type "NodePort" }}
+      nodePort: {{ .Values.minio.site1.service.nodePortConsole }}
+      {{- end }}
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: minio-site1-data
+  namespace: {{ include "fastdb.namespace" . }}
+spec:
+  accessModes: [ReadWriteOnce]
+  {{- if .Values.volumes.storageClass }}
+  storageClassName: {{ .Values.volumes.storageClass }}
+  {{- end }}
+  resources:
+    requests:
+      storage: 5Gi
+
+---
+#
+# MinIO Site 2
+#
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio-site2
+  namespace: {{ include "fastdb.namespace" . }}
+  labels:
+    app: minio-site2
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: minio-site2
+  template:
+    metadata:
+      labels:
+        app: minio-site2
+    spec:
+      containers:
+        - name: minio
+          image: minio/minio
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            privileged: false
+            readOnlyRootFilesystem: false
+          command: ["minio", "server"]
+          args: ["/data", "--console-address", ":9001"]
+          env:
+            - name: MINIO_ROOT_USER
+              value: {{ .Values.minio.credentials.accessKey | quote }}
+            - name: MINIO_ROOT_PASSWORD
+              value: {{ .Values.minio.credentials.secretKey | quote }}
+          ports:
+            - containerPort: 9000
+              name: s3
+            - containerPort: 9001
+              name: console
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            tcpSocket:
+              port: 9000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: minio-site2-data
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio-site2
+  namespace: {{ include "fastdb.namespace" . }}
+spec:
+  type: {{ .Values.minio.site2.service.type }}
+  selector:
+    app: minio-site2
+  ports:
+    - name: s3
+      port: {{ .Values.minio.site2.port }}
+      targetPort: 9000
+      {{- if eq .Values.minio.site2.service.type "NodePort" }}
+      nodePort: {{ .Values.minio.site2.service.nodePortS3 }}
+      {{- end }}      
+    - name: console
+      port: {{ .Values.minio.site2.consolePort }}
+      targetPort: 9001
+      {{- if eq .Values.minio.site2.service.type "NodePort" }}
+      nodePort: {{ .Values.minio.site2.service.nodePortConsole }}
+      {{- end }}
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: minio-site2-data
+  namespace: {{ include "fastdb.namespace" . }}
+spec:
+  accessModes: [ReadWriteOnce]
+  {{- if .Values.volumes.storageClass }}
+  storageClassName: {{ .Values.volumes.storageClass }}
+  {{- end }}
+  resources:
+    requests:
+      storage: 5Gi
+
+---
+#
+# Bucket creation job
+# Retries until both MinIO instances are ready
+#
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: create-buckets
+  namespace: {{ include "fastdb.namespace" . }}
+spec:
+  backoffLimit: 10
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: create-buckets
+          image: minio/mc
+          securityContext:
+            capabilities:
+              drop:
+              - ALL
+            privileged: false
+            readOnlyRootFilesystem: false
+          env:
+          - name: HOME
+            value: /tmp
+          - name: MC_CONFIG_DIR
+            value: /tmp/.mc
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              echo "Waiting for MinIO instances to be ready..."
+              for i in $(seq 1 30); do
+                mc alias set site1 http://minio-site1:{{ .Values.minio.site1.port }} \
+                  {{ .Values.minio.credentials.accessKey }} \
+                  {{ .Values.minio.credentials.secretKey }} --insecure 2>/dev/null && break
+                echo "MinIO site1 not ready, retry $i/30..."
+                sleep 5
+              done
+
+
+
+              mc mb --ignore-existing site1/{{ .Values.postgres.pgbackrest.repo1.bucket }} --insecure &&
+              
+              echo "Buckets created successfully"
+{{- end }}

@@ -42,8 +42,7 @@ RUN curl -fsSL https://www.mongodb.org/static/pgp/server-8.0.asc | \
    gpg -o /usr/share/keyrings/mongodb-server-8.0.gpg \
    --dearmor
 
-RUN echo "deb [ signed-by=/usr/share/keyrings/mongodb-server-8.0.gpg ] http://repo.mongodb.org/apt/debian bookworm/mongodb-org/8.0 main" | tee /etc/apt/sources.list.d/mongodb-org-8.0.list
-
+RUN echo "deb [ signed-by=/usr/share/keyrings/mongodb-server-8.0.gpg ] https://repo.mongodb.org/apt/ubuntu noble/mongodb-org/8.0 multiverse" | tee /etc/apt/sources.list.d/mongodb-org-8.0.list
 RUN apt-get update \
   && DEBIAN_FRONTEND="noninteractive" TZ="UTC" apt-get -y install -y --no-install-recommends \
           mongodb-mongosh mongodb-database-tools \
@@ -74,6 +73,7 @@ RUN source /venv/bin/activate && \
        flask-sock==0.7.0 \
        gevent==25.9.1 \
        gunicorn==25.1.0 \
+       minio==7.2.20 \
        nested-pandas==0.6.8 \
        numpy==2.4.3 \
        pandas==2.3.3 \
