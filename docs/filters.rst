@@ -301,8 +301,12 @@ UDF filters are JavaScript functions which get passed a message object. The mess
       return message;
     }
 
-In order to create a new filtered topic for FASTDB to subscribe to, you should write a new filter (following the `tutorial <https://github.com/mwvgroup/pittgoogle-user-demos/blob/main/pubsub/README.md>`_) and then upstream it to Pitt-Google by creating a GitHub issue on the `broker repository <https://github.com/mwvgroup/Pitt-Google-Broker>`_. Provided the filter is accepted, the Pitt-Google team will go and create a new Topic which can be subscribed to by FASTDB.
+In order to create a new filtered topic for FASTDB to subscribe to, you should write a new filter (following the `tutorial <https://github.com/mwvgroup/pittgoogle-user-demos/blob/main/pubsub/README.md>`_) and then follow one of two paths:
 
+* Upstream it to Pitt-Google by creating a GitHub issue on the `broker repository <https://github.com/mwvgroup/Pitt-Google-Broker>`_. Provided the filter is accepted, the Pitt-Google team will go and create a new Topic which can be subscribed to by FASTDB.
+* Create a new subscription manually in the Google Cloud web console, and paste the filter code in as a *Transform*. Then, ensure the broker consumer ``groupid`` matches the name of the subscription, so that FASTDB will attach to this filtered version of the topic. 
+
+The Pitt-Google team can provide feedback as to which option is best-suited.
 
 Useful Links
 ------------
