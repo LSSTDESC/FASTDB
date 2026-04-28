@@ -844,14 +844,12 @@ def test_import_30days_60days( messy_import_30days, import_30days_60days, test_u
     assert set( r['id'] for r in roots ) == set( o['rootid'] for o in objects )
 
     with db.MG() as mongoclient:
-        # Thumbnails is going to have more than what we've imported, because we don't have
-        #   a way of filtering out bad diaobjectids for thumbnails.
         collection = db.get_mongo_collection( mongoclient, "source_thumbnails" )
         thumbs = list( collection.find( {}, projection={ 'diasourceid': 1 } ) )
-        assert len(thumbs) > nsrc30 + nsrc60
+        assert len(thumbs) == nsrc30 + nsrc60
         sourceids = set( s['diasourceid'] for s in sources )
         thumbids = set( t['diasourceid'] for t in thumbs )
-        assert sourceids.issubset( thumbids )
+        assert sourceids == thumbids
 
 
 # **********************************************************************
@@ -897,7 +895,7 @@ def test_import_only_next60days( import_only_next60days, check_database_contents
         collection = db.get_mongo_collection( mongoclient, "source_thumbnails" )
         # Only the sources imported directly will have thumbnails; previous sources will not
         # That's why this is less than nsrc
-        assert collection.count_documents( {} ) == 104
+        assert collection.count_documents( {} ) == 82
 
 
 # **********************************************************************
@@ -965,8 +963,7 @@ def test_full90days_fast( alerts_90days_sent_received_and_imported, snana_fits_p
 
     with db.MG() as mongoclient:
         collection = db.get_mongo_collection( mongoclient, "source_thumbnails" )
-        # More than number of sources becasue brokerconsumer can't filter bad diaobjectid out of thumbnails
-        assert collection.count_documents( {} ) > nsrc
+        assert collection.count_documents( {} ) == nsrc
 
     check_database_contents( 90 )
 
@@ -993,7 +990,6 @@ def test_full90days( fully_do_alerts_90days_sent_received_and_imported, check_da
 
     with db.MG() as mongoclient:
         collection = db.get_mongo_collection( mongoclient, "source_thumbnails" )
-        assert collection.count_documents( {} ) > nsrc
-        assert collection.count_documents( {} ) == 177
+        assert collection.count_documents( {} ) == nsrc
 
     check_database_contents( 90 )

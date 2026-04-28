@@ -559,6 +559,7 @@ class BrokerConsumer:
 
         if any( ( f in msg and f is not None ) for f in [ 'cutoutDifference', 'cutoutScience', 'cutoutTemplate' ] ):
             thumbnails = { 'diasourceid': msg['diaSource']['diaSourceId'],
+                           'diaobjectid': msg['diaSource']['diaObjectId'],
                            'savetime': metamsg['savetime'] }
             thumbnails.update( { f.lower(): msg[f] if f in msg else None
                                  for f in ['cutoutDifference', 'cutoutScience', 'cutoutTemplate' ] } )

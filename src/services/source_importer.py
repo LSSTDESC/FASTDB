@@ -631,34 +631,36 @@ class SourceImporter:
         session = mg.client.start_session()
         session.start_transaction()
 
+        # Going to use cutoutDifference as the canary.
+        # We want to filter out bad diaobjectids.  However, we have to consider the case.
+        #   where diaobjectid is not in the stored cache, because this will be applied to
+        #   an existing database that had not saved diaobjectid in the mongo cache collection.
+        matchand = [ { "cutoutdifference": { "$ne": None } },
+                     { "$or": [ { "diaobjectid": { "$exists": False } },
+                                { "$and": [ { "diaobjectid": { "$ne": None} },
+                                            { "diaobjectid": { "$ne": 0 } }
+                                           ]
+                                 }
+                               ]
+                      } ]
         if t0 is not None:
-            if ( t1 is not None ):
-                pipeline = [ { "$match": { "$and": [ { "cutoutdifference": { "$ne": None } },
-                                                     { "savetime": { "$gt": t0 } },
-                                                     { "savetime": { "$lte": t1 } } ] } } ]
-            else:
-                pipeline = [ { "$match": { "$and": [ { "cutoutdifference": { "$ne": None } },
-                                                     { "savetime": { "$gt": t0 } } ] } } ]
-        elif t1 is not None:
-            pipeline = [ { "$match": { "$and": [ { "cutoutdifference": { "$ne": None } },
-                                                 { "savetime": { "$lte": t1 } } ] } } ]
-        else:
-            pipeline = [ { "$match": { "cutoutdifference": { "$ne": None } } } ]
+            matchand.append( { "savetime": { "$gt": t0 } } )
+        if t1 is not None:
+            matchand.append( { "savetime": { "$lte": t1 } } )
 
-
-        # Going to use cutoutDifference as the canary
-        pipeline.extend( [ { "$group": { "_id": "$diasourceid",
-                                         "diasourceid": { "$first": "$diasourceid" },
-                                         "base_procver_id": { "$first": str( self.source_base_processing_version ) },
-                                         "cutoutdifference": { "$first": "$cutoutdifference" },
-                                         "cutoutscience": { "$first": "$cutoutscience" },
-                                         "cutouttemplate": { "$first": "$cutouttemplate" }
-                                        } },
-                           { "$merge": { "into": "source_thumbnails",
-                                         "on": [ "diasourceid", "base_procver_id" ],
-                                         "whenMatched": "keepExisting"
-                                        } }
-                          ] )
+        pipeline = [ { "$match": { "$and": matchand } },
+                     { "$group": { "_id": "$diasourceid",
+                                   "diasourceid": { "$first": "$diasourceid" },
+                                   "base_procver_id": { "$first": str( self.source_base_processing_version ) },
+                                   "cutoutdifference": { "$first": "$cutoutdifference" },
+                                   "cutoutscience": { "$first": "$cutoutscience" },
+                                   "cutouttemplate": { "$first": "$cutouttemplate" }
+                                  } },
+                     { "$merge": { "into": "source_thumbnails",
+                                   "on": [ "diasourceid", "base_procver_id" ],
+                                   "whenMatched": "keepExisting"
+                                  } }
+                    ]
         FDBLogger.debug( "   ...aggregating cutouts to mongo source_thumbnails collection" )
         collection.aggregate( pipeline )
 
