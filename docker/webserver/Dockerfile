@@ -42,22 +42,30 @@ RUN curl -fsSL https://www.mongodb.org/static/pgp/server-8.0.asc | \
    gpg -o /usr/share/keyrings/mongodb-server-8.0.gpg \
    --dearmor
 
-RUN echo "deb [ signed-by=/usr/share/keyrings/mongodb-server-8.0.gpg ] http://repo.mongodb.org/apt/debian bookworm/mongodb-org/8.0 main" | tee /etc/apt/sources.list.d/mongodb-org-8.0.list
+# Installing the bookworm mongosh because last I checked, there wasn't a mongodb-database-tools
+#    package available for trixie
+RUN echo "deb [ signed-by=/usr/share/keyrings/mongodb-server-8.0.gpg ] http://repo.mongodb.org/apt/debian trixie/mongodb-org/8.0 main" | tee /etc/apt/sources.list.d/mongodb-org-8.0.list
 
 RUN apt-get update \
   && DEBIAN_FRONTEND="noninteractive" TZ="UTC" apt-get -y install -y --no-install-recommends \
-          mongodb-mongosh mongodb-database-tools \
-  && apt-get clean \
+          mongodb-mongosh \
+ && apt-get clean \
   && rm -rf /var/lib/apt/lists/*
+
+# ...mongodb-database-tools isn't always in the archive I just added!  It's missing for
+#   trixie, and even for bookworm it's missing for arm64.  This mongo
+#   archive is kind of a disaster.  Installation of it has been moved to build.
 
 
 # ======================================================================
 FROM base AS build
 
+WORKDIR /usr/src
+
 RUN DEBIAN_FRONTEND="noninteractive" TZ="UTC" \
     apt-get update \
     && DEBIAN_FRONTEND="noninteractive" TZ="UTC" \
-    apt-get -y install -y python3-pip python3-venv git libpq-dev
+    apt-get -y install -y python3-pip python3-venv git libpq-dev golang
 
 RUN mkdir /venv
 RUN python3 -mvenv /venv
@@ -94,18 +102,19 @@ RUN source /venv/bin/activate && \
 COPY pubsub.patch /tmp/pubsub.patch
 RUN patch /venv/lib/python3.13/site-packages/pittgoogle/pubsub.py /tmp/pubsub.patch
 
-# We have to install fink-client manually because right now it pins its
-#  requirement to fastavro 1.9.4, but I have failed to pip install
-#  fastavro 1.9.4 (is it a python 3.13 thing?)
-
-# WORKDIR /usr/src
-# RUN git clone https://github.com/astrolabsoftware/fink-client.git
-# RUN cat fink-client/requirements.txt | perl -pe 's/fastavro==1.9.4/fastavro>=1.9.4/' > fink-client/requirements-new.txt
-# RUN mv fink-client/requirements-new.txt fink-client/requirements.txt
-# RUN cd fink-client \
-#     && source /venv/bin/activate \
-#     && pip install .
-
+# Irritating that the mongodb debian apt aarchive doesn't have debian
+#   arm packages for mongodb-database-tools, nor does it have them for
+#   any architecture for trixie.  So, build from source.
+#
+# (...and even though this needs golang installed for ./make build to even run,
+#  the first thing it does it download go...)
+RUN git clone https://github.com/mongodb/mongo-tools.git \
+  && cd mongo-tools \
+  && ./make build \
+  && cp -p bin/mongodump /usr/local/bin \
+  && cp -p bin/mongorestore /usr/local/bin \
+  && cd .. \
+  && rm -rf mongo-tools
 
 # ======================================================================
 # This is for the test webserver.  It installs crappy keys so you
@@ -115,6 +124,8 @@ RUN patch /venv/lib/python3.13/site-packages/pittgoogle/pubsub.py /tmp/pubsub.pa
 FROM base AS test
 
 COPY --from=build /venv/ /venv/
+COPY --from=build /usr/local/bin/mongodump /usr/local/bin/mongodump
+COPY --from=build /usr/local/bin/mongorestore /usr/local/bin/mongorestore
 ENV PATH=/venv/bin:$PATH
 
 RUN mkdir -p /fastdb/webserver
@@ -137,6 +148,8 @@ ENTRYPOINT [ "gunicorn", "--certfile", "/usr/src/cert.pem", "--keyfile", "/usr/s
 FROM base AS shell
 
 COPY --from=build /venv/ /venv/
+COPY --from=build /usr/local/bin/mongodump /usr/local/bin/mongodump
+COPY --from=build /usr/local/bin/mongorestore /usr/local/bin/mongorestore
 ENV PATH=/venv/bin:$PATH
 
 RUN mkdir -p /fastdb/webserver
@@ -150,6 +163,8 @@ ENTRYPOINT [ "tail", "-f", "/etc/issue" ]
 FROM base AS webserver
 
 COPY --from=build /venv/ /venv/
+COPY --from=build /usr/local/bin/mongodump /usr/local/bin/mongodump
+COPY --from=build /usr/local/bin/mongorestore /usr/local/bin/mongorestore
 ENV PATH=/venv/bin:$PATH
 
 RUN mkdir -p /fastdb/webserver
