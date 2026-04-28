@@ -139,9 +139,10 @@ def check_mongodb( collection_base_name, tfirstalert, cached_alerts=False ):
             forcedsources = list( mg.collection( f"{base}_diaforcedsource" ).find( {} ) )
             brokerinfos = list( mg.collection( f"{base}_brokerinfo" ).find( {} ) )
 
-            assert ( set( c['msg']['diaObject']['diaObjectId'] for c in cachedalerts )
+            assert ( set( c['msg']['diaSource']['diaObjectId'] for c in cachedalerts )
                      == set( o['diaobjectid'] for o in objects ) )
-            allsources = set( c['msg']['diaSourceId'] for c in cachedalerts )
+            allsources = set( c['msg']['diaSourceId'] for c in cachedalerts
+                              if ( c['msg']['diaSource']['diaObjectId'] not in [0, None] ) )
             assert allsources.issubset( set( s['diasourceid'] for s in sources ) )
             assert allsources == set( b['diasourceid'] for b in brokerinfos )
             allforcedsources = set()
@@ -149,8 +150,7 @@ def check_mongodb( collection_base_name, tfirstalert, cached_alerts=False ):
                 if c['msg']['prvDiaSources'] is not None:
                     allsources = allsources.union( set( m['diaSourceId'] for m in c['msg']['prvDiaSources'] ) )
                 if c['msg']['prvDiaForcedSources'] is not None:
-                    allforcedsources = allforcedsources.union( set( m['diaForcedSourceId']
-                                                                    for m in c['msg']['prvDiaForcedSources'] ) )
+                    allforcedsources = allforcedsources.union( set( m['diaForcedSourceId'] ) )
             assert allsources == set( s['diasourceid'] for s in sources )
             assert allforcedsources == set( f['diaforcedsourceid'] for f in forcedsources )
 
