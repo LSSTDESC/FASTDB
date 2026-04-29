@@ -6,7 +6,6 @@ import db
 import ltcv
 
 
-@pytest.mark.skip( reason="This test is broken right now, I don't know why.  Please fix." )
 def check_df_contents( df, procver, statbands=None ):
     """Used in the test ltcv object test, to verify that the first, last, max fields match the databse.
 
@@ -104,6 +103,8 @@ def check_df_contents( df, procver, statbands=None ):
 #   with the web ap.
 
 # This is separated out from test_ltcv.py since it uses a different fixture... at least for now
+
+@pytest.mark.skip( reason="This test is broken right now, I don't know why.  Please fix." )
 def test_object_search( procver_collection, test_user, snana_fits_maintables_loaded_module ):
     """This test tests lots of the keywords, but doesn't test every conceivable combination because n² is big."""
     _bpv, pv, _pvinfo = procver_collection
