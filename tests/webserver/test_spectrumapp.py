@@ -12,9 +12,7 @@ import db
 
 
 @pytest.fixture
-def setup_wanted_spectra_etc( procver_collection, alerts_90days_sent_received_and_imported, test_user ):
-    bpvs, _pvs = procver_collection
-    rtbpv = bpvs['realtime']
+def setup_wanted_spectra_etc( alerts_90days_sent_received_and_imported, test_user ):
     # Prime the database with some wanted spectra
     # Some objects of interest:
     #    1696949 — 5 detections, 5 forced
@@ -42,11 +40,17 @@ def setup_wanted_spectra_etc( procver_collection, alerts_90days_sent_received_an
     try:
         with db.DB() as con:
             cursor = con.cursor()
-            cursor.execute( "SELECT rootid,diaobjectid FROM diaobject "
-                            "WHERE diaobjectid=ANY(%(obj)s) AND base_procver_id=%(procver)s",
-                            { 'obj': [ 1696949, 1981540, 191776, 1747042, 1173200 ],
-                              'procver': rtbpv.id } )
-            idmap = { r[1]: r[0] for r in cursor.fetchall() }
+            # I am shortcutting this next query and not dealing with procver, etc., because
+            # I know the snana import fixture only has one processing version for everything.
+            cursor.execute( "SELECT o.rootid,o.diaobjectid,p.ra,p.dec "
+                            "FROM diaobject o "
+                            "INNER JOIN diaobject_position p ON p.diaobjectid=o.diaobjectid "
+                            "WHERE o.diaobjectid=ANY(%(obj)s)",
+                            { 'obj': [ 1696949, 1028798, 191776, 1747042, 1173200 ]} )
+            rows = cursor.fetchall()
+            idmap = { r[1]: r[0] for r in rows }
+            ramap = { r[1]: r[2] for r in rows }
+            decmap = { r[1]: r[3] for r in rows }
             assert len(idmap) == 5
 
             # requester1 has asked for all five
@@ -63,7 +67,7 @@ def setup_wanted_spectra_etc( procver_collection, alerts_90days_sent_received_an
                             "                          requester,priority) "
                             "VALUES (%(wid)s,%(rid)s,%(t)s,%(uid)s,%(req)s,%(prio)s)",
                             { 'wid': uuid.uuid4(),
-                              'rid': idmap[1981540],
+                              'rid': idmap[1028798],
                               't': now - datetime.timedelta( days=1 ),
                               'uid': test_user.id,
                               'req': 'requester1',
@@ -134,15 +138,19 @@ def setup_wanted_spectra_etc( procver_collection, alerts_90days_sent_received_an
 
             # One of the planned spectra was observed
             cursor.execute( "INSERT INTO spectruminfo(specinfo_id,root_diaobject_id,facility,inserted_at,"
-                            "                         mjd,z,classid) "
-                            "VALUES (%(sid)s,%(rid)s,%(fac)s,%(t)s,%(mjd)s,%(z)s,%(class)s)",
+                            "                         mjd,z,classid,ra,dec,is_host) "
+                            "VALUES (%(sid)s,%(rid)s,%(fac)s,%(t)s,%(mjd)s,%(z)s,%(class)s,%(ra)s,%(dec)s,%(ishost)s)",
                             { 'sid': uuid.uuid4(),
                               'rid': idmap[191776],
                               'fac': 'test facility',
                               't': now - datetime.timedelta( days=1 ),
                               'mjd': mjdnow - 2,
                               'z': 0.25,
-                              'class': 2222 } )
+                              'class': 2222,
+                              'ra': ramap[191776],
+                              'dec': decmap[191776],
+                              'ishost': False
+                             } )
 
             con.commit()
 
@@ -207,14 +215,14 @@ def setup_spectrum_info( setup_wanted_spectra_etc ):
 
 
 def test_ask_for_spectra( procver_collection, alerts_90days_sent_received_and_imported, fastdb_client ):
-    _bpvs, pvs = procver_collection
+    _bpvs, pvs, _pvinfo = procver_collection
     rtpv = pvs['realtime']
     try:
         # Get some hot lightcurves
-        df, objdf, _hostdf = ltcv.get_hot_ltcvs( rtpv.description, mjd_now=60328., source_patch=True )
+        df, objdf = ltcv.get_hot_ltcvs( rtpv.description, mjd_now=60328., source_patch=True, return_format='pandas' )
         assert df.index.get_level_values('mjd').max() < 60328.
-        assert len(objdf.rootid.unique()) == 14
-        assert len(df) == 310
+        assert len(objdf.rootid.unique()) == 13
+        assert len(df) == 294
 
         # Pick out five objects to ask for spectra
 
@@ -294,15 +302,15 @@ def test_get_wanted_spectra( setup_wanted_spectra_etc, fastdb_client ):
     #   observed spectra in the last 7 days, and that have been detected
     #   in the last 14 days.  That should throw out 1696949 and 191776
     #   (both requested in the last 7 days), as well as 1747042 and
-    #   1173200 (neither detected in the last 14 days), leaving only 1981540.
-    # 1981540 only has one requester, so there should only be one entry
+    #   1173200 (neither detected in the last 14 days), leaving only 1028798.
+    # 1028798 only has one requester, so there should only be one entry
     #   in the resutant list.
 
     res = fastdb_client.post( '/spectrum/spectrawanted', json={ 'mjd_now': mjdnow } )
     assert isinstance( res, dict )
     assert res['status'] == 'ok'
     assert len( res['wantedspectra'] ) == 1
-    assert str( res['wantedspectra'][0]['root_diaobject_id'] ) == str( idmap[1981540] )
+    assert str( res['wantedspectra'][0]['root_diaobject_id'] ) == str( idmap[1028798] )
 
     # Test 2 : set a bunch of filters to None to see if we get everything
     # We should get back *6* responses.  Five objects, but one is requested
@@ -352,7 +360,7 @@ def test_get_wanted_spectra( setup_wanted_spectra_etc, fastdb_client ):
     assert len( res['wantedspectra'] ) == 4
     assert all( r['requester'] == 'requester1' for r in res['wantedspectra'] )
     assert set( r['root_diaobject_id'] for r in res['wantedspectra'] ) == { str(idmap[i]) for i in
-                                                                            [ 1696949, 1981540, 191776, 1747042 ] }
+                                                                            [ 1696949, 1028798, 191776, 1747042 ] }
 
 
     # Test 7: detected_in_last_days = 15 should throw out 1747042 and 1173200
@@ -363,7 +371,7 @@ def test_get_wanted_spectra( setup_wanted_spectra_etc, fastdb_client ):
     assert len( res['wantedspectra'] ) == 3
     assert all( r['requester'] == 'requester1' for r in res['wantedspectra'] )
     assert set( r['root_diaobject_id'] for r in res['wantedspectra'] ) == { str(idmap[i]) for i in
-                                                                            [ 1696949, 1981540, 191776 ] }
+                                                                            [ 1696949, 1028798, 191776 ] }
 
     # Test 8: passing both detected_in_last_days and detected_since_mjd should ignore ..._last_days
     res = fastdb_client.post( '/spectrum/spectrawanted', json={ 'mjd_now': mjdnow,
@@ -374,7 +382,7 @@ def test_get_wanted_spectra( setup_wanted_spectra_etc, fastdb_client ):
     assert len( res['wantedspectra'] ) == 4
     assert all( r['requester'] == 'requester1' for r in res['wantedspectra'] )
     assert set( r['root_diaobject_id'] for r in res['wantedspectra'] ) == { str(idmap[i]) for i in
-                                                                            [ 1696949, 1981540, 191776, 1747042 ] }
+                                                                            [ 1696949, 1028798, 191776, 1747042 ] }
 
     # Test 10 and 11: check requester
     res = fastdb_client.post( '/spectrum/spectrawanted', json={ 'mjd_now': mjdnow,
@@ -407,7 +415,7 @@ def test_get_wanted_spectra( setup_wanted_spectra_etc, fastdb_client ):
     assert str(idmap[1173200]) not in [ r['root_diaobject_id'] for r in res['wantedspectra'] ]
     assert str(idmap[1747042]) not in [ r['root_diaobject_id'] for r in res['wantedspectra'] ]
 
-    # Test 13: lim_mag = 23.0 and lim_mag_band='r' should throw out 1981540 and 1173200
+    # Test 13: lim_mag = 23.0 and lim_mag_band='r' should throw out 1028798 and 1173200
     res = fastdb_client.post( '/spectrum/spectrawanted', json={ 'mjd_now': mjdnow,
                                                                 'not_claimed_in_last_days': None,
                                                                 'detected_since_mjd': None,
@@ -418,7 +426,7 @@ def test_get_wanted_spectra( setup_wanted_spectra_etc, fastdb_client ):
     assert len( set( r['root_diaobject_id'] for r in res['wantedspectra'] ) ) == 3
     assert str(idmap[1696949]) in [ r['root_diaobject_id'] for r in res['wantedspectra'] ]
     assert str(idmap[1173200]) not in [ r['root_diaobject_id'] for r in res['wantedspectra'] ]
-    assert str(idmap[1981540]) not in [ r['root_diaobject_id'] for r in res['wantedspectra'] ]
+    assert str(idmap[1028798]) not in [ r['root_diaobject_id'] for r in res['wantedspectra'] ]
 
 
 def test_plan_spectrum( setup_wanted_spectra_etc, fastdb_client ):
