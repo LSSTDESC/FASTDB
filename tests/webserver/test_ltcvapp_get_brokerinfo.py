@@ -6,7 +6,7 @@ import re
 
 def test_getbrokerinfo( alerts_90days_sent_received_and_imported, fastdb_client ):
     for suffix in [ "", "/realtime" ]:
-        srcs = [ 2971700022, 174704200008, 198154000035 ]
+        srcs = [ 2971700022, 174704200008, 19177600031 ]
 
         res = fastdb_client.post( f'/ltcv/getbrokerinfo{suffix}', json={ 'diasourceids': srcs } )
         assert len(res) == 3
