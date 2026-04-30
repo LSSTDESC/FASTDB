@@ -21,13 +21,24 @@ def test_what_spectra_are_wanted( wanted_spectra, planned_spectra, reported_spec
         #  directly to the pythong thing.
         assert all( i.values[0] for i in [ df.loc[ df.id==w.wantspec_id, attr ] == getattr( w, attr )
                                            for w in wanted_spectra ] )
-    # root positions won't be the same as the averaged source positions that what_spectra_are_wanted
-    #   will have returned
-    assert all ( df.loc[ df.id==w.wantspec_id, 'ra' ].values[0] == pytest.approx( w.ra, abs=1./3600. )
+    # ra and dec should match "exactly", because they should have been copied from wanted_spectra
+    assert all( df.loc[ df.id==w.wantspec_id, 'ra' ].values[0] == pytest.approx( w.ra, rel=1e-11 )
+                for w in wanted_spectra )
+    assert all( df.loc[ df.id==w.wantspec_id, 'dec' ].values[0] == pytest.approx( w.dec, rel=1e-11 )
+                for w in wanted_spectra )
+    # mean position should not match perfectly, but close, and really I
+    #   should probably calculate it here like I did in the
+    #   lightcurve_checker fixture used in test_ltcv.py, but omg that
+    #   was a nightmare of processing versions and so forth, so let's
+    #   just be loosey-goosey here
+    assert not any( df.loc[ df.id==w.wantspec_id, 'diaobj_meanra' ].values[0] == pytest.approx( w.ra, rel=1e-7 )
                  for w in wanted_spectra )
-    assert all ( df.loc[ df.id==w.wantspec_id, 'dec' ].values[0] == pytest.approx( w.dec, abs=1./3600. )
+    assert not any( df.loc[ df.id==w.wantspec_id, 'diaobj_meandec' ].values[0] == pytest.approx( w.dec, rel=1e-7 )
                  for w in wanted_spectra )
-
+    assert all( df.loc[ df.id==w.wantspec_id, 'diaobj_meanra' ].values[0] == pytest.approx( w.ra, abs=1./3600. )
+                 for w in wanted_spectra )
+    assert all( df.loc[ df.id==w.wantspec_id, 'diaobj_meandec' ].values[0] == pytest.approx( w.dec, abs=1./3600. )
+                 for w in wanted_spectra )
 
     # The first two should have a last detection of 60030 and a last forced of 60050, because they're object 0
     subdf = df[ df.root_diaobject_id==roots[0]['root'].id ]

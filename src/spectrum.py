@@ -106,8 +106,11 @@ def what_spectra_are_wanted( procver='realtime', position_procver=None,
          diabojectid [ WARNING -- these aren't unique, so this is just a "random" one ]
          requester
          priority
-         ra
-         dec
+         ra -- ra given by the requester
+         dec -- dec given by the requester
+         diaobj_meanra  -- weghted average of detection positions of transient.  DO NOT USE FOR HOST
+         diaobj_meandec -- weighted average of detection positions of transient.  DO NOT USE FOR HOST.
+         is_hsot -- True if the requester claimed this was a host position, False if a transient position
          src_mjd -- mjd of latest detection
          src_band -- band of latest detection
          src_mag -- magnitude (AB) of latest detection
