@@ -9,7 +9,7 @@ import logging
 import numpy as np
 import pandas
 import astropy.time
-# from psycopg import sql
+from psycopg import sql
 
 import db
 import util
@@ -282,14 +282,14 @@ def what_spectra_are_wanted( procver='realtime', position_procver=None,
     if lim_mag is not None:
         if lim_mag_band is not None:
             # We should only have (at most) one magntiude for each band
-            lim_srcltcvs = srcltcvs.loc[ srcltcvs.src_band == lim_mag_band ]
-            lim_frcltcvs = frcltcvs.loc[ frcltcvs.frced_band == lim_mag_band ]
+            lim_srcltcvs = srcltcvs.loc[ srcltcvs.src_band == lim_mag_band, [ "rootid", "src_mjd", "src_mag" ] ]
+            lim_frcltcvs = frcltcvs.loc[ frcltcvs.frced_band == lim_mag_band,[ "rootid", "frced_mjd", "frced_mag" ] ]
         else:
-            lim_srcltcvs = srcltcvs.loc[ srcltcvs.groupby(["rootid"])["src_mjd"].idxmax() ]
-            lim_frcltcvs = frcltcvs.loc[ frcltcvs.groupby(["rootid"])["frced_mjd"].idxmax() ]
+            lim_srcltcvs = srcltcvs.loc[ srcltcvs.groupby(["rootid"])["src_mjd"].idxmax(),
+                                        [ "rootid", "src_mjd", "src_mag" ] ]
+            lim_frcltcvs = frcltcvs.loc[ frcltcvs.groupby(["rootid"])["frced_mjd"].idxmax(),
+                                        [ "rootid", "frced_mjd", "frced_mag" ] ]
 
-        lim_srcltcvs = lim_srcltcvs.loc[ lim_srcltcvs.src_mag < lim_mag, ["rootid", "src_mjd", "src_mag"] ]
-        lim_frcltcvs = lim_frcltcvs.loc[ lim_frcltcvs.frced_mag < lim_mag, ["rootid", "frced_mjd", "frced_mag"] ]
         lim_srcltcvs.set_index( 'rootid', inplace=True )
         lim_frcltcvs.set_index( 'rootid', inplace=True )
         lim_ltcvs = lim_srcltcvs.join( lim_frcltcvs, how='outer' )
@@ -351,96 +351,35 @@ def get_spectrum_info( logger=None, **kwargs ):
             logout.setFormatter( formatter )
             logger.setLevel( logging.INFO )
 
-    # with db.DBCon() as con:
-    #     q = sql.SQL( "SELECT * FROM spectruminfo " )
+    with db.DBCon() as con:
+        q = sql.SQL( "SELECT * FROM spectruminfo " )
 
-    #     # Backwards compatibility
-    #     if 'since' in kwargs:
-    #         kwargs['inserted_at_min'] = kwargs['since']
-    #         del kwargs['since']
-    #     if 'root_diaobject_ids' in kwargs:
-    #         kwargs['root_diaobject_id'] = kwargs['root_diaobject_ids']
-    #         del kwargs['root_diaobject_ids']
+        # Backwards compatibility
+        if 'since' in kwargs:
+            kwargs['inserted_at_min'] = kwargs['since']
+            del kwargs['since']
+        if 'root_diaobject_ids' in kwargs:
+            kwargs['root_diaobject_id'] = kwargs['root_diaobject_ids']
+            del kwargs['root_diaobject_ids']
 
-    #     # searchspec = {
-    #     #     'root_diaobject_id':  { 'mult': True,  'substr': False, 'minmax': False },
-    #     #     'facility':           { 'mult': True,  'substr': True,  'minmax': True },
-    #     #     'mjd':                { 'mult': False, 'substr': False, 'minmax': True },
-    #     #     'z':                  { 'mult': False, 'substr': False, 'minmax': True },
-    #     #     'class_description':  { 'mult': True,  'substr': True,  'minmax': False },
-    #     #     'classid':            { 'mult': True,  'substr': False, 'minmax': True }
-    #     # }
+        searchspec = {
+            'root_diaobject_id':  { 'mult': True,  'substr': False, 'minmax': False },
+            'facility':           { 'mult': True,  'substr': True,  'minmax': True },
+            'mjd':                { 'mult': False, 'substr': False, 'minmax': True },
+            'z':                  { 'mult': False, 'substr': False, 'minmax': True },
+            'class_description':  { 'mult': True,  'substr': True,  'minmax': False },
+            'classid':            { 'mult': True,  'substr': False, 'minmax': True },
+            'is_host':            { 'mult': False, 'substr': False, 'minmax': False },
+            'inserted_at':        { 'mult': False, 'substr': False, 'minmax': True }
+        }
 
-    #     # for field, fieldinfo in searchspec:
-    #     #     if field in kwargs:
-    #     #         if util.isSequence( kwargs[field] ):
-    #     #             if not fieldinfo[ 'mult' ]:
-    #     #                 raise ValueError( f"Field {field} can't be a list" )
-    #     #             q += sql.SQL( "{where} {field}=ANY(%(field)s)" ).format( where=sql.SQL(where),
-    #     #                                                                      field=sql.Identifier(field) )
-    #     #             subdict['field'] = list( kwargs[field] )
-    #     #         else:
-    #     #             q += sql.SQL( f"{where} {field}=%(field)s" ).format( where=sql.SQL(where),
-    #     #                                                                  field=sql.Identifier(field) )
-    #     #             subdict['field'] = kwargs[field]
-    #     #         where = " AND "
+        whereq, subdict, leftovers, _where = db.construct_pgsql_where_clause( searchspec, **kwargs )
+        if len(leftovers) != 0:
+            raise ValueError( "Unknown arguments: {leftovers}" )
 
-    #     #     if f'field_contains' in kwargs:
-    #     #         if not fieldinfo['mult']:
-    #     #             raise ValueError( f'Field {field} doesn\'t work with "contains"' )
-    #     #         q += sql.SQL( f"{where} {field}="%%%(field)s%%" ).format( field=
+        q += whereq
 
+        rows, cols = con.execute( q, subdict )
+        df = pandas.DataFrame( rows, columns=cols )
 
-
-
-
-
-    #     if root_diaobject_ids is not None:
-    #         if util.isSequence( root_diaobject_ids ):
-    #             q += sql.SQL( f"{where} root_diaobject_id=ANY(%(ids)s) " )
-    #             subdict['ids'] = [ str(i) for i in root_diaobject_ids ]
-    #         else:
-    #             q += sql.SQL( f"{where} root_diaobject_id=%(id)s " )
-    #             subdict['id'] = str(root_diaobject_ids)
-    #         where = "AND"
-
-    #     if facility is not None:
-    #         q += sql.SQL( f"{where} facility=%(fac)s " )
-    #         subdict['fac'] = facility
-    #         where = "AND"
-
-    #     if mjd_min is not None:
-    #         q += sql.SQL( f"{where} mjd>=%(mjdmin)s " )
-    #         subdict['mjdmin'] = mjd_min
-    #         where = "AND"
-
-    #     if mjd_max is not None:
-    #         q += sql.SQL( f"{where} mjd<=%(mjdmax)s " )
-    #         subdict['mjdmax'] = mjd_max
-    #         where = "AND"
-
-    #     if classid is not None:
-    #         q += sql.SQL( f"{where} classid=%(class)s " )
-    #         subdict['class'] = classid
-    #         where = "AND"
-
-    #     if z_min is not None:
-    #         q += sql.SQL( f"{where} z>=%(zmin)s " )
-    #         subdict['zmin'] = z_min
-    #         where = "AND"
-
-    #     if z_max is not None:
-    #         q += sql.SQL( f"{where} z<=%(zmax)s " )
-    #         subdict['zmax'] = z_max
-    #         where = "AND"
-
-    #     if since is not None:
-    #         q += sql.SQL( f"{where} inserted_at>=%(since)s " )
-    #         subdict['since'] = since
-    #         where = "AND"
-
-    #     cursor.execute( q, subdict )
-    #     columns = [ col.name for col in cursor.description ]
-    #     df = pandas.DataFrame( cursor.fetchall(), columns=columns )
-
-    # return df
+    return df

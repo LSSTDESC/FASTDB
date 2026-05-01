@@ -452,8 +452,8 @@ def construct_pgsql_where_clause( searchspec, where="WHERE", **kwargs ):
                 where = " AND"
             else:
                 q += sql.SQL( "{where} {field} LIKE %({sfield}_contains)s" ).format( where=sql.SQL(where),
-                                                                                           field=sql.Identifier(field),
-                                                                                           sfield=sql.SQL(field) )
+                                                                                     field=sql.Identifier(field),
+                                                                                     sfield=sql.SQL(field) )
                 subdict[f'{field}_contains'] = f"%{kwargs[f'{field}_contains']}%"
                 where = " AND"
             del kwargs[f'{field}_contains']
@@ -466,7 +466,8 @@ def construct_pgsql_where_clause( searchspec, where="WHERE", **kwargs ):
             q += sql.SQL( "{where} {field}>=%({sfield}_min)s" ).format( where=sql.SQL(where),
                                                                         field=sql.Identifier(field),
                                                                         sfield=sql.SQL(field) )
-            subdict['f{field}_min'] = kwargs[f'{field}_min']
+            subdict[f'{field}_min'] = kwargs[f'{field}_min']
+            where = " AND"
             del kwargs[f'{field}_min']
 
         if f'{field}_max' in kwargs:
@@ -475,12 +476,13 @@ def construct_pgsql_where_clause( searchspec, where="WHERE", **kwargs ):
             if util.isSequence( f'{field}_max' ):
                 raise ValueError( f"{field}_max can't be a list" )
             q += sql.SQL( "{where} {field}<=%({sfield}_max)s" ).format( where=sql.SQL(where),
-                                                                        field=sql.Identifier(field) )
+                                                                        field=sql.Identifier(field),
+                                                                        sfield=sql.SQL(field) )
             subdict[f'{field}_max'] = kwargs[f'{field}_max']
             where = " AND"
             del kwargs[f'{field}_max']
 
-    return q, subdict, set(kwargs.keys())
+    return q, subdict, set(kwargs.keys()), where
 
 
 # ======================================================================

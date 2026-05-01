@@ -140,8 +140,8 @@ def test_what_spectra_are_wanted( wanted_spectra, planned_spectra, reported_spec
     # ...should probably do all kinds of tests combining the criteria, huh.
 
 
-@pytest.mark.skip( reason="get_spectrum_info is currently broken" )
 def test_get_spectrum_info( set_of_lightcurves, reported_spectra, more_reported_spectra ):
+    # TODO, look at these tests; the spectruminfo table has evolved a bit since they were written
     roots = set_of_lightcurves
 
     df = get_spectrum_info( root_diaobject_ids=roots[0]['root'].id )
