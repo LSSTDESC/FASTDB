@@ -84,9 +84,12 @@ class TestWantedSpectra( BaseTestDB ):
                          'wanttime',
                          'user_id',
                          'requester',
-                         'priority'
+                         'priority',
+                         'is_host',
+                         'ra',
+                         'dec'
                         }
-        self.safe_to_modify = [ 'wanttime', 'requester', 'priority' ]
+        self.safe_to_modify = [ 'wanttime', 'requester', 'priority', 'is_host', 'ra', 'dec' ]
         self.uniques = []
 
         t0 = datetime.datetime.now( tz=datetime.UTC )
@@ -97,31 +100,46 @@ class TestWantedSpectra( BaseTestDB ):
                                    wanttime=t0,
                                    user_id=test_user.id,
                                    requester="Test Requester 1",
-                                   priority=1 )
+                                   priority=1,
+                                   is_host=True,
+                                   ra=1.,
+                                   dec=1. )
         self.dict1 = { 'wantspec_id': self.obj1.wantspec_id,
                        'root_diaobject_id': rootobj1.id,
                        'wanttime': t0,
                        'user_id': test_user.id,
                        'requester': "Test Requester 1",
-                       'priority': 1 }
+                       'priority': 1,
+                       'is_host': True,
+                       'ra': 1.,
+                       'dec': 1. }
         self.obj2 = WantedSpectra( wantspec_id=f'{rootobj2.id} ; testquester2',
                                    root_diaobject_id=rootobj2.id,
                                    wanttime=t1,
                                    user_id=test_user.id,
                                    requester="Test Requester 2",
-                                   priority=2 )
+                                   priority=2,
+                                   is_host=True,
+                                   ra=2.,
+                                   dec=2. )
         self.dict2 = { 'wantspec_id': self.obj2.wantspec_id,
                        'root_diaobject_id': rootobj2.id,
                        'wanttime': t1,
                        'user_id': test_user.id,
                        'requester': "Test Requester 2",
-                       'priority': 2 }
+                       'priority': 2,
+                       'is_host': True,
+                       'ra': 2.,
+                       'dec': 2. }
         self.dict3 = { 'wantspec_id': f'{rootobj1.id} ; testquester3',
                        'root_diaobject_id': rootobj1.id,
                        'wanttime': t2,
                        'user_id': test_user.id,
                        'requester': "Test Requester 3",
-                       'priority': 3 }
+                       'priority': 3,
+                       'is_host': False,
+                       'ra': 3.,
+                       'dec': 3. }
 
 
 class TestPlannedSpectra( BaseTestDB ):
@@ -134,8 +152,10 @@ class TestPlannedSpectra( BaseTestDB ):
                          'facility',
                          'created_at',
                          'plantime',
-                         'comment' }
-        self.safe_to_modify = [ 'facility', 'created_at', 'plantime', 'comment' ]
+                         'comment',
+                         'is_host',
+                         'wantspec_id' }
+        self.safe_to_modify = [ 'facility', 'created_at', 'plantime', 'comment', 'is_host', 'wantspec_id' ]
         self.uniques = []
 
         ct0 = datetime.datetime.now( tz=datetime.UTC )
@@ -149,28 +169,38 @@ class TestPlannedSpectra( BaseTestDB ):
                                     facility="4Most",
                                     created_at=ct0,
                                     plantime=pt0,
-                                    comment="This is the most important one." )
+                                    comment="This is the most important one.",
+                                    is_host=True,
+                                    wantspec_id="a ; 1" )
         self.dict1 = { 'plannedspec_id': self.obj1.plannedspec_id,
                        'root_diaobject_id': rootobj1.id,
                        'facility': "4Most",
                        'created_at': ct0,
                        'plantime': pt0,
-                       'comment': "This is the most important one." }
+                       'comment': "This is the most important one.",
+                       'is_host': True,
+                       'wantspec_id': "a ; 1" }
         self.obj2 = PlannedSpectra( plannedspec_id=uuid.UUID( '5be6c122-2fa4-4b7d-aa76-7d617951d64c' ),
                                     root_diaobject_id=rootobj2.id,
                                     facility="Subaru",
                                     created_at=ct1,
                                     plantime=pt1,
-                                    comment="No, this is the most important one." )
+                                    comment="No, this is the most important one.",
+                                    is_host=True,
+                                    wantspec_id="b ; 2" )
         self.dict2 = { 'plannedspec_id': self.obj2.plannedspec_id,
                        'root_diaobject_id': rootobj2.id,
                        'facility': "Subaru",
                        'created_at': ct1,
                        'plantime': pt1,
-                       'comment': "No, this is the most important one." }
+                       'comment': "No, this is the most important one.",
+                       'is_host': True,
+                       'wantspec_id': "b ; 2" }
         self.dict3 = { 'plannedspec_id': uuid.UUID( '028cafa3-2fb8-4540-bacd-0702b8d6c01c' ),
                        'root_diaobject_id': rootobj1.id,
                        'facility': "My C8 in my back yard",
                        'created_at': ct2,
                        'plantime': pt2,
-                       'comment': "Guys. You are wrong. This one is really the most important." }
+                       'comment': "Guys. You are wrong. This one is really the most important.",
+                       'is_host': False,
+                       'wantspec_id': "c ; 3" }
