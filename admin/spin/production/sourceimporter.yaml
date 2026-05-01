@@ -25,7 +25,7 @@ spec:
           - command: [ '/bin/bash' ]
             args:
               - -c
-              - "python /fastdb/services/source_importer.py -o realtime_0 -p realtime_0 -s realtime_0 -f realtime_0 -v -c fink_alerts fink_uniform > /logs/sourceimporter_`date -Isec`.log 2>&1"
+              - "python /fastdb/services/source_importer.py -o realtime_0 -p realtime_0 -s realtime_0 -f realtime_0 -c fink_alerts fink_uniform pittgoogle_mod113 > /logs/sourceimporter_`date -Isec`.log 2>&1"
             workingDir: /brokerconsumer
             env:
             - name: MONGODB_HOST
@@ -70,7 +70,7 @@ spec:
                   key: mongodb_alert_reader_password
                   name: secrets
                   optional: false
-            image: registry.nersc.gov/m1727/raknop/fastdb-shell:20260225b
+            image: registry.nersc.gov/m1727/raknop/fastdb-shell:20260501
             imagePullPolicy: IfNotPresent
             name: sourceimporter
             resources: {}
@@ -119,6 +119,6 @@ spec:
               path: /global/cfs/cdirs/desc-td/SOFTWARE/fastdb_deployment/production/brokerconsumer_logs
               type: Directory
             name: fastdb-brokerconsumer-logs
-  schedule: "26 * * * *"
+  schedule: "55 * * * *"
   successfulJobsHistoryLimit: 3
   suspend: false
