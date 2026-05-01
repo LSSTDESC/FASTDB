@@ -227,6 +227,9 @@ class SourceImporter:
                                           "                           decerr, ra_dec_cov) FROM STDIN" )
                        as pgcopy ):
                     for row in mongocursor:
+                        # Sometimes alerts may have been solar system objects
+                        if ( row['diaobjectid'] is None ) or ( row['diaobjectid'] == 0 ):
+                            continue
                         data = [ str(row['diaobjectid']), None, str(self.object_base_processing_version) ]
                         if row['diaobjectposition'] is None:
                             data.extend( [ None, None, None, None, None, None ] )
@@ -243,7 +246,7 @@ class SourceImporter:
 
     def _read_mongo_fields( self, dbcon, collection, pipeline, fields,
                             temptable, liketable, batchsize=10000,
-                            base_procver_id=None ):
+                            base_procver_id=None, rejectfields={}, rejectid=None ):
 
         if not self.debug_just_read_mongo:
             q = sql.SQL( "CREATE TEMP TABLE IF NOT EXISTS {temptable} (LIKE {liketable})"
@@ -262,6 +265,7 @@ class SourceImporter:
         if base_procver_id is not None:
             writefields.append( 'base_procver_id' )
         n = 0
+        rejects = set()
 
         if self.debug_just_read_mongo:
             gratuitous = 0
@@ -272,18 +276,30 @@ class SourceImporter:
         else:
             with dbcon.cursor.copy( f"COPY {temptable}({','.join(writefields)}) FROM STDIN" ) as pgcopy:
                 for row in mongocursor:
-                    # This is probably inefficient.  Generator to list to tuple.  python makes
-                    #   writing this easy, but it's probably doing multiple gratuitous memory copies
-                    data = [ None if row[f] is None
-                             else simplejson.dumps(row[f], ignore_nan=True) if isinstance( row[f], dict )
-                             else row[f]
-                             for f in fields ]
-                    if base_procver_id is not None:
-                        data.append( base_procver_id )
-                    pgcopy.write_row( tuple( data ) )
-                    n += 1
+                    # We may need to reject some things.  E.g., we may have pulled alerts that have
+                    #  no diaboejctid because they are solar system lists.
+                    # NOT PERFECT : because of how brokerconsumer works, we can't filter these rows
+                    #  out thumbnails, so extra stuff will show up there.
+                    if any( ( f in row ) and ( row[f] in bads ) for f, bads in rejectfields.items() ):
+                        FDBLogger.debug( f"...rejecting row from {collection} : {row}" )
+                        if rejectid is not None:
+                            rejects.add( row[rejectid] )
+
+                    else:
+                        # This is probably inefficient.  Generator to list to tuple.  python makes
+                        #   writing this easy, but it's probably doing multiple gratuitous memory copies
+                        data = [ None if row[f] is None
+                                 else simplejson.dumps(row[f], ignore_nan=True) if isinstance( row[f], dict )
+                                 else row[f]
+                                 for f in fields ]
+                        if base_procver_id is not None:
+                            data.append( base_procver_id )
+                        pgcopy.write_row( tuple( data ) )
+                        n += 1
 
             FDBLogger.debug( f"      ...wrote {n} rows to {temptable}" )
+
+        return rejects
 
 
     def read_mongo_sources( self, dbcon, t0=None, t1=None, batchsize=10000 ):
@@ -304,9 +320,10 @@ class SourceImporter:
             self._add_mongo_time_limits_to_pipeline( pipeline, t0, t1 )
             pipeline.append( { "$group": group } )
             collection = mg.collection( f"{self.collection_base_name}_diasource" )
-            self._read_mongo_fields( dbcon, collection, pipeline, self.diasource_fields,
-                                     "temp_diasource_import", "diasource",
-                                     batchsize=batchsize, base_procver_id=self.source_base_processing_version )
+            rejects= self._read_mongo_fields( dbcon, collection, pipeline, self.diasource_fields,
+                                              "temp_diasource_import", "diasource",
+                                              batchsize=batchsize, base_procver_id=self.source_base_processing_version,
+                                              rejectfields={ 'diaobjectid': { 0, None } }, rejectid='diasourceid' )
 
             group = { "_id": "$diasourceid" }
             group.update( { k: { "$first": f"${k}" } for k in self.diasource_extra_fields } )
@@ -316,7 +333,8 @@ class SourceImporter:
             collection = mg.collection( f"{self.collection_base_name}_diasource_extra" )
             self._read_mongo_fields( dbcon, collection, pipeline, self.diasource_extra_fields,
                                      "temp_diasource_extra_import", "diasource_extra",
-                                     batchsize=batchsize, base_procver_id=self.source_base_processing_version )
+                                     batchsize=batchsize, base_procver_id=self.source_base_processing_version,
+                                     rejectfields={ 'diasourceid': rejects } )
 
 
     def read_mongo_prvforcedsources( self, dbcon, t0=None, t1=None, batchsize=10000 ):
@@ -338,9 +356,12 @@ class SourceImporter:
             group.update( { k: { "$first": f"${k}" } for k in self.diaforcedsource_fields } )
             pipeline.append( { "$group": group } )
             collection = mg.collection( f"{self.collection_base_name}_diaforcedsource" )
-            self._read_mongo_fields( dbcon, collection, pipeline, self.diaforcedsource_fields,
-                                     "temp_prvdiaforcedsource_import", "diaforcedsource",
-                                     batchsize=batchsize, base_procver_id=self.forcedsource_base_processing_version )
+            rejects = self._read_mongo_fields( dbcon, collection, pipeline, self.diaforcedsource_fields,
+                                               "temp_prvdiaforcedsource_import", "diaforcedsource",
+                                               batchsize=batchsize,
+                                               base_procver_id=self.forcedsource_base_processing_version,
+                                               rejectfields={ 'diaobjectid': { 0, None } },
+                                               rejectid='diaforcedsourceid' )
 
             pipeline = []
             self._add_mongo_time_limits_to_pipeline( pipeline, t0, t1 )
@@ -350,7 +371,8 @@ class SourceImporter:
             collection = mg.collection( f"{self.collection_base_name}_diaforcedsource_extra" )
             self._read_mongo_fields( dbcon, collection, pipeline, self.diaforcedsource_extra_fields,
                                      "temp_prvdiaforcedsource_extra_import", "diaforcedsource_extra",
-                                     batchsize=batchsize, base_procver_id=self.forcedsource_base_processing_version )
+                                     batchsize=batchsize, base_procver_id=self.forcedsource_base_processing_version,
+                                     rejectfields={ 'diaforcedsourceid': rejects } )
 
 
     def read_mongo_brokerinfo( self, dbcon, t0=None, t1=None, batchsize=1000 ):
@@ -381,7 +403,8 @@ class SourceImporter:
                                                                     "msgtime", "receivedtime", "importtime",
                                                                     "info" ],
                                      "temp_diasource_brokerinfo_import", "diasource_brokerinfo",
-                                     batchsize=batchsize, base_procver_id=self.source_base_processing_version )
+                                     batchsize=batchsize, base_procver_id=self.source_base_processing_version,
+                                     rejectfields={ 'diaobjectid': [ 0, None ] } )
 
 
     def import_objects( self, t0=None, t1=None, batchsize=10000, dbcon=None, commit=True ):
@@ -608,34 +631,36 @@ class SourceImporter:
         session = mg.client.start_session()
         session.start_transaction()
 
+        # Going to use cutoutDifference as the canary.
+        # We want to filter out bad diaobjectids.  However, we have to consider the case.
+        #   where diaobjectid is not in the stored cache, because this will be applied to
+        #   an existing database that had not saved diaobjectid in the mongo cache collection.
+        matchand = [ { "cutoutdifference": { "$ne": None } },
+                     { "$or": [ { "diaobjectid": { "$exists": False } },
+                                { "$and": [ { "diaobjectid": { "$ne": None} },
+                                            { "diaobjectid": { "$ne": 0 } }
+                                           ]
+                                 }
+                               ]
+                      } ]
         if t0 is not None:
-            if ( t1 is not None ):
-                pipeline = [ { "$match": { "$and": [ { "cutoutdifference": { "$ne": None } },
-                                                     { "savetime": { "$gt": t0 } },
-                                                     { "savetime": { "$lte": t1 } } ] } } ]
-            else:
-                pipeline = [ { "$match": { "$and": [ { "cutoutdifference": { "$ne": None } },
-                                                     { "savetime": { "$gt": t0 } } ] } } ]
-        elif t1 is not None:
-            pipeline = [ { "$match": { "$and": [ { "cutoutdifference": { "$ne": None } },
-                                                 { "savetime": { "$lte": t1 } } ] } } ]
-        else:
-            pipeline = [ { "$match": { "cutoutdifference": { "$ne": None } } } ]
+            matchand.append( { "savetime": { "$gt": t0 } } )
+        if t1 is not None:
+            matchand.append( { "savetime": { "$lte": t1 } } )
 
-
-        # Going to use cutoutDifference as the canary
-        pipeline.extend( [ { "$group": { "_id": "$diasourceid",
-                                         "diasourceid": { "$first": "$diasourceid" },
-                                         "base_procver_id": { "$first": str( self.source_base_processing_version ) },
-                                         "cutoutdifference": { "$first": "$cutoutdifference" },
-                                         "cutoutscience": { "$first": "$cutoutscience" },
-                                         "cutouttemplate": { "$first": "$cutouttemplate" }
-                                        } },
-                           { "$merge": { "into": "source_thumbnails",
-                                         "on": [ "diasourceid", "base_procver_id" ],
-                                         "whenMatched": "keepExisting"
-                                        } }
-                          ] )
+        pipeline = [ { "$match": { "$and": matchand } },
+                     { "$group": { "_id": "$diasourceid",
+                                   "diasourceid": { "$first": "$diasourceid" },
+                                   "base_procver_id": { "$first": str( self.source_base_processing_version ) },
+                                   "cutoutdifference": { "$first": "$cutoutdifference" },
+                                   "cutoutscience": { "$first": "$cutoutscience" },
+                                   "cutouttemplate": { "$first": "$cutouttemplate" }
+                                  } },
+                     { "$merge": { "into": "source_thumbnails",
+                                   "on": [ "diasourceid", "base_procver_id" ],
+                                   "whenMatched": "keepExisting"
+                                  } }
+                    ]
         FDBLogger.debug( "   ...aggregating cutouts to mongo source_thumbnails collection" )
         collection.aggregate( pipeline )
 

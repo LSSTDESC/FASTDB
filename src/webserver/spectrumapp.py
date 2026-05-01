@@ -8,7 +8,7 @@ import astropy.time
 import db
 import spectrum
 from webserver.baseview import BaseView
-from util import FDBLogger, asUUID
+from util import FDBLogger, asUUID, isSequence
 
 # Want this to be False except when
 #  doing deep-in-the-weeds debugging
@@ -23,35 +23,57 @@ class AskForSpectrum( BaseView ):
         userid = flask.session['useruuid']
 
         data = flask.request.json
-        if ( ( 'requester' not in data ) or
-             ( 'objectids' not in data ) or
-             ( 'priorities' not in data ) or
-             ( not isinstance( data['objectids'], list ) ) or
-             ( not isinstance( data['priorities'], list ) ) or
-             ( len( data['objectids'] ) != len( data['priorities'] ) ) ):
-            return "Mal-formed data for askforspectrum", 500
+        reqfields = [ 'requester', 'rootids', 'priorities', 'ras', 'decs' ]
+        missing = set( field for field in reqfields if field not in data )
+        if len(missing) > 0:
+            return f"Missing required fields: {missing}", 422
+
+        matchlen = [ 'rootids', 'priorities', 'ras', 'decs', 'is_hosts' ]
+        mismatch = {}
+        for field in matchlen:
+            if field not in data:
+                continue
+            if not isSequence( data[field] ):
+                data[field] = [ data[field] ]
+            if len( data[field] ) != len( data['rootids'] ):
+                mismatch.add( (field, len(data[field])) )
+        if len(mismatch) > 0:
+            return ( f"Lists must have the same length as rootids ({len(data['rootids'])}), "
+                     f"but the following had the the wrong lengths: {mismatch}" ), 422
+
+        # Specific field processing
 
         try:
-            objectids = [ asUUID(i) for i in data['objectids'] ]
+            rootids = [ asUUID(i) for i in data['rootids'] ]
         except Exception:
-            return "Error, all objectids must be UUIDs", 500
+            return "Error, all rootids must be UUIDs", 500
 
-        now = datetime.datetime.now( tz=datetime.UTC )
-        tocreate = [ { 'requester': data['requester'],
-                       'root_diaobject_id': objectids[i],
-                       'wantspec_id': f"{str(objectids[i])} ; {data['requester']}",
-                       'user_id': userid,
-                       'priority': ( 0 if int(data['priorities'][i]) < 0
-                                     else 5 if int(data['priorities'][i]) > 5
-                                     else int(data['priorities'][i] )),
-                       'wanttime': now }
-                       for i in range(len(objectids)) ]
+        is_hosts = data['is_hosts'] if 'is_hosts' in data else [False] * len(rootids)
 
-        n = db.WantedSpectra.bulk_insert_or_upsert( tocreate, upsert=True )
+        # Insert
 
-        return { 'status': 'ok',
-                 'message': 'wanted spectra created',
-                 'num': n }
+        try:
+            now = datetime.datetime.now( tz=datetime.UTC )
+            tocreate = [ { 'requester': data['requester'],
+                           'root_diaobject_id': rootids[i],
+                           'wantspec_id': f"{str(rootids[i])} ; {data['requester']}",
+                           'user_id': userid,
+                           'priority': ( 0 if int(data['priorities'][i]) < 0
+                                         else 5 if int(data['priorities'][i]) > 5
+                                         else int(data['priorities'][i] )),
+                           'is_host': is_hosts[i],
+                           'ra': data['ras'][i],
+                           'dec': data['decs'][i],
+                           'wanttime': now }
+                           for i in range(len(rootids)) ]
+
+            n = db.WantedSpectra.bulk_insert_or_upsert( tocreate, upsert=True )
+
+            return { 'status': 'ok',
+                     'message': 'wanted spectra created',
+                     'num': n }
+        except Exception as ex:
+            return f"Error inserting into the database: {ex}", 422
 
 
 # ======================================================================
@@ -68,6 +90,7 @@ class WhatSpectraAreWanted( BaseView ):
         lim_mag_band = data['lim_mag_band'] if 'lim_mag_band' in data else None
         lim_mag = float( data['lim_mag'] ) if 'lim_mag' in data else None
         requester = data['requester'] if 'requester' in data else None
+        is_host = data['is_host'] if 'is_host' in data else None
 
         if 'requested_since' in data.keys():
             try:
@@ -106,7 +129,7 @@ class WhatSpectraAreWanted( BaseView ):
         df = spectrum.what_spectra_are_wanted( procver=procver, wantsince=wantsince, requester=requester,
                                                notclaimsince=notclaimsince, nospecsince=nospecsince,
                                                detsince=detsince, lim_mag=lim_mag, lim_mag_band=lim_mag_band,
-                                               mjdnow=mjdnow, logger=FDBLogger )
+                                               is_host=is_host, mjdnow=mjdnow, logger=FDBLogger )
 
         # Build the return structure
         retarr = []
@@ -115,6 +138,7 @@ class WhatSpectraAreWanted( BaseView ):
                              'diaobjectid': row.diaobjectid,
                              'requester': row.requester,
                              'priority': row.priority,
+                             'is_host': row.is_host,
                              'ra': float( row.ra ),
                              'dec': float( row.dec ),
                              'latest_source_band': row.src_band,
@@ -186,17 +210,32 @@ class ReportSpectrumInfo( BaseView ):
     def do_the_things( self ):
         data = flask.request.json
 
-        if not all( i in data for i in [ 'root_diaobject_id', 'facility', 'mjd', 'z', 'classid' ] ):
-            return "JSON payload must include keys root_diaobject_id, facility, mjd, z, and classid", 500
+        knownfields = [ 'root_diaobject_id', 'facility', 'mjd', 'z', 'classid', 'ra', 'dec',
+                        'is_host', 'class_description' ]
+        neededfields = [ 'facility', 'mjd', 'ra', 'dec' ]
+        if not all( i in data for i in neededfields ):
+            return f"JSON payload must include at least keys {neededfields}", 422
+        unknown = set( i for i in data.keys() if i not in knownfields )
+        if len(unknown) > 0:
+            return f"Error, unknown keys: {unknown}", 422
 
-        specinfo = db.SpectrumInfo( root_diaobject_id=uuid.UUID( data['root_diaobject_id'] ),
+        def _nullcheck( x, typ, data ):
+            return ( None if ( ( x not in data ) or ( data[x] is None ) or ( str(data[x]).strip() == "" ) )
+                     else typ( data[x] ) )
+
+        specinfo = db.SpectrumInfo( root_diaobject_id=( None if 'root_diaobject_id' not in data
+                                                        else uuid.UUID( data['root_diaobject_id'] ) ),
                                     facility=str( data['facility'] ),
                                     inserted_at=datetime.datetime.now( tz=datetime.UTC ),
                                     mjd=float( data['mjd'] ),
-                                    z=( None if ( ( 'z' not in data ) or ( data['z'] is None ) or
-                                                  ( str(data['z']).strip()=="" ) )
-                                        else float( data['z'] ) ),
-                                    classid=int( data['classid'] ) )
+                                    ra=float( data['ra'] ),
+                                    dec=float( data['dec'] ),
+                                    z=_nullcheck( 'z', float, data ),
+                                    classid=_nullcheck( 'classid', int, data ),
+                                    is_host=_nullcheck( 'is_hsot', bool, data ),
+                                    class_description=_nullcheck( 'class_description', str, data )
+                                   )
+
         specinfo.insert( refresh=False )
 
         return { 'status': 'ok' }

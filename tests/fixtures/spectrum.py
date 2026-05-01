@@ -13,6 +13,9 @@ def wanted_spectra( set_of_lightcurves, test_user ):
 
     wanteds_list = [ { 'wantspec_id': f'{roots[0]["root"].id} ; req1',
                        'root_diaobject_id': roots[0]['root'].id,
+                       'ra': roots[0]['root'].ra,
+                       'dec': roots[0]['root'].dec,
+                       'is_host': False,
                        'wanttime': _dt_of_mjd(60010.),
                        'user_id': test_user.id,
                        'requester': 'req1',
@@ -20,6 +23,9 @@ def wanted_spectra( set_of_lightcurves, test_user ):
                       },
                      { 'wantspec_id': f'{roots[0]["root"].id} ; req2',
                        'root_diaobject_id': roots[0]['root'].id,
+                       'ra': roots[0]['root'].ra,
+                       'dec': roots[0]['root'].dec,
+                       'is_host': False,
                        'wanttime': _dt_of_mjd(60015.),
                        'user_id': test_user.id,
                        'requester': 'req2',
@@ -27,6 +33,9 @@ def wanted_spectra( set_of_lightcurves, test_user ):
                       },
                      { 'wantspec_id': f'{roots[1]["root"].id} ; req1',
                        'root_diaobject_id': roots[1]["root"].id,
+                       'ra': roots[1]['root'].ra,
+                       'dec': roots[1]['root'].dec,
+                       'is_host': False,
                        'wanttime': _dt_of_mjd(60025.),
                        'user_id': test_user.id,
                        'requester': 'req1',
@@ -34,6 +43,9 @@ def wanted_spectra( set_of_lightcurves, test_user ):
                       },
                      { 'wantspec_id': f'{roots[2]["root"].id} ; req1',
                        'root_diaobject_id': roots[2]["root"].id,
+                       'ra': roots[2]['root'].ra,
+                       'dec': roots[2]['root'].dec,
+                       'is_host': True,
                        'wanttime': _dt_of_mjd(60050.),
                        'user_id': test_user.id,
                        'requester': 'req1',
@@ -57,16 +69,24 @@ def wanted_spectra( set_of_lightcurves, test_user ):
 
 
 @pytest.fixture( scope="module" )
-def planned_spectra( set_of_lightcurves ):
+def planned_spectra( set_of_lightcurves, wanted_spectra ):
     roots = set_of_lightcurves
 
     planneds_list = [ { 'root_diaobject_id': roots[1]['root'].id,
                         'facility': 'test facility',
                         'plantime': _dt_of_mjd(60030.),
+                        'wantspec_id': wanted_spectra[2].wantspec_id,
+                        'is_host': False,
                        },
                       { 'root_diaobject_id': roots[2]['root'].id,
                         'facility': 'test facility',
                         'plantime': _dt_of_mjd(60055.),
+                        'is_host': True
+                       },
+                      { 'root_diaobject_id': roots[2]['root'].id,
+                        'facility': 'test facility',
+                        'plantime': _dt_of_mjd(60055.),
+                        'is_host': False
                        } ]
 
     try:
@@ -145,7 +165,7 @@ def more_reported_spectra( set_of_lightcurves, reported_spectra ):
                      'classid': 666,
                      'ra': roots[2]['root'].ra,
                      'dec': roots[2]['root'].dec,
-                     'is_host': False
+                     'is_host': True
                     } ]
     try:
         with db.DBCon() as con:

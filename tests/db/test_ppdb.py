@@ -2,23 +2,22 @@ import uuid
 import pytest
 
 from db import DB, PPDBHostGalaxy, PPDBDiaObject, PPDBDiaSource, PPDBDiaForcedSource
+from util import env_as_bool
 
 from basetest import BaseTestDB
 
+# IMPORTANT: Because sana_fits_ppdb_loaded is a session fixture, if any
+# test that uses it runs before these tests, some of these tests will
+# fail.  Surprsiingly, many of them still work.  That was a combination
+# of luck, and moving the "band" in TestPPDBDiaSource's safe_to_modify
+# list further down so that it wouldn't be used.  However, some tests still fail.
 
-# These tests are a little scary because the database tests in
-# basetest.py sort of assume that the database tables they're futzing
-# with are empty, but there are session scope fixtures that load up the
-# PPDB.
-#
-# As of this writing, the numbers below (luckily) avoid conflicts with
-# the sanna_fits_ppdb_loaded session fixture in conftest.py.  One thing
-# that needed to be done was to move the 'band' entry in
-# TestPPDBDiaSource's safe_to_modify list further down.  (It was being
-# used in a test to search by attributes; the test expected to find one
-# result, but found lots, because the test PPDB includes lots of things
-# with band='r'.  By moving 'band' further down in the safe_to_modify
-# list, that attribute was not used in that test.)
+# As such, the classes in this file are not routinely run, but are
+# marked to be skipped unless the env var RUN_PPDB_DBTESTS is set.
+# These basic database tests have been stable for a while, so I'm not
+# *too* worried, but sometimes I should probably actually run those
+# tests to make sure it's still good.
+
 
 @pytest.fixture
 def ppdbobj1():
@@ -74,6 +73,7 @@ def ppdbobj3():
 # These have lots of redundancies with test_diaobject.py,
 # test_host_galaxy.py, test_diasource.py, test_diaforcedsource.py
 
+@pytest.mark.skipif( not env_as_bool('RUN_PPDB_DBTESTS'), reason='Set RUN_PPDB_DBTESTS to run tet' )
 class TestPPDBHostGalaxy( BaseTestDB ):
 
     @pytest.fixture
@@ -169,6 +169,7 @@ class TestPPDBHostGalaxy( BaseTestDB ):
                        }
 
 
+@pytest.mark.skipif( not env_as_bool('RUN_PPDB_DBTESTS'), reason='Set RUN_PPDB_DBTESTS to run tet' )
 class TestPPDBDiaObject( BaseTestDB ):
 
     @pytest.fixture
@@ -228,6 +229,7 @@ class TestPPDBDiaObject( BaseTestDB ):
                        'dec': -23. }
 
 
+@pytest.mark.skipif( not env_as_bool('RUN_PPDB_DBTESTS'), reason='Set RUN_PPDB_DBTESTS to run tet' )
 class TestPPDBDiaSource( BaseTestDB ):
 
     @pytest.fixture
@@ -360,6 +362,7 @@ class TestPPDBDiaSource( BaseTestDB ):
                        'psffluxerr': 9.1 }
 
 
+@pytest.mark.skipif( not env_as_bool('RUN_PPDB_DBTESTS'), reason='Set RUN_PPDB_DBTESTS to run tet' )
 class TestPPDBDiaForcedSource( BaseTestDB ):
 
     @pytest.fixture

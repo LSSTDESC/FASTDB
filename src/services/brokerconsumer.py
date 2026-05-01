@@ -474,6 +474,10 @@ class BrokerConsumer:
 
     @classmethod
     def _wrangle_object( cls, msg, metamsg ):
+        # Throw out things with diaObjectId 0; those are bad
+        if msg['diaSource']['diaObjectId'] in [0, None]:
+            return None
+
         obj = { 'diaobjectid': msg['diaSource']['diaObjectId'],
                 'savetime': metamsg['savetime'],
                 'diaobjectposition': None }
@@ -530,13 +534,14 @@ class BrokerConsumer:
     def _wrangle_all_standard_lsst_fields( self, metamsg, msg ):
         obj = self._wrangle_object( msg, metamsg )
         # Basic sanity check
-        try:
-            np.int64( obj['diaobjectid'] )
-        except Exception as ex:
-            self.countlogger.error( f"Got an alert with diaSource.diaObjectId={obj['diaobjectid']} "
-                                    f"(type {type(obj['diaobjectid'])}), which isn't "
-                                    f"a 64-bit integer.  Skipping this alert!  Exception: {ex}" )
-            return None
+        if obj is not None:
+            try:
+                np.int64( obj['diaobjectid'] )
+            except Exception as ex:
+                self.countlogger.error( f"Got an alert with diaSource.diaObjectId={obj['diaobjectid']} "
+                                        f"(type {type(obj['diaobjectid'])}), which isn't "
+                                        f"a 64-bit integer.  Skipping this alert!  Exception: {ex}" )
+                return None
 
         # TODO : more sanity checks.
 
@@ -559,6 +564,7 @@ class BrokerConsumer:
 
         if any( ( f in msg and f is not None ) for f in [ 'cutoutDifference', 'cutoutScience', 'cutoutTemplate' ] ):
             thumbnails = { 'diasourceid': msg['diaSource']['diaSourceId'],
+                           'diaobjectid': msg['diaSource']['diaObjectId'],
                            'savetime': metamsg['savetime'] }
             thumbnails.update( { f.lower(): msg[f] if f in msg else None
                                  for f in ['cutoutDifference', 'cutoutScience', 'cutoutTemplate' ] } )

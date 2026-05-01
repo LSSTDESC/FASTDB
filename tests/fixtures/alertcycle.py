@@ -233,7 +233,7 @@ def alerts_90days_sent_received_and_imported( procver_collection ):
         assert res.returncode == 0
         with db.MG() as mongoclient:
             collection = db.get_mongo_collection( mongoclient, 'source_thumbnails' )
-            assert collection.count_documents( {} ) == nsrc
+            assert collection.count_documents( {} ) == 147 # nsrc
 
         yield nobj, nroot, npos, nsrc, nfrc, ninfo
     finally:

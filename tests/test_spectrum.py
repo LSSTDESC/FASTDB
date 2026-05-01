@@ -1,3 +1,4 @@
+import pytest
 import datetime
 import astropy.time
 from spectrum import what_spectra_are_wanted, get_spectrum_info
@@ -14,9 +15,30 @@ def test_what_spectra_are_wanted( wanted_spectra, planned_spectra, reported_spec
     df = what_spectra_are_wanted( 'realtime', mjdnow=60080. )
     df.insert( 0, 'id',[ f"{str(i)} ; {r}" for i, r in zip( df.root_diaobject_id.values, df.requester.values ) ] )
     assert ( set( df.id.values ) == set( str(w.wantspec_id) for w in wanted_spectra ) )
-    assert all( df[ df.id==w.wantspec_id ].root_diaobject_id.values[0] == w.root_diaobject_id for w in wanted_spectra )
-    assert all( df[ df.id==w.wantspec_id ].requester.values[0] == w.requester for w in wanted_spectra )
-    assert all( df[ df.id==w.wantspec_id ].priority.values[0] == w.priority for w in wanted_spectra )
+    for attr in [ 'root_diaobject_id', 'is_host', 'wanttime', 'requester', 'priority' ]:
+        # Have to jump through some hoops here because if we do a .values[0] on a datetime column,
+        #  it comes out as a numpy datetime thingy.  The pandas thing, it turns out, can be compared
+        #  directly to the pythong thing.
+        assert all( i.values[0] for i in [ df.loc[ df.id==w.wantspec_id, attr ] == getattr( w, attr )
+                                           for w in wanted_spectra ] )
+    # ra and dec should match "exactly", because they should have been copied from wanted_spectra
+    assert all( df.loc[ df.id==w.wantspec_id, 'ra' ].values[0] == pytest.approx( w.ra, rel=1e-11 )
+                for w in wanted_spectra )
+    assert all( df.loc[ df.id==w.wantspec_id, 'dec' ].values[0] == pytest.approx( w.dec, rel=1e-11 )
+                for w in wanted_spectra )
+    # mean position should not match perfectly, but close, and really I
+    #   should probably calculate it here like I did in the
+    #   lightcurve_checker fixture used in test_ltcv.py, but omg that
+    #   was a nightmare of processing versions and so forth, so let's
+    #   just be loosey-goosey here
+    assert not any( df.loc[ df.id==w.wantspec_id, 'diaobj_meanra' ].values[0] == pytest.approx( w.ra, rel=1e-7 )
+                 for w in wanted_spectra )
+    assert not any( df.loc[ df.id==w.wantspec_id, 'diaobj_meandec' ].values[0] == pytest.approx( w.dec, rel=1e-7 )
+                 for w in wanted_spectra )
+    assert all( df.loc[ df.id==w.wantspec_id, 'diaobj_meanra' ].values[0] == pytest.approx( w.ra, abs=1./3600. )
+                 for w in wanted_spectra )
+    assert all( df.loc[ df.id==w.wantspec_id, 'diaobj_meandec' ].values[0] == pytest.approx( w.dec, abs=1./3600. )
+                 for w in wanted_spectra )
 
     # The first two should have a last detection of 60030 and a last forced of 60050, because they're object 0
     subdf = df[ df.root_diaobject_id==roots[0]['root'].id ]
@@ -89,7 +111,7 @@ def test_what_spectra_are_wanted( wanted_spectra, planned_spectra, reported_spec
     # EIGHTH TEST
     # lim_mag 24.8 will keep only roots[2], as it's the only one that's at least that bright
     #   still at mjd 60060
-    df = what_spectra_are_wanted( 'realtime', mjdnow=60080, lim_mag=24.8 )
+    df = what_spectra_are_wanted( 'realtime', mjdnow=60060, lim_mag=24.8 )
     df.insert( 0, 'id',[ f"{str(i)} ; {r}" for i, r in zip( df.root_diaobject_id.values, df.requester.values ) ] )
     expectedids = [ w.wantspec_id for w in wanted_spectra if w.root_diaobject_id == roots[2]['root'].id ]
     assert len( expectedids ) == 1
@@ -97,8 +119,8 @@ def test_what_spectra_are_wanted( wanted_spectra, planned_spectra, reported_spec
     assert set( df.id ) == set( expectedids )
 
     # NINTH TEST
-    # However, if we do lim_mag 24.5 in the i-band, it will keep both roots[1] and roots[2]
-    df = what_spectra_are_wanted( 'realtime', mjdnow=60080, lim_mag=24.8, lim_mag_band='i' )
+    # However, if we do lim_mag 24.8 in the i-band, it will keep both roots[1] and roots[2]
+    df = what_spectra_are_wanted( 'realtime', mjdnow=60060, lim_mag=24.8, lim_mag_band='i' )
     df.insert( 0, 'id',[ f"{str(i)} ; {r}" for i, r in zip( df.root_diaobject_id.values, df.requester.values ) ] )
     expectedids = [ w.wantspec_id for w in wanted_spectra
                     if w.root_diaobject_id in ( roots[2]['root'].id, roots[1]['root'].id ) ]
@@ -107,8 +129,8 @@ def test_what_spectra_are_wanted( wanted_spectra, planned_spectra, reported_spec
     assert set( df.id ) == set( expectedids )
 
     # TENTH TEST
-    # If we say r band, that's back to the results of the eight test
-    df = what_spectra_are_wanted( 'realtime', mjdnow=60080, lim_mag=24.8, lim_mag_band='r' )
+    # If we say r band, that's back to the results of the eighth test
+    df = what_spectra_are_wanted( 'realtime', mjdnow=60080, lim_mag=24.4, lim_mag_band='r' )
     df.insert( 0, 'id',[ f"{str(i)} ; {r}" for i, r in zip( df.root_diaobject_id.values, df.requester.values ) ] )
     expectedids = [ w.wantspec_id for w in wanted_spectra if w.root_diaobject_id == roots[2]['root'].id ]
     assert len( expectedids ) == 1
@@ -119,6 +141,7 @@ def test_what_spectra_are_wanted( wanted_spectra, planned_spectra, reported_spec
 
 
 def test_get_spectrum_info( set_of_lightcurves, reported_spectra, more_reported_spectra ):
+    # TODO, look at these tests; the spectruminfo table has evolved a bit since they were written
     roots = set_of_lightcurves
 
     df = get_spectrum_info( root_diaobject_ids=roots[0]['root'].id )

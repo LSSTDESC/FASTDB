@@ -3,26 +3,81 @@ import datetime
 import pytz
 import uuid
 import numpy
-import psycopg.rows
 
 import astropy.time
 
 import ltcv
+# import spectrum
 import db
 
 
+def _get_test_object_maps( con=None ):
+    with db.DBCon( con ) as con:
+        # I am shortcutting this next query and not dealing with procver, etc., because
+        # I know the snana import fixture only has one processing version for everything.
+        rows, _cols = con.execute( "SELECT o.rootid,o.diaobjectid,p.ra,p.dec "
+                                   "FROM diaobject o "
+                                   "INNER JOIN diaobject_position p ON p.diaobjectid=o.diaobjectid "
+                                   "WHERE o.diaobjectid=ANY(%(obj)s)",
+                                   { 'obj': [ 1696949, 1186717, 191776, 1747042, 1173200 ]} )
+        idmap = { r[1]: r[0] for r in rows }
+        ramap = { r[1]: r[2] for r in rows }
+        decmap = { r[1]: r[3] for r in rows }
+        assert len(idmap) == 5
+
+    return idmap, ramap, decmap
+
+
 @pytest.fixture
-def setup_wanted_spectra_etc( procver_collection, alerts_90days_sent_received_and_imported, test_user ):
-    bpvs, _pvs = procver_collection
-    rtbpv = bpvs['realtime']
+def setup_wanted_spectra_etc( alerts_90days_sent_received_and_imported, test_user ):
     # Prime the database with some wanted spectra
+    #
+    # To find objects to use in this test, I ran this query:
+    #
+    # SELECT o.diaobjectid, ns.num AS nsrc, nf.num AS nfrc,
+    #        ROUND(CAST(s.maxmjd AS numeric),2) AS srcmjd,
+    #        s.maxband AS srcband,
+    #        ROUND(CAST( CASE WHEN s.maxflux<=0 THEN 99.99 ELSE -2.5*LOG(s.maxflux)+31.4 END AS numeric),2) AS srcmag,
+    #        ROUND(CAST(f.maxmjd AS numeric),2) AS frcmjd,
+    #        f.maxband AS frcband,
+    #        ROUND(CAST( CASE WHEN f.maxflux<=0 THEN 99.99 ELSE -2.5*LOG(f.maxflux)+31.4 END AS numeric),2) AS frcmag
+    # FROM diaobject o
+    # INNER JOIN
+    #   ( SELECT DISTINCT ON( diaobjectid ) diaobjectid, midpointmjdtai AS maxmjd,
+    #        band AS maxband, psfflux AS maxflux
+    #     FROM diasource
+    #     WHERE midpointmjdtai <= 60362.5 AND band='r'
+    #     ORDER BY diaobjectid, midpointmjdtai DESC
+    #   ) s ON s.diaobjectid=o.diaobjectid
+    # INNER JOIN
+    #   ( SELECT DISTINCT ON( diaobjectid ) diaobjectid, midpointmjdtai AS maxmjd,
+    #       band AS maxband, psfflux AS maxflux
+    #       FROM diaforcedsource
+    #       WHERE midpointmjdtai < 60362.5 AND band='r'
+    #       ORDER BY diaobjectid, midpointmjdtai DESC
+    #    ) f ON f.diaobjectid=o.diaobjectid
+    # INNER JOIN
+    #   ( SELECT DISTINCT ON( diaobjectid ) diaobjectid, COUNT(diasourceid) AS num
+    #     FROM diasource
+    #     GROUP BY diaobjectid
+    #   ) ns ON ns.diaobjectid=o.diaobjectid
+    # INNER JOIN
+    #   ( SELECT DISTINCT ON( diaobjectid ) diaobjectid, COUNT(diaforcedsourceid) AS num
+    #     FROM diaforcedsource
+    #     GROUP BY diaobjectid
+    #   ) nf ON nf.diaobjectid=o.diaobjectid
+    # ORDER BY s.maxmjd DESC;
+    #
+    # Being cavalier about processing versions becasue we know there is only one from the snana fixture.
+    # Remove the two "AND band='r'" to get the latest forced and source for any band.
+    #
     # Some objects of interest:
     #    1696949 — 5 detections, 5 forced
     #                  last forced r = 60359.35 (21.48), last forced = 60359.36 (i, 21.49)
     #                  last source r = 60359.35 (21.48), last source = 60362.33 (z, 21.36)
-    #    1981540 — 30 detections, 38 forced
-    #                  last forced r = 60352.13 (23.38), last forced = 60355.11 (g, 24.63)
-    #                  last source r = 60352.13 (23.38), last source = 60360.09 (z, 21.59)
+    #    1186717 — 6 detections, 11 forced
+    #                  last forced r = 60353.37 (23.30), last forced = 60353.37 (r, 23.30)
+    #                  last source r = 60348.35 (23.27), last source = 60358.32 (i, 23.37)
     #     191776 — 12 detections, 37 forced
     #                  last forced r = 60345.20 (22.31), last forced = 60345.25 (g, 23.36)
     #                  last source r = 60353.24 (22.75), last source = 60353.26 (i, 22.25)
@@ -40,269 +95,324 @@ def setup_wanted_spectra_etc( procver_collection, alerts_90days_sent_received_an
     now = datetime.datetime.utcfromtimestamp( astropy.time.Time( mjdnow, format='mjd', scale='tai' ).unix_tai )
     now = pytz.utc.localize( now )
     try:
-        with db.DB() as con:
-            cursor = con.cursor()
-            cursor.execute( "SELECT rootid,diaobjectid FROM diaobject "
-                            "WHERE diaobjectid=ANY(%(obj)s) AND base_procver_id=%(procver)s",
-                            { 'obj': [ 1696949, 1981540, 191776, 1747042, 1173200 ],
-                              'procver': rtbpv.id } )
-            idmap = { r[1]: r[0] for r in cursor.fetchall() }
-            assert len(idmap) == 5
+        with db.DBCon() as con:
+            idmap, ramap, decmap = _get_test_object_maps( con )
 
             # requester1 has asked for all five
-            cursor.execute( "INSERT INTO wantedspectra(wantspec_id,root_diaobject_id,wanttime,user_id,"
-                            "                          requester,priority) "
-                            "VALUES (%(wid)s,%(rid)s,%(t)s,%(uid)s,%(req)s,%(prio)s)",
-                            { 'wid': uuid.uuid4(),
-                              'rid': idmap[1696949],
-                              't': now - datetime.timedelta( minutes=1 ),
-                              'uid': test_user.id,
-                              'req': 'requester1',
-                              'prio': 3 } )
-            cursor.execute( "INSERT INTO wantedspectra(wantspec_id,root_diaobject_id,wanttime,user_id,"
-                            "                          requester,priority) "
-                            "VALUES (%(wid)s,%(rid)s,%(t)s,%(uid)s,%(req)s,%(prio)s)",
-                            { 'wid': uuid.uuid4(),
-                              'rid': idmap[1981540],
-                              't': now - datetime.timedelta( days=1 ),
-                              'uid': test_user.id,
-                              'req': 'requester1',
-                              'prio': 4 } )
-            cursor.execute( "INSERT INTO wantedspectra(wantspec_id,root_diaobject_id,wanttime,user_id,"
-                            "                          requester,priority) "
-                            "VALUES (%(wid)s,%(rid)s,%(t)s,%(uid)s,%(req)s,%(prio)s)",
-                            { 'wid': uuid.uuid4(),
-                              'rid': idmap[191776],
-                              't': now - datetime.timedelta( days=5 ),
-                              'uid': test_user.id,
-                              'req': 'requester1',
-                              'prio': 2 } )
-            cursor.execute( "INSERT INTO wantedspectra(wantspec_id,root_diaobject_id,wanttime,user_id,"
-                            "                          requester,priority) "
-                            "VALUES (%(wid)s,%(rid)s,%(t)s,%(uid)s,%(req)s,%(prio)s)",
-                            { 'wid': uuid.uuid4(),
-                              'rid': idmap[1747042],
-                              't': now - datetime.timedelta( days=10 ),
-                              'uid': test_user.id,
-                              'req': 'requester1',
-                              'prio': 1 } )
-            cursor.execute( "INSERT INTO wantedspectra(wantspec_id,root_diaobject_id,wanttime,user_id,"
-                            "                          requester,priority) "
-                            "VALUES (%(wid)s,%(rid)s,%(t)s,%(uid)s,%(req)s,%(prio)s)",
-                            { 'wid': uuid.uuid4(),
-                              'rid': idmap[1173200],
-                              't': now - datetime.timedelta( days=40 ),
-                              'uid': test_user.id,
-                              'req': 'requester1',
-                              'prio': 5 } )
+            q = ( "INSERT INTO wantedspectra(wantspec_id,root_diaobject_id,wanttime,user_id,"
+                  "                          requester,is_host,ra,dec,priority) "
+                  "VALUES (%(wid)s,%(rid)s,%(t)s,%(uid)s,%(req)s,%(is_host)s,%(ra)s,%(dec)s,%(prio)s)" )
+            con.execute( q,
+                         { 'wid': uuid.uuid4(),
+                           'rid': idmap[1696949],
+                           't': now - datetime.timedelta( minutes=1 ),
+                           'uid': test_user.id,
+                           'req': 'requester1',
+                           'is_host': False,
+                           'ra': ramap[1696949],
+                           'dec': decmap[1696949],
+                           'prio': 3 } )
+            con.execute( q,
+                         { 'wid': uuid.uuid4(),
+                           'rid': idmap[1186717],
+                           't': now - datetime.timedelta( days=1 ),
+                           'uid': test_user.id,
+                           'req': 'requester1',
+                           'is_host': True,
+                           'ra': ramap[1186717],
+                           'dec': decmap[1186717],
+                           'prio': 4 } )
+            con.execute( q,
+                         { 'wid': uuid.uuid4(),
+                           'rid': idmap[191776],
+                           't': now - datetime.timedelta( days=5 ),
+                           'uid': test_user.id,
+                           'req': 'requester1',
+                           'is_host': True,
+                           'ra': ramap[191776],
+                           'dec': decmap[191776],
+                           'prio': 2 } )
+            con.execute( q,
+                         { 'wid': uuid.uuid4(),
+                           'rid': idmap[1747042],
+                           't': now - datetime.timedelta( days=10 ),
+                           'uid': test_user.id,
+                           'req': 'requester1',
+                           'is_host': False,
+                           'ra': ramap[1747042],
+                           'dec': decmap[1747042],
+                           'prio': 1 } )
+            con.execute( q,
+                         { 'wid': uuid.uuid4(),
+                           'rid': idmap[1173200],
+                           't': now - datetime.timedelta( days=40 ),
+                           'uid': test_user.id,
+                           'req': 'requester1',
+                           'is_host': False,
+                           'ra': ramap[1173200],
+                           'dec': decmap[1173200],
+                           'prio': 5 } )
             # requester2 very recently asked for a spectrum of a source that requester1 asked for a long time ago
-            cursor.execute( "INSERT INTO wantedspectra(wantspec_id,root_diaobject_id,wanttime,user_id,"
-                            "                          requester,priority) "
-                            "VALUES (%(wid)s,%(rid)s,%(t)s,%(uid)s,%(req)s,%(prio)s)",
-                            { 'wid': uuid.uuid4(),
-                              'rid': idmap[1173200],
-                              't': now - datetime.timedelta( days=1 ),
-                              'uid': test_user.id,
-                              'req': 'requester2',
-                              'prio': 5 } )
+            con.execute( q,
+                         { 'wid': uuid.uuid4(),
+                           'rid': idmap[1173200],
+                           't': now - datetime.timedelta( days=1 ),
+                           'uid': test_user.id,
+                           'req': 'requester2',
+                           'is_host': False,
+                           'ra': ramap[1173200],
+                           'dec': decmap[1173200],
+                           'prio': 5 } )
 
             # Put in a couple of spectrum claims
-            cursor.execute( "INSERT INTO plannedspectra(plannedspec_id,root_diaobject_id,facility,created_at,plantime) "
-                            "VALUES (%(pid)s,%(rid)s,%(fac)s,%(ct)s,%(pt)s)",
-                            { 'pid': uuid.uuid4(),
-                              'rid': idmap[1747042],
-                              'fac': 'test facility',
-                              'ct': now - datetime.timedelta( days=9 ),
-                              'pt': now - datetime.timedelta( days=8 )
-                             } )
-            cursor.execute( "INSERT INTO plannedspectra(plannedspec_id,root_diaobject_id,facility,created_at,plantime) "
-                            "VALUES (%(pid)s,%(rid)s,%(fac)s,%(ct)s,%(pt)s)",
-                            { 'pid': uuid.uuid4(),
-                              'rid': idmap[1696949],
-                              'fac': 'test facility',
-                              'ct': now,
-                              'pt': now + datetime.timedelta( days=1 )
-                             } )
-            cursor.execute( "INSERT INTO plannedspectra(plannedspec_id,root_diaobject_id,facility,created_at,plantime) "
-                            "VALUES (%(pid)s,%(rid)s,%(fac)s,%(ct)s,%(pt)s)",
-                            { 'pid': uuid.uuid4(),
-                              'rid': idmap[191776],
-                              'fac': 'test facility',
-                              'ct': now - datetime.timedelta( days=4 ),
-                              'pt': now - datetime.timedelta( days=3 )
-                             } )
+            q = ( "INSERT INTO plannedspectra(plannedspec_id,root_diaobject_id,is_host,facility,created_at,plantime) "
+                  "VALUES (%(pid)s,%(rid)s,%(ih)s,%(fac)s,%(ct)s,%(pt)s)" )
+            con.execute( q,
+                         { 'pid': uuid.uuid4(),
+                           'rid': idmap[1747042],
+                           'ih': False,
+                           'fac': 'test facility',
+                           'ct': now - datetime.timedelta( days=9 ),
+                           'pt': now - datetime.timedelta( days=8 )
+                          } )
+            con.execute( q,
+                         { 'pid': uuid.uuid4(),
+                           'rid': idmap[1696949],
+                           'ih': False,
+                           'fac': 'test facility',
+                           'ct': now,
+                           'pt': now + datetime.timedelta( days=1 )
+                          } )
+            con.execute( q,
+                         { 'pid': uuid.uuid4(),
+                           'rid': idmap[191776],
+                           'ih': False,
+                           'fac': 'test facility',
+                           'ct': now - datetime.timedelta( days=4 ),
+                           'pt': now - datetime.timedelta( days=3 )
+                          } )
+            con.execute( q,
+                         { 'pid': uuid.uuid4(),
+                           'rid': idmap[1747042],
+                           'ih': True,
+                           'fac': 'test facility 2',
+                           'ct': now - datetime.timedelta( days=9 ),
+                           'pt': now - datetime.timedelta( days=8 )
+                          } )
 
             # One of the planned spectra was observed
-            cursor.execute( "INSERT INTO spectruminfo(specinfo_id,root_diaobject_id,facility,inserted_at,"
-                            "                         mjd,z,classid) "
-                            "VALUES (%(sid)s,%(rid)s,%(fac)s,%(t)s,%(mjd)s,%(z)s,%(class)s)",
-                            { 'sid': uuid.uuid4(),
-                              'rid': idmap[191776],
-                              'fac': 'test facility',
-                              't': now - datetime.timedelta( days=1 ),
-                              'mjd': mjdnow - 2,
-                              'z': 0.25,
-                              'class': 2222 } )
+            con.execute( "INSERT INTO spectruminfo(specinfo_id,root_diaobject_id,facility,inserted_at,"
+                         "                         mjd,z,classid,ra,dec,is_host) "
+                         "VALUES (%(sid)s,%(rid)s,%(fac)s,%(t)s,%(mjd)s,%(z)s,%(class)s,%(ra)s,%(dec)s,%(ishost)s)",
+                         { 'sid': uuid.uuid4(),
+                           'rid': idmap[191776],
+                           'fac': 'test facility',
+                           't': now - datetime.timedelta( days=1 ),
+                           'mjd': mjdnow - 2,
+                           'z': 0.25,
+                           'class': 2222,
+                           'ra': ramap[191776],
+                           'dec': decmap[191776],
+                           'ishost': True
+                          } )
 
             con.commit()
 
-        yield mjdnow, now, idmap
+        yield mjdnow, now, idmap, ramap, decmap
 
     finally:
-        with db.DB() as con:
-            cursor = con.cursor()
-            cursor.execute( "DELETE FROM spectruminfo" )
-            cursor.execute( "DELETE FROM plannedspectra" )
-            cursor.execute( "DELETE FROM wantedspectra" )
+        with db.DBCon() as con:
+            con.execute( "DELETE FROM spectruminfo" )
+            con.execute( "DELETE FROM plannedspectra" )
+            con.execute( "DELETE FROM wantedspectra" )
             con.commit()
 
 
 @pytest.fixture
 def setup_spectrum_info( setup_wanted_spectra_etc ):
-    mjdnow, now, idmap = setup_wanted_spectra_etc
+    mjdnow, now, idmap, ramap, decmap = setup_wanted_spectra_etc
 
     # The previous fixture adds one.  Let's add more.
 
-    with db.DB() as con:
-        cursor = con.cursor()
-
-        cursor.execute( "INSERT INTO spectruminfo(specinfo_id,root_diaobject_id,facility,inserted_at,"
-                        "                         mjd,z,classid) "
-                        "VALUES (%(sid)s,%(rid)s,%(fac)s,%(t)s,%(mjd)s,%(z)s,%(class)s)",
+    with db.DBCon() as con:
+        q = ( "INSERT INTO spectruminfo(specinfo_id,root_diaobject_id,facility,inserted_at,"
+              "                         mjd,z,classid,class_description,ra,dec,is_host) "
+              "VALUES (%(sid)s,%(rid)s,%(fac)s,%(t)s,%(mjd)s,%(z)s,%(class)s,%(desc)s,%(ra)s,%(dec)s,%(ishost)s)" )
+        con.execute(q,
                         { 'sid': uuid.uuid4(),
                           'rid': idmap[1173200],
                           'fac': 'test facility',
                           't': now - datetime.timedelta( days=25 ),
                           'mjd': mjdnow - 24,
                           'z': 0.12,
-                          'class': 2235 } )
+                          'class': 2235,
+                          'desc': "Microlens",
+                          'ra': ramap[1173200],
+                          'dec': decmap[1173200],
+                          'ishost': False } )
 
-        cursor.execute( "INSERT INTO spectruminfo(specinfo_id,root_diaobject_id,facility,inserted_at,"
-                        "                         mjd,z,classid) "
-                        "VALUES (%(sid)s,%(rid)s,%(fac)s,%(t)s,%(mjd)s,%(z)s,%(class)s)",
-                        { 'sid': uuid.uuid4(),
-                          'rid': idmap[1173200],
-                          'fac': "Galileo's Telescope",
-                          't': now - datetime.timedelta( days=2 ),
-                          'mjd': mjdnow - 3,
-                          'z': 0.005,
-                          'class': 2322 } )
+        con.execute( q,
+                     { 'sid': uuid.uuid4(),
+                       'rid': idmap[1173200],
+                       'fac': "Galileo's Telescope",
+                       't': now - datetime.timedelta( days=2 ),
+                       'mjd': mjdnow - 3,
+                       'z': 0.005,
+                       'class': 2322,
+                       'desc': "Cepheid",
+                       'ra': ramap[1173200],
+                       'dec': decmap[1173200],
+                       'ishost': False } )
 
-        cursor.execute( "INSERT INTO spectruminfo(specinfo_id,root_diaobject_id,facility,inserted_at,"
-                        "                         mjd,z,classid) "
-                        "VALUES (%(sid)s,%(rid)s,%(fac)s,%(t)s,%(mjd)s,%(z)s,%(class)s)",
-                        { 'sid': uuid.uuid4(),
-                          'rid': idmap[191776],
-                          'fac': "Rob's C8 in his back yard",
-                          't': now - datetime.timedelta( days=10 ),
-                          'mjd': mjdnow - 14,
-                          'z': 1.25,
-                          'class': 2342 } )
+        con.execute( q,
+                     { 'sid': uuid.uuid4(),
+                       'rid': idmap[191776],
+                       'fac': "Rob's C8 in his back yard",
+                       't': now - datetime.timedelta( days=10 ),
+                       'mjd': mjdnow - 14,
+                       'z': 1.25,
+                       'class': 2342,
+                       'desc': "δ Scuti",
+                       'ra': ramap[191776],
+                       'dec': decmap[191776],
+                       'ishost': False } )
 
         con.commit()
 
-    return mjdnow, now, idmap
+    return mjdnow, now, idmap, ramap, decmap
     # Don't have to clean up, parent fixture will do that
 
 
 
-def test_ask_for_spectra( procver_collection, alerts_90days_sent_received_and_imported, fastdb_client ):
-    _bpvs, pvs = procver_collection
+def test_ask_for_spectra( procver_collection, alerts_90days_sent_received_and_imported, fastdb_client, test_user ):
+    _bpvs, pvs, _pvinfo = procver_collection
     rtpv = pvs['realtime']
     try:
         # Get some hot lightcurves
-        df, objdf, _hostdf = ltcv.get_hot_ltcvs( rtpv.description, mjd_now=60328., source_patch=True )
+        df, objdf = ltcv.get_hot_ltcvs( rtpv.description, mjd_now=60328., source_patch=True, return_format='pandas' )
         assert df.index.get_level_values('mjd').max() < 60328.
-        assert len(objdf.rootid.unique()) == 14
-        assert len(df) == 310
+        assert len(objdf.rootid.unique()) == 13
+        assert len(df) == 294
 
-        # Pick out five objects to ask for spectra
+        # Pick out three objects to ask for spectra.
+        # NOTE.  I'm being cavalier here.  In reality, objdf could have multiple rows for
+        #   the same rootid.  But, for the loaded SNANA set, I know that won't happen.
 
-        chosenobjs = [ str(i) for i in objdf.rootid.unique()[ numpy.array([1, 5, 7]) ] ]
+        objdex = numpy.array([1, 5, 7])
+        chosenids = [ str(objdf.iloc[i].rootid) for i in objdex ]
+        chosenras = [ objdf.iloc[i].ra for i in objdex ]
+        chosendecs = [ objdf.iloc[i].dec for i in objdex ]
+        chosenishosts = [ False, True, False ]
+        chosenprios = [ 3, 5, 2 ]
+
+        queryjson = { 'requester': 'testing',
+                      'rootids': chosenids,
+                      'ras': chosenras,
+                      'decs': chosendecs,
+                      'is_hosts': chosenishosts,
+                      'priorities': chosenprios }
+
+        # Test failure modes
+        for oops in [ 'requester', 'rootids', 'priorities', 'ras', 'decs' ]:
+            json = queryjson.copy()
+            del json[ oops ]
+            with pytest.raises( RuntimeError, match=( f"Error response from server, status 422: "
+                                                      f"Missing required fields: {{'{oops}'}}" )
+                               ):
+                fastdb_client.post( '/spectrum/askforspectrum', json=json )
 
         # Ask
 
-        res = fastdb_client.post( '/spectrum/askforspectrum',
-                                  json={ 'requester': 'testing',
-                                         'objectids': chosenobjs,
-                                         'priorities': [3, 5, 2] } )
+        res = fastdb_client.post( '/spectrum/askforspectrum', json=queryjson )
         assert isinstance( res, dict )
         assert res['status'] == 'ok'
 
-        with db.DB() as con:
-            cursor = con.cursor( row_factory=psycopg.rows.dict_row )
-            cursor.execute( "SELECT * FROM wantedspectra" )
-            rows = cursor.fetchall()
+        with db.DBCon( dictcursor=True ) as con:
+            rows = con.execute( "SELECT * FROM wantedspectra" )
 
         assert len(rows) == 3
-        assert set( str(r['root_diaobject_id']) for r in rows ) == set( chosenobjs )
-        prios = { str(r['root_diaobject_id']) : r['priority'] for r in rows }
-        assert prios[ chosenobjs[0] ] == 3
-        assert prios[ chosenobjs[1] ] == 5
-        assert prios[ chosenobjs[2] ] == 2
+        assert set( str(r['root_diaobject_id']) for r in rows ) == set( chosenids )
+        for field, comp in zip( [ 'priority', 'is_host', 'ra', 'dec' ],
+                                [ chosenprios, chosenishosts, chosenras, chosendecs ] ):
+            vals = { str(r['root_diaobject_id']) : r[field] for r in rows }
+            assert all( vals[ chosenids[i] ] == comp[i] for i in range( len(chosenids) ) )
 
         assert all( r['requester'] == 'testing' for r in rows )
+        assert all( r['user_id'] == test_user.id for r in rows )
         now = datetime.datetime.now( tz=datetime.UTC )
         before = now - datetime.timedelta( minutes=10 )
         assert all( r['wanttime'] < now for r in rows )
         assert all( r['wanttime'] > before for r in rows )
 
         # Make sure that if the same requester asks again, priorities are updated, not added to the list
+        # (Also, incidentally test passing a scalar instead of a list.)
 
         later = datetime.datetime.now( tz=datetime.UTC )
 
         res = fastdb_client.post( '/spectrum/askforspectrum',
                                   json={ 'requester': 'testing',
-                                         'objectids': [ chosenobjs[0] ],
-                                         'priorities' : [ 1 ] } )
+                                         'rootids': chosenids[0],
+                                         'ras': chosenras[0],
+                                         'decs': chosendecs[0],
+                                         'is_hosts': chosenishosts[0],
+                                         'priorities' : 1 } )
+
         assert res['status'] == 'ok'
 
-        with db.DB() as con:
-            cursor = con.cursor( row_factory=psycopg.rows.dict_row )
-            cursor.execute( "SELECT * FROM wantedspectra" )
-            rows = cursor.fetchall()
+        with db.DBCon( dictcursor=True ) as con:
+            rows = con.execute( "SELECT * FROM wantedspectra" )
 
         assert len(rows) == 3
-        assert set( str(r['root_diaobject_id']) for r in rows ) == set( chosenobjs )
-        prios = { str(r['root_diaobject_id']) : r['priority'] for r in rows }
-        wanttimes = { str(r['root_diaobject_id']) : r['wanttime'] for r in rows }
-        assert prios[ chosenobjs[0] ] == 1
-        assert prios[ chosenobjs[1] ] == 5
-        assert prios[ chosenobjs[2] ] == 2
+        assert set( str(r['root_diaobject_id']) for r in rows ) == set( chosenids )
+        for field, comp in zip( [ 'priority', 'is_host', 'ra', 'dec' ],
+                                [ chosenprios, chosenishosts, chosenras, chosendecs ] ):
+            vals = { str(r['root_diaobject_id']) : r[field] for r in rows }
+            if field == 'priority':
+                assert vals[ chosenids[0] ] == 1
+                assert all( vals[ chosenids[i] ] == comp[i] for i in range(1, len(chosenids) ) )
+            else:
+                assert all( vals[ chosenids[i] ] == comp[i] for i in range( len(chosenids) ) )
+
         assert all( r['requester'] == 'testing' for r in rows )
+        assert all( r['user_id'] == test_user.id for r in rows )
 
         evenlater = datetime.datetime.now( tz=datetime.UTC )
+        wanttimes = { str(r['root_diaobject_id']) : r['wanttime'] for r in rows }
+        assert wanttimes[ chosenids[0] ] > later
+        assert wanttimes[ chosenids[0] ] < evenlater
+        assert all( wanttimes[ chosenids[i] ] < now for i in ( 1, 2 ) )
+        assert all( wanttimes[ chosenids[i] ] > before for i in ( 1, 2 ) )
 
-        assert wanttimes[ chosenobjs[0] ] > later
-        assert wanttimes[ chosenobjs[0] ] < evenlater
-        assert all( wanttimes[ chosenobjs[i] ] < now for i in ( 1, 2 ) )
-        assert all( wanttimes[ chosenobjs[i] ] > before for i in ( 1, 2 ) )
+        # TODO test differing is_host
 
     finally:
-        with db.DB() as con:
-            cursor = con.cursor()
-            cursor.execute( "DELETE FROM wantedspectra" )
+        with db.DBCon() as con:
+            con.execute( "DELETE FROM wantedspectra" )
             con.commit()
 
 
 def test_get_wanted_spectra( setup_wanted_spectra_etc, fastdb_client ):
-    mjdnow, _now, idmap = setup_wanted_spectra_etc
+    # TODO : is_host was added after most of these tests were written.
+    # They were adapted, but think about whether we need more tests for
+    # it.
 
-    # Test 1 : If we pass nothing (except for mjd_now, which we need
-    #   for the test), we should get all spectra ever requested that
-    #   have not been claimed in the last 7 days, that have no
-    #   observed spectra in the last 7 days, and that have been detected
-    #   in the last 14 days.  That should throw out 1696949 and 191776
-    #   (both requested in the last 7 days), as well as 1747042 and
-    #   1173200 (neither detected in the last 14 days), leaving only 1981540.
-    # 1981540 only has one requester, so there should only be one entry
-    #   in the resutant list.
+    mjdnow, _now, idmap, ramap, decmap = setup_wanted_spectra_etc
+
+    # Test 1 : If we pass nothing (except for mjd_now, which we need for
+    #   the test), we should get all spectra ever requested that have
+    #   not been claimed in the last 7 days, that have no observed
+    #   spectra in the last 7 days, and that have been detected in the
+    #   last 14 days.  That should throw out 1696949 (claimed in the
+    #   last 7 days), as well as 1747042 and 1173200 (neither detected
+    #   in the last 14 days), as wella s 191776 (requested and observed
+    #   in the last 7 days with is_host=True), leaving only 1186717,
+    #   which has only one requester.
 
     res = fastdb_client.post( '/spectrum/spectrawanted', json={ 'mjd_now': mjdnow } )
     assert isinstance( res, dict )
     assert res['status'] == 'ok'
     assert len( res['wantedspectra'] ) == 1
-    assert str( res['wantedspectra'][0]['root_diaobject_id'] ) == str( idmap[1981540] )
+    assert res['wantedspectra'][0]['root_diaobject_id'] == str( idmap[1186717] )
 
     # Test 2 : set a bunch of filters to None to see if we get everything
     # We should get back *6* responses.  Five objects, but one is requested
@@ -352,7 +462,7 @@ def test_get_wanted_spectra( setup_wanted_spectra_etc, fastdb_client ):
     assert len( res['wantedspectra'] ) == 4
     assert all( r['requester'] == 'requester1' for r in res['wantedspectra'] )
     assert set( r['root_diaobject_id'] for r in res['wantedspectra'] ) == { str(idmap[i]) for i in
-                                                                            [ 1696949, 1981540, 191776, 1747042 ] }
+                                                                            [ 1696949, 1186717, 191776, 1747042 ] }
 
 
     # Test 7: detected_in_last_days = 15 should throw out 1747042 and 1173200
@@ -363,7 +473,7 @@ def test_get_wanted_spectra( setup_wanted_spectra_etc, fastdb_client ):
     assert len( res['wantedspectra'] ) == 3
     assert all( r['requester'] == 'requester1' for r in res['wantedspectra'] )
     assert set( r['root_diaobject_id'] for r in res['wantedspectra'] ) == { str(idmap[i]) for i in
-                                                                            [ 1696949, 1981540, 191776 ] }
+                                                                            [ 1696949, 1186717, 191776 ] }
 
     # Test 8: passing both detected_in_last_days and detected_since_mjd should ignore ..._last_days
     res = fastdb_client.post( '/spectrum/spectrawanted', json={ 'mjd_now': mjdnow,
@@ -374,7 +484,7 @@ def test_get_wanted_spectra( setup_wanted_spectra_etc, fastdb_client ):
     assert len( res['wantedspectra'] ) == 4
     assert all( r['requester'] == 'requester1' for r in res['wantedspectra'] )
     assert set( r['root_diaobject_id'] for r in res['wantedspectra'] ) == { str(idmap[i]) for i in
-                                                                            [ 1696949, 1981540, 191776, 1747042 ] }
+                                                                            [ 1696949, 1186717, 191776, 1747042 ] }
 
     # Test 10 and 11: check requester
     res = fastdb_client.post( '/spectrum/spectrawanted', json={ 'mjd_now': mjdnow,
@@ -395,19 +505,27 @@ def test_get_wanted_spectra( setup_wanted_spectra_etc, fastdb_client ):
     assert res['wantedspectra'][0]['requester'] == 'requester2'
     assert res['wantedspectra'][0]['root_diaobject_id'] == str( idmap[1173200] )
 
-    # Test 12: lim_mag = 23.0 should throw out 1173200 and 1747042
+    # Test 12: lim_mag = 23.0 should throw out 1186717, 1747042, 1173200
+    #
+    # Do it straight (i.e. not through the webap) so I can debug
+    # import pdb; pdb.set_trace()
+    # df = spectrum.what_spectra_are_wanted( 'realtime', mjdnow=60362.5, notclaimsince=None, detsince=None,
+    #                                        nospecsince=None, lim_mag=23. )
+
     res = fastdb_client.post( '/spectrum/spectrawanted', json={ 'mjd_now': mjdnow,
                                                                 'not_claimed_in_last_days': None,
                                                                 'detected_since_mjd': None,
                                                                 'no_spectra_in_last_days': None,
                                                                 'lim_mag': 23. } )
-    assert len( res['wantedspectra'] ) == 3
-    assert len( set( r['root_diaobject_id'] for r in res['wantedspectra'] ) ) == 3
+    assert len( res['wantedspectra'] ) == 2
+    assert len( set( r['root_diaobject_id'] for r in res['wantedspectra'] ) ) == 2
     assert str(idmap[1696949]) in [ r['root_diaobject_id'] for r in res['wantedspectra'] ]
+    assert str(idmap[191776]) in [ r['root_diaobject_id'] for r in res['wantedspectra'] ]
     assert str(idmap[1173200]) not in [ r['root_diaobject_id'] for r in res['wantedspectra'] ]
     assert str(idmap[1747042]) not in [ r['root_diaobject_id'] for r in res['wantedspectra'] ]
+    assert str(idmap[1186717]) not in [ r['root_diaobject_id'] for r in res['wantedspectra'] ]
 
-    # Test 13: lim_mag = 23.0 and lim_mag_band='r' should throw out 1981540 and 1173200
+    # Test 13: lim_mag = 23.0 and lim_mag_band='r' should throw out 1186717 and 1173200
     res = fastdb_client.post( '/spectrum/spectrawanted', json={ 'mjd_now': mjdnow,
                                                                 'not_claimed_in_last_days': None,
                                                                 'detected_since_mjd': None,
@@ -417,12 +535,14 @@ def test_get_wanted_spectra( setup_wanted_spectra_etc, fastdb_client ):
     assert len( res['wantedspectra'] ) == 3
     assert len( set( r['root_diaobject_id'] for r in res['wantedspectra'] ) ) == 3
     assert str(idmap[1696949]) in [ r['root_diaobject_id'] for r in res['wantedspectra'] ]
+    assert str(idmap[191776]) in [ r['root_diaobject_id'] for r in res['wantedspectra'] ]
+    assert str(idmap[1747042]) in [ r['root_diaobject_id'] for r in res['wantedspectra'] ]
     assert str(idmap[1173200]) not in [ r['root_diaobject_id'] for r in res['wantedspectra'] ]
-    assert str(idmap[1981540]) not in [ r['root_diaobject_id'] for r in res['wantedspectra'] ]
+    assert str(idmap[1186717]) not in [ r['root_diaobject_id'] for r in res['wantedspectra'] ]
 
 
 def test_plan_spectrum( setup_wanted_spectra_etc, fastdb_client ):
-    _mjdnow, _now, idmap = setup_wanted_spectra_etc
+    _mjdnow, _now, idmap, _ramap, _decmap = setup_wanted_spectra_etc
 
     # There are three planned spectra in the database from the fixture.
     # Add another, see if it goes.
@@ -435,19 +555,17 @@ def test_plan_spectrum( setup_wanted_spectra_etc, fastdb_client ):
     assert isinstance( res, dict )
     assert res['status'] == 'ok'
 
-    with db.DB() as con:
-        cursor = con.cursor( row_factory=psycopg.rows.dict_row )
-        cursor.execute( "SELECT * FROM plannedspectra" )
-        rows = cursor.fetchall()
+    with db.DBCon( dictcursor=True ) as con:
+        rows = con.execute( "SELECT * FROM plannedspectra" )
 
-    assert len(rows) == 4
+    assert len(rows) == 5
     assert set( str(r['root_diaobject_id']) for r in rows ) == { str(idmap[i]) for i in ( 1747042, 1696949, 191776 ) }
-    assert len( [ r for r in rows if r['root_diaobject_id'] == idmap[1747042] ] ) == 2
-    assert set( r['facility'] for r in rows ) == { 'test facility', 'Second test facility' }
+    assert len( [ r for r in rows if r['root_diaobject_id'] == idmap[1747042] ] ) == 3
+    assert set( r['facility'] for r in rows ) == { 'test facility', 'test facility 2', 'Second test facility' }
 
 
 def test_remove_spectrum_plan( setup_wanted_spectra_etc, fastdb_client ):
-    _mjdnow, _now, idmap = setup_wanted_spectra_etc
+    _mjdnow, _now, idmap, _ramap, _decmap = setup_wanted_spectra_etc
 
     res = fastdb_client.post( '/spectrum/planspectrum',
                               json={ 'root_diaobject_id': str(idmap[1747042]),
@@ -460,32 +578,31 @@ def test_remove_spectrum_plan( setup_wanted_spectra_etc, fastdb_client ):
     assert res['status'] == 'ok'
     assert res['ndel'] == 1
 
-    with db.DB() as con:
-        cursor = con.cursor( row_factory=psycopg.rows.dict_row )
-        cursor.execute( "SELECT * FROM plannedspectra" )
-        rows = cursor.fetchall()
+    with db.DBCon( dictcursor=True ) as con:
+        rows = con.execute( "SELECT * FROM plannedspectra" )
 
-    assert len(rows) == 3
+    assert len(rows) == 4
     assert set( str(r['root_diaobject_id']) for r in rows ) == { str(idmap[i]) for i in ( 1747042, 1696949, 191776 ) }
-    assert [ r['facility'] for r in rows if r['root_diaobject_id'] == idmap[1747042] ] == [ 'Second test facility' ]
-    assert set( r['facility'] for r in rows ) == { 'test facility', 'Second test facility' }
+    assert ( set( r['facility'] for r in rows if r['root_diaobject_id'] == idmap[1747042] )
+             == { 'test facility 2', 'Second test facility' } )
+    assert set( r['facility'] for r in rows ) == { 'test facility', 'test facility 2', 'Second test facility' }
 
 
 def test_report_spectrum_info( setup_wanted_spectra_etc, fastdb_client ):
-    _mjdnow, _now, idmap = setup_wanted_spectra_etc
+    _mjdnow, _now, idmap, ramap, decmap = setup_wanted_spectra_etc
 
     res = fastdb_client.post( '/spectrum/reportspectruminfo',
                               json={ 'root_diaobject_id': str( idmap[1747042] ),
+                                     'ra': ramap[1747042],
+                                     'dec': decmap[1747042],
                                      'facility': "Rob's C8 in his back yard",
                                      'mjd': 60364.128,
                                      'z': 1.36,
                                      'classid': 2232 } )
     assert res['status'] == 'ok'
 
-    with db.DB() as con:
-        cursor = con.cursor( row_factory=psycopg.rows.dict_row )
-        cursor.execute( "SELECT * FROM spectruminfo" )
-        rows = cursor.fetchall()
+    with db.DBCon( dictcursor=True ) as con:
+        rows = con.execute( "SELECT * FROM spectruminfo" )
 
     # There was one pre-existing one from the fixture
     assert len(rows) == 2
@@ -495,10 +612,17 @@ def test_report_spectrum_info( setup_wanted_spectra_etc, fastdb_client ):
     assert r['mjd'] == pytest.approx( 60364.13, abs=0.01 )
     assert r['z'] == pytest.approx( 1.36, abs=0.01 )
     assert r['classid'] == 2232
+    assert r['is_host'] is None
+    assert r['class_description'] is None
+
+    # TODO MORE; test rejecting of missing requried, test unknown keys, test various things null
 
 
 def test_get_known_spectrum_info( setup_spectrum_info, fastdb_client):
-    mjdnow, now, idmap = setup_spectrum_info
+    # TODO : the spectruminfo table schema has evolved since these tests were
+    #   written.  Update tests to check all of that!
+
+    mjdnow, now, idmap, _ramap, _decmap = setup_spectrum_info
 
     # Get them all
     res = fastdb_client.post( "/spectrum/getknownspectruminfo", json={} )

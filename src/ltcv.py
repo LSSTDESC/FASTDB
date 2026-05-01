@@ -2106,7 +2106,7 @@ def get_hot_ltcvs( processing_version, position_processing_version=None,
 
       Returns
       -------
-        ltcvdf, objinfo, hostdf
+        ltcvdf, objinfo
 
         ltcvdf: pandas.DataFrame
            A dataframe with lightcurves. It is sorted and indexed by
@@ -2173,7 +2173,7 @@ def get_hot_ltcvs( processing_version, position_processing_version=None,
            should never have fewer rows tan ltcvdf.)
 
         hostdf: None
-           NOT CURRENTLY SUPPORTED.
+           NOT CURRENTLY SUPPORTED.... so not returned
 
         *A note on diaobjectid of sources : LSST may put more than one
          diaObjectId at the same point in the sky.  What's more,

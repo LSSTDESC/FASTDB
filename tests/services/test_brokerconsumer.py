@@ -71,17 +71,22 @@ def check_mongodb( collection_base_name, tfirstalert, cached_alerts=False ):
             #   something is written to it.
             assert f'{base}_alertcache' in knowncollections
 
-        # 208 objects, only 29 unique
+        # 164 objects, only 28 unique
         msgcursor = mg.collection( f"{base}_diaobject" ).find( {}, projection={'diaobjectid': 1 } )
         objids = [ c['diaobjectid'] for c in msgcursor ]
-        assert len( objids ) == 208
-        assert len( set(objids) ) == 29
+        assert len( objids ) == 164
+        assert len( set(objids) ) == 28
 
         # Same number of cached alerts if we cached alerts
-        nalerts = mg.collection( f'{base}_alertcache' ).count_documents( {} )
+        nalerts = mg.collection( f'{base}_alertcache' ).count_documents(
+            { "$expr": { "$not": { "$or": [ { "$eq": [ "$msg.diaSource.diaObjectId", 0 ] },
+                                            { "$eq": [ "$msg.diaSource.diaObjectId", None ] } ] } } } )
         assert nalerts == ( len( objids ) if cached_alerts else 0 )
 
-        # 208 sources + 1326 previous sources, only 152 unique.
+        # throwing out alerts with diaObjectId 0 or None (remainder called "good"):
+        #   208 alerts, only 164 good, but with 2 brokers, that's 104 sources, only 82 good
+        #   1326 previous dia sources, only 512 good, but w/ 2 brokers, that's 663, only 256 good
+        # Of the 164 + 1326 sources that show up in the 164 alerts, 152 are unique
         msgcursor = mg.collection( f'{base}_diasource' ).find( {}, projection={'diasourceid': 1 } )
         srcids = [ c['diasourceid'] for c in msgcursor ]
         assert len( srcids ) == 208 + 1326
@@ -93,7 +98,8 @@ def check_mongodb( collection_base_name, tfirstalert, cached_alerts=False ):
         assert len( srcids ) == 152
         assert extsrcids == srcids
 
-        # 4044 previous forced sources, only 770 unique
+        # 4044 previous forced sources (really 2022) (770 unique),
+        #    3026 (really 1513) with good diaObjectId, only 732 unique
         msgcursor = mg.collection( f'{base}_diaforcedsource' ).find( {}, projection={'diaforcedsourceid': 1} )
         frcedids = [ c['diaforcedsourceid'] for c in msgcursor ]
         assert len( frcedids ) == 4044
@@ -131,28 +137,36 @@ def check_mongodb( collection_base_name, tfirstalert, cached_alerts=False ):
         assert num_nones == 0
 
         # Slower: make sure lots of stuff matches what's in the alertcache
-        FDBLogger.info( "Verifying that saved info matches cached alerts..." )
         if cached_alerts:
+            FDBLogger.info( "Verifying that saved info matches cached alerts..." )
             cachedalerts = list( mg.collection( f"{base}_alertcache" ).find( {} ) )
             objects = list( mg.collection( f"{base}_diaobject" ).find( {} ) )
             sources = list( mg.collection( f"{base}_diasource" ).find( {} ) )
             forcedsources = list( mg.collection( f"{base}_diaforcedsource" ).find( {} ) )
             brokerinfos = list( mg.collection( f"{base}_brokerinfo" ).find( {} ) )
 
-            assert ( set( c['msg']['diaObject']['diaObjectId'] for c in cachedalerts )
-                     == set( o['diaobjectid'] for o in objects ) )
-            allsources = set( c['msg']['diaSourceId'] for c in cachedalerts )
-            assert allsources.issubset( set( s['diasourceid'] for s in sources ) )
-            assert allsources == set( b['diasourceid'] for b in brokerinfos )
-            allforcedsources = set()
+            # alertobjects = set( c['msg']['diaSource']['diaObjectId'] for c in cachedalerts )
+            nonrej_alertobjects = set( c['msg']['diaSource']['diaObjectId'] for c in cachedalerts
+                                       if c['msg']['diaSource']['diaObjectId'] not in [0, None] )
+            alertsourceids = set( c['msg']['diaSourceId'] for c in cachedalerts )
+            # nonrej_alertsourceids = set( c['msg']['diaSourceId'] for c in cachedalerts
+            #                              if c['msg']['diaSource']['diaObjectId'] not in [0, None] )
+
+            assert nonrej_alertobjects == set( o['diaobjectid'] for o in objects )
+            assert alertsourceids.issubset( s['diasourceid'] for s in sources )
+            assert alertsourceids == set( b['diasourceid'] for b in brokerinfos )
+
+            all_alertsourceids = alertsourceids.copy()
+            all_alertforcedids = set()
             for c in cachedalerts:
                 if c['msg']['prvDiaSources'] is not None:
-                    allsources = allsources.union( set( m['diaSourceId'] for m in c['msg']['prvDiaSources'] ) )
+                    all_alertsourceids = all_alertsourceids.union(
+                        set( m['diaSourceId'] for m in c['msg']['prvDiaSources'] ) )
                 if c['msg']['prvDiaForcedSources'] is not None:
-                    allforcedsources = allforcedsources.union( set( m['diaForcedSourceId']
-                                                                    for m in c['msg']['prvDiaForcedSources'] ) )
-            assert allsources == set( s['diasourceid'] for s in sources )
-            assert allforcedsources == set( f['diaforcedsourceid'] for f in forcedsources )
+                    all_alertforcedids = all_alertforcedids.union(
+                        set( m['diaForcedSourceId'] for m in c['msg']['prvDiaForcedSources'] ) )
+            assert all_alertsourceids == set( s['diasourceid'] for s in sources )
+            assert all_alertforcedids == set( f['diaforcedsourceid'] for f in forcedsources )
 
             # TODO : check that the actual contents of the various collections match the contents
             #   of the alert cache.  (Here we just check brokerinfo.)
@@ -164,7 +178,7 @@ def check_mongodb( collection_base_name, tfirstalert, cached_alerts=False ):
                 for c in cs:
                     if ( b['brokername'], b['topic'] ) == ( c['brokername'], c['topic'] ):
                         assert b['diaobjectid'] is not None
-                        assert b['diaobjectid'] == c['msg']['diaObject']['diaObjectId']
+                        assert b['diaobjectid'] == c['msg']['diaSource']['diaObjectId']
                         assert b['info'] == { k:v for k, v in c['msg'].items()
                                               if k not in BrokerConsumer._standard_lsst_alert_fields }
                     if b['prv_diasourceid'] is None:
@@ -181,7 +195,7 @@ def check_mongodb( collection_base_name, tfirstalert, cached_alerts=False ):
                 assert ( ( c['brokername'], c['topic'], c['msg']['diaSourceId'] )
                          in set( ( b['brokername'], b['topic'], b['diasourceid'] ) for b in brokerinfos ) )
 
-        FDBLogger.info( "...done verifying that saved info matches cached alerts." )
+            FDBLogger.info( "...done verifying that saved info matches cached alerts." )
 
     # Make sure sources and previous sources match what's expected
     #  (Sadly, because of how this test works, there won't be any
