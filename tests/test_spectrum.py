@@ -109,9 +109,9 @@ def test_what_spectra_are_wanted( wanted_spectra, planned_spectra, reported_spec
     assert set( df.id ) == set( expectedids )
 
     # EIGHTH TEST
-    # lim_mag 24.4 will keep only roots[2], as it's the only one that's at least that bright
+    # lim_mag 24.8 will keep only roots[2], as it's the only one that's at least that bright
     #   still at mjd 60060
-    df = what_spectra_are_wanted( 'realtime', mjdnow=60080, lim_mag=24.4 )
+    df = what_spectra_are_wanted( 'realtime', mjdnow=60060, lim_mag=24.8 )
     df.insert( 0, 'id',[ f"{str(i)} ; {r}" for i, r in zip( df.root_diaobject_id.values, df.requester.values ) ] )
     expectedids = [ w.wantspec_id for w in wanted_spectra if w.root_diaobject_id == roots[2]['root'].id ]
     assert len( expectedids ) == 1
@@ -119,8 +119,8 @@ def test_what_spectra_are_wanted( wanted_spectra, planned_spectra, reported_spec
     assert set( df.id ) == set( expectedids )
 
     # NINTH TEST
-    # However, if we do lim_mag 24.4 in the i-band, it will keep both roots[1] and roots[2]
-    df = what_spectra_are_wanted( 'realtime', mjdnow=60080, lim_mag=24.4, lim_mag_band='i' )
+    # However, if we do lim_mag 24.8 in the i-band, it will keep both roots[1] and roots[2]
+    df = what_spectra_are_wanted( 'realtime', mjdnow=60060, lim_mag=24.8, lim_mag_band='i' )
     df.insert( 0, 'id',[ f"{str(i)} ; {r}" for i, r in zip( df.root_diaobject_id.values, df.requester.values ) ] )
     expectedids = [ w.wantspec_id for w in wanted_spectra
                     if w.root_diaobject_id in ( roots[2]['root'].id, roots[1]['root'].id ) ]
