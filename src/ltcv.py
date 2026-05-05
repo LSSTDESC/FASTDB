@@ -5,6 +5,7 @@ import time
 import io
 import numbers
 import textwrap
+import random
 import json   # noqa: F401
 
 from psycopg import sql
@@ -579,6 +580,7 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                         WHERE rootid=ANY(%(roots)s)
                         """
                     ) ).format()
+                    FDBLogger.debug( "...inserting objects from passed root ids into tmp_objids table" )
                     dbcon.execute_nofetch( q, {'roots': objids} )
                 else:
                     q = sql.SQL( "CREATE TEMP TABLE temp_input_diaobject( diaobjectid bigint )" )
@@ -597,6 +599,7 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                         INNER JOIN diaobject ot ON t.diaobjectid=ot.diaobjectid
                         INNER JOIN diaobject o ON ot.rootid=o.rootid
                         """ ) )
+                    FDBLogger.debug( "...inserting objects from passed diaobjectid into tmp_objids table" )
                     dbcon.execute( q )
             else:
                 actual_objids_table = f'{objids_table}_withboth'
@@ -612,6 +615,7 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                         INNER JOIN diaobject o ON x.rootid=o.rootid
                         """ ) ).format( desttable=sql.Identifier( actual_objids_table ),
                                         sourcetable=sql.Identifier( objids_table ) )
+                    FDBLogger.debug( f"...inserting objects from passed root id table to {actual_objids_table}" )
                     dbcon.execute( q )
                 else:
                     q = sql.SQL( textwrap.dedent(
@@ -623,6 +627,7 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                         INNER JOIN diaobject o ON t.rootid=o.rootid
                         """ ) ).format( desttable=sql.Identifier(actual_objids_table),
                                         sourcetable=sql.Identifier(objids_table) )
+                    FDBLogger.debug( f"...inserting objects from passed diaobjectid table to {actual_objids_table}" )
                     dbcon.execute( q )
                 objids_table = actual_objids_table
 
@@ -664,6 +669,7 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                 q += sql.SQL( f"                   {_and} s.band=ANY(%(bands)s)" )
                 _and = "  AND"
             q += sql.SQL( "   ORDER BY t.rootid, s.visit, pv.priority DESC\n")
+            FDBLogger.debug( "...querying for detections" )
             dbcon.execute_nofetch( q, { 'bands': bands } )
 
             if which == 'detections':
@@ -705,6 +711,7 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                     q += sql.SQL( f"                   {_and} s.band=ANY(%(bands)s)" )
                     _and = "  AND"
                 q += sql.SQL( "   ORDER BY t.rootid, s.visit, pv.priority DESC\n" )
+                FDBLogger.debug( "...querying for forced photometry" )
                 dbcon.execute_nofetch( q, { 'bands': bands } )
 
                 # Join detections to forced photometry to set the 'isdet' and 'ispatch' flags.
@@ -735,33 +742,52 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                     FULL OUTER JOIN tmp_sources s ON f.rootid=s.rootid AND s.visit=f.visit
                     ORDER BY rootid, mjd
                     """ ) ).format( pos_fields=pos_fields, procver_fields=procver_fields )
-                rows, cols = dbcon.execute( q )
+                FDBLogger.debug( "...extracting results from postgres" )
+                FDBLogger.debug( "...executing query" )
+                barf = "".join( random.choices( "abcdefghijklmnopqrstuvwxyz", k=6 ) )
+                cursor = dbcon.execute_nofetch( q, echo=True, cursorname=f'many_object_ltcvs_{barf}' )
+                cursor.itersize = 1000
+                FDBLogger.debug( "...fetching results from postgres" )
+                cols = [ desc[0] for desc in cursor.description ]
+                coldex = { c: i for i, c in enumerate(cols) }
 
-            # Convert the lightcurve return into the dictionary
-            # IF we might need to calculate weighted positions, then make some of the
-            #   columns numpy arrays for faster processing later.  We'll have to
-            #   convert back to a list, but I'm gambling that it will be faster to
-            #   do that than to iterate through the calculations for weighted
-            #   source positions.  (I should check that.)
-            FDBLogger( "Parsing postgres return to dictionary..." )
-            coldex = { c: i for i, c in enumerate(cols) }
-            tmp = { c: ( np.array( [ r[coldex[c]] for r in rows ], dtype=np.float64 )
-                           if use_weighted_source_positions and ( c in [ 'flux', 'fluxerr', 'det_ra', 'det_dec' ] )
-                         else np.array( [ r[coldex[c]] for r in rows ] ) if c == 'rootid'
-                         else [ r[coldex[c]] for r in rows ]
-                        )
-                    for c in cols }
-            rootidlist = np.array( tmp['rootid'] )
-            rootids = np.unique( rootidlist )
-            ltcvs = []
-            for rootid in rootids:
-                w = np.where( tmp['rootid'] == rootid )[0]
-                dex0 = w[0]
-                dex1 = w[-1] + 1
-                thisltcv = { c: tmp[c][dex0:dex1] for c in cols if c != 'rootid' }
-                thisltcv['rootid'] = rootid
-                ltcvs.append( thisltcv )
-            FDBLogger.debug( "...done parsing postgres return into dictionary" )
+                ltcvs = []
+                currootid = None
+                rowcache = []
+
+                def _extract_rowcache():
+                    nonlocal ltcvs, rowcache, currootid
+
+                    if len(rowcache) > 0:
+                        # Make some of the columns numpy arrays if we're using weighted
+                        #   source positions, so that (hopefully) processing will be
+                        #   faster later.
+                        if use_weighted_source_positions:
+                            tmp = { c: ( np.array( [ r[coldex[c]] for r in rowcache ], dtype=np.float64 )
+                                         if c in [ 'flux', 'fluxerr', 'det_ra', 'det_dec' ]
+                                         else [ r[coldex[c]] for r in rowcache ] )
+                                    for c in cols }
+                        else:
+                            tmp  = { c: [ r[coldex[c]] for r in rowcache ] for c in cols }
+                        tmp['rootid'] = currootid
+                        ltcvs.append( tmp )
+                    rowcache = []
+                    currootid = row[ coldex['rootid'] ]
+
+                n = 0
+                for row in cursor:
+                    if ( n % 50000 == 0 ) and ( n > 0 ):
+                        FDBLogger.debug( f"...{n} rows, {len(ltcvs)} ltcvs so far" )
+                    n += 1
+                    if row[ coldex['rootid'] ] != currootid:
+                        _extract_rowcache()
+                    rowcache.append( row )
+                if len(rowcache) > 0:
+                    # I wish python had inline functions
+                    _extract_rowcache()
+
+                cursor.close()
+                FDBLogger.debug( f"...done fetching {n} rows, {len(ltcvs)} lightcurves." )
 
             # We might also need to get object info.  Get all diaobjects
             #    that match the rootids the caller asked for, from any base
@@ -787,6 +813,9 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                                             position_processing_version=pospvid, columns=columns,
                                             return_format=return_format, dbcon=dbcon )
 
+        except Exception:
+            dbcon.rollback()
+            raise
         finally:
             # Drop any temp tables we created.  Do NOT commit, however.  Reason:
             #   If this is called with an existing dbcon, then the caller

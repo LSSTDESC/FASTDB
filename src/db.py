@@ -214,6 +214,7 @@ class DBCon:
             self.alwaysanalyze = _alwaysanalyze
 
         self.dictcursor = dictcursor
+        self.cursor = None
         self.remake_cursor()
 
 
@@ -249,6 +250,8 @@ class DBCon:
             names).
 
         """
+        if self.cursor is not None:
+            self.cursor.close()
         self.curcursorisdict = self.dictcursor if dictcursor is None else dictcursor
         if self.curcursorisdict:
             self.cursor = self.con.cursor( row_factory=psycopg.rows.dict_row )
@@ -267,6 +270,8 @@ class DBCon:
 
         """
         if self._con_is_mine:
+            if self.cursor is not None:
+                self.cursor.close()
             self.con.rollback()
             self.con.close()
 
@@ -295,12 +300,44 @@ class DBCon:
         self.remake_cursor( self.curcursorisdict )  # ...is this necessary?
 
 
-    def execute_nofetch( self, q, subdict={}, echo=None, explain=None, analyze=None ):
+    def execute_nofetch( self, q, subdict={}, echo=None, explain=None, analyze=None, cursorname=None ):
         """Runs a query where you don't expect to fetch results.
 
-        Parameters are the same as execute().  Returns nothing.
+        Parameters are the same as execute(), except:
+
+        cursorname : str, default None
+          If not None, then make server-side cursor of the given name
+          for this query.  This will only work on SELECT queries.  Worry
+          about postgres cursor namespace.
+
+        Returns
+        -------
+          psycopg.ClientCursor or psycopg.ServerCursor
+            A sever cursor if cursorname is not None.  If cursorname is
+            None, it just returns self.cursor.
+
+            IMPORTANT : if you get back a ServerCursor, make sure to
+            call close() on it!  Do NOT do this if you are getting back
+            self.cursor.
 
         """
+
+        _curcursor = None
+
+        def _cursor():
+            nonlocal _curcursor, cursorname
+
+            if cursorname is None:
+                _curcursor = self.cursor
+                return self.cursor
+            else:
+                if _curcursor is not None:
+                    _curcursor.close()
+                if self.curcursorisdict:
+                    _curcursor = self.con.cursor( cursorname, row_factory=psycopg.rows.dict_row )
+                else:
+                    _curcursor = self.con.cursor( cursorname )
+                return _curcursor
 
         t0 = time.perf_counter()
 
@@ -308,6 +345,7 @@ class DBCon:
         if not isinstance( q, ( sql.SQL, sql.Composed ) ):
             q = sql.SQL( q )
 
+        # ...should this be >=, not <=?  THINK.
         if FDBLogger.instance().get().level <= logging.DEBUG:
             echo = echo if echo is not None else self.echoqueries
             explain = explain if explain is not None else self.alwaysexplain
@@ -318,15 +356,15 @@ class DBCon:
             nl = '\n'
             if explain:
                 FDBLogger.debug( "Explaining..." )
-                self.cursor.execute( sql.SQL("EXPLAIN ") + q, subdict )
-                rows = self.cursor.fetchall()
+                _cursor().execute( sql.SQL("EXPLAIN ") + q, subdict )
+                rows = _curcursor.fetchall()
                 dex = 'QUERY PLAN' if self.curcursorisdict else 0
                 FDBLogger.debug( f"Query plan:\n{nl.join([r[dex] for r in rows])}" )
             if analyze:
                 FDBLogger.debug( "Doing EXPLAIN ANALYZE..." )
-                self.cursor.execute( sql.SQL("EXPLAIN ANALYZE ") + q, subdict )
+                _cursor().execute( sql.SQL("EXPLAIN ANALYZE ") + q, subdict )
                 alreadydid = True
-                rows = self.cursor.fetchall()
+                rows = _curcursor.fetchall()
                 dex = 'QUERY PLAN' if self.curcursorisdict else 0
                 FDBLogger.debug( f"Query plan:\n{nl.join([r[dex] for r in rows])}" )
 
@@ -335,7 +373,7 @@ class DBCon:
         # be false, because you can't EXPLAIN ANALYZE the query and get the results
         # all in one call.
         if not alreadydid:
-            self.cursor.execute( q, subdict )
+            _cursor().execute( q, subdict )
 
         if ( FDBLogger.instance().get().level <= logging.DEBUG ) and ( echo or explain ):
             FDBLogger.debug( "Query complete." )
@@ -343,6 +381,9 @@ class DBCon:
         t1 = time.perf_counter()
         self.timings.last_query_time = t1 - t0
         self.timings.tot_query_time += t1 - t0
+
+        return _curcursor
+
 
     def execute( self, q, subdict={}, silent=False, echo=None, explain=None ):
         """Runs a query, and returns either (rows, columns) or just rows.
@@ -385,6 +426,8 @@ class DBCon:
 
         """
         self.execute_nofetch( q, subdict, echo=echo, explain=explain, analyze=False )
+        if echo:
+            FDBLogger.debug( "Query done, fetching" )
         if self.curcursorisdict:
             if self.cursor.description is None:
                 return None

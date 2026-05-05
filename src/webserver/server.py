@@ -242,7 +242,10 @@ class ObjectSearch( BaseView ):
         searchdata = flask.request.json
 
         FDBLogger.debug( f"ObjectSearch on processing version {processing_version} with search data {searchdata}" )
-        rval = ltcv.object_search( processing_version, return_format='json', **searchdata )
+        try:
+            rval = ltcv.object_search( processing_version, return_format='json', **searchdata )
+        except Exception as ex:
+            raise FASTDBWebException( str(ex) )
 
         # JSON dysfunctionality... convert to strings and back,
         # javascript may decide to interpret bigints as doubles, thereby
@@ -252,7 +255,8 @@ class ObjectSearch( BaseView ):
         # there probably isn't.
         bigints = [ 'diaobjectid' ]
         for k in bigints:
-            rval[k] = [ str(v) for v in rval[k] ]
+            if k in rval.keys():
+                rval[k] = [ str(v) for v in rval[k] ]
 
         return rval
 
@@ -265,8 +269,10 @@ class ObjectSearch( BaseView ):
 FDBLogger.multiprocessing_replace( pid=True )
 
 app = flask.Flask(  __name__ )
-# app.logger.setLevel( logging.INFO )
-app.logger.setLevel( logging.DEBUG )
+# loglevel = logging.INFO
+loglevel = logging.DEBUG
+app.logger.setLevel( loglevel )
+FDBLogger.setLevel( loglevel )
 
 app.config.from_mapping(
     SECRET_KEY=_flask_session_secret_key,
