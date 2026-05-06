@@ -673,8 +673,7 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
             dbcon.execute_nofetch( q, { 'bands': bands } )
 
             if which == 'detections':
-                rows, cols = dbcon.execute( "SELECT * FROM tmp_sources "
-                                            "ORDER BY rootid, mjd" )
+                q = sql.SQL( "SELECT * FROM tmp_sources ORDER BY rootid, mjd" )
 
             else:
                 # Extract forced photometry if necessary
@@ -742,65 +741,65 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                     FULL OUTER JOIN tmp_sources s ON f.rootid=s.rootid AND s.visit=f.visit
                     ORDER BY rootid, mjd
                     """ ) ).format( pos_fields=pos_fields, procver_fields=procver_fields )
-                FDBLogger.debug( "...extracting results from postgres" )
-                FDBLogger.debug( "...executing query" )
-                barf = "".join( random.choices( "abcdefghijklmnopqrstuvwxyz", k=6 ) )
-                cursor = dbcon.execute_nofetch( q, echo=True, cursorname=f'many_object_ltcvs_{barf}' )
-                cursor.itersize = 1000
-                FDBLogger.debug( "...fetching results from postgres" )
-                cols = [ desc[0] for desc in cursor.description ]
-                coldex = { c: i for i, c in enumerate(cols) }
 
-                ltcvs = []
-                currootid = None
-                rowcache = []
+            FDBLogger.debug( "...extracting results from postgres" )
+            FDBLogger.debug( "...executing query" )
+            barf = "".join( random.choices( "abcdefghijklmnopqrstuvwxyz", k=6 ) )
+            cursor = dbcon.execute_nofetch( q, echo=True, cursorname=f'many_object_ltcvs_{barf}' )
+            cursor.itersize = 1000
+            FDBLogger.debug( "...fetching results from postgres" )
+            cols = [ desc[0] for desc in cursor.description ]
+            coldex = { c: i for i, c in enumerate(cols) }
 
-                def _extract_rowcache():
-                    nonlocal ltcvs, rowcache, currootid
+            ltcvs = []
+            currootid = None
+            rowcache = []
+            allobjbpvs = set()
 
-                    if len(rowcache) > 0:
-                        # Make some of the columns numpy arrays if we're using weighted
-                        #   source positions, so that (hopefully) processing will be
-                        #   faster later.
-                        if use_weighted_source_positions:
-                            tmp = { c: ( np.array( [ r[coldex[c]] for r in rowcache ], dtype=np.float64 )
-                                         if c in [ 'flux', 'fluxerr', 'det_ra', 'det_dec' ]
-                                         else [ r[coldex[c]] for r in rowcache ] )
-                                    for c in cols }
-                        else:
-                            tmp  = { c: [ r[coldex[c]] for r in rowcache ] for c in cols }
-                        tmp['rootid'] = currootid
-                        ltcvs.append( tmp )
-                    rowcache = []
-                    currootid = row[ coldex['rootid'] ]
+            def _extract_rowcache():
+                nonlocal ltcvs, rowcache, currootid
 
-                n = 0
-                for row in cursor:
-                    if ( n % 50000 == 0 ) and ( n > 0 ):
-                        FDBLogger.debug( f"...{n} rows, {len(ltcvs)} ltcvs so far" )
-                    n += 1
-                    if row[ coldex['rootid'] ] != currootid:
-                        _extract_rowcache()
-                    rowcache.append( row )
                 if len(rowcache) > 0:
-                    # I wish python had inline functions
-                    _extract_rowcache()
+                    # Make some of the columns numpy arrays if we're using weighted
+                    #   source positions, so that (hopefully) processing will be
+                    #   faster later.
+                    if use_weighted_source_positions:
+                        tmp = { c: ( np.array( [ r[coldex[c]] for r in rowcache ], dtype=np.float64 )
+                                     if c in [ 'flux', 'fluxerr', 'det_ra', 'det_dec' ]
+                                     else [ r[coldex[c]] for r in rowcache ] )
+                                for c in cols }
+                    else:
+                        tmp  = { c: [ r[coldex[c]] for r in rowcache ] for c in cols }
+                    tmp['rootid'] = currootid
+                    ltcvs.append( tmp )
+                rowcache = []
+                currootid = row[ coldex['rootid'] ]
 
-                cursor.close()
-                FDBLogger.debug( f"...done fetching {n} rows, {len(ltcvs)} lightcurves." )
+            n = 0
+            for row in cursor:
+                if ( n % 50000 == 0 ) and ( n > 0 ):
+                    FDBLogger.debug( f"...{n} rows, {len(ltcvs)} ltcvs so far" )
+                n += 1
+                if row[ coldex['source_obj_bpv'] ] is not None:
+                    allobjbpvs.add( row[ coldex['source_obj_bpv'] ] )
+                if ( which != 'detections' ) and ( row[ coldex['forced_obj_bpv'] ] is not None ):
+                    allobjbpvs.add( row[ coldex['forced_obj_bpv'] ] )
+                if row[ coldex['rootid'] ] != currootid:
+                    _extract_rowcache()
+                rowcache.append( row )
+            if len(rowcache) > 0:
+                # I wish python had inline functions
+                _extract_rowcache()
+
+            cursor.close()
+            FDBLogger.debug( f"...done fetching {n} rows, {len(ltcvs)} lightcurves." )
 
             # We might also need to get object info.  Get all diaobjects
             #    that match the rootids the caller asked for, from any base
             #    processing version from any diaobjectid from any source or
             #    forced source that we found.
             if return_object_info:
-                sbpvdex = cols.index( 'source_obj_bpv' )
-                bpvs = set( r[sbpvdex] for r in rows )
-                if which != 'detections':
-                    fbpvdex = cols.index( 'forced_obj_bpv' )
-                    bpvs = bpvs.union( set( r[fbpvdex] for r in rows ) )
-                bpvs = list( bpvs )
-
+                bpvs = list( allobjbpvs )
                 columns = [ 'diaobjectid', 'rootid' ]
                 if include_base_procver:
                     columns.append( 'obj_base_procver' )
@@ -2286,3 +2285,219 @@ def get_hot_ltcvs( processing_version, position_processing_version=None,
             # no passed dbcon, then the while db.DBCon() loop will close
             # the connection when it exits, which will automatically
             # delete the temp tables anyway.
+
+
+def create_object_stats_materialized_view( procver ):
+    with db.DBCon( dictcursor=True ) as dbcon:
+        # Check to see if it already exists
+        q = sql.SQL( "SELECT * FROM pg_class WHERE relname={viewname}" ).format( viewname=f'objstats_{procver}' )
+        rows = dbcon.execute( q )
+        if len(rows) > 0:
+            row = rows[0]
+            if row['relkind'] != 'm':
+                raise RuntimeError( f"postgres class objstats_{procver} exists, but is not a materialized "
+                                    f"view!  (It is a \"{row['relkind']}\")" )
+            q = sql.SQL( "SELECT a.attname FROM pg_catalog.pg_attribute a "
+                         "INNER JOIN pg_class c ON c.oid=a.attrelid "
+                         "WHERE c.relname={viewname} AND a.attnum>0"
+                        ).format( viewname=f'objstats_{procver}' )
+            rows = dbcon.execute( q )
+            if ( set( r['attname'] for r in rows ) !=
+                 { 'rootid', 'band', 'ra', 'dec', 'firstdet_mjd', 'firstdet_flux', 'firstdet_fluxerr',
+                   'lastdet_mjd', 'lastdet_flux', 'lastdet_fluxerr', 'maxdet_mjd', 'maxdet_flux', 'maxdet_fluxerr',
+                   'ndets', 'ndets24', 'ndets23', 'ndets22', 'ndets21', 'nsn10', 'nsn7', 'nsn5' }
+                ):
+                raise RuntimeError( f"postgres view objstats_{procver} has the wrong set of columns" )
+
+            FDBLogger.info( f"Refreshing materizalized view objstats_{procver}" )
+            q = sql.SQL( "REFRESH MATERIALIZED VIEW {viewname}"
+                        ).format( viewname=sql.Identifier( f'objstats_{procver}' ) )
+            dbcon.execute( q )
+            dbcon.commit()
+            FDBLogger.info( f"Done refreshing materialized view objstats_{procver}" )
+            return
+
+        # If we get here, the materialized view does not exist
+
+        FDBLogger.info( f"Creating materialized view objstats_{procver}" )
+        pvid = db.ProcessingVersion.procver_id( procver, dbcon=dbcon )
+
+        q = sql.SQL( textwrap.dedent(
+            """
+            CREATE MATERIALIZED VIEW {viewname} AS (
+               SELECT d0.rootid AS rootid, d0.band AS band, r.ra AS ra, r.dec AS dec,
+                   d0.midpointmjdtai AS firstdet_mjd, d0.psfflux AS firstdet_flux, d0.psffluxerr AS firstdet_fluxerr,
+                   dn.midpointmjdtai AS lastdet_mjd, dn.psfflux AS lastdet_flux, dn.psffluxerr AS lastdet_fluxerr,
+                   dx.midpointmjdtai AS maxdet_mjd, dx.psfflux AS maxdet_flux, dx.psffluxerr AS maxdet_fluxerr,
+                   n.ndets AS ndets,
+                   CASE WHEN n24.ndets IS NULL THEN 0 ELSE n24.ndets END as ndets24,
+                   CASE WHEN n23.ndets IS NULL THEN 0 ELSE n23.ndets END AS ndets23,
+                   CASE WHEN n22.ndets IS NULL THEN 0 ELSE n22.ndets END AS ndets22,
+                   CASE WHEN n21.ndets IS NULL THEN 0 ELSE n21.ndets END AS ndets21,
+                   CASE WHEN sn10.ndets IS NULL THEN 0 ELSE sn10.ndets END AS nsn10,
+                   CASE WHEN sn7.ndets IS NULL THEN 0 ELSE sn7.ndets END AS nsn7,
+                   CASE WHEN sn5.ndets IS NULL THEN 0 ELSE sn5.ndets END AS nsn5
+               FROM (
+                  SELECT DISTINCT ON(rootid, band) rootid, band, midpointmjdtai, psfflux, psffluxerr
+                  FROM (
+                     SELECT DISTINCT ON(o.rootid, s.visit) o.rootid, s.band, s.midpointmjdtai, s.psfflux, s.psffluxerr
+                     FROM diasource s
+                     INNER JOIN diaobject o ON s.diaobjectid=o.diaobjectid
+                     INNER JOIN base_procver_of_procver j ON s.base_procver_id=j.base_procver_id
+                                                         AND j.procver_id={pvid}
+                     ORDER BY o.rootid, s.visit, j.priority DESC
+                  ) subq
+                  ORDER BY rootid, band, midpointmjdtai
+               ) d0
+               INNER JOIN root_diaobject r ON d0.rootid=r.id
+               INNER JOIN (
+                  SELECT DISTINCT ON(rootid, band) rootid, band, midpointmjdtai, psfflux, psffluxerr
+                  FROM (
+                     SELECT DISTINCT ON(o.rootid, s.visit) o.rootid, s.band, s.midpointmjdtai, s.psfflux, s.psffluxerr
+                     FROM diasource s
+                     INNER JOIN diaobject o ON s.diaobjectid=o.diaobjectid
+                     INNER JOIN base_procver_of_procver j ON s.base_procver_id=j.base_procver_id
+                                                         AND j.procver_id={pvid}
+                     ORDER BY o.rootid, s.visit, j.priority DESC
+                  ) subq
+                  ORDER BY rootid, band, midpointmjdtai DESC
+               ) dn ON d0.rootid=dn.rootid and d0.band=dn.band
+               INNER JOIN (
+                  SELECT DISTINCT ON(rootid, band) rootid, band, midpointmjdtai, psfflux, psffluxerr
+                  FROM (
+                     SELECT DISTINCT ON(o.rootid, s.visit) o.rootid, s.band, s.midpointmjdtai, s.psfflux, s.psffluxerr
+                     FROM diasource s
+                     INNER JOIN diaobject o ON s.diaobjectid=o.diaobjectid
+                     INNER JOIN base_procver_of_procver j ON s.base_procver_id=j.base_procver_id
+                                                         AND j.procver_id={pvid}
+                     ORDER BY o.rootid, s.visit, j.priority DESC
+                  ) subq
+                  ORDER BY rootid, band, psfflux DESC
+               ) dx ON d0.rootid=dx.rootid AND d0.band=dx.band
+               INNER JOIN (
+                  SELECT rootid, band, COUNT(diasourceid) AS ndets
+                  FROM (
+                     SELECT DISTINCT ON(o.rootid, s.visit) o.rootid, s.band, s.diasourceid
+                     FROM diasource s
+                     INNER JOIN diaobject o ON s.diaobjectid=o.diaobjectid
+                     INNER JOIN base_procver_of_procver j ON s.base_procver_id=j.base_procver_id
+                                                         AND j.procver_id={pvid}
+                     ORDER BY o.rootid, s.visit, j.priority DESC
+                  ) subq
+                  GROUP BY rootid, band
+               ) n ON d0.rootid=n.rootid AND d0.band=n.band
+               LEFT JOIN (
+                  SELECT rootid, band, COUNT(diasourceid) AS ndets
+                  FROM (
+                     SELECT DISTINCT ON(o.rootid, s.visit) o.rootid, s.band, s.diasourceid
+                     FROM diasource s
+                     INNER JOIN diaobject o ON s.diaobjectid=o.diaobjectid
+                     INNER JOIN base_procver_of_procver j ON s.base_procver_id=j.base_procver_id
+                                                         AND j.procver_id={pvid}
+                     WHERE s.psfflux >= 912
+                     ORDER BY o.rootid, s.visit, j.priority DESC
+                  ) subq
+                  GROUP BY rootid, band
+               ) n24 ON d0.rootid=n24.rootid AND d0.band=n24.band
+               LEFT JOIN (
+                  SELECT rootid, band, COUNT(diasourceid) AS ndets
+                  FROM (
+                     SELECT DISTINCT ON(o.rootid, s.visit) o.rootid, s.band, s.diasourceid
+                     FROM diasource s
+                     INNER JOIN diaobject o ON s.diaobjectid=o.diaobjectid
+                     INNER JOIN base_procver_of_procver j ON s.base_procver_id=j.base_procver_id
+                                                         AND j.procver_id={pvid}
+                     WHERE s.psfflux >= 2291
+                     ORDER BY o.rootid, s.visit, j.priority DESC
+                  ) subq
+                  GROUP BY rootid, band
+               ) n23 ON d0.rootid=n23.rootid AND d0.band=n23.band
+               LEFT JOIN (
+                  SELECT rootid, band, COUNT(diasourceid) AS ndets
+                  FROM (
+                     SELECT DISTINCT ON(o.rootid, s.visit) o.rootid, s.band, s.diasourceid
+                     FROM diasource s
+                     INNER JOIN diaobject o ON s.diaobjectid=o.diaobjectid
+                     INNER JOIN base_procver_of_procver j ON s.base_procver_id=j.base_procver_id
+                                                         AND j.procver_id={pvid}
+                     WHERE s.psfflux >= 5754
+                     ORDER BY o.rootid, s.visit, j.priority DESC
+                  ) subq
+                  GROUP BY rootid, band
+               ) n22 ON d0.rootid=n22.rootid AND d0.band=n22.band
+               LEFT JOIN (
+                  SELECT rootid, band, COUNT(diasourceid) AS ndets
+                  FROM (
+                     SELECT DISTINCT ON(o.rootid, s.visit) o.rootid, s.band, s.diasourceid
+                     FROM diasource s
+                     INNER JOIN diaobject o ON s.diaobjectid=o.diaobjectid
+                     INNER JOIN base_procver_of_procver j ON s.base_procver_id=j.base_procver_id
+                                                         AND j.procver_id={pvid}
+                     WHERE s.psfflux >= 14454
+                     ORDER BY o.rootid, s.visit, j.priority DESC
+                  ) subq
+                  GROUP BY rootid, band
+               ) n21 ON d0.rootid=n21.rootid AND d0.band=n21.band
+               LEFT JOIN (
+                  SELECT rootid, band, COUNT(diasourceid) AS ndets
+                  FROM (
+                     SELECT DISTINCT ON(o.rootid, s.visit) o.rootid, s.band, s.diasourceid
+                     FROM diasource s
+                     INNER JOIN diaobject o ON s.diaobjectid=o.diaobjectid
+                     INNER JOIN base_procver_of_procver j ON s.base_procver_id=j.base_procver_id
+                                                         AND j.procver_id={pvid}
+                     INNER JOIN processing_version p ON j.procver_id=p.id AND p.description='realtime'
+                     WHERE s.psfflux / s.psffluxerr > 10
+                     ORDER BY o.rootid, s.visit, j.priority DESC
+                  ) subq
+                  GROUP BY rootid, band
+               ) sn10 ON d0.rootid=sn10.rootid AND d0.band=sn10.band
+               LEFT JOIN (
+                  SELECT rootid, band, COUNT(diasourceid) AS ndets
+                  FROM (
+                     SELECT DISTINCT ON(o.rootid, s.visit) o.rootid, s.band, s.diasourceid
+                     FROM diasource s
+                     INNER JOIN diaobject o ON s.diaobjectid=o.diaobjectid
+                     INNER JOIN base_procver_of_procver j ON s.base_procver_id=j.base_procver_id
+                                                         AND j.procver_id={pvid}
+                     WHERE s.psfflux / s.psffluxerr > 7
+                     ORDER BY o.rootid, s.visit, j.priority DESC
+                  ) subq
+                  GROUP BY rootid, band
+               ) sn7 ON d0.rootid=sn7.rootid AND d0.band=sn7.band
+               LEFT JOIN (
+                  SELECT rootid, band, COUNT(diasourceid) AS ndets
+                  FROM (
+                     SELECT DISTINCT ON(o.rootid, s.visit) o.rootid, s.band, s.diasourceid
+                     FROM diasource s
+                     INNER JOIN diaobject o ON s.diaobjectid=o.diaobjectid
+                     INNER JOIN base_procver_of_procver j ON s.base_procver_id=j.base_procver_id
+                                                         AND j.procver_id={pvid}
+                     WHERE s.psfflux / s.psffluxerr > 5
+                     ORDER BY o.rootid, s.visit, j.priority DESC
+                  ) subq
+                  GROUP BY rootid, band
+               ) sn5 ON d0.rootid=sn5.rootid AND d0.band=sn5.band
+            )
+            """
+        ) ).format( viewname=sql.Identifier( f'objstats_{procver}' ), pvid=pvid )
+
+        dbcon.execute_nofetch( q, explain=False )
+
+        for col in [ 'rootid', 'band', 'firstdet_mjd', 'lastdet_mjd', 'maxdet_mjd',
+                     'firstdet_flux', 'lastdet_flux', 'maxdet_flux',
+                     'ndets', 'ndets24', 'ndets23', 'ndets22', 'ndets21', 'nsn10', 'nsn7', 'nsn5' ]:
+            q = sql.SQL( 'CREATE INDEX {idxname} ON {viewname}({col})'
+                        ).format( idxname=sql.Identifier( f'idx_obstats_{procver}_{col}' ),
+                                  viewname=sql.Identifier( f'objstats_{procver}' ),
+                                  col=sql.Identifier( col ) )
+            dbcon.execute( q )
+
+        q = sql.SQL( 'CREATE INDEX {idxname} ON {viewname}(q3c_ang2ipix(ra, dec))'
+                    ).format( idxname=sql.Identifier( f'idx_objstats_{procver}_q3c' ),
+                              viewname=sql.Identifier( f'objstats_{procver}' ) )
+        dbcon.execute( q, explain=False )
+
+        dbcon.commit()
+
+        FDBLogger.info( f"Done creating materialized view objstats_{procver}" )

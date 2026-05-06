@@ -10,6 +10,156 @@ import ltcv
 from util import FDBLogger
 
 
+@pytest.fixture( scope='module' )
+def objstats_realtime_view():
+    try:
+        ltcv.create_object_stats_materialized_view( 'realtime' )
+        yield True
+    finally:
+        with db.DBCon() as con:
+            con.execute_nofetch( "DROP MATERIALIZED VIEW objstats_realtime" )
+            con.commit()
+
+
+# THIS TEST MUST COME FIRST, because it depends on both the
+#   objstats_realtime_view and set_of_lightcurves module-scope fixtures
+#   not having been run.
+
+def test_empty_objstats_realtime_view( procver_collection ):
+    try:
+        ltcv.create_object_stats_materialized_view( 'realtime' )
+
+        with db.DBCon() as con:
+            rows, cols = con.execute( "SELECT * FROM objstats_realtime" )
+            assert len(rows) == 0
+            assert set(cols) == { 'rootid', 'band', 'ra', 'dec',
+                                  'firstdet_mjd', 'firstdet_flux', 'firstdet_fluxerr',
+                                  'lastdet_mjd', 'lastdet_flux', 'lastdet_fluxerr',
+                                  'maxdet_mjd', 'maxdet_flux', 'maxdet_fluxerr',
+                                  'ndets', 'ndets24', 'ndets23', 'ndets22', 'ndets21',
+                                  'nsn10', 'nsn7', 'nsn5' }
+            # TODO : test that indexes got created
+
+    finally:
+        with db.DBCon() as con:
+            con.execute_nofetch( "DROP MATERIALIZED VIEW IF EXISTS objstats_realtime" )
+            con.commit()
+
+
+# THIS TESTS MUST COME SECOND.  It depends on the set_of_lightcurve
+#   module-scope fixture not having been run. The point of it is so that
+#   the *next* fixture can test refreshing the view.
+
+def test_create_objstats_realtime_view( objstats_realtime_view ):
+    with db.DBCon() as con:
+        rows, cols = con.execute( "SELECT * FROM objstats_realtime" )
+        assert len(rows) == 0
+        assert set(cols) == { 'rootid', 'band', 'ra', 'dec',
+                              'firstdet_mjd', 'firstdet_flux', 'firstdet_fluxerr',
+                              'lastdet_mjd', 'lastdet_flux', 'lastdet_fluxerr',
+                              'maxdet_mjd', 'maxdet_flux', 'maxdet_fluxerr',
+                              'ndets', 'ndets24', 'ndets23', 'ndets22', 'ndets21',
+                              'nsn10', 'nsn7', 'nsn5' }
+
+
+def check_db_rows_vs_expected( rows, roots ):
+    # Make sure what we got matches what we should expect from set_of_lightcurves.
+    # This involves arduously trolling through set_of_lightcurves to figure out what we expect.
+    # Objects 0 through 2 are in realtime, and all have detections in r and i
+    assert len(rows) == 6
+
+    for which in range(0, 3):
+        for band in [ 'r', 'i' ]:
+            expected = { 'rootid': ( roots[which]['root'].id, None, None ),
+                         'band': ( band, None, None ),
+                         'ra': ( roots[which]['root'].ra, 0.01/3600., None ),
+                         'dec': ( roots[which]['root'].dec, 0.01/3600., None )
+                        }
+            for n in [ 'firstdet', 'lastdet', 'maxdet' ]:
+                expected[ f'{n}_mjd'] = [ None, 0.0001, None ]
+                expected[ f'{n}_flux'] = [ -1e32, None, 1e-6 ]
+                expected[ f'{n}_fluxerr'] = [ None, None, 1e-6 ]
+            expected[ 'ndets' ] = [ 0, None, None ]
+            for mag in [ 21, 22, 23, 24 ]:
+                expected[ f'ndets{mag}' ] = [ 0, None, None ]
+            for sn in [ 5, 7, 10 ]:
+                expected[ f'nsn{sn}' ] = [ 0, None, None ]
+
+            for src in roots[which]['src']['realtime_diasource']:
+                if src.band != band:
+                    continue
+                expected[ 'ndets' ][0] += 1
+                expected[ 'lastdet_mjd' ][0] = src.midpointmjdtai
+                expected[ 'lastdet_flux' ][0] = src.psfflux
+                expected[ 'lastdet_fluxerr' ][0] = src.psffluxerr
+                if expected[ 'firstdet_mjd' ][0] is None:
+                    expected[ 'firstdet_mjd' ][0] = src.midpointmjdtai
+                    expected[ 'firstdet_flux' ][0] = src.psfflux
+                    expected[ 'firstdet_fluxerr' ][0] = src.psffluxerr
+                if src.psfflux > expected[ 'maxdet_flux' ][0]:
+                    expected[ 'maxdet_mjd' ][0] = src.midpointmjdtai
+                    expected[ 'maxdet_flux' ][0] = src.psfflux
+                    expected[ 'maxdet_fluxerr' ][0] = src.psffluxerr
+                # For zeropoint = 31.4,
+                #   m = 24 : f =   912
+                #   m = 23 : f =  2291
+                #   m = 22 : f =  5754
+                #   m = 21 : f = 14454
+                for mag, flux in zip( [ 24, 23, 22, 21 ], [ 912, 2291, 5754, 14454 ] ):
+                    if src.psfflux >= flux:
+                        expected[ f'ndets{mag}' ][0] += 1
+                for sn in [ 5, 7, 10 ]:
+                    if ( src.psfflux / src.psffluxerr ) >= sn:
+                        expected[ f'nsn{sn}' ][0] += 1
+
+            row = None
+            for checkrow in rows:
+                if ( checkrow['rootid'] == roots[which]['root'].id ) and ( checkrow['band'] == band ):
+                    if row is not None:
+                        raise RuntimeError( f"{row['rootid']}, {row['band']} shows up more than once!" )
+                    row = checkrow
+
+            assert set( row.keys() ) == set( expected.keys() )
+            for key in row.keys():
+                if expected[key][1] is not None:
+                    assert row[key] == pytest.approx( expected[key][0], abs=expected[key][1] )
+                elif expected[key][2] is not None:
+                    assert row[key] == pytest.approx( expected[key][0], rel=expected[key][2] )
+                else:
+                    assert row[key] == expected[key][0]
+
+
+def test_objstats_realtime_view( set_of_lightcurves ):
+    roots = set_of_lightcurves
+
+    # Because the objstats_realtime_view was created before the diaobject, diasource
+    #  tables were loaded, it should be empty
+    with db.DBCon( dictcursor=True ) as con:
+        rows = con.execute( "SELECT * FROM objstats_realtime" )
+        assert len(rows) == 0
+
+    # Now explicitly load it
+    ltcv.create_object_stats_materialized_view( 'realtime' )
+    with db.DBCon( dictcursor=True ) as con:
+        rows = con.execute( "SELECT * FROM objstats_realtime" )
+        check_db_rows_vs_expected( rows, roots )
+
+    # Now delete it, and then recreate it, to make sure it gets filled on creation
+    with db.DBCon( dictcursor=True ) as con:
+        con.execute( "DROP MATERIALIZED VIEW objstats_realtime" )
+        con.commit()
+
+    with db.DBCon( dictcursor=True ) as con:
+        rows = con.execute( "SELECT * FROM pg_class WHERE relname='objstats_realtime'" )
+        assert len(rows) == 0
+
+    ltcv.create_object_stats_materialized_view( 'realtime' )
+    with db.DBCon( dictcursor=True ) as con:
+        rows = con.execute( "SELECT * FROM objstats_realtime" )
+        check_db_rows_vs_expected( rows, roots )
+
+
+
 def test_get_object_infos( set_of_lightcurves, procver_collection ):
     bpvs, _pvs, _pvinfo = procver_collection
     roots = set_of_lightcurves
