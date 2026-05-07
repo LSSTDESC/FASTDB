@@ -353,6 +353,13 @@ class DBCon:
             if echo:
                 FDBLogger.debug( f"Sending query\n{q.as_string()}\nwith substitutions: {subdict}" )
 
+            if ( cursorname is not None ) and ( ( explain is not None ) or ( analyze is not None ) ):
+                # I haven't fully figured this out, but sometimes the server-side cursor seems
+                #   to have trouble when you try to explain
+                FDBLogger.warning( "Turning off EXPLAIN and ANALYZE for server-side cursor." )
+                explain = False
+                analyze= False
+
             nl = '\n'
             if explain:
                 FDBLogger.debug( "Explaining..." )
