@@ -542,6 +542,17 @@ def test_object_search( set_of_lightcurves, objstats_realtime_view, check_search
                 'roots': [ 2 ],
                 'conditions': { 'ndets24_min': 2, 'ndets22_max': 0  }
                },
+              { 'pv': 'pvc_pv2',
+                'band': None,
+                'roots': [ 1, 2 ],
+                'conditions': { 'lastdet_mjd_minus_firstdet_mjd_min': 35 }
+               },
+              { 'pv': 'pvc_pv2',
+                'band': None,
+                'roots': [ 0 ],
+                'conditions': { 'lastdet_mjd_minus_firstdet_mjd_min': 25,
+                                'lastdet_mjd_minus_firstdet_mjd_max': 35 }
+               },
               # Probably test other things too.... like bands....
              ]
 

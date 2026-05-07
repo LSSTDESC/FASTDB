@@ -1081,25 +1081,51 @@ def object_search( processing_version='default', just_objids=False, searchband=N
       SEARCH FIELDS:
 
           For most of the following fields (i.e. where not indicated
-          otherwise), you can have the field as is, in which case it
-          will search objects with the quantity equal to the value
-          (which does not make sense for real numbers), it can be
-          {field}_max, in which case it will search for things where
-          quantity for the object is ≤ the value give, or it can be
-          {field}_min, in which case... you got it.
+          otherwise), you can have any of the following patterns .  (Specific
+          exceptions are noted below.)
+
+             * field=val
+
+                   Will find objects whose value for the given field is
+                   exactly this.  This is probably a bad idea for the
+                   floating-point fields.
+
+             * field_min=val
+
+                   Will find objects whose value for the given field is
+                   at least val
+
+              * field_max=val
+
+                   Will find objects whose value for the given field is
+                   at most val.
+
+              * field1_minus_field2_min=val
+
+                   Will find objects where the difference between the
+                   values of field1 and field2 is at least val.
+
+              * field1_minus_field2_max=val
+
+                   Will find objects where the difference between the
+                   values of field1 and field2 is at most val.
 
           rootid: str or list of str
-             You can give a list of rootids and it will search for these.
-             If you include other criteria besides just this list, they may
-             further filter down what you get back.  If you're just sending
-             rootid, you might as well call get_object_infos.
+             You can give a list of rootids and it will search for
+             these.  You can't do the "min", "max", or "minus" thing
+             with rootid.  If you include other criteria besides just
+             this list, they may further filter down what you get back.
+             If you're just sending rootid, you might as well call
+             get_object_infos.
 
           ra: float
           dec: float
           radius: float
-             ra and dec _min and _max.  But, also, if you give both,
-             and "radius", then it will do a cone search at (ra, dec) in
-             radius arcseconds.
+             ra and dec work as any other float field.  But, also, if
+             you give both, and "radius", then it will do a cone search
+             at (ra, dec) in radius arcseconds.  If you specify radius,
+             you must specify both ra and dec.  You can't do any "min" etc.
+             with radius (that doesn't make sense).
 
           firstdet_mjd: float
              MJD of first detection
@@ -1171,7 +1197,6 @@ def object_search( processing_version='default', just_objids=False, searchband=N
           nsn10             : int, number of detections with flux/fluxerr ≥ 10
           nsn7              : int, number of detections with flux/fluxerr ≥ 7
           nsn5              : int, number of detections with flux/fluxerr ≥ 5
-
 
     """
 
