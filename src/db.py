@@ -353,6 +353,13 @@ class DBCon:
             if echo:
                 FDBLogger.debug( f"Sending query\n{q.as_string()}\nwith substitutions: {subdict}" )
 
+            if ( cursorname is not None ) and ( ( explain is not None ) or ( analyze is not None ) ):
+                # I haven't fully figured this out, but sometimes the server-side cursor seems
+                #   to have trouble when you try to explain
+                FDBLogger.warning( "Turning off EXPLAIN and ANALYZE for server-side cursor." )
+                explain = False
+                analyze= False
+
             nl = '\n'
             if explain:
                 FDBLogger.debug( "Explaining..." )
@@ -1544,6 +1551,43 @@ class ProcessingVersion( DBBase ):
     _tablemeta = None
     _pk = [ 'id' ]
 
+
+    @classmethod
+    def get_procver( cls, processing_version, dbcon=None ):
+        """Return a ProcessingVersion based on a UUID, description, or alias."""
+
+        try:
+            pvid = util.asUUID( processing_version )
+        except Exception:
+            pvid = None
+
+        with DBCon( dbcon, dictcursor=True ) as con:
+            if pvid is not None:
+                rows = con.execute( "SELECT * FROM processing_version WHERE id=%(pv)s", { 'pv': pvid } )
+                if len(rows) > 0:
+                    if len(rows) > 1:
+                        raise RuntimeError( "This should never happen." )
+                    return ProcessingVersion( **(rows[0]) )
+
+            rows = con.execute( "SELECT * FROM processing_version WHERE description=%(pv)s",
+                                { 'pv': processing_version } )
+            if len(rows) > 0:
+                if len(rows) > 1:
+                    raise RuntimeError( "This should never happen." )
+                return ProcessingVersion( **(rows[0]) )
+
+            rows = con.execute( "SELECT p.* FROM processing_version p "
+                                "INNER JOIN processing_version_alias a ON p.id=a.procver_id "
+                                "WHERE a.description=%(pv)s",
+                                { 'pv': processing_version } )
+            if len(rows) > 0:
+                if len(rows ) > 1:
+                    raise RuntimeError( "This should never happen." )
+                return ProcessingVersion( **(rows[0]) )
+
+        raise ValueError( f"Unknown processing version {processing_version}" )
+
+
     @classmethod
     def procver_id( cls, processing_version, dbcon=None ):
         """Return the uuid of processing_version.
@@ -1578,16 +1622,9 @@ class ProcessingVersion( DBBase ):
             return ipv
         except Exception:
             pass
-        with DBCon( dbcon ) as con:
-            rows, _cols = con.execute( "SELECT id FROM processing_version WHERE description=%(pv)s",
-                                       { 'pv': processing_version } )
-            if len(rows) > 0:
-                return rows[0][0]
-            rows, _cols = con.execute( "SELECT procver_id FROM processing_version_alias WHERE description=%(pv)s",
-                                       { 'pv': processing_version } )
-            if len(rows) == 0:
-                raise ValueError( f"Unknown processing version {processing_version}" )
-            return rows[0][0]
+
+        pv = cls.get_procver( processing_version, dbcon=dbcon )
+        return pv.id
 
 
     def highest_prio_base_procver( self, table, dbcon=None ):

@@ -2,6 +2,12 @@ import re
 import uuid
 import pytest
 
+from psycopg import sql
+import numpy as np
+
+import db
+import ltcv
+
 
 # If you've manually loaded your test database, but haven't
 #   manually inserted a user, from /code/tests run:
@@ -212,6 +218,96 @@ def test_getdiaobjectinfo( fastdb_client, procver_collection, set_of_lightcurves
         fastdb_client.retries = orig_retries
 
 
-@pytest.mark.skip( reason="NEED TO WRITE THIS TEST" )
-def test_objectsearch( fastdb_client, procver_collection, set_of_lightcurves ):
-    assert False
+def test_objectsearch( fastdb_client, procver_collection, objstats_realtime_view, check_search_vs_expected ):
+    # These tests should be exacly the same as what's in test_ltcv.py::test_object_search
+
+    tests = [ { 'pv': 'pvc_pv2',
+                'band': None,
+                'roots': [0, 1],
+                'conditions': { 'firstdet_mjd_min': 59999, 'firstdet_mjd_max': 60030 }
+               },
+              { 'pv': 'pvc_pv2',
+                'band': None,
+                'roots': [1, 2, 3],
+                'conditions': { 'lastdet_mjd_min': 60059, 'lastdet_mjd_max': 60081 }
+               },
+              { 'pv': 'pvc_pv2',
+                'band': None,
+                'roots': [2, 3],
+                'conditions': { 'lastdet_mjd_min': 60059, 'lastdet_mjd_max': 60081,
+                                'firstdet_mjd_min': 60039 }
+               },
+              { 'pv': 'pvc_pv2',
+                'band': None,
+                'roots': [1, 2],
+                'conditions': { 'maxdet_mjd_min': 60034, 'maxdet_mjd_max': 60051 }
+               },
+              { 'pv': 'pvc_pv2',
+                'band': None,
+                'roots': [ 1, 2 ],
+                'conditions': { 'maxdet_flux_min': np.pow( 10,  (31.4 - 23.1) / 2.5 ) }
+               },
+              { 'pv': 'pvc_pv2',
+                'band': None,
+                'roots': [ 1 ],
+                'conditions': { 'nsn10_min': 4 }
+               },
+              { 'pv': 'pvc_pv2',
+                'band': None,
+                'roots': [ 1, 2 ],
+                'conditions': { 'nsn5_min': 2 }
+               },
+              { 'pv': 'pvc_pv2',
+                'band': None,
+                'roots': [ 2 ],
+                'conditions': { 'nsn5_min': 2, 'nsn5_max': 7 }
+               },
+              { 'pv': 'pvc_pv2',
+                'band': None,
+                'roots': [ 1 ],
+                'conditions': { 'ndets23_min': 2 }
+               },
+              { 'pv': 'pvc_pv2',
+                'band': None,
+                'roots': [ 1, 2 ],
+                'conditions': { 'ndets24_min': 5 }
+               },
+              { 'pv': 'pvc_pv2',
+                'band': None,
+                'roots': [0, 2, 3 ],
+                'conditions': { 'ndets22_max': 0 }
+               },
+              { 'pv': 'pvc_pv2',
+                'band': None,
+                'roots': [ 2 ],
+                'conditions': { 'ndets24_min': 2, 'ndets22_max': 0  }
+               },
+              # Probably test other things too.... like bands....
+             ]
+
+    made_procvers = { 'realtime' }
+
+    try:
+        for test in tests:
+            if test['pv'] not in made_procvers:
+                with pytest.raises( RuntimeError, match="Can't do object search, materialized view.*doesn't exist" ):
+                    _ = fastdb_client.post( f"/objectsearch/{test['pv']}", json=test['conditions'] )
+
+                ltcv.create_object_stats_materialized_view( test['pv'] )
+                made_procvers.add( test['pv'] )
+
+            results = fastdb_client.post( f"/objectsearch/{test['pv']}", json=test['conditions'] )
+            check_search_vs_expected( test['pv'], test['roots'], test['band'], results )
+
+    finally:
+        with db.DBCon() as con:
+            for procver in made_procvers:
+                if procver == 'realtime':
+                    continue
+
+                con.execute_nofetch( sql.SQL( "DROP MATERIALIZED VIEW {view}" )
+                                     .format( view=sql.Identifier( f'objstatscomb_{procver}' ) ) )
+                con.execute_nofetch( sql.SQL( "DROP MATERIALIZED VIEW {view}" )
+                                     .format( view=sql.Identifier( f'objstats_{procver}' ) ) )
+
+            con.commit()

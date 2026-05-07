@@ -22,6 +22,7 @@ from db import ( BaseProcessingVersion,
                  DB,
                  DBCon,
                  AuthUser )
+import ltcv
 from util import asUUID
 import admin.load_snana_fits_ppdb
 from admin.load_snana_fits import FITSLoader
@@ -1388,3 +1389,222 @@ def lightcurve_checker( set_of_lightcurves, procver_collection ):
                                     assert all( ( infos[i][dex] is None ) or np.isnan( infos[i][dex] )
                                                 for i in ( 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ) )
     return check_ltcv_res
+
+
+# ======================================================================
+# These next few fixtures are used in both test_ltcv.py and
+# webserver/test.server.py (which is why they are here and not just in
+# one file).
+
+@pytest.fixture( scope='module' )
+def objstats_realtime_view( procver_collection ):
+    try:
+        ltcv.create_object_stats_materialized_view( 'realtime' )
+        yield True
+    finally:
+        with DBCon() as con:
+            con.execute_nofetch( "DROP MATERIALIZED VIEW IF EXISTS objstatscomb_realtime" )
+            con.execute_nofetch( "DROP MATERIALIZED VIEW IF EXISTS objstats_realtime" )
+            con.commit()
+
+
+@pytest.fixture( scope='module' )
+def accumulate_expected_stats( set_of_lightcurves, procver_collection ):
+    def do_the_things( procver, band=None ):
+        bpvs, pvs, pvinfo = procver_collection
+        roots = set_of_lightcurves
+
+        pvrow = [ p for p in pvinfo if ( ( p['procver'].description == procver ) or
+                                         ( procver in pvs and p['procver'].description == pvs[procver].description ) or
+                                         ( isinstance(procver, ProcessingVersion) and
+                                           procver.id==p['procver'].id ) ) ]
+        assert len(pvrow) == 1
+        pvrow = pvrow[0]
+
+        expected = {}
+
+        for root in roots:
+            thisexp = { 'rootid': [ root['root'].id, None, None ],
+                        'ra': [ root['root'].ra, None, 1e-10 ],
+                        'dec': [ root['root'].dec, None, 1e-10 ]
+                       }
+            if band is not None:
+                thisexp['band'] = [ band, None, None ]
+
+            for n in [ 'firstdet', 'lastdet', 'maxdet' ]:
+                thisexp[ f'{n}_mjd' ] = [ 1e32 if n=='firstdet' else -1e32, 0.0001, None ]
+                thisexp[ f'{n}_flux' ] = [ -1e32, None, 1e-6 ]
+                thisexp[ f'{n}_fluxerr' ] = [ None, None, 1e-6 ]
+            thisexp[ 'ndets' ] = [ 0, None, None ]
+
+            for mag in [ 21, 22, 23, 24 ]:
+                thisexp[ f'ndets{mag}' ] = [ 0, None, None ]
+            for sn in [ 5, 7, 10 ]:
+                thisexp[ f'nsn{sn}' ] = [ 0, None, None ]
+
+            # There are multiple base processing versions that have data.  We need to
+            #  extract the highest priority for each.  To do this, rewrangle
+            #  the set_of_lightcurves data so that it's indexed by bsae_procver,
+            #  in descending priority order
+
+            if band is not None:
+                cond = lambda s: s.band == band
+            else:
+                cond = lambda s: True
+
+            src_bpvkeys = [ p[2] for p in pvrow['diasource'] ]
+            reindexed_srces = { k: { s.visit: s for s in root['src'][k] if cond(s) }
+                                for k in src_bpvkeys if k in root['src'].keys() }
+
+            seenvisits = set()
+
+            # Extract the expected values for this root object
+            for bpv, srces in reindexed_srces.items():
+                for visit, src in srces.items():
+                    if visit in seenvisits:
+                        # already have a higher prio bpv
+                        continue
+
+                    seenvisits.add( visit )
+                    thisexp['ndets'][0] += 1
+
+                    if src.midpointmjdtai < thisexp['firstdet_mjd'][0]:
+                        thisexp['firstdet_mjd'][0] = src.midpointmjdtai
+                        thisexp['firstdet_flux'][0] = src.psfflux
+                        thisexp['firstdet_fluxerr'][0] = src.psffluxerr
+                    if src.midpointmjdtai > thisexp['lastdet_mjd'][0]:
+                        thisexp['lastdet_mjd'][0] = src.midpointmjdtai
+                        thisexp['lastdet_flux'][0] = src.psfflux
+                        thisexp['lastdet_fluxerr'][0] = src.psffluxerr
+                    if src.psfflux > thisexp['maxdet_flux'][0]:
+                        thisexp['maxdet_mjd'][0] = src.midpointmjdtai
+                        thisexp['maxdet_flux'][0] = src.psfflux
+                        thisexp['maxdet_fluxerr'][0] = src.psffluxerr
+
+                    # For zeropoint = 31.4,
+                    #   m = 24 : f =   912
+                    #   m = 23 : f =  2291
+                    #   m = 22 : f =  5754
+                    #   m = 21 : f = 14454
+                    for mag, flux in zip( [ 24, 23, 22, 21 ], [ 912, 2291, 5754, 14454 ] ):
+                        if src.psfflux >= flux:
+                            thisexp[ f'ndets{mag}' ][0] += 1
+                    for sn in [ 5, 7, 10 ]:
+                        if ( src.psfflux / src.psffluxerr ) >= sn:
+                            thisexp[ f'nsn{sn}' ][0] += 1
+
+            expected[ root['root'].id ] = thisexp
+
+        return expected
+
+    return do_the_things
+
+
+@pytest.fixture( scope='module' )
+def check_db_rows_vs_expected( set_of_lightcurves, accumulate_expected_stats ):
+    roots = set_of_lightcurves
+
+    def do_the_things( rows, combrows, expected_roots=None, procver='realtime' ):
+        nonlocal roots
+
+        # Make sure what we got matches what we should expect from set_of_lightcurves.
+        # This involves arduously trolling through set_of_lightcurves to figure out what we expect.
+        # Objects 0 through 2 are in realtime, and all have detections in r and i
+        if expected_roots is not None:
+            assert len(rows) == len( expected_roots ) * 2
+            assert len(combrows) == len( expected_roots )
+        else:
+            assert len(rows) == 8
+            assert len(combrows) == 4
+
+        expected = { 'r': accumulate_expected_stats( procver, 'r' ),
+                     'i': accumulate_expected_stats( procver, 'i' ) }
+        exptot = accumulate_expected_stats( procver )
+
+        for rootid in exptot.keys():
+            for band in 'r', 'i':
+                thisexp = expected[ band ][ rootid ]
+                row = None
+                for checkrow in rows:
+                    if ( checkrow['rootid'] == rootid ) and ( checkrow['band'] == band ):
+                        if row is not None:
+                            raise RuntimeError( f"{row['rootid']}, {row['band']} shows up more than once!" )
+                        row = checkrow
+
+                if row is None:
+                    if expected_roots is None:
+                        assert False, f"Didn't get a result for {rootid} band {band}"
+                    else:
+                        assert rootid not in set( roots[i]['root'].id for i in expected_roots )
+                else:
+                    assert set( row.keys() ) == set( thisexp.keys() )
+                    for key in row.keys():
+                        if thisexp[key][1] is not None:
+                            assert row[key] == pytest.approx( thisexp[key][0], abs=thisexp[key][1] )
+                        elif thisexp[key][2] is not None:
+                            assert row[key] == pytest.approx( thisexp[key][0], rel=thisexp[key][2] )
+                        else:
+                            assert row[key] == thisexp[key][0]
+
+            combexp = exptot[ rootid ]
+            row = None
+            for checkrow in combrows:
+                if checkrow['rootid'] == rootid:
+                    if row is not None:
+                        raise RuntimeError( f"{row['rootid']} shows up more than once!" )
+                    row = checkrow
+
+            if row is None:
+                if expected_roots is None:
+                    assert False, f"Didn't get a result for {rootid}"
+                else:
+                    assert rootid not in set( roots[i]['root'].id for i in expected_roots )
+            else:
+                assert set( row.keys() ) == set( combexp.keys() )
+                for key in row.keys():
+                    if combexp[key][1] is not None:
+                        assert row[key] == pytest.approx( combexp[key][0], abs=combexp[key][1] )
+                    elif combexp[key][2] is not None:
+                        assert row[key] == pytest.approx( combexp[key][0], rel=combexp[key][2] )
+                    else:
+                        assert row[key] == combexp[key][0]
+
+    return do_the_things
+
+
+@pytest.fixture( scope='module' )
+def check_search_vs_expected( set_of_lightcurves, accumulate_expected_stats ):
+    roots = set_of_lightcurves
+
+    def do_the_things( procver, expected_roots, band, results ):
+        nonlocal roots
+
+        expected_rootids = set( roots[i]['root'].id for i in expected_roots )
+        expected = accumulate_expected_stats( procver, band )
+        expected = { k: v for k, v in expected.items() if k in expected_rootids }
+
+        if ( len(results['rootid']) == 0 ) and ( len(expected) != 0 ):
+            assert False, "No results, should have been some"
+
+        rootsareuuid = isinstance( results['rootid'][0], uuid.UUID )
+
+        if rootsareuuid:
+            assert set( results['rootid'] ) == expected_rootids
+        else:
+            assert set( uuid.UUID(r) for r in results['rootid'] ) == expected_rootids
+
+        for i, rootid in enumerate( results['rootid'] ):
+            if not rootsareuuid:
+                rootid = uuid.UUID( rootid )
+            for k, shouldbe in expected[rootid].items():
+                val = results[k][i]
+                if ( k == 'rootid' ) and ( not rootsareuuid ):
+                    val = uuid.UUID( val )
+                if shouldbe[1] is not None:
+                    assert val == pytest.approx( shouldbe[0], abs=shouldbe[1] )
+                elif shouldbe[2] is not None:
+                    assert val == pytest.approx( shouldbe[0], rel=shouldbe[2] )
+                else:
+                    assert val == shouldbe[0]
+
+    return do_the_things

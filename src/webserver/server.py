@@ -243,22 +243,9 @@ class ObjectSearch( BaseView ):
 
         FDBLogger.debug( f"ObjectSearch on processing version {processing_version} with search data {searchdata}" )
         try:
-            rval = ltcv.object_search( processing_version, return_format='json', **searchdata )
+            return ltcv.object_search( processing_version, **searchdata )
         except Exception as ex:
             raise FASTDBWebException( str(ex) )
-
-        # JSON dysfunctionality... convert to strings and back,
-        # javascript may decide to interpret bigints as doubles, thereby
-        # losing necessary precision.  Convert all bigints to strings.
-        # Right now, that means listing the possible columns here.  There
-        # must be a better way... but if I want to interpret it in javascript
-        # there probably isn't.
-        bigints = [ 'diaobjectid' ]
-        for k in bigints:
-            if k in rval.keys():
-                rval[k] = [ str(v) for v in rval[k] ]
-
-        return rval
 
 
 # **********************************************************************
