@@ -1060,12 +1060,11 @@ _object_search_timings_count = {}
 def object_search( processing_version='default', just_objids=False, searchband=None, dbcon=None, **kwargs ):
     """Search for objects.
 
-    For parameters that define the search, if they are None, they are
-    not considered in the search.  (I.e. that filter will be skipped.)
+    This is a relatively fast search that only looks at object stats
+    materialized views.
 
-    THIS IS WAY TOO SLOW RIGHT NOW.  Even in tests with modest database.
-    TODO: explore and figure out where the queries are slow, make them
-    faster.
+    (A search function that can do more, but that is potentially much
+    slower, is still TBD.)
 
     Parameters
     ----------
@@ -1079,61 +1078,70 @@ def object_search( processing_version='default', just_objids=False, searchband=N
          given, then the cuts will only consider photometry with this
          band.
 
-      SEARCH FIELDS: For each of the following fields, you can have the
-         field as is, in which case it will search for the quantity
-         equal to the value (which does not make sense for real
-         numbers), it can be {field}_max, in which case it will search
-         for things where quantity is ≤ the value, or it can be
-         {field}_min, in which case... you got it.
+      SEARCH FIELDS:
 
-      ra: float
-      dec: float
-      radius: float
-         ra and dec _min and _max.  But, also, if you give both,
-         and "radius", then it will do a cone search at (ra, dec) in
-         radius arcseconds.
+          For most of the following fields (i.e. where not indicated
+          otherwise), you can have the field as is, in which case it
+          will search objects with the quantity equal to the value
+          (which does not make sense for real numbers), it can be
+          {field}_max, in which case it will search for things where
+          quantity for the object is ≤ the value give, or it can be
+          {field}_min, in which case... you got it.
 
-      firstdet_mjd: float
-         MJD of first detection
+          rootid: str or list of str
+             You can give a list of rootids and it will search for these.
+             If you include other criteria besides just this list, they may
+             further filter down what you get back.  If you're just sending
+             rootid, you might as well call get_object_infos.
 
-      firstdet_flux: float
-         Flux (nJy) of first detection
+          ra: float
+          dec: float
+          radius: float
+             ra and dec _min and _max.  But, also, if you give both,
+             and "radius", then it will do a cone search at (ra, dec) in
+             radius arcseconds.
 
-      lastdet_mjd: float
-         MJD of last detection
+          firstdet_mjd: float
+             MJD of first detection
 
-      lastdet_flux: float
-         Flux (nJy) of last detection
+          firstdet_flux: float
+             Flux (nJy) of first detection
 
-      maxdet_mjd: float
-         MJD of last detection
+          lastdet_mjd: float
+             MJD of last detection
 
-      maxdet_flux: float
-         Flux (nJy) of last detection
+          lastdet_flux: float
+             Flux (nJy) of last detection
 
-      ndets: int
-         Number of detections
+          maxdet_mjd: float
+             MJD of last detection
 
-      ndets24: int
-         Number of detections with mag≤24
+          maxdet_flux: float
+             Flux (nJy) of last detection
 
-      ndets23: int
-         Number of detections with mag≤23
+          ndets: int
+             Number of detections
 
-      ndets22: int
-         Number of detections with mag≤22
+          ndets24: int
+             Number of detections with mag≤24
 
-      ndets21: int
-         Number of detections with mag≤21
+          ndets23: int
+             Number of detections with mag≤23
 
-      nsn10: int
-         Number of detections with S/N > 10
+          ndets22: int
+             Number of detections with mag≤22
 
-      nsn7: int
-         Number of detections with S/N > 7
+          ndets21: int
+             Number of detections with mag≤21
 
-      nsn5: int
-         Number of detections with S/N > 5
+          nsn10: int
+             Number of detections with S/N > 10
+
+          nsn7: int
+             Number of detections with S/N > 7
+
+          nsn5: int
+             Number of detections with S/N > 5
 
     Returns
     -------
@@ -1141,7 +1149,29 @@ def object_search( processing_version='default', just_objids=False, searchband=N
 
       Each key is the column name, and the value is a numpy array with
       column values.  It should be safe to stuff this directly into
-      pandas.DataFrame().
+      pandas.DataFrame().  Column names are:
+
+          rootid            : UUID, the rootid of the object
+          ra                : float
+          dec               : float
+          firstdet_mjd      : float, mjd of first detection (diasource)
+          firstdet_flux     : float, flux in nJy (zeropoint 31.4) of first detection
+          firstdet_fluxerr  : float
+          lastdet_mjd       : float, mjd of last detection (diasource)
+          lastdet_flux      : float, flux in nJy (zeropoint 31.4) of last detection
+          lastdet_fluxerr   : float
+          maxdet_mjd        : float, mjd of max (i.e. highest-flux) detection (diasource)
+          maxdet_flux       : float, flux in nJy (zeropoint 31.4) of max detection
+          maxdet_fluxerr    : float
+          ndets             : int, number of detections (diasources for this processing version and rootid)
+          ndets24           : int, number of detections with mag ≤ 24
+          ndets23           : int, number of detections with mag ≤ 23
+          ndets22           : int, number of detections with mag ≤ 22
+          ndets21           : int, number of detections with mag ≤ 21
+          nsn10             : int, number of detections with flux/fluxerr ≥ 10
+          nsn7              : int, number of detections with flux/fluxerr ≥ 7
+          nsn5              : int, number of detections with flux/fluxerr ≥ 5
+
 
     """
 
