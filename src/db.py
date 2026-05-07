@@ -7,6 +7,7 @@
 
 # import sys
 import os
+import re
 import uuid
 import time
 import collections
@@ -459,6 +460,9 @@ class DBCon:
 
 # ======================================================================
 
+_pgwherere = re.compile( '^(.+)_minus_(.+)_(min|max)$' )
+
+
 def construct_pgsql_where_clause( searchspec, where="WHERE", **kwargs ):
     # See spectrum.py::get_spectrum_info for an exmple
 
@@ -511,7 +515,7 @@ def construct_pgsql_where_clause( searchspec, where="WHERE", **kwargs ):
         if f'{field}_min' in kwargs:
             if not fieldinfo['minmax']:
                 raise ValueError( f'Field {field} doesn\'t work with "min"' )
-            if util.isSequence( f'{field}_max' ):
+            if util.isSequence( kwargs[f'{field}_min'] ):
                 raise ValueError( f"{field}_max can't be a list" )
             q += sql.SQL( "{where} {field}>=%({sfield}_min)s" ).format( where=sql.SQL(where),
                                                                         field=sql.Identifier(field),
@@ -523,7 +527,7 @@ def construct_pgsql_where_clause( searchspec, where="WHERE", **kwargs ):
         if f'{field}_max' in kwargs:
             if not fieldinfo['minmax']:
                 raise ValueError( f'Field {field} doesn\'t work with "max"' )
-            if util.isSequence( f'{field}_max' ):
+            if util.isSequence( kwargs[f'{field}_max'] ):
                 raise ValueError( f"{field}_max can't be a list" )
             q += sql.SQL( "{where} {field}<=%({sfield}_max)s" ).format( where=sql.SQL(where),
                                                                         field=sql.Identifier(field),
@@ -531,6 +535,44 @@ def construct_pgsql_where_clause( searchspec, where="WHERE", **kwargs ):
             subdict[f'{field}_max'] = kwargs[f'{field}_max']
             where = " AND"
             del kwargs[f'{field}_max']
+
+    # Differences
+    # NOTE.  The parsing here will screw up if any of the fields have an underscore in their
+    #   name.  Think about this.
+
+    yanks = set()
+    for kw in kwargs:
+        mat = _pgwherere.search( kw )
+        if mat is None:
+            continue
+        field = mat.group(1)
+        other = mat.group(2)
+        minmax = mat.group(3)
+
+        if not ( ( field in searchspec ) and ( other in searchspec ) ):
+            continue
+
+        if not searchspec[field]['minmax']:
+            raise ValueError( f'Field {field} doesn\'t work with "minus"' )
+        if not searchspec[other]['minmax']:
+            raise ValueError( f'Field {other} doesn\'t work with "minus"' )
+
+        if util.isSequence( kwargs[kw] ):
+            raise ValueError( f"{kw} can't be a list" )
+
+        lege = ">=" if minmax == "min" else "<="
+
+        q += sql.SQL( "{where} {field}-{other}{op}%({kw})s" ).format( where=sql.SQL(where),
+                                                                      field=sql.Identifier(field),
+                                                                      other=sql.Identifier(other),
+                                                                      op=sql.SQL(lege),
+                                                                      kw=sql.SQL(kw) )
+        subdict[kw] = kwargs[kw]
+        where = " AND"
+        yanks.add( kw )
+
+    for yank in yanks:
+        del kwargs[yank]
 
     return q, subdict, set(kwargs.keys()), where
 
