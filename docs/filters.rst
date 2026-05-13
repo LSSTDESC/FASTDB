@@ -30,9 +30,9 @@ Some of the requirements for filters include:
     +--------------------+----------------------------------------------------------+
     | ``midpointMjdTai`` | Modified Julian Date of visit                            | 
     +--------------------+----------------------------------------------------------+
-    | ``apFlux``         | flux in nJy                                              | 
+    | ``psfFlux``        | flux in nJy                                              | 
     +--------------------+----------------------------------------------------------+
-    | ``apFluxErr``      | estimated flux uncertainty in nJy                        | 
+    | ``psfFluxErr``     | estimated flux uncertainty in nJy                        | 
     +--------------------+----------------------------------------------------------+
     | ``visit``          | id of the visit where the source was measured            | 
     +--------------------+----------------------------------------------------------+
@@ -123,12 +123,14 @@ Useful Links
 AMPEL
 =====
 
-**Current status as of April 2026:** have to contact the broker maintainers in order to implement filters. At the moment it looks like there are base filters implemented in 'Tier 0', before the enriching and processing of the data, but FASTDB might want to have an option to have filters implemented in an additional post-existing-pipeline stage, since it seems there is also some filtering happening in the final stages. 
+**Current status as of April 2026:** Ampel is modular, and is constructed so that groups can construct their own pipelines that will be run on the AMPEL instance at DESY. To construct a pipeline (essentially a yaml file), you can use a combination of existing modules that match your needs, which include things like filtering, catalog matching, and photometric classification. Once the pipeline has been tested, it can be submitted to the AMPEL team for validation and review. They will then deploy the pipeline, which outputs a Kafka stream that is hosted on `Hopskotch <https://scimma.org/hopskotch>`_. If the available modules do not match your needs, you can talk to the maintainers to get new filter modules created.
+
 
 Useful Links
 ------------
 * `AMPEL Github <https://github.com/AmpelAstro/Ampel-LSST>`_
-* `AMPEL Documentation <https://ampelproject.github.io/>`_
+* `AMPEL main website <https://ampelastro.github.io/>`_
+* `AMPEL code documentation <https://ampelproject.github.io/>`_
 * `example filter <https://github.com/AmpelAstro/Ampel-HU-astro/blob/main/ampel/contrib/hu/t0/DecentVroFilter.py>`_
 
 
