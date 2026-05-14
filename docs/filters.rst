@@ -132,6 +132,7 @@ Useful Links
 * `AMPEL main website <https://ampelastro.github.io/>`_
 * `AMPEL code documentation <https://ampelproject.github.io/>`_
 * `example filter <https://github.com/AmpelAstro/Ampel-HU-astro/blob/main/ampel/contrib/hu/t0/DecentVroFilter.py>`_
+* `AMPEL client <https://github.com/AmpelAstro/Ampel-Access>`_
 
 
 ANTARES
