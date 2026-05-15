@@ -134,7 +134,9 @@ Useful Links
 AMPEL
 =====
 
-**Current status as of May 2026:** AMPEL is modular, and is constructed so that groups can construct their own pipelines that will be run on the AMPEL instance on their servers. To construct a pipeline (essentially a yaml file), you can use a combination of existing modules that match your needs, which include things like filtering, catalog matching, and photometric classification. Once the pipeline has been tested, it can be submitted to the AMPEL team for validation and review. They will then deploy the pipeline, which outputs a Kafka stream that is hosted on `Hopskotch <https://scimma.org/hopskotch>`_. If the available modules do not match your needs, you can talk to the maintainers to get new filter modules created.
+**Current status as of May 2026:** AMPEL is modular, and is constructed so that groups can construct their own pipelines that will be run on the AMPEL instance on their servers. To construct a pipeline (essentially a yaml file), you can use a combination of existing modules that match your needs, which include things like filtering, catalog matching, and photometric classification. 
+
+Once the pipeline has been tested, it can be submitted to the AMPEL team for validation and review. They will then deploy the pipeline, which outputs a Kafka stream that is hosted on `Hopskotch <https://scimma.org/hopskotch>`_. If the available modules do not match your needs, you can talk to the maintainers to get new filter modules created.
 
 **NOTE:** currently Ampel's streamed alerts are object-based, and do not include diaSourceIds or some of the other required information from the diaSource table. This makes it currently not feasible for FASTDB to listen to any topics there. 
 
