@@ -138,7 +138,7 @@ AMPEL
 
 Once the pipeline has been tested, it can be submitted to the AMPEL team for validation and review. They will then deploy the pipeline, which outputs a Kafka stream that is hosted on `Hopskotch <https://scimma.org/hopskotch>`_. If the available modules do not match your needs, you can talk to the maintainers to get new filter modules created.
 
-**NOTE:** currently Ampel's streamed alerts are object-based, and do not include diaSourceIds or some of the other required information from the diaSource table. This makes it currently not feasible for FASTDB to listen to any topics there. 
+**NOTE:** currently Ampel's streamed alerts are object-based, and do not include diaSourceIds or some of the other required information from the diaSource table. However, they are working on including the diaSourceId in their alerts, and may be open to adding in the other required parameters as well.  
 
 
 Useful Links
