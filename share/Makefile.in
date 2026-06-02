@@ -476,6 +476,13 @@ uninstall-am: uninstall-avscDATA uninstall-shareDATA
 
 .PRECIOUS: Makefile
 
+	avsc/lsst.v11_0.alert.avsc \
+	avsc/lsst.v11_0.diaObject.avsc \
+	avsc/lsst.v11_0.diaSource.avsc \
+	avsc/lsst.v11_0.diaForcedSource.avsc \
+	avsc/lsst.v11_0.ssObject.avsc \
+	avsc/lsst.v11_0.ssSource.avsc \
+	avsc/lsst.v11_0.mpc_orbits.avsc
 
 # Tell versions [3.59,3.63) of GNU make to not export all variables.
 # Otherwise a system limit (for SysV at least) may be exceeded.
