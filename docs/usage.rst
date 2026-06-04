@@ -44,7 +44,7 @@ To run the FASTDB client on Perlmutter, you need to do the following *once*:
       [production]
       url = https://desc-fastdb.lbl.gov
       username = <your fastdb username>
-      pass = <your fastdb password>
+      password = <your fastdb password>
 
   * Run ``chmod go-rws ~/.fastdb.ini`` to make sure nobody else can read your password.
 
