@@ -36,10 +36,14 @@ spec:
               value: {{ .Values.minio.credentials.accessKey | quote }}
             - name: MINIO_ROOT_PASSWORD
               value: {{ .Values.minio.credentials.secretKey | quote }}
+            {{- if .Values.minio.site1.serverUrl }}
             - name: MINIO_SERVER_URL
-              value: "https://minio-site1.rearmstr-dev.development.svc.spin.nersc.org"
+              value: {{ .Values.minio.site1.serverUrl | quote }}
+            {{- end }}
+            {{- if .Values.minio.site1.browserRedirectUrl }}
             - name: MINIO_BROWSER_REDIRECT_URL
-              value: "https://minio-site1-console.rearmstr-dev.development.svc.spin.nersc.org"
+              value: {{ .Values.minio.site1.browserRedirectUrl | quote }}
+            {{- end }}
           ports:
             - containerPort: 9000
               name: s3
@@ -135,6 +139,14 @@ spec:
               value: {{ .Values.minio.credentials.accessKey | quote }}
             - name: MINIO_ROOT_PASSWORD
               value: {{ .Values.minio.credentials.secretKey | quote }}
+            {{- if .Values.minio.site1.serverUrl }}
+            - name: MINIO_SERVER_URL
+              value: {{ .Values.minio.site2.serverUrl | quote }}
+            {{- end }}
+            {{- if .Values.minio.site1.browserRedirectUrl }}
+            - name: MINIO_BROWSER_REDIRECT_URL
+              value: {{ .Values.minio.site2.browserRedirectUrl | quote }}
+            {{- end }}
           ports:
             - containerPort: 9000
               name: s3
@@ -233,9 +245,20 @@ spec:
                 sleep 5
               done
 
-
-
               mc mb --ignore-existing site1/{{ .Values.postgres.pgbackrest.repo1.bucket }} --insecure &&
-              
+
+
+              {{- if .Values.postgres.pgbackrest.repo2.enabled }}
+              echo "Waiting for MinIO site2 to be ready..."
+              for i in $(seq 1 30); do
+                mc alias set site2 http://minio-site2:{{ .Values.minio.site2.port }} \
+                  {{ .Values.minio.credentials.accessKey }} \
+                  {{ .Values.minio.credentials.secretKey }} --insecure 2>/dev/null && break
+                echo "MinIO site2 not ready, retry $i/30..."
+                sleep 5
+              done
+
+              mc mb --ignore-existing site2/{{ .Values.postgres.pgbackrest.repo2.bucket }} --insecure &&
+              {{- end }}
               echo "Buckets created successfully"
 {{- end }}

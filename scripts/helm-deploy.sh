@@ -35,7 +35,7 @@ set -euo pipefail
 
 # ── Defaults ─────────────────────────────────────────────────────────
 NS="${1:-local}"
-VALUES="${2:-./helm/fastdb/values-local.yaml}"
+VALUES="${2:-.admin/helm/fastdb/values-local.yaml}"
 RELEASE="fastdb"
 SKIP_BUILD=false
 SKIP_HELM=false
@@ -169,7 +169,7 @@ fi
 # ── Step 1b: Build and load images into Kind ──────────────────────────
 if [[ "$LOAD_IMAGES" == "true" ]]; then
   DOCKER_ARCHIVE="${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}"
-  DOCKER_VERSION="${DOCKER_VERSION:-test20251201}"
+  DOCKER_VERSION="${DOCKER_VERSION:-test20260225}"
 
   echo "--- Building container images ---"
   $CONTAINER_RT compose build postgres postgres-standby mongodb shell webap queryrunner
@@ -203,7 +203,7 @@ if [[ "$SKIP_HELM" == "false" ]]; then
   if [[ -n "$REGISTRY_PASSWORD" ]]; then
     HELM_SET_ARGS+=(--set "global.registryCredentials.password=$REGISTRY_PASSWORD")
   fi
-  helm upgrade --install "$RELEASE" ./helm/fastdb -f "$VALUES"\
+  helm upgrade --install "$RELEASE" ./admin/helm/fastdb -f "$VALUES"\
     --create-namespace -n "$NS" \
     "${HELM_CTX[@]+"${HELM_CTX[@]}"}" \
     "${HELM_SET_ARGS[@]+"${HELM_SET_ARGS[@]}"}"

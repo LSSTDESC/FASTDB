@@ -58,6 +58,8 @@ postgres:
   
   pgbackrest:
     enabled: true
+    caSecretName: pgbackrest-ca
+    caMountPath: /etc/pgbackrest-ca
     repo1:
       endpoint: https://minio-site1.rearmstr-dev.development.svc.spin.nersc.org
       storagePort: 443
@@ -99,3 +101,6 @@ minio:
   credentials:
     accessKey: minioadmin
     secretKey: minioadmin
+  site1:
+    serverUrl: "https://minio-site1.rearmstr-dev.development.svc.spin.nersc.org"
+    browserRedirectUrl: "https://minio-site1-console.rearmstr-dev.development.svc.spin.nersc.org"

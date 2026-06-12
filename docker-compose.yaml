@@ -419,8 +419,9 @@ services:
         condition: service_completed_successfully
       postgres:
         condition: service_healthy
-    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-postgres-standby:${DOCKER_VERSION:-test20251201}
+    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-postgres-standby:${DOCKER_VERSION:-test20260225}
     environment:
+      PGDATA: /var/lib/postgresql/data/pgdata
       FASTDB_ARCHIVE_ENABLED: true
       PGBACKREST_REPO1_S3_KEY: minioadmin
       PGBACKREST_REPO1_S3_KEY_SECRET: minioadmin

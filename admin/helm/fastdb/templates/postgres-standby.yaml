@@ -107,14 +107,15 @@ spec:
             - name: secrets
               mountPath: /secrets
               readOnly: true
-            - name: pgbackrest-ca
-              mountPath: /etc/pgbackrest-ca
-              readOnly: true         
+            {{- if .Values.postgres.pgbackrest.enabled }}
             - name: pgbackrest-conf
               mountPath: /etc/pgbackrest/pgbackrest.conf
               subPath: pgbackrest.conf
               readOnly: true
-
+            - name: certs
+              mountPath: {{ .Values.postgres.pgbackrest.caMountPath }}
+              readOnly: true
+            {{- end }}
             - name: dshm
               mountPath: /dev/shm
 
@@ -135,15 +136,18 @@ spec:
         - name: pgbackrest-conf
           configMap:
             name: pgbackrest-conf
-
+        {{- if and (or .Values.postgres.pgbackrest.repo1.caFile .Values.postgres.pgbackrest.repo2.caFile) (ne .Values.postgres.pgbackrest.caSecretName "minio-certs") }}
         - name: pgbackrest-ca
           secret:
             secretName: pgbackrest-ca
-
+        {{- end }}
         - name: dshm
           emptyDir:
             medium: Memory
             sizeLimit: {{ .Values.postgresStandby.sharedMemory | default "1Gi" }}
+        - name: certs
+          secret:
+            secretName: {{ .Values.postgres.pgbackrest.caSecretName }}
 
 ---
 apiVersion: v1

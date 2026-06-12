@@ -2,13 +2,14 @@
 # Usage: helm install fastdb ./helm/fastdb -f ./helm/fastdb/values-local.yaml
 
 global:
-  namespace: rearmstr-dev
+  namespace: fastdb-local
   environment: local
 
   # Images built by docker-compose and loaded into Kind via kind load.
   # imagePullPolicy: Never means K8s uses the local store only — no registry contact.
   imageRegistry: "ghcr.io/lsstdesc"
-  imageTag: "test20251201"
+  #imageTag: "test20251201"
+  imageTag: "test20260225"
   imagePullPolicy: Never
   imagePullSecrets: []
 
@@ -50,15 +51,34 @@ postgres:
 
   pgbackrest:
     enabled: true
+    setupBackup: true
+    caSecretName: pgbackrest-ca
+    caMountPath: /etc/pgbackrest-ca
     repo1:
-      endpoint: minio-site1
+      endpoint: minio-site1-proxy
+      storagePort: 443
+      caFile: /etc/pgbackrest-ca/ca.crt
     repo2:
       enabled: true
-      endpoint: minio-site2
+      endpoint: minio-site2-proxy
+      storagePort: 443
+      caFile: /etc/pgbackrest-ca/ca.crt
+
 
 # Standby enabled for local testing
 postgresStandby:
   enabled: true
+  caSecretName: pgbackrest-ca
+  caMountPath: /etc/pgbackrest-ca
+  repo1:
+    endpoint: minio-site1-proxy
+    storagePort: 443
+    caFile: /etc/pgbackrest-ca/ca.crt
+  repo2:
+    enabled: true
+    endpoint: minio-site2-proxy
+    storagePort: 443
+    caFile: /etc/pgbackrest-ca/ca.crt
   persistence:
     size: 10Gi
 
@@ -120,3 +140,21 @@ minio:
       type: NodePort
       nodePortS3: 30092
       nodePortConsole: 30093
+
+minioProxy:
+  enabled: true
+  tlsSecretName: minio-proxy-tls
+
+  image:
+    repository: nginx
+    tag: 1.25-alpine
+    pullPolicy: IfNotPresent
+
+  sites:
+    - name: minio-site1-proxy
+      backendService: minio-site1
+      backendPort: 9000
+
+    - name: minio-site2-proxy
+      backendService: minio-site2
+      backendPort: 9000

@@ -1,0 +1,112 @@
+{{- if .Values.minioProxy.enabled }}
+{{- $root := . }}
+{{- range .Values.minioProxy.sites }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .name }}-nginx-conf
+  namespace: {{ $root.Values.global.namespace }}
+data:
+  default.conf: |
+    server {
+      listen 8443 ssl;
+      server_name _;
+
+      ssl_certificate     /etc/nginx/tls/tls.crt;
+      ssl_certificate_key /etc/nginx/tls/tls.key;
+
+      client_max_body_size 0;
+
+      location / {
+        proxy_pass http://{{ .backendService }}:{{ .backendPort }};
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+
+        proxy_http_version 1.1;
+        proxy_request_buffering off;
+        proxy_buffering off;
+      }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .name }}
+  namespace: {{ $root.Values.global.namespace }}
+  labels:
+    app: {{ .name }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .name }}
+    spec:
+      containers:
+        - name: nginx
+          image: {{ $root.Values.minioProxy.image.repository }}:{{ $root.Values.minioProxy.image.tag }}
+          imagePullPolicy: {{ $root.Values.minioProxy.image.pullPolicy }}
+          command: ["nginx"]
+          args: ["-g", "daemon off;"]
+          ports:
+            - containerPort: 8443
+              name: https
+          volumeMounts:
+            - name: nginx-conf
+              mountPath: /etc/nginx/conf.d
+              readOnly: true
+            - name: tls
+              mountPath: /etc/nginx/tls
+              readOnly: true
+            - name: nginx-cache
+              mountPath: /var/cache/nginx
+            - name: nginx-run
+              mountPath: /var/run
+            - name: nginx-tmp
+              mountPath: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 101
+            runAsGroup: 101
+            capabilities:
+              drop:
+                - ALL
+      volumes:
+        - name: nginx-conf
+          configMap:
+            name: {{ .name }}-nginx-conf
+        - name: tls
+          secret:
+            secretName: {{ $root.Values.minioProxy.tlsSecretName }}
+        - name: nginx-cache
+          emptyDir: {}
+        - name: nginx-run
+          emptyDir: {}
+        - name: nginx-tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .name }}
+  namespace: {{ $root.Values.global.namespace }}
+  labels:
+    app: {{ .name }}
+spec:
+  type: ClusterIP
+  selector:
+    app: {{ .name }}
+  ports:
+    - name: https
+      port: 443
+      targetPort: 8443
+{{- end }}
+{{- end }}

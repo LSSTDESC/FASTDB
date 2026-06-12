@@ -100,6 +100,7 @@ postgres:
   # pgBackRest WAL archiving
   pgbackrest:
     enabled: false
+    setupBackup: false
     stanza: fastdb
     # S3 repositories (up to 2)
     repo1:

@@ -14,7 +14,9 @@ data:
     repo1-path={{ .Values.postgres.pgbackrest.repo1.path }}
     repo1-s3-uri-style={{ .Values.postgres.pgbackrest.repo1.uriStyle }}
     repo1-storage-port={{ .Values.postgres.pgbackrest.repo1.storagePort }}
+    {{- if .Values.postgres.pgbackrest.repo1.caFile }}
     repo1-storage-ca-file={{ .Values.postgres.pgbackrest.repo1.caFile }}
+    {{- end }}
     repo1-retention-full={{ .Values.postgres.pgbackrest.retention.full }}
     {{- if .Values.postgres.pgbackrest.repo2.enabled }}
     repo2-type=s3
@@ -24,7 +26,9 @@ data:
     repo2-path={{ .Values.postgres.pgbackrest.repo2.path }}
     repo2-s3-uri-style={{ .Values.postgres.pgbackrest.repo2.uriStyle }}
     repo2-storage-port={{ .Values.postgres.pgbackrest.repo2.storagePort }}
+    {{- if .Values.postgres.pgbackrest.repo2.caFile }}
     repo2-storage-ca-file={{ .Values.postgres.pgbackrest.repo2.caFile }}
+    {{- end }}
     repo2-retention-full={{ .Values.postgres.pgbackrest.retention.full }}
     {{- end }}
     compress-type=gz

@@ -42,6 +42,6 @@ restore_command = 'pgbackrest --stanza=${STANZA} archive-get %f %p'
 recovery_target_timeline = 'latest'
 EOF
 
-exec /usr/lib/postgresql/15/bin/postgres \
+exec  /usr/lib/postgresql/17/bin/postgres \
     -D "$PGDATA" \
-    -c config_file=/etc/postgresql/15/main/postgresql.conf
+    -c config_file=/etc/postgresql/17/main/postgresql.conf

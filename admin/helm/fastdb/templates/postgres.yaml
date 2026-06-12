@@ -56,6 +56,8 @@ spec:
         {{- if .Values.postgres.pgbackrest.enabled }}
         - name: FASTDB_ARCHIVE_ENABLED
           value: "true"
+        - name: SETUP_BACKUP
+          value: {{ .Values.postgres.pgbackrest.setupBackup | default false | quote }}
         - name: PGBACKREST_REPO1_S3_KEY
           valueFrom:
             secretKeyRef:
@@ -84,9 +86,6 @@ spec:
         volumeMounts:
         - name: postgres-data
           mountPath: /var/lib/postgresql/data
-        - name: pgbackrest-ca
-          mountPath: /etc/pgbackrest-ca
-          readOnly: true
         - name: secrets
           mountPath: /secrets
           readOnly: true
@@ -98,7 +97,7 @@ spec:
           subPath: pgbackrest.conf
           readOnly: true
         - name: certs
-          mountPath: /certs
+          mountPath: {{ .Values.postgres.pgbackrest.caMountPath }}
           readOnly: true
         {{- end }}
       volumes:
@@ -108,9 +107,6 @@ spec:
       - name: secrets
         secret:
           secretName: secrets
-      - name: pgbackrest-ca
-        secret:
-          secretName: pgbackrest-ca
       - name: dshm
         emptyDir:
           medium: Memory
@@ -121,7 +117,7 @@ spec:
           name: pgbackrest-conf
       - name: certs
         secret:
-          secretName: minio-certs
+          secretName: {{ .Values.postgres.pgbackrest.caSecretName }}
       {{- end }}
 ---
 apiVersion: v1
