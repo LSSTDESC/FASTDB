@@ -1,7 +1,10 @@
 import textwrap
+import datetime
 
 from psycopg import sql
 import flask
+
+import astropy.time
 
 import db
 import ltcv
@@ -276,60 +279,177 @@ class GetHotTransients( BaseView ):
 
 # **********************************************************************
 
+class KnownBrokerTopics( BaseView ):
+    def do_the_things( self, processing_version='realtime' ):
+        try:
+            with db.DBCon() as con:
+                pvid = db.ProcessingVersion.procver_id( processing_version, dbcon=con )
+                rows = con.execute( sql.SQL( textwrap.dedent(
+                    """\
+                    SELECT DISTINCT ON (b.brokername, b.topic) b.brokername, b.topic
+                    FROM diasource_brokerinfo b
+                    INNER JOIN base_procver_of_procver pv ON b.base_procver_id=pv.base_procver_id
+                    WHERE pv.procver_id={pvid}
+                    ORDER BY brokername, topic
+                    """
+                ) ).format( pvid=pvid ) )
+                return rows
+
+        except Exception as ex:
+            raise FASTDBWebException( str(ex) )
+
+
+# **********************************************************************
 
 class GetBrokerInfo( BaseView ):
     def do_the_things( self, processing_version='realtime' ):
-        global app
-        if ( not flask.request.is_json ) or ( not isinstance( flask.request.json, dict ) ):
-            raise FASTDBWebException( "Post data was not a JSON dict, expected a dict as JSON post data." )
-        jsondata = flask.request.json
-        if 'diasourceids' not in jsondata:
-            raise FASTDBWebException( "Post data dict must include key diasourceids with list of source ids." )
-        srcids = jsondata['diasourceids']
-        srcids = list( srcids ) if util.isSequence(srcids) else [ srcids ]
-        brokername = None if 'brokername' not in jsondata else jsondata['brokername']
-        topic = None if 'topic' not in jsondata else jsondata[ 'topic' ]
+        try:
+            if ( not flask.request.is_json ) or ( not isinstance( flask.request.json, dict ) ):
+                raise FASTDBWebException( "Post data was not a JSON dict, expected a dict as JSON post data." )
+            jsondata = flask.request.json
+            if 'diasourceids' not in jsondata:
+                raise FASTDBWebException( "Post data dict must include key diasourceids with list of source ids." )
+            srcids = jsondata['diasourceids']
+            srcids = list( srcids ) if util.isSequence(srcids) else [ srcids ]
+            brokername = None if 'brokername' not in jsondata else jsondata['brokername']
+            topic = None if 'topic' not in jsondata else jsondata[ 'topic' ]
 
-        with db.DBCon() as con:
-            try:
-                pvid = db.ProcessingVersion.procver_id( processing_version, dbcon=con )
-            except Exception:
-                raise FASTDBWebException( f"Unknown processing version {processing_version}" )
-            q = sql.SQL( textwrap.dedent(
-                """\
-                SELECT DISTINCT ON (b.diasourceid, b.brokername, b.topic)
-                   b.diasourceid, b.brokername, b.topic, b.info
-                FROM diasource_brokerinfo b
-                INNER JOIN base_procver_of_procver pv ON b.base_procver_id=pv.base_procver_id
-                                                     AND pv.procver_id={pvid}
-                WHERE b.diasourceid=ANY({srcids})
-                """
-            ) ).format( pvid=pvid, srcids=srcids )
-            if brokername is not None:
-                q += sql.SQL( "  AND b.brokername={brokername}\n" ).format( brokername=brokername )
-            if topic is not None:
-                q += sql.SQL("   AND b.topic={topic}\n" ).format( topic=topic )
-            q += sql.SQL( textwrap.dedent(
-                """\
-                ORDER BY b.diasourceid, b.brokername, b.topic
-                """
-            ) )
-            rows, _cols = con.execute( q )
+            with db.DBCon() as con:
+                try:
+                    pvid = db.ProcessingVersion.procver_id( processing_version, dbcon=con )
+                except Exception:
+                    raise FASTDBWebException( f"Unknown processing version {processing_version}" )
+                q = sql.SQL( textwrap.dedent(
+                    """\
+                    SELECT DISTINCT ON (b.diasourceid, b.brokername, b.topic)
+                       b.diasourceid, b.brokername, b.topic, b.info
+                    FROM diasource_brokerinfo b
+                    INNER JOIN base_procver_of_procver pv ON b.base_procver_id=pv.base_procver_id
+                                                         AND pv.procver_id={pvid}
+                    WHERE b.diasourceid=ANY({srcids})
+                    """
+                ) ).format( pvid=pvid, srcids=srcids )
+                if brokername is not None:
+                    q += sql.SQL( "  AND b.brokername={brokername}\n" ).format( brokername=brokername )
+                if topic is not None:
+                    q += sql.SQL("   AND b.topic={topic}\n" ).format( topic=topic )
+                q += sql.SQL( textwrap.dedent(
+                    """\
+                    ORDER BY b.diasourceid, b.brokername, b.topic
+                    """
+                ) )
+                rows, _cols = con.execute( q )
 
-        rval = {}
-        curdiasourceid = None
-        for row in rows:
-            if row[0] != curdiasourceid:
-                curdiasourceid = row[0]
-                rval[ curdiasourceid ] = []
-            rval[ curdiasourceid ].append( { 'brokername': row[1],
-                                             'topic': row[2],
-                                             'info': row[3] } )
+            rval = {}
+            curdiasourceid = None
+            for row in rows:
+                if row[0] != curdiasourceid:
+                    curdiasourceid = row[0]
+                    rval[ curdiasourceid ] = []
+                rval[ curdiasourceid ].append( { 'brokername': row[1],
+                                                 'topic': row[2],
+                                                 'info': row[3] } )
 
-        return rval
+            return rval
+
+        except FASTDBWebException:
+            raise
+        except Exception as ex:
+            raise FASTDBWebException( str(ex) )
 
 
 
+# **********************************************************************
+
+class SourcesFromBroker( BaseView ):
+    def do_the_things( self, processing_version='realtime', broker=None, topic=None ):
+        try:
+            known_keys = { 'detected_in_last_days', 'detected_since_mjd', 'mjd_now', 'broker', 'topic' }
+            if not flask.request.is_json:
+                kwargs = dict()
+            else:
+                kwargs = flask.request.json
+
+            unknown = set( kwargs.keys() ) - known_keys
+            if len(unknown) > 0:
+                raise FASTDBWebException( f"Unknown data parameters: {unknown}" )
+
+            broker = broker if broker is not None else kwargs['broker'] if 'broker' in kwargs else None
+            if ( 'broker' in kwargs ) and ( broker != kwargs['broker'] ):
+                raise FASTDBWebException( f"Broker in url {broker} doesn't match broker in data {kwargs['broker']}" )
+            topic = topic if topic is not None else kwargs['topic'] if 'topic' in kwargs else None
+            if ( 'topic' in kwargs ) and ( topic != kwargs['topic'] ):
+                raise FASTDBWebException( f"Topic in url {topic} doesn't match topic in data {kwargs['topic']}" )
+            if ( broker is None ) or ( topic is None ):
+                raise FASTDBWebException( "Must specify both broker and topic" )
+
+            if 'mjd_now' in kwargs:
+                now = kwargs['mjd_now']
+            else:
+                now = astropy.time.Time( datetime.datetime.now( tz=datetime.UTC ), format='datetime' ).mjd
+
+            if 'detected_since_mjd' in kwargs:
+                t0 = float( kwargs['detected_since_mjd'] )
+            elif 'detected_in_last_days' in kwargs:
+                t0 = now - float( kwargs['detected_in_last_days'] )
+            else:
+                t0 = now - 7.
+
+            with db.DBCon( dictcursor=True ) as con:
+                q = sql.SQL( textwrap.dedent(
+                    """\
+                    SELECT b.* FROM
+                    FROM (
+                      SELECT DISTINCT ON (s.diasourceid)
+                               o.diaobjectid, o.rootid,
+                               s.diasourceid, s.midpointmjdtai, s.visit, s.band, s.psfflux, s.psffluxerr,
+                               s.ra, s.dec, s.raerr, s.decerr, s.ra_dec_cov,
+                               b.info, b.msgtime, b.receivedtime, b.importtime,
+                      FROM diasource_brokerinfo b
+                      INNER JOIN diasource s ON b.diasourceid=s.diasourceid AND b.base_procver_id=s.base_procver_id
+                      INNER JOIN diaobject o ON b.diaobjectid=o.diaobjectid
+                      INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id
+                                                           AND pv.procver_id={procver}
+                      WHERE b.brokername={broker}
+                        AND b.topic={topic}
+                        AND s.midpointmjdtai<={now}
+                        AND s.midpointmjdtai>={t0}
+                      ORDER BY s.diasourceid, pv.priority DESC
+                    ) b
+                    ORDER BY o.rootid, o.midpointmjdtai
+                    """
+                ) ).format( procver=processing_version, broker=broker, topic=topic, now=now, t0=t0 )
+                rows = con.execute( q )
+
+            colmap = { k: k for k in [ 'diasourceid', 'visit', 'band', 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov',
+                                       'info', 'msgtime', 'receivedtime', 'importtime' ] }
+            colmap.update( { 'midpointmjdtai': 'mjd',
+                             'psfflux': 'flux',
+                             'psffluxerr': 'fluxerr' } )
+
+            roots = {}
+            curroot = None
+            currootinfo = None
+            for row in rows:
+                if row['rootid'] != curroot:
+                    roots[row['rootid']] = { 'diaobjectids': set(),
+                                             'diasources': { v: [] for v in colmap.values() } }
+                    curroot = row['rootid']
+                    currootinfo = roots[curroot]
+
+                currootinfo['diaobjectids'].add( row['diaobjectid'] )
+                for rowdex, field in colmap.items():
+                    currootinfo['diasources'][field].append( row[rowdex] )
+
+            for root in roots:
+                root['diaobjectids'] = list( root['diaobjectids'] )
+
+            return roots
+
+        except FASTDBWebException:
+            raise
+        except Exception as ex:
+            raise FASTDBWebException( str(ex) )
 
 
 
@@ -349,7 +469,11 @@ urls = {
     "/gethottransients": GetHotTransients,
     "/gethottransients/<procver>": GetHotTransients,
     "/getbrokerinfo": GetBrokerInfo,
-    "/getbrokerinfo/<processing_version>": GetBrokerInfo
+    "/getbrokerinfo/<processing_version>": GetBrokerInfo,
+    "/sourcesfrombroker": SourcesFromBroker,
+    "/sourcesfrombroker/<processing_verson>": SourcesFromBroker,
+    "/sourcesfrombroker/<processing_version>/<broker>": SourcesFromBroker,
+    "/sourcesfrombroker/<processing_version>/<broker>/<topic>": SourcesFromBroker,
 }
 
 usedurls = {}
