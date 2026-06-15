@@ -57,9 +57,12 @@ class ProcVer( BaseView ):
         # app.logger.debug( f"In ProcVer with procver={procver}" )
 
         with db.DBCon() as con:
-            pvid = db.ProcessingVersion.procver_id( procver, dbcon=con )
-            if pvid is None:
-                return f"Unknown processing version {procver}", 422
+            try:
+                pvid = db.ProcessingVersion.procver_id( procver, dbcon=con )
+                if pvid is None:
+                    return f"Unknown processing version {procver}", 422
+            except Exception as ex:
+                raise FASTDBWebException( str(ex) )
 
             retval = { 'status': 'ok', 'id': None, 'description': None, 'aliases': [], 'base_procvers': [] }
             row, _ = con.execute( "SELECT id,description FROM processing_version WHERE id=%(pv)s", { 'pv': pvid } )
@@ -225,7 +228,15 @@ class GetDiaObjectInfo( BaseView ):
             objid = data['objectids'] if objid is None else objid
             columns = data['columns'] if 'columns' in data else None
 
+        if ( objid is None ) and ( procver is not None ):
+            # OK, calling semantics are kinda complicated here.  If no objids were specified
+            #   in the data, and there was only one REST argument, then we actually assume
+            #   it's an objid rather than a procver.
+            objid = procver
+            procver = 'default'
+
         procver = 'default' if procver is None else procver
+
         try:
             return ltcv.get_object_infos( objid, processing_version=procver, columns=columns, return_format='json' )
         except Exception as ex:
