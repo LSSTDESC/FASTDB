@@ -33,7 +33,7 @@ spec:
       affinity: {}
       containers:
       - name: webserver
-        image: registry.nersc.gov/m1727/raknop/fastdb-webap:20260331
+        image: registry.nersc.gov/m1727/raknop/fastdb-webap:20260501
         env:
         - name: MONGODB_HOST
           value: mongodb

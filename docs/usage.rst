@@ -16,10 +16,13 @@ Access to FASTDB is designed to be entirely through a web API.  By design, the u
 The FASTDB Client
 =================
 
-While you can access the FASTDB web API using any standard way of accessing web APIs (e.g. the python ``requests`` module), there is a FASTDB client designed to make this a little bit easier.
+While you can access the FASTDB web API using any standard way of accessing web APIs (e.g. the python ``requests`` module), there is a FASTDB client designed to make this a little bit easier.  It does two things for you.  First, it handles the authentication loop, and required subequent headers on requests, which would be somewhat painful for you to do yourself.  Second, it has a "retry on fail" function, so that when you try to post to something, if the connect fails, it will retry a few times before actually raisinig an exception.
 
 Getting Set Up to Use the FASTDB Client
-----------------------------------------
+---------------------------------------
+
+On Places Other Than NERSC
+**************************
 
 The FASTDB client is entirely contained in the file ``client/fastdb_client.py`` in the GitHub checkout.  You can just refer to this directly in your checkout by adding something to your `PYTHONPATH`, or you can copy it somewhere.  (**Warning**: if you copy it somewhere, then be aware that eventually stuff might break as your copied version falls out of date!)
 
@@ -37,16 +40,16 @@ To run the FASTDB client on Perlmutter, you need to do the following *once*:
 
   * Get an account on FASTDB.  Talk to Rob; he will need your name, email address, and the username you want on FASTDB.
 
-  * Go to https://desc-fastdb.lbl.gov and click on "Request Password Reset".  Follow the prompts.  Make sure to use a good password, that is not the same as a password you use anywhere else.  If you're still using the same password for more than one account, and indeed if you're not using a password manager like KeePassXC or LastPass, then you are at least a decade behind on what you really need to be doing with your passwords.
+  * Go to https://desc-fastdb.lbl.gov and click on "Request Password Reset".  Follow the prompts.  Make sure to use a good password, that is not the same as a password you use anywhere else.  If you're still using the same password for more than one account, and indeed if you're not using a password manager, then you are at least a decade behind on what you really need to be doing with your passwords.  (Rob uses and recommend `KeePassXC <https://keepassxc.org/>`_, but there are other good ones.)  (As a bonus, with some pain, you can get KeePassXC to serve up passkeys (this potentially good but in practice cumbersome new development in authentication), if you're anal like Rob and don't want to just rely on whatever is built into your browser.)
   
   * Create a file ``.fastdb.ini`` in your home directory on nersc.  Give it contents::
 
       [production]
       url = https://desc-fastdb.lbl.gov
       username = <your fastdb username>
-      pass = <your fastdb password>
+      password = <your fastdb password>
 
-  * Run ``chmod go-rws ~/.fastdb.ini`` to make sure nobody else can read your password.
+  * Run ``chmod go-rws ~/.fastdb.ini`` to make sure nobody else can read your password.  (Indeed, the FASTDB client will refuse to start if your ``.ini`` file is readable by anybody other than you.)
 
 Having done that, thereafter in order to use FASTDB from Perlmutter, each time you start a session you need to:
 
@@ -54,10 +57,8 @@ Having done that, thereafter in order to use FASTDB from Perlmutter, each time y
 
       source /global/cfs/cdirs/lsst/groups/TD/setup_td.sh
 
-  * Add the ``fastdb_client`` directory to your python path with::
-
-      export PYTHONPATH=/dvs_ro/cfs/cdirs/desc-td/SOFTWARE/fastdb_deployment/fastdb_client:$PYTHONPATH
-
+This environment includes the path that has the NERSC install of the fastdb client.
+      
   * Run python::
 
       python
@@ -108,6 +109,15 @@ Returns a list of known processing versions and processing version aliases.  You
 
 Because ``procvers`` includes both aliases and processing version names, some of the elements of the list actually refer to the same thing.  (For instance, if ``default`` is in the list, it's almost certainly an alias for something else that is also in the list.)
 
+Example::
+
+  >>> from pprint import pp
+  >>> result = fdb.post( "/getprocvers" )
+  >>> pp(result)
+  {'status': 'ok',
+   'procvers': ['default', 'pvc_pv1', 'pvc_pv2', 'pvc_pv3', 'realtime']}
+
+
 .. _webap-procver:
 
 ``/procver``
@@ -132,7 +142,7 @@ You can pass either a processing version or a processing version alias in ``<pro
 ``/baseprocver``
 ****************
 
-Hit this API endpoint with ``/baseprocver/<procver>/<table>``, where ``<procver>`` is either the name or the UUID (as a string) of the base processing version you want information about; if this is a UUID, then you should omit the ``/<table>``, but if it's a string, then ``<table>`` should be one of ``diaobject``, ``diasource``, or ``diaforcedsource``.  You will get back a JSON dictionary with keys:
+Hit this API endpoint with ``/baseprocver/<procver>/<table>``, where ``<procver>`` is either the name or the UUID (as a string) of the base processing version you want information about; if this is a UUID, then you should omit the ``/<table>``, but if it's a string, then ``<table>`` is the name of the table you want this the base processing version for.  (Possible tables include ``diaobject``, ``diasource``, ``diaforcedsource``, ``diaobject_position``, ``host_galaxy``.)   You wil get back a JSON dictionary with keys:
 
 * ``status`` : string, value ``ok``
 * ``id`` : string UUID, the UUID of the base processing version
@@ -170,12 +180,20 @@ Because of the table joins necessary to handle processing versions, this can act
 
 Call this with one of:
 
+  * ``/getdiaobjectinfo``
+  * ``/getdiaobjectinfo/procver``
   * ``/getdiaobjectinfo/objid``
   * ``/getdiaobjectinfo/procver/objid``
 
 Where procver is the processing version; it can either be the database's UUID, or the human-readable processing version, or an alias for the processing version.  If not given, it assumes "default".  ``objid`` is either the rootid, or the diaobjectid, of the object you want information for.
 
-You can include in the ``json=`` dictionary a single parameter, ``columns``, which is a list of the columns you want back.  (The query *may* be slightly faster if you don't ask for any position information, but realistically it should be pretty fast in either case.)
+(If there is only a single argument after ``/getdiaobjectinfo``, it is interpreted as an objectid if the json dictionary does *not* include ``objectids`` (see below), otherwise its interpreted as a processing version.)
+
+You can also include information in the ``json=`` dictionary.  Options include:
+
+  * ``processing_version`` : You can specify this here instead of in the URL.  Usually it's probably easier to just put the processing version in the URL.  You'll get an exception if you do both and they don't match.
+  * ``objectids`` : A list of object ids, either integer ``diaobjectid`` values, or ``rootid`` values.
+  * ``columns`` : A list of columns you want back.  (The query *may* be slightly faster if you don't ask for any position information, but realistically it should be pretty fast in either case.)
 
 You get back a dictionary.  Each key of the dictionary is a string, the name of the column, and each the value of each element of the dictionary is a list, the values for that column; each list will have the same length.  There may be more than one value in each list because FASTDB will return information on each diaobject that shares the same rootid in the processing version you've queried.  Returned columns include:
 
@@ -188,7 +206,9 @@ You get back a dictionary.  Each key of the dictionary is a string, the name of 
   * ``raerr`` : uncertainty on ra, as reported by LSST
   * ``decerr`` : uncertainty on dec, as reported by LSST
   * ``ra_dec_cov`` : covariance between ra and dec, as reported by LSST
-  
+
+**If you get empty lists and you really didn't expect to:** Probably the ``diaobject`` you were asking for does not exist in the processing version you specified.  Processing versions are complicated.
+    
     
 .. _webap-objectsearch:
 
@@ -331,7 +351,7 @@ In addition, there are several optional keys that control what's included:
 * ``always_use_weighted_source_positions`` : TBD
 
 
-What you get depends on whether you included ``return_object_info``.  If you included that with a value of 1, then the return will be a dictionary: ``{'ltcvs': ltcvs, 'objinfo': objinfo}``.  If you didn't include that, then you just get back ``ltcvs``..
+What you get depends on whether you included ``return_object_info``.  If you included that with a value of 1, then the return will be a dictionary: ``{'ltcvs': ltcvs, 'objinfo': objinfo}``.  If you didn't include that, then you just get back ``ltcvs``.
 
 ``ltcvs`` is a list that's a little bit complicated.  Each row of ``ltcvs`` is a dictionary, and corresponds to the lightcurve for a single diaobject.  It has one key ``rootid`` that is the root diaobject id for the object; this is an internal FASTDB id that tries to deduplicate redundant diaobjectids that came from LSST.  The remaining keys can be thought of as column names, and the values are lists that can be thought of as the contents of those columns.  The columns include:
 
@@ -382,7 +402,7 @@ Get the lightcurve of a single object.  Hit this with one of:
 * ``/ltcv/getltcv/<objid>``
 * ``/ltcv/getltcv/<procver>/<objid>``
 
-``<objid>`` is either the integer ``diaobjectid`` or string (uuid) ``rootid`` of the object whose lightcurve you want.  **Warning**: there are subtleties around ``diaobjectid`` and processing versions.  Be careful!  It's often safer to specify root ids.
+``<objid>`` is either the integer ``diaobjectid`` or string (uuid) ``rootid`` of the object whose lightcurve you want.  **Warning**: there are subtleties around ``diaobjectid`` and processing versions.  Be careful!  It's often safer to always psecify ``<procver>`` and give a root id, because it's more obvious what you get back in that case.  (I.e., the photometry from that processing version for that object.)
 
 ``<procver>`` is the processing version of the photometry to fetch.  If not given, it will assume ``default``.
 

@@ -33,7 +33,7 @@ spec:
       affinity: {}
       containers:
       - name: shell
-        image: registry.nersc.gov/m1727/raknop/fastdb-shell:20260225b
+        image: registry.nersc.gov/m1727/raknop/fastdb-shell:20260501
         env:
         - name: MONGODB_HOST
           value: mongodb

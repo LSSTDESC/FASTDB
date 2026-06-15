@@ -57,9 +57,12 @@ class ProcVer( BaseView ):
         # app.logger.debug( f"In ProcVer with procver={procver}" )
 
         with db.DBCon() as con:
-            pvid = db.ProcessingVersion.procver_id( procver, dbcon=con )
-            if pvid is None:
-                return f"Unknown processing version {procver}", 422
+            try:
+                pvid = db.ProcessingVersion.procver_id( procver, dbcon=con )
+                if pvid is None:
+                    return f"Unknown processing version {procver}", 422
+            except Exception as ex:
+                raise FASTDBWebException( str(ex) )
 
             retval = { 'status': 'ok', 'id': None, 'description': None, 'aliases': [], 'base_procvers': [] }
             row, _ = con.execute( "SELECT id,description FROM processing_version WHERE id=%(pv)s", { 'pv': pvid } )
@@ -225,7 +228,15 @@ class GetDiaObjectInfo( BaseView ):
             objid = data['objectids'] if objid is None else objid
             columns = data['columns'] if 'columns' in data else None
 
+        if ( objid is None ) and ( procver is not None ):
+            # OK, calling semantics are kinda complicated here.  If no objids were specified
+            #   in the data, and there was only one REST argument, then we actually assume
+            #   it's an objid rather than a procver.
+            objid = procver
+            procver = 'default'
+
         procver = 'default' if procver is None else procver
+
         try:
             return ltcv.get_object_infos( objid, processing_version=procver, columns=columns, return_format='json' )
         except Exception as ex:
@@ -242,19 +253,10 @@ class ObjectSearch( BaseView ):
         searchdata = flask.request.json
 
         FDBLogger.debug( f"ObjectSearch on processing version {processing_version} with search data {searchdata}" )
-        rval = ltcv.object_search( processing_version, return_format='json', **searchdata )
-
-        # JSON dysfunctionality... convert to strings and back,
-        # javascript may decide to interpret bigints as doubles, thereby
-        # losing necessary precision.  Convert all bigints to strings.
-        # Right now, that means listing the possible columns here.  There
-        # must be a better way... but if I want to interpret it in javascript
-        # there probably isn't.
-        bigints = [ 'diaobjectid' ]
-        for k in bigints:
-            rval[k] = [ str(v) for v in rval[k] ]
-
-        return rval
+        try:
+            return ltcv.object_search( processing_version, **searchdata )
+        except Exception as ex:
+            raise FASTDBWebException( str(ex) )
 
 
 # **********************************************************************
@@ -265,8 +267,10 @@ class ObjectSearch( BaseView ):
 FDBLogger.multiprocessing_replace( pid=True )
 
 app = flask.Flask(  __name__ )
-# app.logger.setLevel( logging.INFO )
-app.logger.setLevel( logging.DEBUG )
+# loglevel = logging.INFO
+loglevel = logging.DEBUG
+app.logger.setLevel( loglevel )
+FDBLogger.setLevel( loglevel )
 
 app.config.from_mapping(
     SECRET_KEY=_flask_session_secret_key,

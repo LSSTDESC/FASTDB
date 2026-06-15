@@ -6,6 +6,7 @@ def test_construct_sql_where_clause():
                    'mult':       { 'mult': True,  'substr': False, 'minmax': False },
                    'substr':     { 'mult': False, 'substr': True,  'minmax': False },
                    'minmax':     { 'mult': False, 'substr': False, 'minmax': True },
+                   'minmax2':    { 'mult': False, 'substr': False, 'minmax': True },
                    'multsubstr': { 'mult': True,  'substr': True,  'minmax': False }
                   }
 
@@ -47,5 +48,30 @@ def test_construct_sql_where_clause():
                               '("multsubstr" LIKE %(multsubstr_contains_0)s OR '
                               '"multsubstr" LIKE %(multsubstr_contains_1)s)' )
     assert subdict == { 'multsubstr': "C", 'multsubstr_contains_0': '%D%', 'multsubstr_contains_1': "%E%" }
+
+
+    q, subdict, missing, _where = construct_pgsql_where_clause( searchspec, minmax_min=5 )
+    assert missing == set()
+    assert q.as_string() == 'WHERE "minmax">=%(minmax_min)s'
+    assert subdict == { 'minmax_min': 5 }
+
+    q, subdict, missing, _where = construct_pgsql_where_clause( searchspec, minmax_min=5, minmax_max=10 )
+    assert missing == set()
+    assert q.as_string() == 'WHERE "minmax">=%(minmax_min)s AND "minmax"<=%(minmax_max)s'
+    assert subdict == { 'minmax_min': 5, 'minmax_max': 10 }
+
+
+    q, subdict, missing, _where = construct_pgsql_where_clause( searchspec, minmax_minus_minmax2_min=1 )
+    assert missing == set()
+    assert q.as_string() == 'WHERE "minmax"-"minmax2">=%(minmax_minus_minmax2_min)s'
+    assert subdict == { 'minmax_minus_minmax2_min': 1 }
+
+    q, subdict, missing, _where = construct_pgsql_where_clause( searchspec, minmax_minus_minmax2_min=1,
+                                                                minmax_minus_minmax2_max=2 )
+    assert missing == set()
+    assert q.as_string() == ( 'WHERE "minmax"-"minmax2">=%(minmax_minus_minmax2_min)s '
+                              'AND "minmax"-"minmax2"<=%(minmax_minus_minmax2_max)s' )
+    assert subdict == { 'minmax_minus_minmax2_min': 1, 'minmax_minus_minmax2_max': 2 }
+
 
     # NOT DONE YET, MORE TESTS NEED TO BE WRITTEN

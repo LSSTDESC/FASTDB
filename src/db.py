@@ -7,6 +7,7 @@
 
 # import sys
 import os
+import re
 import uuid
 import time
 import collections
@@ -214,6 +215,7 @@ class DBCon:
             self.alwaysanalyze = _alwaysanalyze
 
         self.dictcursor = dictcursor
+        self.cursor = None
         self.remake_cursor()
 
 
@@ -249,6 +251,8 @@ class DBCon:
             names).
 
         """
+        if self.cursor is not None:
+            self.cursor.close()
         self.curcursorisdict = self.dictcursor if dictcursor is None else dictcursor
         if self.curcursorisdict:
             self.cursor = self.con.cursor( row_factory=psycopg.rows.dict_row )
@@ -267,6 +271,8 @@ class DBCon:
 
         """
         if self._con_is_mine:
+            if self.cursor is not None:
+                self.cursor.close()
             self.con.rollback()
             self.con.close()
 
@@ -295,12 +301,44 @@ class DBCon:
         self.remake_cursor( self.curcursorisdict )  # ...is this necessary?
 
 
-    def execute_nofetch( self, q, subdict={}, echo=None, explain=None, analyze=None ):
+    def execute_nofetch( self, q, subdict={}, echo=None, explain=None, analyze=None, cursorname=None ):
         """Runs a query where you don't expect to fetch results.
 
-        Parameters are the same as execute().  Returns nothing.
+        Parameters are the same as execute(), except:
+
+        cursorname : str, default None
+          If not None, then make server-side cursor of the given name
+          for this query.  This will only work on SELECT queries.  Worry
+          about postgres cursor namespace.
+
+        Returns
+        -------
+          psycopg.ClientCursor or psycopg.ServerCursor
+            A sever cursor if cursorname is not None.  If cursorname is
+            None, it just returns self.cursor.
+
+            IMPORTANT : if you get back a ServerCursor, make sure to
+            call close() on it!  Do NOT do this if you are getting back
+            self.cursor.
 
         """
+
+        _curcursor = None
+
+        def _cursor():
+            nonlocal _curcursor, cursorname
+
+            if cursorname is None:
+                _curcursor = self.cursor
+                return self.cursor
+            else:
+                if _curcursor is not None:
+                    _curcursor.close()
+                if self.curcursorisdict:
+                    _curcursor = self.con.cursor( cursorname, row_factory=psycopg.rows.dict_row )
+                else:
+                    _curcursor = self.con.cursor( cursorname )
+                return _curcursor
 
         t0 = time.perf_counter()
 
@@ -308,6 +346,7 @@ class DBCon:
         if not isinstance( q, ( sql.SQL, sql.Composed ) ):
             q = sql.SQL( q )
 
+        # ...should this be >=, not <=?  THINK.
         if FDBLogger.instance().get().level <= logging.DEBUG:
             echo = echo if echo is not None else self.echoqueries
             explain = explain if explain is not None else self.alwaysexplain
@@ -315,18 +354,25 @@ class DBCon:
             if echo:
                 FDBLogger.debug( f"Sending query\n{q.as_string()}\nwith substitutions: {subdict}" )
 
+            if ( cursorname is not None ) and ( ( explain is not None ) or ( analyze is not None ) ):
+                # I haven't fully figured this out, but sometimes the server-side cursor seems
+                #   to have trouble when you try to explain
+                FDBLogger.warning( "Turning off EXPLAIN and ANALYZE for server-side cursor." )
+                explain = False
+                analyze= False
+
             nl = '\n'
             if explain:
                 FDBLogger.debug( "Explaining..." )
-                self.cursor.execute( sql.SQL("EXPLAIN ") + q, subdict )
-                rows = self.cursor.fetchall()
+                _cursor().execute( sql.SQL("EXPLAIN ") + q, subdict )
+                rows = _curcursor.fetchall()
                 dex = 'QUERY PLAN' if self.curcursorisdict else 0
                 FDBLogger.debug( f"Query plan:\n{nl.join([r[dex] for r in rows])}" )
             if analyze:
                 FDBLogger.debug( "Doing EXPLAIN ANALYZE..." )
-                self.cursor.execute( sql.SQL("EXPLAIN ANALYZE ") + q, subdict )
+                _cursor().execute( sql.SQL("EXPLAIN ANALYZE ") + q, subdict )
                 alreadydid = True
-                rows = self.cursor.fetchall()
+                rows = _curcursor.fetchall()
                 dex = 'QUERY PLAN' if self.curcursorisdict else 0
                 FDBLogger.debug( f"Query plan:\n{nl.join([r[dex] for r in rows])}" )
 
@@ -335,7 +381,7 @@ class DBCon:
         # be false, because you can't EXPLAIN ANALYZE the query and get the results
         # all in one call.
         if not alreadydid:
-            self.cursor.execute( q, subdict )
+            _cursor().execute( q, subdict )
 
         if ( FDBLogger.instance().get().level <= logging.DEBUG ) and ( echo or explain ):
             FDBLogger.debug( "Query complete." )
@@ -343,6 +389,9 @@ class DBCon:
         t1 = time.perf_counter()
         self.timings.last_query_time = t1 - t0
         self.timings.tot_query_time += t1 - t0
+
+        return _curcursor
+
 
     def execute( self, q, subdict={}, silent=False, echo=None, explain=None ):
         """Runs a query, and returns either (rows, columns) or just rows.
@@ -385,6 +434,8 @@ class DBCon:
 
         """
         self.execute_nofetch( q, subdict, echo=echo, explain=explain, analyze=False )
+        if echo:
+            FDBLogger.debug( "Query done, fetching" )
         if self.curcursorisdict:
             if self.cursor.description is None:
                 return None
@@ -408,6 +459,9 @@ class DBCon:
 
 
 # ======================================================================
+
+_pgwherere = re.compile( '^(.+)_minus_(.+)_(min|max)$' )
+
 
 def construct_pgsql_where_clause( searchspec, where="WHERE", **kwargs ):
     # See spectrum.py::get_spectrum_info for an exmple
@@ -461,7 +515,7 @@ def construct_pgsql_where_clause( searchspec, where="WHERE", **kwargs ):
         if f'{field}_min' in kwargs:
             if not fieldinfo['minmax']:
                 raise ValueError( f'Field {field} doesn\'t work with "min"' )
-            if util.isSequence( f'{field}_max' ):
+            if util.isSequence( kwargs[f'{field}_min'] ):
                 raise ValueError( f"{field}_max can't be a list" )
             q += sql.SQL( "{where} {field}>=%({sfield}_min)s" ).format( where=sql.SQL(where),
                                                                         field=sql.Identifier(field),
@@ -473,7 +527,7 @@ def construct_pgsql_where_clause( searchspec, where="WHERE", **kwargs ):
         if f'{field}_max' in kwargs:
             if not fieldinfo['minmax']:
                 raise ValueError( f'Field {field} doesn\'t work with "max"' )
-            if util.isSequence( f'{field}_max' ):
+            if util.isSequence( kwargs[f'{field}_max'] ):
                 raise ValueError( f"{field}_max can't be a list" )
             q += sql.SQL( "{where} {field}<=%({sfield}_max)s" ).format( where=sql.SQL(where),
                                                                         field=sql.Identifier(field),
@@ -481,6 +535,44 @@ def construct_pgsql_where_clause( searchspec, where="WHERE", **kwargs ):
             subdict[f'{field}_max'] = kwargs[f'{field}_max']
             where = " AND"
             del kwargs[f'{field}_max']
+
+    # Differences
+    # NOTE.  The parsing here will screw up if any of the fields have an underscore in their
+    #   name.  Think about this.
+
+    yanks = set()
+    for kw in kwargs:
+        mat = _pgwherere.search( kw )
+        if mat is None:
+            continue
+        field = mat.group(1)
+        other = mat.group(2)
+        minmax = mat.group(3)
+
+        if not ( ( field in searchspec ) and ( other in searchspec ) ):
+            continue
+
+        if not searchspec[field]['minmax']:
+            raise ValueError( f'Field {field} doesn\'t work with "minus"' )
+        if not searchspec[other]['minmax']:
+            raise ValueError( f'Field {other} doesn\'t work with "minus"' )
+
+        if util.isSequence( kwargs[kw] ):
+            raise ValueError( f"{kw} can't be a list" )
+
+        lege = ">=" if minmax == "min" else "<="
+
+        q += sql.SQL( "{where} {field}-{other}{op}%({kw})s" ).format( where=sql.SQL(where),
+                                                                      field=sql.Identifier(field),
+                                                                      other=sql.Identifier(other),
+                                                                      op=sql.SQL(lege),
+                                                                      kw=sql.SQL(kw) )
+        subdict[kw] = kwargs[kw]
+        where = " AND"
+        yanks.add( kw )
+
+    for yank in yanks:
+        del kwargs[yank]
 
     return q, subdict, set(kwargs.keys()), where
 
@@ -1501,6 +1593,43 @@ class ProcessingVersion( DBBase ):
     _tablemeta = None
     _pk = [ 'id' ]
 
+
+    @classmethod
+    def get_procver( cls, processing_version, dbcon=None ):
+        """Return a ProcessingVersion based on a UUID, description, or alias."""
+
+        try:
+            pvid = util.asUUID( processing_version )
+        except Exception:
+            pvid = None
+
+        with DBCon( dbcon, dictcursor=True ) as con:
+            if pvid is not None:
+                rows = con.execute( "SELECT * FROM processing_version WHERE id=%(pv)s", { 'pv': pvid } )
+                if len(rows) > 0:
+                    if len(rows) > 1:
+                        raise RuntimeError( "This should never happen." )
+                    return ProcessingVersion( **(rows[0]) )
+
+            rows = con.execute( "SELECT * FROM processing_version WHERE description=%(pv)s",
+                                { 'pv': processing_version } )
+            if len(rows) > 0:
+                if len(rows) > 1:
+                    raise RuntimeError( "This should never happen." )
+                return ProcessingVersion( **(rows[0]) )
+
+            rows = con.execute( "SELECT p.* FROM processing_version p "
+                                "INNER JOIN processing_version_alias a ON p.id=a.procver_id "
+                                "WHERE a.description=%(pv)s",
+                                { 'pv': processing_version } )
+            if len(rows) > 0:
+                if len(rows ) > 1:
+                    raise RuntimeError( "This should never happen." )
+                return ProcessingVersion( **(rows[0]) )
+
+        raise ValueError( f"Unknown processing version {processing_version}" )
+
+
     @classmethod
     def procver_id( cls, processing_version, dbcon=None ):
         """Return the uuid of processing_version.
@@ -1535,16 +1664,9 @@ class ProcessingVersion( DBBase ):
             return ipv
         except Exception:
             pass
-        with DBCon( dbcon ) as con:
-            rows, _cols = con.execute( "SELECT id FROM processing_version WHERE description=%(pv)s",
-                                       { 'pv': processing_version } )
-            if len(rows) > 0:
-                return rows[0][0]
-            rows, _cols = con.execute( "SELECT procver_id FROM processing_version_alias WHERE description=%(pv)s",
-                                       { 'pv': processing_version } )
-            if len(rows) == 0:
-                raise ValueError( f"Unknown processing version {processing_version}" )
-            return rows[0][0]
+
+        pv = cls.get_procver( processing_version, dbcon=dbcon )
+        return pv.id
 
 
     def highest_prio_base_procver( self, table, dbcon=None ):
