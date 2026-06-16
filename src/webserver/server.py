@@ -144,7 +144,10 @@ class CountThings( BaseView ):
             estimate = ( 'estimate' in data ) and ( data['estimate'] )
 
         with db.DBCon() as dbcon:
-            pvid = db.ProcessingVersion.procver_id( procver )
+            try:
+                pvid = db.ProcessingVersion.procver_id( procver )
+            except Exception as ex:
+                raise FASTDBWebException( str(ex) )
 
             if thingtocount in ( 'rootid', 'diaobject' ):
                 distinct = 'diaobjectid' if thingtocount=='diaobject' else 'rootid'
