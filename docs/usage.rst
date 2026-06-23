@@ -633,3 +633,88 @@ Direct SQL Queries
 The FASTDB web interface includes a front-end for direct read-only SQL queries to the backend PostgreSQL database.  (Note that "read-only" means that you can't commit changes to the database.  You *can* use temporary tables with this interface, and that is often a very useful thing to do.)
 
 TODO document this.  In the mean time, see the `examples FASTDB client Juypyter notebook <https://github.com/LSSTDESC/FASTDB/blob/main/examples/using_fastdb_client.ipynb>`_ for documentation on this interface.
+
+
+Filter descriptions
+===================
+
+This section described the filters, or topics, that are being ingested into FASTDB. This defines what types of alerts are ingested.
+
+Currently, there are three filters being ingested from Fink:
+
+1. :ref:`remove-unlikely-transients`
+2. :ref:`most-likely-sn`
+3. :ref:`uniform-sample`
+
+
+.. _remove-unlikely-transients:
+
+Removes objects unlikely to be transients of interest
+------------------------------------------------------
+
+**Broker:** `Fink <https://fink-broker.org/>`_
+
+**Filter name:** ``fink_remove_unlikely_transients_lsst``
+
+**Link to filter:** `remove_unlikely_transients <https://github.com/astrolabsoftware/fink-filters/blob/master/fink_filters/rubin/livestream/filter_remove_unlikely_transients/filter.py>`_
+
+The goal of this filter is to remove alerts unlikely to be transients of interest to the LSST DESC community, filtering only on LSST-provided parameters. Essentially, this filter aims to balance the goals of reducing the alert stream to something manageable by FASTDB and ensuring that all all alerts of interest are also passed on to FASTDB. As of May 2026, it returns ~20% of the incoming alerts. It does the following:
+
+- uses Fink's ``b_good_quality`` `function <https://github.com/astrolabsoftware/fink-filters/blob/e48a6cdba44645d294aa50409d7431bc9e7575b3/fink_filters/rubin/blocks.py#L372>`_, which filters out alerts with certain flags, those with negative flux, and those with SNR <= 6. As of June 2026, it filters out alerts with the following flags:
+  
+  - ``isDipole``
+  - ``pixelFlags``
+  - ``pixelFlags_bad``
+  - ``pixelFlags_saturated``
+  - ``pixelFlags_streakCenter``
+  - ``pixelFlags_interpolated``
+  - ``pixelFlags_cr``
+  - ``pixelFlags_nodata``
+  - ``pixelFlags_streak``
+  - ``pixelFlags_edge``
+  - ``psfFlux_flag``
+  - ``apFlux_flag``
+  - ``forced_PsfFlux_flag``
+  - ``forced_PsfFlux_flag_edge``
+  - ``shape_flag``
+  - ``centroid_flag``
+
+- removes alerts with the flags: ``isNegative``
+- removes alerts that are identified as solar system objects by LSST
+- removes alerts with no previous detections
+- removes alerts with SNR <= 10
+
+.. _most-likely-sn:
+
+Most likely to be supernovae
+----------------------------
+
+**Broker:** `Fink <https://fink-broker.org/>`_
+
+**Filter name:** ``fink_most_likely_sn_lsst``
+
+**Link to filter:** `most_likely_sn <https://github.com/astrolabsoftware/fink-filters/blob/master/fink_filters/rubin/livestream/filter_most_likely_sn/filter.py>`_
+
+The goal of this filter is to return only alerts that are very likely to be supernovae, according to two of Fink's classifiers, the SuperNNova classifier and the CATS classifier (described in `Transient Classifiers for Fink: Benchmarks for LSST <https://arxiv.org/pdf/2404.08798>`_). As of May 2026, it returns less than 2% of the incoming alerts.
+
+**IMPORTANT NOTE:** This filter makes use of Fink's classifiers, and the specific model behind those classifiers may change over time, and in fact has changed since the creation of these filters. So to keep this filter working as intended, we recommend monitoring this filter and making adjustments as necessary to return the desired fraction of alerts.
+
+This filter does the following:
+
+- uses the same set of filters as described above to filter out any undesired alerts
+- filters out all alerts with a SuperNNova score less than 0.7
+- filters out all alerts that are not classified as Supernova-like (cats_class = 11) with the CATS classifier
+- filters out all alerts with a CATS score < 0.9
+
+.. _uniform-sample:
+
+Uniform sample
+--------------
+
+**Broker:** `Fink <https://fink-broker.org/>`_
+
+**Filter name:** ``fink_uniform_sample_lsst``
+
+**Link to filter:** `uniform_sample <https://github.com/astrolabsoftware/fink-filters/blob/master/fink_filters/rubin/livestream/filter_uniform_sample/filter.py>`_
+
+This filter selects 1% of all live alerts in a uniformly random way by returning all alerts where the ``diaSourceId`` is evenly divisible by 113.
