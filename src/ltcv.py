@@ -78,12 +78,9 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None, p
         later and wondering what the heck you were thinking six months
         ago), bug Rob to document them.
 
-      columns : list of str, default None
-        If given only include these columns in the returned data.  If
-        'diaobjectid' is not included in this list, it will be prepended
-        to it.  (You can't not get diaobjectid back, because it's the
-        index of the returned dataframe or the keys of the returned
-        dictionary.)  See "Returns" below for allowed columns.
+      return_diaobject_positions : bool, default True
+        Set this to false to not return diaobject positions.  That might
+        speed up the query.
 
       return_format : str, default 'json'
         Either 'pandas' or 'json'
@@ -96,32 +93,48 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None, p
     -------
       rval: pandas.DataFrame or dict
         If return_format is 'pandas', get back a dataframe indexed by
-        'diaobject'.  (Not 'rootid', because there may be multiple
-        diaobjects for one root, but there will never be multiple roots
-        for one diaobject.  Base on how call this function, you might
-        get back more than one row with the same rootid.)  If
-        return_format is 'json', then the return is a dictionary whose
-        keys are the columns names, and whose values are lists all of
-        the same length.
+        'rootid'.  If return_format is 'json', then the return is a
+        dictionary whose keys are the columns names, and whose values
+        are lists all of the same length.
 
-        NOTE THAT it's possible you will get back more diaobjectids than
-        you asked for if you specified a list of diaobjectids!  This is
-        because sometimes there is more than one diaobjectid in the same
-        processing version with the same rootid.  (It's also possible
-        that you will get back fewer if you didn't give the right object
-        processing version, or if the diaobjectids don't exist.)
+        Note that diaobjectid is a list because there can be multiple
+        diaobjectids for the same rootid.  This is true even within one
+        processing version; empirically, LSST will sometimes assign more
+        than one diaobjectid to the same actual transient.  *Some* of
+        this may be FASTDB and LSST disagreeing on deduplication (FASTDB
+        says they're the same if they're within 1" of whatever the
+        (ra,dec) for a root object is), but we know it's more than that,
+        because LSST will sometimes associate the same diasourceid with
+        different diabojetics.  The diaobjectids you get back will not
+        be all of them, but the ones from the processing version you
+        asked for.
 
-        Columns included come from the diaobject and diaboject_position tables:
+        SCARY THING ABOUT POSITIONS.  FASTDB stores the positions from
+        LSST alerts.  root postiions are from the first alert where it
+        learns about a new root object (i.e. new diaobject that's not
+        close to a pre-existing root object).  These will not be the
+        best positions!  If you want good positions, you're better off
+        averaging the positions from the diasource table yourself.
+    
+        Columns included come from the root_diaobject, diaobject, and (maybe) diabobject_position tables:
+           
+           rootid                | uuid             | root_diaobject id for this object; this is true object identifier
+           diaobjectid           | list of bigint   | Globally unique (across all proc vers) diaobject id [Index]
+           obj_base_procver      | uuid             | base processing version for the diaobject
+           pos_base_procver      | uuid             | base processing version for the diaobject_position
+           ra                    | double precision | ra stored in the rootid record
+           dec                   | double precision | dec stored in the rootid record
+           diaobject_ra          | list of double   | ras from diaobject
+           diaobject_dec         | list of double   | decs from diaobject
+           diaobject_raerr       | list of real     | uncertainty (NOT variance) on ra from diaobject
+           diaobject_decerr      | list of real     | uncertainty (NOT variance) on dec from diaobject
+           diaobject_ra_dec_cov  | list of real     | covariance between ra and dec from diaobject
 
-           diaobjectid         | bigint           | Globally unique (across all proc vers) diaobject id [Index]
-           rootid              | uuid             | root_diaobject id for this object; this is true object identifier
-           obj_base_procver    | uuid             | base processing version for the diaobject
-           pos_base_procver    | uuid             | base processing version for the diaobject_position
-           ra                  | double precision | ra
-           dec                 | double precision | dec
-           raerr               | real             | uncertainty (NOT variance) on ra
-           decerr              | real             | uncertainty (NOT variance) on dec
-           ra_dec_cov          | real             | covariance between ra and dec
+        The diaobject_ra, diaobject_dec, etc. will not be included if
+        return_diaobject_positions was False.  If they're there, it's
+        entirely possible that some of them will be None!
+    
+        * might be a list, see above.
 
     """
 
@@ -174,6 +187,7 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None, p
     pospvid = ( objpvid if position_processing_version is None
                 else db.ProcessingVersion.procver_id( position_processing_version ) )
 
+    rootcols = [ 'ra', 'dec' ]
     objcols = [ 'diaobjectid', 'rootid', 'obj_base_procver' ]
     poscols = [ 'pos_base_procver', 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ]
     joincolumn = "rootid" if obj_is_root else "diaobjectid"
