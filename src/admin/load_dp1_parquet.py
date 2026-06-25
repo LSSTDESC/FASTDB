@@ -1,3 +1,6 @@
+raise RuntimeError( "Does not work in current dockerfile.  Depends on nested_pandas, "
+                    "which requires pandas<2.4, but we need a newer version of pandas.")
+
 import sys
 import os
 import re

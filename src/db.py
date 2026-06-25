@@ -47,7 +47,7 @@ from util import FDBLogger
 # explaining can slow down queries as sometimes it seems that
 # postgres really wants to think about what it's doing before giving you
 # a query plan (I don't know why; is it a pg_hint_plan thing?)
-_echoqueries = False
+_echoqueries = True
 _alwaysexplain = False
 _alwaysanalyze = False
 

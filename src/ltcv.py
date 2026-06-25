@@ -36,7 +36,7 @@ def _is_objids_table_rootid( objids_table, dbcon ):
 
 
 def get_object_infos( objids=None, objids_table=None, processing_version=None, position_processing_version=None,
-                      base_procvers=None, columns=None, return_format='json', dbcon=None ):
+                      base_procvers=None, return_diaobject_positions=True, return_format='json', dbcon=None ):
     """Get information from the diaobject table.
 
     Parameters
@@ -113,17 +113,17 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None, p
         LSST alerts.  root postiions are from the first alert where it
         learns about a new root object (i.e. new diaobject that's not
         close to a pre-existing root object).  These will not be the
-        best positions!  If you want good positions, you're better off
+        Bestx positions!  If you want good positions, you're better off
         averaging the positions from the diasource table yourself.
-    
+
         Columns included come from the root_diaobject, diaobject, and (maybe) diabobject_position tables:
-           
+
            rootid                | uuid             | root_diaobject id for this object; this is true object identifier
-           diaobjectid           | list of bigint   | Globally unique (across all proc vers) diaobject id [Index]
-           obj_base_procver      | uuid             | base processing version for the diaobject
-           pos_base_procver      | uuid             | base processing version for the diaobject_position
            ra                    | double precision | ra stored in the rootid record
            dec                   | double precision | dec stored in the rootid record
+           diaobjectid           | list of bigint   | Globally unique (across all proc vers) diaobject id [Index]
+           obj_base_procver      | list of uuid     | base processing version for the diaobject
+           pos_base_procver      | list of uuid     | base processing version for the diaobject_position
            diaobject_ra          | list of double   | ras from diaobject
            diaobject_dec         | list of double   | decs from diaobject
            diaobject_raerr       | list of real     | uncertainty (NOT variance) on ra from diaobject
@@ -133,10 +133,12 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None, p
         The diaobject_ra, diaobject_dec, etc. will not be included if
         return_diaobject_positions was False.  If they're there, it's
         entirely possible that some of them will be None!
-    
+
         * might be a list, see above.
 
     """
+
+    FDBLogger.info( "get_object_infos starting" )
 
     if return_format not in ( 'pandas', 'json' ):
         raise ValueError( f"return_format must be pandas or json, not {return_format}" )
@@ -176,7 +178,10 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None, p
     if base_procvers is not None:
         if not util.isSequence( base_procvers ):
             raise TypeError( "base_procvers must be a list of uuids" )
-        base_procvers = [ util.asUUID(v) for v in base_procvers ]
+        try:
+            base_procvers = [ util.asUUID(v) for v in base_procvers ]
+        except Exception:
+            raise TypeError( "base_procvers must be a list of uuids" )
         if processing_version is not None:
             FDBLogger.warning( "Both processing_version and base_procvers given, ignoring processing_version" )
     else:
@@ -187,122 +192,148 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None, p
     pospvid = ( objpvid if position_processing_version is None
                 else db.ProcessingVersion.procver_id( position_processing_version ) )
 
-    rootcols = [ 'ra', 'dec' ]
-    objcols = [ 'diaobjectid', 'rootid', 'obj_base_procver' ]
-    poscols = [ 'pos_base_procver', 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ]
-    joincolumn = "rootid" if obj_is_root else "diaobjectid"
-    sqlcolumns = []
-    gotsomepos = False
-    if columns is None:
-        columns = objcols + poscols
-    else:
-        if not util.isSequence( columns ):
-            columns = [ columns ]
-        else:
-            columns = list( columns )
-        if not all( ( c in objcols ) or ( c in poscols ) for c in columns ):
-            unknown = set(columns) - set( objcols ).union( poscols )
-            raise ValueError( f"Unknown Columns: {unknown}" )
-        if 'diaobjectid' not in columns:
-            columns.insert( 0, 'diaobjectid' )
-
-    for c in columns:
-        if c in objcols:
-            sqlcolumns.append( sql.Identifier( 'o', c ) if c != 'obj_base_procver'
-                               else sql.Identifier( 'b', 'description' ) + sql.SQL( " AS " ) + sql.Identifier( c ) )
-        else:
-            gotsomepos = True
-            sqlcolumns.append( sql.Identifier( 'p', c ) if c != 'pos_base_procver'
-                               else sql.Identifier( 'p', 'description' ) + sql.SQL( " AS " ) + sql.Identifier( c ) )
-    sqlcolumns = sql.SQL(',').join( c for c in sqlcolumns )
-
-    if gotsomepos and ( pospvid is None ):
+    if return_diaobject_positions and ( pospvid is None ):
         raise ValueError( "Must supply a position processing_version with base_procvers" )
 
-    if ( not gotsomepos ) and ( position_processing_version is not None ):
+    if ( not return_diaobject_positions ) and (  position_processing_version is not None ):
         FDBLogger.warning( "Didn't ask for positon columns, but provided position processing version; "
                            "ignoring the position processing version." )
 
-    with db.DBCon( dbcon ) as dbcon:
-        if obj_is_root:
-            q = sql.SQL( "/*+ IndexScan(o idx_diaobject_rootid)\n" )
-        else:
-            q = sql.SQL( "/*+ IndexScan(o idx_diaobject_diaobjectid)\n" )
+    q = sql.SQL( "/*+ IndexScan(r root_diaobject_pkey)\n" )
+    if not obj_is_root:
+        q += sql.SQL( "    IndexScan(o1 idx_diaobject_diaobjectid)\n" )
+    q += sql.SQL( "    IndexScan({objtab} idx_diaobject_rootid)\n"
+                 ).format( objtab=sql.Identifier("o2" if base_procvers is None else "o") )
+    if return_diaobject_positions:
+        q += sql.SQL( "    IndexScan(p1 idx_position_diaobjectid)\n" )
 
-        if gotsomepos:
-            q += sql.SQL( "    IndexScan(p1 idx_position_diaobjectid)\n" )
+    q += sql.SQL( textwrap.dedent(
+        """\
+        */
+        SELECT r.id AS rootid, r.ra, r.dec,
+               ARRAY_AGG(o.diaobjectid) AS diaobjectid,
+               ARRAY_AGG(o.base_procver_id) AS obj_base_procver{comma}
+        """
+    ) ).format( comma=sql.SQL( "," if return_diaobject_positions else "" ) )
 
-        q +=  sql.SQL( textwrap.dedent(
+    if return_diaobject_positions:
+        q += sql.SQL( textwrap.indent( textwrap.dedent(
+            """
+            ARRAY_AGG(p.base_procver_id) AS pos_base_procver,
+            ARRAY_AGG(p.ra) AS diaobject_ra,
+            ARRAY_AGG(p.dec) AS diaobject_dec,
+            ARRAY_AGG(p.raerr) AS diaobject_raerr,
+            ARRAY_AGG(p.decerr) AS diaobject_decerr,
+            ARRAY_AGG(p.ra_dec_cov) AS diaobject_ra_dec_cov
+            """
+        ), "       " ) )
+
+    q += sql.SQL( "FROM root_diaobject r\n" )
+
+    if not obj_is_root:
+        q += sql.SQL( textwrap.dedent(
             """\
-            */
-            SELECT DISTINCT ON(o.diaobjectid) {sqlcolumns}
-            FROM diaobject o
-            INNER JOIN base_processing_version b ON b.id=o.base_procver_id
-            """ ) ).format( sqlcolumns=sqlcolumns )
-        if base_procvers is None:
-            q += sql.SQL( textwrap.dedent(
-                """\
-                INNER JOIN base_procver_of_procver pv ON b.id=pv.base_procver_id
-                                                     AND pv.procver_id={objpvid}
-                """ ) ).format( objpvid=objpvid )
-        else:
-            q += sql.SQL( "                          AND b.id=ANY({base_procvers})\n"
-                         ).format( base_procvers=base_procvers )
-
-        if gotsomepos:
-            q += sql.SQL( textwrap.dedent(
-                """\
-                LEFT JOIN (
-                  SELECT DISTINCT ON(p1.diaobjectid) p1.*, b1.description
-                  FROM diaobject o1
-                  INNER JOIN diaobject_position p1 ON o1.diaobjectid=p1.diaobjectid
-                  INNER JOIN base_processing_version b1 ON p1.base_procver_id=b1.id
-                  INNER JOIN base_procver_of_procver pv1 ON b1.id=pv1.base_procver_id
-                                                        AND pv1.procver_id={pospvid}
-                  ORDER BY p1.diaobjectid, pv1.priority DESC
-                ) p ON o.diaobjectid=p.diaobjectid
-                """ ) ).format( pospvid=pospvid )
-
+            INNER JOIN (
+              SELECT DISTINCT ON(o1.rootid) o1.rootid
+              FROM diaobject o1
+            """ ) )
         if objids_table is not None:
-            q += sql.SQL( textwrap.dedent(
-                """\
-                INNER JOIN {objids_table} t ON {ojoin}={tjoin}
-                """ ) ).format( objids_table=sql.Identifier(objids_table),
-                                ojoin=sql.Identifier( 'o', joincolumn ),
-                                tjoin=sql.Identifier( 't', joincolumn ) )
+            q += sql.SQL( "  INNER JOIN {objtab} t ON o1.diaobjectid=t.diaobjectid\n"
+                          ).format( objtab=sql.Identifier(objids_table) )
         else:
-            q += sql.SQL( textwrap.dedent(
-                """\
-                WHERE {ojoin}=ANY({objids})
-                """ ) ).format( ojoin=sql.Identifier( 'o', joincolumn ), objids=objids )
+            q += sql.SQL( "  WHERE o1.diaobjectid=ANY(ARRAY[{objids}]) "
+                         ).format( objids=sql.SQL(",").join(objids) )
+        q += sql.SQL( textwrap.dedent(
+            """\
+              ORDER BY o1.rootid
+            ) osearch ON osearch.rootid=r.id
+            """
+        ) )
+    elif objids_table is not None:
+        q += sql.SQL( "INNER JOIN {objtab} t ON r.id=t.rootid\n"
+                      ).format( objtab=sql.Identifier(objids_table) )
 
-        q += sql.SQL( "ORDER BY o.diaobjectid\n" )
+    if base_procvers is not None:
+        q += sql.SQL( textwrap.dedent(
+            """\
+            LEFT JOIN diaobject o ON o.rootid=r.id
+                                  AND o.base_procver_id=ANY(ARRAY[{bpvs}])
+            """
+        ) ).format( bpvs=base_procvers )
+    else:
+        q += sql.SQL( textwrap.dedent(
+            """\
+            LEFT JOIN (
+              SELECT DISTINCT ON(o2.diaobjectid) o2.*
+              FROM diaobject o2
+              INNER JOIN base_procver_of_procver j ON o2.base_procver_id=j.base_procver_id
+                                                  AND j.procver_id={pvid}
+              ORDER BY o2.diaobjectid, j.priority DESC
+            ) o ON o.rootid=r.id
+            """
+        )).format( objjoin=sql.SQL("LEFT" if obj_is_root else "INNER"), pvid=objpvid )
 
-        # ****
-        # TEMP DEBUGGING, TAKE THIS OUT
-        # dbcon.echoqueries = True
-        # ****
+    if return_diaobject_positions:
+        q += sql.SQL( textwrap.dedent(
+            """\
+            LEFT JOIN (
+              SELECT DISTINCT ON(p1.diaobjectid) p1.*
+              FROM diaobject_position p1
+              INNER JOIN base_procver_of_procver j ON p1.base_procver_id=j.base_procver_id
+                                                  AND j.procver_id={pospvid}
+              ORDER BY p1.diaobjectid, j.priority DESC
+            ) p ON p.diaobjectid=o.diaobjectid
+            """
+        ) ).format( pospvid=pospvid )
+
+    if obj_is_root and ( objids_table is None ):
+        q += sql.SQL( "WHERE r.id=ANY(ARRAY[{objids}])\n" ).format( objids=sql.SQL(",").join(objids) )
+
+    q += sql.SQL( "GROUP BY r.id ORDER BY r.id" )
+
+    with db.DBCon( dbcon ) as dbcon:
         rows, cols = dbcon.execute( q )
-        # Next line deals with what I think is a dysfunctional psycopg return
-        cols = columns if len(rows) == 0 else cols
-        if return_format == 'pandas':
-            FDBLogger.debug( "Constructing pandas dataframe..." )
-            df = laboriously_construct_pandas( rows, columns=cols,
-                                               int64cols=[ 'diaobjectid' ],
-                                               doublecols=[ 'ra', 'dec' ],
-                                               floatcols=[ 'raerr', 'decerr', 'ra_dec_cov' ],
-                                               ignore_missing_cols=True
-                                              )
-            if len(df) > 0:
-                df.set_index( 'diaobjectid', inplace=True )
-            return df
-        elif return_format == 'json':
-            FDBLogger.debug( "Extracting postgres return to dictionary" )
-            return { c: [ r[i] for r in rows ] for i, c in enumerate( cols ) }
-        else:
-            raise RuntimeError( "This should never happen" )
 
-        FDBLogger.debug( "get_object_infos done." )
+    rval = { c: [ r[i] for r in rows ] for i, c in enumerate(cols) }
+
+    # Find Arrays of [None] and fix them to empty arrays; this is an artifact of
+    # postgres joins.  Complicated because sometimes we *don't* want to fix it for
+    # positions.
+    for col in [ 'diaobjectid', 'obj_base_procver' ]:
+        rval[col] = [ [] if i==[None] else i for i in rval[col] ]
+
+    if return_diaobject_positions:
+        for col in [ 'pos_base_procver', 'diaobject_ra', 'diaobject_dec',
+                     'diaobject_raerr', 'diaobject_decerr', 'diaobject_ra_dec_cov' ]:
+            rval[col] = [ [] if objval==[] else posval
+                          for objval, posval in zip( rval['diaobjectid'], rval[col] ) ]
+
+    if return_format == 'json':
+        FDBLogger.debug( "get_object_infos done, returning a dict" )
+        return rval
+
+    elif return_format == 'pandas':
+        FDBLogger.debug( "making pandas dataframe" )
+        # Sadly, this next line chokes, because pandas.array() sees
+        #   [[201], [202], [203]], and yells at me because it thinks it
+        #   should be a 1-dimensional array, whereas it's perfectly
+        #   happy with [[201,2011], [202], [203]].
+        # So, gotta be kinda manual about it, forcing it to do lists
+        #   instead of autodeteting integers if all the lists happen to
+        #   be single-length. Which is too bad, because if columns
+        #   change, here's a placein the code we'll have to change too.
+        # df = pandas.DataFrame( { k: pandas.array(v) for k, v in rval.items() } )
+        df = pandas.DataFrame(
+            { k: ( pandas.array(v) if k in ['rootid', 'ra', 'dec']
+                   else pandas.array(v, dtype='object') )
+              for k, v in rval.items() }
+        )
+        df.set_index( 'rootid', inplace=True )
+        FDBLogger.debug( "get_object_infos done, returning a Pandas dataframe" )
+        return df
+
+    else:
+        raise RuntimeError( "This should never happen." )
 
 
 def many_object_ltcvs( processing_version='default', objids=None, objids_table=None, limit=None, offset=None,

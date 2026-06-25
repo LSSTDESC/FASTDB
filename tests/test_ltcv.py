@@ -114,63 +114,97 @@ def test_objstats_view( objstats_realtime_view, set_of_lightcurves, check_db_row
 def test_get_object_infos( set_of_lightcurves, procver_collection ):
     bpvs, _pvs, _pvinfo = procver_collection
     roots = set_of_lightcurves
+    rootdict = { r['root'].id : r for r in roots }
 
     info = ltcv.get_object_infos( [ 200, 201, 202 ], return_format='pandas',
                                   processing_version='pvc_pv2', position_processing_version='pvc_pv1' )
-    assert info.index.name == 'diaobjectid'
-    assert set(info.columns.values) == { 'rootid', 'obj_base_procver', 'pos_base_procver',
-                                         'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' }
+    assert info.index.name == 'rootid'
+    assert set(info.columns.values) == { 'ra', 'dec', 'diaobjectid', 'obj_base_procver',
+                                         'pos_base_procver', 'diaobject_ra', 'diaobject_dec',
+                                         'diaobject_raerr', 'diaobject_decerr', 'diaobject_ra_dec_cov' }
     assert len(info) == 3
-    assert list( info.index.values ) == [ 200, 201, 202 ]
-    assert info.rootid.values.tolist() == [ roots[i]['root'].id for i in [ 0, 1, 2 ] ]
-    # Since we gave a position processing versoin that was inconsistent with the diaobject
+    exproots = [ roots[i]['root'].id for i in [ 0, 1, 2 ] ]
+    exproots.sort()
+    expobjids = [ [ o.diaobjectid for o in rootdict[r]['obj'].values()
+                    if o.base_procver_id==bpvs['bpv2_diaobject'].id ]
+                  for r in exproots ]
+    assert list( info.index.values ) == exproots
+    assert list( info.diaobjectid ) == expobjids
+    assert all( all( c == pytest.approx( getattr(rootdict[r]['root'], col), abs=1e-7 )
+                     for c, r in zip( info[col].values, exproots ) )
+                for col in [ 'ra', 'dec' ] )
+
+    # Since we gave a position processing version that was inconsistent with the diaobject
     #   processing version, none of the position fields should be filled.
-    assert all( all( ( i is None ) or pandas.isna(i) for i in info[col] )
-                for col in ['pos_base_procver', 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov'] )
+    assert all( all( info.loc[rid, col] == [None]*len(expobj)
+                     for rid, expobj in zip( exproots, expobjids ) )
+                for col in ['pos_base_procver', 'diaobject_ra', 'diaobject_dec',
+                            'diaobject_raerr', 'diaobject_decerr', 'diaobject_ra_dec_cov'] )
 
     # Make sure we get position information if we use the position processing default
     #   to the processing version
     info = ltcv.get_object_infos( [ 200, 201, 202 ], return_format='pandas', processing_version='pvc_pv2' )
-    assert list( info.index.values ) == [ 200, 201, 202 ]
-    assert all( all( ( i is not None ) and ( not pandas.isna(i) ) for i in info[col] )
-                for col in ['pos_base_procver', 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov'] )
-    assert info.loc[ 200, 'pos_base_procver'] == bpvs['bpv2a_diaobject_position_60030'].description
-    assert info.loc[ 201, 'pos_base_procver'] == bpvs['bpv2a_diaobject_position_60030'].description
-    assert info.loc[ 202, 'pos_base_procver'] == bpvs['bpv2_diaobject_position_60080'].description
+    assert list( info.index.values ) == exproots
+    assert list( info.diaobjectid ) == expobjids
+    # ...so many nested python comprehensions, "comprehension" has left the building
+    assert all( all( ( len(i) == len(expobj) ) and any( ii is not None for ii in i )
+                     for i, expobj in zip( info[col], expobjids ) )
+                for col in ['pos_base_procver', 'diaobject_ra', 'diaobject_dec',
+                            'diaobject_raerr', 'diaobject_decerr', 'diaobject_ra_dec_cov'] )
+    assert info.loc[ roots[0]['root'].id, 'pos_base_procver'] == [ bpvs['bpv2a_diaobject_position_60030'].id ]
+    assert ( set( info.loc[ roots[1]['root'].id, 'pos_base_procver'] )
+             == { bpvs['bpv2a_diaobject_position_60030'].id, None } )
+    assert info.loc[ roots[2]['root'].id, 'pos_base_procver'] == [ bpvs['bpv2_diaobject_position_60080'].id ]
     info2 = ltcv.get_object_infos( [ 200, 201, 202 ], return_format='pandas', processing_version='pvc_pv2',
                                    position_processing_version='pvc_pv2' )
     assert info2.equals( info )
 
     # Make sure json return gives the same stuff
     jsinfo = ltcv.get_object_infos( [ 200, 201, 202 ], processing_version='pvc_pv2', return_format='json' )
-    assert jsinfo['diaobjectid'] == [ 200, 201, 202 ]
-    info.reset_index( inplace=True )
+    assert jsinfo['rootid'] == exproots
+    assert jsinfo['diaobjectid'] == expobjids
     for col in info.columns:
-        if col in { 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' }:
-            assert np.array( info.loc[:, col].values ) == pytest.approx( np.array( jsinfo[col] ), rel=1e-5 )
+        if col in { 'ra', 'dec' }:
+            assert np.array( info.loc[:, col].values ) == pytest.approx( np.array( jsinfo[col] ), rel=1e-7 )
+        elif col in [ 'obj_base_procver', 'pos_base_procver' ]:
+            assert all( all( j == p for j, p in zip( jval, pval ) ) for jval, pval in zip( jsinfo[col], info[col] ) )
+        elif col in [ 'diaobject_ra', 'diaobject_dec' ]:
+            assert all( all( j == pytest.approx( p, abs=1e-7 ) for j, p in zip( jval, pval ) )
+                        for jval, pval in zip( jsinfo[col], info[col] ) )
+        elif col in [ 'diaobject_raerr', 'diaobject_decerr', 'diaobject_ra_dec_cov' ]:
+            assert all( all( j == pytest.approx( p, rel=1e-5 ) for j, p in zip( jval, pval) )
+                        for jval, pval in zip( jsinfo[col], info[col] ) )
         else:
-            assert ( np.array( info.loc[:, col].values ) == np.array( jsinfo[col] ) ).all()
+            assert all( jval == pval for jval, pval in zip( jsinfo[col], info[col] ) )
 
     # TODO : right now there are no diaobjects in the default processing version!  Fix that in Issue #70.
     info = ltcv.get_object_infos( [ roots[i]['root'].id for i in [0, 1, 2] ], return_format='pandas' )
-    assert list( info.index.values ) == [ 200, 201, 202, 2011 ]
-    assert all( b == bpvs['bpv2_diaobject'].description for b in info['obj_base_procver'] )
-    assert info.loc[ 200, 'pos_base_procver' ] == bpvs['bpv2a_diaobject_position_60030'].description
-    assert info.loc[ 201, 'pos_base_procver' ] == bpvs['bpv2a_diaobject_position_60030'].description
-    assert info.loc[ 2011, 'pos_base_procver' ] is None
-    assert info.loc[ 202, 'pos_base_procver' ] == bpvs['bpv2_diaobject_position_60080'].description
+    # Same expected objects as before
+    assert list( info.index.values ) == exproots
+    idwithtwo = [ i for i in exproots if i == roots[1]['root'].id ][0]
+    for i, rid in enumerate(info.index.values):
+        if rid == idwithtwo:
+            assert set( info.loc[rid, 'diaobjectid'] ) == { 201, 2011 }
+        else:
+            assert info.loc[rid, 'diaobjectid'] == expobjids[i]
+        assert all( b == bpvs['bpv2_diaobject'].id for b in info.loc[rid, 'obj_base_procver'] )
 
-    info2 = ltcv.get_object_infos( [ roots[i]['root'].id for i in [0, 1, 2] ], processing_version='pvc_pv2',
-                                   return_format='pandas' )
-    assert ( info2.rootid == info.rootid ).all()
-    assert ( info2.obj_base_procver == info.obj_base_procver ).all()
-    # The None/<NA> values aren't comparing as equal, probably because of the whole "all nan tests are False" thing
-    assert ( info2.loc[ [ 200, 201, 202 ], : ] == info.loc[ [ 200, 201, 202], : ] ).all().all()
+    assert info.loc[ roots[0]['root'].id, 'pos_base_procver' ] == [ bpvs['bpv2a_diaobject_position_60030'].id ]
+    # Next one, should probably check that the diaobjectid matched the pos_base_procver
+    #   (None goes with 2011.)
+    assert ( set( info.loc[ roots[1]['root'].id, 'pos_base_procver' ] ) ==
+             { bpvs['bpv2a_diaobject_position_60030'].id, None } )
+    assert ( info.loc[ roots[2]['root'].id, 'pos_base_procver' ] ==
+             [ bpvs['bpv2_diaobject_position_60080'].id ] )
 
-    info = ltcv.get_object_infos( [ 200, 201, 202 ], columns=['ra', 'dec'], processing_version='pvc_pv2',
-                                  return_format='pandas' )
-    assert info.index.values.tolist() == [ 200, 201, 202 ]
-    assert set( info.keys() ) == { 'ra', 'dec' }
+    assert np.all( info2.index.values == info.index.values )
+    assert info2.ra.values.to_numpy() == pytest.approx( info.ra.values.to_numpy(), abs=1e-7 )
+    assert info2.dec.values.to_numpy() == pytest.approx( info.dec.values.to_numpy(), abs=1e-7 )
+
+    info = ltcv.get_object_infos( [ 200, 201, 202 ], processing_version='pvc_pv2',
+                                  return_format='pandas', return_diaobject_positions=False )
+    assert list( info.index.values ) == exproots
+    assert set( info.keys() ) == { 'diaobjectid', 'obj_base_procver', 'ra', 'dec' }
 
     # Test passing base_procvers
     with pytest.raises( ValueError, match="Must supply a position processing.version with base_procvers" ):
@@ -180,25 +214,74 @@ def test_get_object_infos( set_of_lightcurves, procver_collection ):
     info = ltcv.get_object_infos( [ roots[i]['root'].id for i in [0, 1, 2] ], return_format='pandas',
                                   base_procvers=[ bpvs[i].id for i in [ 'realtime_diaobject', 'bpv1_diaobject' ] ],
                                   position_processing_version='realtime' )
-    assert set( info.rootid ) == set( roots[i]['root'].id for i in [0, 1, 2] )
-    assert set( info.index.values ) == { 0, 1, 2, 100 }
-    for objid in [ 0, 1, 2 ]:
-        assert not pandas.isna( info.loc[ objid, 'ra' ] )
-        assert not pandas.isna( info.loc[ objid, 'dec' ] )
-    for col in [ 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ]:
-        assert pandas.isna( info.loc[ 100, col ] )
+    assert list( info.index.values) == exproots
+    expobjids = [ [ o.diaobjectid for o in rootdict[r]['obj'].values()
+                    if o.base_procver_id in [ bpvs['bpv1_diaobject'].id, bpvs['realtime_diaobject'].id ] ]
+                  for r in exproots ]
+    idwithtwo = [ i for i in exproots if i == roots[0]['root'].id ][0]
+    for expobj, rid in zip( expobjids, info.index.values ):
+        assert set( info.loc[rid, 'diaobjectid'] ) == set( expobj )
+        assert info.loc[ rid, 'ra' ] == pytest.approx( rootdict[rid]['root'].ra, abs=1e-7 )
+        assert info.loc[ rid, 'dec' ] == pytest.approx( rootdict[rid]['root'].dec, abs=1e-7 )
+
+        if rid == idwithtwo:
+            assert all( len(info.loc[rid, col]) == 2
+                        for col in [ 'diaobjectid', 'obj_base_procver', 'pos_base_procver',
+                                     'diaobject_ra', 'diaobject_dec', 'diaobject_raerr', 'diaobject_decerr',
+                                     'diaobject_ra_dec_cov' ] )
+            assert set( info.loc[rid, 'diaobjectid'] ) == { 0, 100 }
+            assert set( info.loc[rid, 'obj_base_procver'] ) == { bpvs['bpv1_diaobject'].id,
+                                                                 bpvs['realtime_diaobject'].id }
+            assert all( None in info.loc[rid, col]
+                        for col in [ 'pos_base_procver', 'diaobject_ra', 'diaobject_dec',
+                                     'diaobject_raerr', 'diaobject_decerr', 'diaobject_ra_dec_cov' ] )
+            assert all( not all( i is None for i in info.loc[rid,col] )
+                        for col in [ 'pos_base_procver', 'diaobject_ra', 'diaobject_dec',
+                                     'diaobject_raerr', 'diaobject_decerr', 'diaobject_ra_dec_cov' ] )
+        else:
+            assert all( len(info.loc[rid, col]) == 1
+                        for col in [ 'diaobjectid', 'obj_base_procver', 'pos_base_procver',
+                                     'diaobject_ra', 'diaobject_dec', 'diaobject_raerr', 'diaobject_decerr',
+                                     'diaobject_ra_dec_cov' ] )
+            assert info.loc[rid, 'diaobjectid'] == expobj
+            assert info.loc[rid, 'obj_base_procver'] == [ bpvs['realtime_diaobject'].id ]
+            # ...check the other stuff?
 
     info = ltcv.get_object_infos(  [ roots[i]['root'].id for i in [0, 1, 2] ], return_format='pandas',
                                    base_procvers=[ bpvs[i].id for i in [ 'realtime_diaobject', 'bpv2_diaobject' ] ],
                                    position_processing_version='pvc_pv2' )
-    assert set( info.rootid ) == set( roots[i]['root'].id for i in [0, 1, 2] )
-    assert set( info.index.values ) == { 0, 1, 2, 200, 201, 2011, 202 }
-    for objid in [ 200, 201, 202 ]:
-        assert not pandas.isna( info.loc[ objid, 'ra' ] )
-        assert not pandas.isna( info.loc[ objid, 'dec' ] )
-    for objid in [ 0, 1, 2, 2011 ]:
-        for col in [ 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ]:
-            assert pandas.isna( info.loc[ objid, col ] )
+    assert list( info.index.values ) == exproots
+    expobjids = [ [ o.diaobjectid for o in rootdict[r]['obj'].values()
+                    if o.base_procver_id in [ bpvs['bpv2_diaobject'].id, bpvs['realtime_diaobject'].id ] ]
+                  for r in exproots ]
+    idwiththree = [ i for i in exproots if i == roots[1]['root'].id ][0]
+    for expobj, rid in zip( expobjids, info.index.values ):
+        assert set( info.loc[rid, 'diaobjectid'] ) == set( expobj )
+        assert info.loc[ rid, 'ra' ] == pytest.approx( rootdict[rid]['root'].ra, abs=1e-7 )
+        assert info.loc[ rid, 'dec' ] == pytest.approx( rootdict[rid]['root'].dec, abs=1e-7 )
+
+        if rid == idwiththree:
+            assert all( len(info.loc[rid, col]) == 3
+                        for col in [ 'diaobjectid', 'obj_base_procver', 'pos_base_procver',
+                                     'diaobject_ra', 'diaobject_dec', 'diaobject_raerr', 'diaobject_decerr',
+                                     'diaobject_ra_dec_cov' ] )
+            assert set( info.loc[rid, 'diaobjectid'] ) == { 1, 201, 2011 }
+            assert set( info.loc[rid, 'obj_base_procver'] ) == { bpvs['bpv2_diaobject'].id,
+                                                                 bpvs['realtime_diaobject'].id }
+            assert all( None in info.loc[rid, col]
+                        for col in [ 'pos_base_procver', 'diaobject_ra', 'diaobject_dec',
+                                     'diaobject_raerr', 'diaobject_decerr', 'diaobject_ra_dec_cov' ] )
+            assert all( not all( i is None for i in info.loc[rid,col] )
+                        for col in [ 'pos_base_procver', 'diaobject_ra', 'diaobject_dec',
+                                     'diaobject_raerr', 'diaobject_decerr', 'diaobject_ra_dec_cov' ] )
+        else:
+            assert all( len(info.loc[rid, col]) == 2
+                        for col in [ 'diaobjectid', 'obj_base_procver', 'pos_base_procver',
+                                     'diaobject_ra', 'diaobject_dec', 'diaobject_raerr', 'diaobject_decerr',
+                                     'diaobject_ra_dec_cov' ] )
+            assert info.loc[rid, 'diaobjectid'] == expobj
+            assert set( info.loc[rid, 'obj_base_procver'] ) == { bpvs['realtime_diaobject'].id,
+                                                                 bpvs['bpv2_diaobject'].id }
 
     # Test passing an object id table
     with db.DBCon() as dbcon:
@@ -207,14 +290,29 @@ def test_get_object_infos( set_of_lightcurves, procver_collection ):
         dbcon.execute( "INSERT INTO tempthing(diaobjectid) VALUES ( 202 )" )
         info = ltcv.get_object_infos( objids_table='tempthing', dbcon=dbcon, processing_version='pvc_pv2',
                                       return_format='pandas' )
-        assert info.index.values.tolist() == [ 200, 202 ]
-        assert all( info['rootid'] == [ roots[i]['root'].id for i in [ 0, 2 ] ] )
-        assert all ( all( ( i is not None ) and ( not pandas.isna(i) ) for i in info[col] )
-                     for col in [ 'pos_base_procver', 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ] )
-        # If we pass an inconjsistent processing version, we should get nothing back
+        exproots = [ roots[i]['root'].id for i in [ 0, 2 ] ]
+        exproots.sort()
+        expobjids = [ [ o.diaobjectid for o in rootdict[r]['obj'].values()
+                        if o.base_procver_id==bpvs['bpv2_diaobject'].id ]
+                      for r in exproots ]
+        assert list( info.index.values ) == exproots
+        assert all( set(info.loc[rid, 'diaobjectid']) ==
+                    set( expobj ) for rid, expobj in zip( exproots, expobjids ) )
+        assert all( set(info.loc[rid, 'obj_base_procver']) == { bpvs['bpv2_diaobject'].id }
+                    for rid in exproots )
+        assert all( all( info.loc[rid, col] == pytest.approx( getattr(rootdict[rid]['root'], col), abs=1e-7 )
+                         for rid in exproots )
+                    for col in [ 'ra', 'dec' ] )
+        assert all( all( i is not None for i in info.loc[rid, col]
+                         for col in [ 'pos_base_procver', 'diaobject_ra', 'diaobject_dec',
+                                      'diaobject_raerr', 'diaobject_decerr', 'diaobject_ra_dec_cov' ] )
+                    for rid in exproots )
+
+        # If we pass an inconsistent processing version, we should get a disturbing return
         info = ltcv.get_object_infos( objids_table='tempthing', dbcon=dbcon, processing_version='pvc_pv3',
                                       return_format='pandas' )
-        assert len( info ) == 0
+        assert all( info.loc[rid, col]==[] for col in info.columns if col not in ['rootid', 'ra', 'dec']
+                    for rid in exproots )
 
         dbcon.execute( "DROP TABLE tempthing" )
         dbcon.execute( "CREATE TEMP TABLE tempthing(rootid uuid)", explain=False )
@@ -222,10 +320,41 @@ def test_get_object_infos( set_of_lightcurves, procver_collection ):
         dbcon.execute( "INSERT INTO tempthing(rootid) VALUES (%(id)s)", { 'id': roots[3]['root'].id } )
         info = ltcv.get_object_infos( objids_table='tempthing', dbcon=dbcon, processing_version='pvc_pv2',
                                       return_format='pandas' )
-        assert info.index.values.tolist() == [ 201, 203, 2011 ]
+        exproots = [ roots[i]['root'].id for i in [ 1, 3 ] ]
+        exproots.sort()
+        expobjids = [ [ o.diaobjectid for o in rootdict[r]['obj'].values()
+                        if o.base_procver_id==bpvs['bpv2_diaobject'].id ]
+                      for r in exproots ]
+        assert info.index.values.tolist() == exproots
+        idwithtwo = [ i for i in exproots if i == roots[1]['root'].id ][0]
+        for expobj, rid in zip( expobjids, info.index.values ):
+            assert set( info.loc[rid, 'diaobjectid'] ) == set( expobj )
+            assert info.loc[ rid, 'ra'] == pytest.approx( rootdict[rid]['root'].ra, abs=1e-7 )
+            assert info.loc[ rid, 'dec'] == pytest.approx( rootdict[rid]['root'].dec, abs=1e-7 )
+
+            if rid == idwithtwo:
+                assert set( info.loc[rid, 'diaobjectid'] ) == { 201, 2011 }
+                assert all( i == bpvs['bpv2_diaobject'].id for i in info.loc[rid, 'obj_base_procver'] )
+                assert all( None in info.loc[rid, col]
+                            for col in [ 'pos_base_procver', 'diaobject_ra', 'diaobject_dec',
+                                         'diaobject_raerr', 'diaobject_decerr', 'diaobject_ra_dec_cov' ] )
+                assert all( not all( i is None for i in info.loc[rid,col] )
+                            for col in [ 'pos_base_procver', 'diaobject_ra', 'diaobject_dec',
+                                         'diaobject_raerr', 'diaobject_decerr', 'diaobject_ra_dec_cov' ] )
+            else:
+                assert all( len(info.loc[rid, col]) == 1
+                            for col in [ 'diaobjectid', 'obj_base_procver', 'pos_base_procver',
+                                         'diaobject_ra', 'diaobject_dec', 'diaobject_raerr', 'diaobject_decerr',
+                                         'diaobject_ra_dec_cov' ] )
+                assert info.loc[rid, 'diaobjectid'] == expobj
+                assert info.loc[rid, 'obj_base_procver'] == [ bpvs['bpv2_diaobject'].id ]
+
+
         info = ltcv.get_object_infos( objids_table='tempthing', dbcon=dbcon, processing_version='realtime',
                                       return_format='pandas' )
-        assert info.index.values.tolist() == [ 1 ]
+        # TODO THIS NEXT TEST IS BROKEN, it now returns both roots, but only one should have
+        #   non-empty list for diaobjectid, DO THIS ROB
+        assert info.index.values.tolist() == [ roots[1]['root'].id ]
         assert all( all( ( i is not None ) and ( not pandas.isna(i) ) for i in info[col] )
                     for col in [ 'pos_base_procver', 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ] )
 
@@ -237,7 +366,12 @@ def test_get_object_infos( set_of_lightcurves, procver_collection ):
         dbcon.execute( "INSERT INTO tempthing VALUES (%(id)s, 202)", { 'id': roots[3]['root'].id } )
         info = ltcv.get_object_infos( objids_table='tempthing', dbcon=dbcon, processing_version='pvc_pv2',
                                      return_format='pandas' )
-        assert info.index.values.tolist() == [ 201, 203, 2011 ]
+        exproots = [ roots[i]['root'].id for i in [ 1, 3 ] ]
+        exproots.sort()
+        assert info.index.values.tolist() == exproots
+        assert len(info) == 2
+        assert set( info.loc[ roots[1]['root'].id, 'diaobjectid' ] ) == { 201, 2011 }
+        assert info.loc[ roots[3]['root'].id, 'diaobjectid' ] == [ 203 ]
 
         # Check failures
         with pytest.raises( ValueError, match='objids_table requires dbcon' ):
