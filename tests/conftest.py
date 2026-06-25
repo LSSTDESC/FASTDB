@@ -486,7 +486,8 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
                                      band=( 'r' if visit%2==0 else 'i' ),
                                      midpointmjdtai=sourcemjd,
                                      psfflux=psfflux, psffluxerr=psffluxerr,
-                                     ra=ra['realtime'], dec=dec['realtime'] )
+                                     ra=ra['realtime'], dec=dec['realtime'],
+                                     raerr=0.2/3600., decerr=0.2/3600., ra_dec_cov=(0.05/3600.)**2 )
                     srcobjs.append( src )
                     rootdict['src']['realtime_diasource'].append( src )
 
@@ -563,7 +564,10 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
                                      psfflux=psfflux,
                                      psffluxerr=psffluxerr,
                                      ra=ra[bpv],
-                                     dec=dec[bpv] )
+                                     dec=dec[bpv],
+                                     raerr=0.2/3600.,
+                                     decerr=0.2/3600.,
+                                     ra_dec_cov=(0.05/3600.)**2 )
                     srcobjs.append( src )
                     rootdict['src'][f'{bpv}_diasource'].append( src )
 
@@ -631,7 +635,10 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
                                          psfflux=psfflux,
                                          psffluxerr=psffluxerr,
                                          ra=ra[bpv],
-                                         dec=dec[bpv] )
+                                         dec=dec[bpv],
+                                         raerr=0.2/3600.,
+                                         decerr=0.2/3600.,
+                                         ra_dec_cov=(0.05/3600.)**2 )
                         srcobjs.append( src )
                         rootdict['src'][f'{bpv}_diasource'].append( src )
 
@@ -1086,7 +1093,12 @@ def lightcurve_checker( set_of_lightcurves, procver_collection ):
                 continue
 
             dexen = [ i for i, lc in enumerate( ltcvs ) if lc['rootid'] == rootid ]
-            assert len(dexen) == 1
+            if len(dexen) > 1:
+                raise RuntimeError( "This should never happen." )
+            elif len(dexen) == 0:
+                assert not expect_all_roots
+                continue
+
             thisltcv = ltcvs[ dexen[0] ]
 
             assert all( len(thisltcv[k]) == len(thisltcv['mjd']) for k in expected_keys
@@ -1248,9 +1260,13 @@ def lightcurve_checker( set_of_lightcurves, procver_collection ):
                 assert all( isinstance( i, str ) for i in infos['rootid'] )
                 infos['rootid'] = [ asUUID(i) for i in infos['rootid'] ]
 
-            assert len( infos['rootid'] ) == len( expected_root_ids )
-            assert set( infos['rootid'] ) == set( expected_root_ids )
-            assert set( expected_diaobjectids ) == set( itertools.chain( *(infos['diaobjectid']) ) )
+            if expect_all_roots:
+                assert len( infos['rootid'] ) == len( expected_root_ids )
+                assert set( infos['rootid'] ) == set( expected_root_ids )
+                assert set( expected_diaobjectids ) == set( itertools.chain( *(infos['diaobjectid']) ) )
+            else:
+                assert set( infos['rootid'] ).issubset( set(expected_root_ids) )
+                assert set( itertools.chain( *(infos['diaobjectid']) ) ).issubset( set( expected_diaobjectids ) )
 
             for dex, rid in enumerate( infos['rootid'] ):
                 assert ltcvs[dex]['rootid'] == rid
@@ -1361,7 +1377,7 @@ def lightcurve_checker( set_of_lightcurves, procver_collection ):
                         # No sources to calculate mean positions, so we should just get the
                         # root position back
                         assert infos['ra'][dex] == pytest.approx( exproot['root'].ra, rel=1e-12 )
-                        assert infos['dec'][dex] == pytest.approx( exproot['root'].ra, rel=1e-12 )
+                        assert infos['dec'][dex] == pytest.approx( exproot['root'].dec, rel=1e-12 )
                         assert all( ( infos[i][dex] is None ) or np.isnan( infos[i][dex] )
                                     for i in ( 'raerr', 'decerr', 'ra_dec_cov' ) )
                     elif len(srcra) > 1:
@@ -1378,7 +1394,6 @@ def lightcurve_checker( set_of_lightcurves, procver_collection ):
                         # Fixture didn't put any correlations in
                         assert infos['ra_dec_cov'][dex] == pytest.approx( ra_dec_cov, abs=0.0001/3600. )
                     elif len(srcra) == 1:
-                        import pdb; pdb.set_trace()
                         # ...might match the root ra and dec... maybe... probably not... eh, whatevs
                         assert infos['ra'][dex] == pytest.approx( srcra[0], rel=1e-12 )
                         assert infos['dec'][dex] == pytest.approx( srcdec[0], rel=1e-12 )

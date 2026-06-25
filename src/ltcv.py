@@ -833,10 +833,11 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                 if len(rowcache) > 0:
                     # Make some of the columns numpy arrays if we're using weighted
                     #   source positions, so that (hopefully) processing will be
-                    #   faster later.
+                    #   faster later.  (But, also, because I use numpy indexing on them.)
                     if use_weighted_source_positions:
                         tmp = { c: ( np.array( [ r[coldex[c]] for r in rowcache ], dtype=np.float64 )
-                                     if c in [ 'flux', 'fluxerr', 'det_ra', 'det_dec' ]
+                                     if c in [ 'flux', 'fluxerr', 'det_ra', 'det_dec',
+                                               'det_raerr', 'det_decerr', 'det_ra_dec_cov' ]
                                      else [ r[coldex[c]] for r in rowcache ] )
                                 for c in cols }
                     else:
@@ -935,8 +936,8 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
             weight = lc['flux'] / lc['fluxerr']
             w = np.where( np.array( lc['isdet'] ) & ( weight > 3 ) )[0]
             if len(w) < 1:
-                meanra = objinfo.loc[rootid, 'ra']
-                meandec = objinfo.loc[rootid, 'dec']
+                meanra = objinfo.loc[rootid, 'ra'] if return_format == 'pandas' else objinfo['ra'][dex]
+                meandec = objinfo.loc[rootid, 'dec'] if return_format == 'pandas' else objinfo['dec'][dex]
                 raerr = None
                 decerr = None
                 ra_dec_cov = None
@@ -945,7 +946,7 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                 meandec = lc['det_dec'][w][0]
                 raerr = lc['det_raerr'][w][0]
                 decerr = lc['det_decerr'][w][0]
-                ra_dec_cov = lc['ra_dec_cov'][w][0]
+                ra_dec_cov = lc['det_ra_dec_cov'][w][0]
             else:
                 weight = weight[w] ** 2
                 meanra = ( lc['det_ra'][w] * weight ).sum() / weight.sum()
@@ -991,7 +992,7 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
         elif use_weighted_source_positions:
             # Turn the few things we made into numpy arrays back into lists, making nan back into None
             for row in ltcvs:
-                for col in ['det_ra', 'det_dec', 'flux', 'fluxerr']:
+                for col in [ 'flux', 'fluxerr', 'det_ra', 'det_dec', 'det_raerr', 'det_decerr', 'det_ra_dec_cov' ]:
                     row[col] = np.where( np.isnan(row[col]), None, row[col] ).tolist()
 
     if which == 'forced':

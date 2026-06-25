@@ -1,4 +1,5 @@
 import time
+import copy
 import pytest
 
 import numpy as np
@@ -553,6 +554,12 @@ def test_many_object_ltcvs( procver_collection, set_of_lightcurves, lightcurve_c
     extras = [
         {},
         { 'mjd_now': 60041. },
+        # This next one is specifically to test the weighted source position case when there
+        #   is only one detection with S/N>3
+        { 'mjd_now': 60045.5, 'use_weighted_source_positions': 1, 'return_object_info': 1 },
+        # ...and this is to explicitly test the case where there are no detections
+        { 'mjd_now': 60039., 'use_weighted_source_positions': 1, 'return_object_info': 1,
+          'expect_all_roots': { 'detections': False } },
         { 'bands': 'r' },
         { 'bands': ['r'] },
         { 'include_source_positions': 1 },
@@ -579,7 +586,20 @@ def test_many_object_ltcvs( procver_collection, set_of_lightcurves, lightcurve_c
         for ltcvreq in ltcvlist:
             for which in [ None, 'patch', 'detections', 'forced' ]:
                 for extra in extras:
-                    kwargs = extra.copy()
+                    # ****
+                    # if ( ( 'mjd_now' in extra ) and ( extra['mjd_now'] == 60041. ) and
+                    #      ( 'use_weighted_source_positions' in extra ) and
+                    #      ( extra['use_weighted_source_positions'] ) and
+                    #      ( ltcvreq[0] == 'pvc_pv2' )
+                    #     ):
+                    #     import pdb; pdb.set_trace()
+                    # ****
+                    kwargs = copy.deepcopy( extra )
+                    expect_all_roots = True
+                    if 'expect_all_roots' in kwargs:
+                        if which in kwargs['expect_all_roots']:
+                            expect_all_roots = kwargs['expect_all_roots'][which]
+                        del kwargs['expect_all_roots']
                     kwargs['objids'] = ltcvreq[1]
                     if ltcvreq[0] is not None:
                         kwargs['processing_version'] = ltcvreq[0]
@@ -605,7 +625,7 @@ def test_many_object_ltcvs( procver_collection, set_of_lightcurves, lightcurve_c
                         del kwargs['processing_version']
 
                     # Verify the "json" (really, list/dict) return is right
-                    check_ltcv( ltcvreq[4], ltcvreq[2], ltcvreq[3], jsres, **kwargs )
+                    check_ltcv( ltcvreq[4], ltcvreq[2], ltcvreq[3], jsres, expect_all_roots=expect_all_roots, **kwargs )
 
                     # Make sure pandas return is consistent
                     if isinstance( pdres, tuple ):
