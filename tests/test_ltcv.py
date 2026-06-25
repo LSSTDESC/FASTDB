@@ -350,13 +350,23 @@ def test_get_object_infos( set_of_lightcurves, procver_collection ):
                 assert info.loc[rid, 'obj_base_procver'] == [ bpvs['bpv2_diaobject'].id ]
 
 
+        # If we pass an inconsistent processing version, we should still
+        # get back the root ids that correspond to the diaobjectids we
+        # passed, but there will be no diaobjectids in the returned
+        # lists for which the object doesn't exist in the processing version.
         info = ltcv.get_object_infos( objids_table='tempthing', dbcon=dbcon, processing_version='realtime',
                                       return_format='pandas' )
-        # TODO THIS NEXT TEST IS BROKEN, it now returns both roots, but only one should have
-        #   non-empty list for diaobjectid, DO THIS ROB
-        assert info.index.values.tolist() == [ roots[1]['root'].id ]
-        assert all( all( ( i is not None ) and ( not pandas.isna(i) ) for i in info[col] )
-                    for col in [ 'pos_base_procver', 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ] )
+        r1 = roots[1]['root']
+        # o1 = roots[1]['obj'][1]
+        # ...was gonna write some checks that the right stuff came back, but I got lazy
+        r3 = roots[3]['root']
+        assert set( info.index.values.tolist() ) == { r1.id, r3.id }
+        assert info.loc[r1.id, 'ra'] == pytest.approx( r1.ra, abs=1e-7 )
+        assert info.loc[r1.id, 'dec'] == pytest.approx( r1.dec, abs=1e-7 )
+        assert info.loc[r3.id, 'ra'] == pytest.approx( r3.ra, abs=1e-7 )
+        assert info.loc[r3.id, 'dec'] == pytest.approx( r3.dec, abs=1e-7 )
+        assert all( info.loc[r3.id, col] == [] for col in info.columns if col not in ['ra', 'dec'] )
+        assert all( len( info.loc[r1.id, col] ) == 1 for col in info.columns if col not in ['ra', 'dec'] )
 
         # If the temp table has both rootid and diaobjectid, it should use diaobjectid.  Test this
         # By passing an inconsistent input
@@ -413,10 +423,14 @@ def compare_pandas_to_json( pdltcvs, jsltcvs, pdobjinfo, jsobjinfo ):
                     ).all()
 
     if jsobjinfo is not None:
-        assert pdobjinfo.index.names == ['diaobjectid']
+        assert pdobjinfo.index.names == ['rootid']
         pdobjinfo.reset_index( inplace=True )
         for k, v in jsobjinfo.items():
-            cond = np.array( [ ( pandas.isna(p) & pandas.isna(val) )
+            # ROB THIS NEEDS FIXING
+            # Need to check None/NA item by item
+            cond = np.array( [ ( isinstance(val, list) and all( pandas.isna(p) & pandas.isna(val) ) )
+                               or
+                               ( not isinstance(val, list) and ( pandas.isna(p) & pandas.isna(val) ) )
                                or
                                ( ( p == pytest.approx(val, rel=1e-12) )
                                    if k in [ 'ra', 'dec' ]
@@ -424,6 +438,8 @@ def compare_pandas_to_json( pdltcvs, jsltcvs, pdobjinfo, jsobjinfo ):
                                    if k in [ 'raerr', 'decerr' ]
                                  else ( p == pytest.approx(val, abs=0.0001/3600.) )
                                    if k == 'ra_dec_cov'
+                                 else ( list(p) == val )
+                                   if isinstance( val, list )
                                  else ( p == val )
                                 )
                                for p, val in zip( pdobjinfo[k], v )
@@ -453,18 +469,18 @@ def test_object_ltcv( set_of_lightcurves, procver_collection, lightcurve_checker
         { 'bands': ['r'] },
         { 'include_source_positions': 1 },
         { 'return_object_info': 1 },
-        { 'return_object_info': 1, 'include_object_positions': 1 },
+        { 'return_object_info': 1, 'return_diaobject_positions': 1 },
         { 'return_object_info': 1, 'include_base_procver': 1 },
-        { 'return_object_info': 1, 'include_base_procver': 1, 'include_object_positions': 1 },
+        { 'return_object_info': 1, 'include_base_procver': 1, 'return_diaobject_positions': 1 },
         { 'use_weighted_source_positions': 1, 'include_base_procver': 1 },
-        { 'use_weighted_source_positions': 1, 'include_object_positions': 1 },
-        { 'use_weighted_source_positions': 1, 'include_object_positions': 1, 'return_object_info': 1 },
+        { 'use_weighted_source_positions': 1, 'return_diaobject_positions': 1 },
+        { 'use_weighted_source_positions': 1, 'return_diaobject_positions': 1, 'return_object_info': 1 },
         { 'use_weighted_source_positions': 1, 'include_source_positions': 1,
-          'return_object_info': 1, 'include_object_positions': 1 },
+          'return_object_info': 1, 'return_diaobject_positions': 1 },
         { 'always_use_weighted_source_positions': 1, 'include_source_positions': 1,
-          'return_object_info': 1, 'include_object_positions': 1 },
+          'return_object_info': 1, 'return_diaobject_positions': 1 },
         { 'mjd_now': 60061., 'always_use_weighted_source_positions': 1, 'include_base_procver': 1,
-          'include_source_positions': 1, 'include_object_positions': 1, 'return_object_info': 1 },
+          'include_source_positions': 1, 'return_diaobject_positions': 1, 'return_object_info': 1 },
     ]
 
     t0 = time.perf_counter()
@@ -541,28 +557,25 @@ def test_many_object_ltcvs( procver_collection, set_of_lightcurves, lightcurve_c
         { 'bands': ['r'] },
         { 'include_source_positions': 1 },
         { 'return_object_info': 1 },
-        { 'return_object_info': 1, 'include_object_positions': 1 },
+        { 'return_object_info': 1, 'return_diaobject_positions': 1 },
         { 'return_object_info': 1, 'include_base_procver': 1 },
-        { 'return_object_info': 1, 'include_base_procver': 1, 'include_object_positions': 1 },
+        { 'return_object_info': 1, 'include_base_procver': 1, 'return_diaobject_positions': 1 },
         { 'use_weighted_source_positions': 1, 'include_base_procver': 1 },
-        { 'use_weighted_source_positions': 1, 'include_object_positions': 1 },
-        { 'use_weighted_source_positions': 1, 'include_object_positions': 1, 'return_object_info': 1 },
+        { 'use_weighted_source_positions': 1, 'return_diaobject_positions': 1 },
+        { 'use_weighted_source_positions': 1, 'return_diaobject_positions': 1, 'return_object_info': 1 },
         { 'use_weighted_source_positions': 1, 'include_source_positions': 1,
-          'return_object_info': 1, 'include_object_positions': 1 },
-        { 'always_use_weighted_source_positions': 1, 'include_source_positions': 1,
-          'return_object_info': 1, 'include_object_positions': 1 },
-        { 'mjd_now': 60061., 'always_use_weighted_source_positions': 1, 'include_base_procver': 1,
-          'include_source_positions': 1, 'include_object_positions': 1, 'return_object_info': 1 },
+          'return_object_info': 1, 'return_diaobject_positions': 1 },
+        { 'use_weighted_source_positions': 1, 'include_source_positions': 1,
+          'return_object_info': 1, 'return_diaobject_positions': 1 },
+        { 'mjd_now': 60061., 'use_weighted_source_positions': 1, 'include_base_procver': 1,
+          'include_source_positions': 1, 'return_diaobject_positions': 1, 'return_object_info': 1 },
     ]
 
     t0 = time.perf_counter()
     tjs = 0
     tpd = 0
     n = 0
-    with db.DBCon() as dbcon:
-        dbcon.echoqueries = True
-        dbcon.alwaysexplain = True
-        dbcon.alwaysanalyze = True
+    with db.DBCon( echoqueries=True, alwaysexplain=True, alwaysanalyze=True ) as dbcon:
         for ltcvreq in ltcvlist:
             for which in [ None, 'patch', 'detections', 'forced' ]:
                 for extra in extras:
@@ -772,15 +785,15 @@ def test_get_hot_ltcvs( set_of_lightcurves, lightcurve_checker ):
 
     extras = [
         {},
-        { 'include_object_positions': 1 },
-        { 'include_object_positions': 0 },
+        { 'return_diaobject_positions': 1 },
+        { 'return_diaobject_positions': 0 },
         { 'include_source_positions': 1 },
-        { 'include_object_positions': 1, 'include_source_positions': 1 },
+        { 'return_diaobject_positions': 1, 'include_source_positions': 1 },
         { 'include_base_procver': 1 },
-        { 'include_base_procver': 1, 'include_object_positions': 1 },
-        { 'use_weighted_source_positions': 1, 'include_object_positions': 1, 'include_base_procver': 1 },
-        { 'always_use_weighted_source_positions': 1, 'include_object_positions': 1, 'include_base_procver': 1 },
-        { 'always_use_weighted_source_positions': 1, 'include_object_positions': 1 },
+        { 'include_base_procver': 1, 'return_diaobject_positions': 1 },
+        { 'use_weighted_source_positions': 1, 'return_diaobject_positions': 1, 'include_base_procver': 1 },
+        { 'always_use_weighted_source_positions': 1, 'return_diaobject_positions': 1, 'include_base_procver': 1 },
+        { 'always_use_weighted_source_positions': 1, 'return_diaobject_positions': 1 },
     ]
 
     n = 0
@@ -812,9 +825,9 @@ def test_get_hot_ltcvs( set_of_lightcurves, lightcurve_checker ):
                     if yank in kwargs:
                         del kwargs[yank]
                 kwargs['which'] = 'patch' if source_patch in ( True, None ) else 'forced'
-                if 'include_object_positions' not in kwargs:
+                if 'return_diaobject_positions' not in kwargs:
                     # get_hot_ltcvs has a different default from many_object_ltcvs
-                    kwargs['include_object_positions'] = True
+                    kwargs['return_diaobject_positions'] = True
                 check_ltcv( lc['testprocver'], lc['exproot'], lc['expobj'], jsres,
                             return_object_info=True, **kwargs )
 

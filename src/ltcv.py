@@ -13,7 +13,7 @@ import astropy.time
 
 import db
 import util
-from util import FDBLogger, laboriously_construct_pandas
+from util import FDBLogger
 
 
 def _is_objids_table_rootid( objids_table, dbcon ):
@@ -105,7 +105,7 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None, p
         says they're the same if they're within 1" of whatever the
         (ra,dec) for a root object is), but we know it's more than that,
         because LSST will sometimes associate the same diasourceid with
-        different diabojetics.  The diaobjectids you get back will not
+        different diaobjetics.  The diaobjectids you get back will not
         be all of them, but the ones from the processing version you
         asked for.
 
@@ -132,9 +132,7 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None, p
 
         The diaobject_ra, diaobject_dec, etc. will not be included if
         return_diaobject_positions was False.  If they're there, it's
-        entirely possible that some of them will be None!
-
-        * might be a list, see above.
+        entirely possible that some of the elements of the list will be None!
 
     """
 
@@ -339,8 +337,8 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None, p
 def many_object_ltcvs( processing_version='default', objids=None, objids_table=None, limit=None, offset=None,
                        return_format='json', bands=None, which='patch', nonevalue=None,
                        include_base_procver=False, include_obj_base_procver_id=False, include_source_positions=False,
-                       use_weighted_source_positions=False, always_use_weighted_source_positions=False,
-                       return_object_info=False, include_object_positions=False, position_processing_version=None,
+                       return_object_info=False, use_weighted_source_positions=False,
+                       return_diaobject_positions=False, position_processing_version=None,
                        mjd_now=None, dbcon=None ):
     """Get lightcurves for objects.
 
@@ -422,23 +420,37 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
       return_object_info : bool, default False
          If True, you get a second return.  See Returns below
 
-      include_object_positions: bool, default False
-         Irrelevant if return_object_info is False or if
-         alwyas_use_weighted_source positions is True.  Otherwise, try
-         to get object positions from the diaobject_position table.
+      return_diaobject_positions: bool, default False
+         Irrelevant if return_object_info is False.  If true, then is
+         passed in to get_object_infos, and affects the returned object
+         info.
 
       position_processing_version : str or uuid, default None
          The processing version for getting object position info.  Not
-         used if return_object_info is False, or if
-         always_use_weighted_source_positions is True.  Defaults to the
-         same as processing_version.  WARNING: just... worry.  If
-         processing versions get complicated, this gets hard.
+         used if return_object_info is False.  Passed on to
+         get_many_object_infos.  WARNING: just... worry.  If processing
+         versions get complicated, this gets hard.
 
       use_weighted_source_positions : bool, default False
-         See Returns below
-
-      always_use_weighted_source_positions : bool, default False
-         See Returns below.  Implies use_weighted_source_positions.
+         Irrelevant if return_object_info is False.  If object info is
+         returned, and use_weighted_source_positions is False, the ra
+         and dec fields in the returned object info are what you get
+         from get_object_infos, i.e. the ra and dec from the
+         root_diaobject table (which may not be great positions).  If
+         use_weighted_source_positions is True, then modify the ra and
+         dec fields from get_object_infos to make them (S/N)²-weighted
+         averages of all detections with S/N>3.  In this case, there
+         will also be three more fields, raerr, decerr, and ra_dec_cov,
+         which are standard deviations or covariances weighted by
+         (S/N)².  In the case where there are no detections with S/N>3,
+         then ra and dec will be left to what was in the root_diaobject
+         table, and raerr, decerr, and ra_dec_cov will be either None or
+         nonevalue (if nonevalue is not None).  (Which I guess it means
+         it will always be nonevalue when there are no S/N>3
+         detections.)  (EDGE CASE: when there is only one detection with
+         S/N>3, then the ra and dec will be the ra and dec from that
+         detection, and the errors will be reported directly from what
+         we got from LSST about that detection.)
 
       mjd_now : float, default None
          You almost always want to leave this at None.  It's here for
@@ -465,6 +477,12 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
       retval: either one or two things.  Only one thing if
         return_object_info is False, two things if return_object_info is
         True.
+
+        **You may not get back as many things as you expect.** If you
+        pass objids (or an objids_table) with objects that don't exist,
+        or that have no lightcurve points in the sepcified
+        processing_version, then those objectids will *not* be included
+        in any of the returns.
 
         The first thing is a pandas.DataFrame or a list.  If
         return_format is 'pandas', then you get back a DataFrame with
@@ -499,35 +517,9 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
 
         If return_object_info is True, then there's a second return,
         which is another dataframe or dictionary (based on
-        return_format).  The columns of the dataframe, or the keys if
-        the dictionary, are 'diaobjectid', 'rootid',
-        'obj_base_procver_id', 'pos_base_procver_id', 'ra', 'dec',
-        'raerr', 'decerr', 'ra_dec_cov'.  The dataframe is indexed by
-        diaobjectid, *not* rootid.  Reason: there may be multiple
-        diaobjectids for the same rootid, but not vice versa.  (This
-        means that to use this, you have to be a little careful.)  If
-        you specified a list of integer diaobjectids, instead of
-        rootids, in the function call, you may get back more than you
-        asked for, because internally the database works on rootids.
-        (*See below.)
-
-        Normally, the position fields come from the diaobject_position
-        table.  While presumably for data releases this is going to be
-        the best possible position, for objects and sources from alerts,
-        the provenance of the diaobject_position table is highly dubious
-        for multiple reasons.  What's more, because of limited
-        information from some brokers, there may be some diaobjects for
-        which we don't have a diaobject_position.  In that case, these
-        fields will all be null.  If use_weighted_source_positions is
-        true, then for objects for which we don't have a
-        diaobject_position, these fields will be filled with (S/N)²
-        weighted averages from the ra and dec of all sources with S/N>3.
-        (They may still be null, if there aren't any sources with high
-        enough S/N, or if we don't have positions for those sources,
-        which can also happen due to limited information from brokers.)
-        If always_use_weighted_source_positions is True, then there will
-        never be information from diaobject_position here, only weighted
-        averages from source positions.
+        return_format); see get_object_infos for information about what
+        this is, but also see the use_weighted_source_positions
+        parameter to this function.
 
         *NOTE ON diaobjectid : empirically, these are not unique in the
          LSST alert stream.  Not only does LSST have morethan one
@@ -600,20 +592,18 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
 
 
     # Figure out what stuff we're going to have to get
-    use_weighted_source_positions = use_weighted_source_positions or always_use_weighted_source_positions
-    if use_weighted_source_positions and ( ( not return_object_info ) or ( not include_object_positions ) ):
-        FDBLogger.warning( "Asked for weighted source positions, but you didn't ask for object positions."
+    if use_weighted_source_positions and ( not return_object_info ):
+        FDBLogger.warning( "Asked for weighted source positions, but you didn't ask for object info."
                            "Ignoring weighted source positions." )
         use_weighted_source_positions = False
-    must_get_source_positions = ( include_source_positions or use_weighted_source_positions or
-                                  ( return_object_info and include_object_positions ) )
+    must_get_source_positions = include_source_positions or use_weighted_source_positions
 
     with db.DBCon( dbcon ) as dbcon:
         tmpsmade = []
         try:
             pvid = db.ProcessingVersion.procver_id( processing_version, dbcon=dbcon )
             pospvid = None
-            if return_object_info and include_object_positions:
+            if return_object_info and return_diaobject_positions:
                 pospvid = ( db.ProcessingVersion.procver_id( position_processing_version, dbcon=dbcon )
                             if position_processing_version is not None else pvid )
 
@@ -881,17 +871,38 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
             #    forced source that we found.
             if return_object_info:
                 bpvs = list( allobjbpvs )
-                columns = [ 'diaobjectid', 'rootid' ]
-                if include_base_procver:
-                    columns.append( 'obj_base_procver' )
-                if include_object_positions:
-                    columns.extend( [ 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ] )
-                    if include_base_procver:
-                        columns.append( 'pos_base_procver' )
-
                 objinfo = get_object_infos( objids_table=objids_table, base_procvers=bpvs,
-                                            position_processing_version=pospvid, columns=columns,
-                                            return_format=return_format, dbcon=dbcon )
+                                            return_diaobject_positions=return_diaobject_positions,
+                                            position_processing_version=pospvid, return_format=return_format,
+                                            dbcon=dbcon )
+
+                # ...make sure that the objinfo came back in the same order as the lightcruves we're
+                #    gonna return.  That means first removing things from objinfo that aren't
+                #   in ltcvs (which will happen if you ask for an object that has no photometry
+                #   in the specified processing version), and then verifying that the order
+                #   is the same (which by construction it should be).
+                ltcvrootids = [ x['rootid'] for x in ltcvs ]
+                # ... "in" should be faster with a set than a list, yes?  Mumble mumble hashing mumble mumble
+                ltcvrootidsset = set( ltcvrootids )
+                if return_format == 'pandas':
+                    objinfo = objinfo.loc[ [ r in ltcvrootidsset for r in objinfo.index.values ] ]
+                    if list( objinfo.index.values ) != [ x['rootid'] for x in ltcvs ]:
+                        raise ValueError( "get_object_info rootids doesn't match manyltcv's!" )
+                    if not include_base_procver:
+                        objinfo.drop( 'obj_base_procver', axis='columns', inplace=True )
+                        if return_diaobject_positions:
+                            objinfo.drop( 'pos_base_procver', axis='columns', inplace=True )
+                elif return_format == 'json':
+                    keepers = [ i for i, r in enumerate(objinfo['rootid']) if r in ltcvrootidsset ]
+                    objinfo = { k: [ v[k] for k in keepers ] for k, v in objinfo.items() }
+                    if objinfo['rootid'] != [ x['rootid'] for x in ltcvs ]:
+                        raise ValueError( "get_object_info rootids doesn't match manyltcv's!" )
+                    if not include_base_procver:
+                        del objinfo['obj_base_procver']
+                        if return_diaobject_positions:
+                            del objinfo['pos_base_procver']
+                else:
+                    raise RuntimeError( "I don't know how to cope." )
 
         except Exception:
             dbcon.rollback()
@@ -899,7 +910,7 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
         finally:
             # Drop any temp tables we created.  Do NOT commit, however.  Reason:
             #   If this is called with an existing dbcon, then the caller
-            #   may be impolicitly assuming these temp tables don't exist.
+            #   may be implicitly assuming these temp tables don't exist.
             #   However, the caller might also (perversely?) be in the middle
             #   of a transaction, and we don't want to end that transaction
             #   by committing.
@@ -911,52 +922,60 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
     # Update object positions if necessary
     if use_weighted_source_positions:
         FDBLogger.debug( "Calculating weighted source positions and updating objinfo..." )
-        if always_use_weighted_source_positions:
-            # Null out any given positions so that we will always reset them
-            if return_format == 'pandas':
-                if include_base_procver:
-                    objinfo.loc[ :, 'pos_base_procver' ] = None
-                objinfo.loc[ :, 'ra' ] = None
-                objinfo.loc[ :, 'dec' ] = None
-                objinfo.loc[ :, 'raerr' ] = None
-                objinfo.loc[ :, 'decerr' ] = None
-                objinfo.loc[ :, 'ra_dec_cov' ] = None
-            else:
-                if include_base_procver:
-                    objinfo['pos_base_procver'] = [ None ] * len( objinfo['diaobjectid'] )
-                objinfo['ra']         = [ None ] * len( objinfo['diaobjectid'] )
-                objinfo['dec']        = [ None ] * len( objinfo['diaobjectid'] )
-                objinfo['raerr']      = [ None ] * len( objinfo['diaobjectid'] )
-                objinfo['decerr']     = [ None ] * len( objinfo['diaobjectid'] )
-                objinfo['ra_dec_cov'] = [ None ] * len( objinfo['diaobjectid'] )
+        if return_format == 'pandas':
+            decdex = list( objinfo.columns ).index( 'dec' )
+            for col in [ 'ra_dec_cov', 'decerr', 'raerr' ]:
+                objinfo.insert( decdex+1, col, np.nan )
+        else:
+            for col in [ 'raerr', 'decerr', 'ra_dec_cov' ]:
+                objinfo[col] = []
 
-        for lc in ltcvs:
+        for dex, lc in enumerate(ltcvs):
             rootid = lc['rootid']
             weight = lc['flux'] / lc['fluxerr']
             w = np.where( np.array( lc['isdet'] ) & ( weight > 3 ) )[0]
-            weight = weight[w] ** 2
-            meanra = ( lc['det_ra'][w] * weight ).sum() / weight.sum()
-            meandec = ( lc['det_dec'][w] * weight ).sum() / weight.sum()
-            raerr = np.sqrt( ( weight * ( lc['det_ra'][w] - meanra )**2 ).sum() / weight.sum() )
-            decerr = np.sqrt( ( weight * ( lc['det_dec'][w] - meandec )**2 ).sum() / weight.sum() )
-            ra_dec_cov = ( weight * ( lc['det_ra'][w] - meanra ) *
-                           ( lc['det_dec'][w] - meandec ) ).sum() / weight.sum()
+            if len(w) < 1:
+                meanra = objinfo.loc[rootid, 'ra']
+                meandec = objinfo.loc[rootid, 'dec']
+                raerr = None
+                decerr = None
+                ra_dec_cov = None
+            elif len(w) < 2:
+                meanra = lc['det_ra'][w][0]
+                meandec = lc['det_dec'][w][0]
+                raerr = lc['det_raerr'][w][0]
+                decerr = lc['det_decerr'][w][0]
+                ra_dec_cov = lc['ra_dec_cov'][w][0]
+            else:
+                weight = weight[w] ** 2
+                meanra = ( lc['det_ra'][w] * weight ).sum() / weight.sum()
+                meandec = ( lc['det_dec'][w] * weight ).sum() / weight.sum()
+                raerr = np.sqrt( ( weight * ( lc['det_ra'][w] - meanra )**2 ).sum() / weight.sum() )
+                decerr = np.sqrt( ( weight * ( lc['det_dec'][w] - meandec )**2 ).sum() / weight.sum() )
+                ra_dec_cov = ( weight * ( lc['det_ra'][w] - meanra ) *
+                               ( lc['det_dec'][w] - meandec ) ).sum() / weight.sum()
 
             if return_format == 'pandas':
-                objinfo.loc[ (objinfo['rootid'] == rootid) & pandas.isna(objinfo['ra']) , 'dec' ] = meandec
-                objinfo.loc[ (objinfo['rootid'] == rootid) & pandas.isna(objinfo['ra']) , 'raerr' ] = raerr
-                objinfo.loc[ (objinfo['rootid'] == rootid) & pandas.isna(objinfo['ra']) , 'decerr' ] = decerr
-                objinfo.loc[ (objinfo['rootid'] == rootid) & pandas.isna(objinfo['ra']) , 'ra_dec_cov' ] = ra_dec_cov
-                # Do ra last so as not to screw up the loc selection in the previous lines
-                objinfo.loc[ (objinfo['rootid'] == rootid) & pandas.isna(objinfo['ra']) , 'ra' ] = meanra
+                if objinfo.index.values[dex] != rootid:
+                    # This should have already raised an exception above, but be paranoid
+                    raise RuntimeError( "This should never happen." )
+                objinfo.loc[rootid, 'ra'] = meanra
+                objinfo.loc[rootid, 'dec'] = meandec
+                objinfo.loc[rootid, 'raerr'] = raerr
+                objinfo.loc[rootid, 'decerr'] = decerr
+                objinfo.loc[rootid, 'ra_dec_cov'] = ra_dec_cov
             else:
-                for i in range( len( objinfo['diaobjectid'] ) ):
-                    if ( objinfo['rootid'][i] == rootid ) and ( objinfo['ra'][i] is None ):
-                        objinfo['ra'][i] = meanra
-                        objinfo['dec'][i] = meandec
-                        objinfo['raerr'][i] = raerr
-                        objinfo['decerr'][i] = decerr
-                        objinfo['ra_dec_cov'][i] = ra_dec_cov
+                if objinfo['rootid'][dex] != rootid:
+                    # This should have already raised an exception above, but be paranoid
+                    raise RuntimeError( "This should never happen." )
+                objinfo['ra'][dex] = meanra
+                objinfo['dec'][dex] = meandec
+                if any( len(objinfo[i]) != dex for i in [ 'raerr', 'decerr', 'ra_dec_cov' ] ):
+                    # Another sanity check that we might want to take out for production
+                    raise RuntimeError( "This should never happen." )
+                for col, val in zip( [ 'raerr', 'decerr', 'ra_dec_cov' ],
+                                     [ raerr, decerr, ra_dec_cov ] ):
+                    objinfo[col].append( val )
 
         FDBLogger.debug( "...done with weighted source positions." )
 
@@ -991,14 +1010,19 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                 del row['forced_obj_bpv']
 
     if return_format == 'pandas':
-        ltcvs = laboriously_construct_pandas( ltcvs, keyname='rootid', indices=['mjd'],
-                                              int64cols=['diaforcedsourceid', 'diasourceid', 'visit',
-                                                         'source_diaobjectid', 'forced_diaobjectid'],
-                                              floatcols=['flux', 'fluxerr', 'det_raerr',
-                                                         'det_decerr', 'det_ra_dec_cov'],
-                                              doublecols=['mjd', 'det_ra', 'det_dec'],
-                                              boolcols=['isdet', 'ispatch'],
-                                              ignore_missing_cols=True )
+        ltcvs = pandas.DataFrame( [ { k: v if k == 'rootid' else pandas.array(v)
+                                      for k, v in row.items() }
+                                    for row in ltcvs ] )
+        ltcvs = ltcvs.explode( [ c for c in ltcvs.columns if c != 'rootid' ] )
+        ltcvs.set_index( ['rootid', 'mjd'], inplace=True )
+        # ltcvs = laboriously_construct_pandas( ltcvs, keyname='rootid', indices=['mjd'],
+        #                                       int64cols=['diaforcedsourceid', 'diasourceid', 'visit',
+        #                                                  'source_diaobjectid', 'forced_diaobjectid'],
+        #                                       floatcols=['flux', 'fluxerr', 'det_raerr',
+        #                                                  'det_decerr', 'det_ra_dec_cov'],
+        #                                       doublecols=['mjd', 'det_ra', 'det_dec'],
+        #                                       boolcols=['isdet', 'ispatch'],
+        #                                       ignore_missing_cols=True )
 
     FDBLogger.debug( "...done with many_object_ltcvs" )
     if return_object_info:
@@ -1515,7 +1539,7 @@ def get_hot_ltcvs( processing_version, position_processing_version=None,
            The columns will be null for objects that don't have an entry
            with the right processing version in diaobject_positions.  If
            you specify use_weighted_source_positions, then were no
-           diaboject_position was available, a weighted (by (S/N)²)
+           diaobject_position was available, a weighted (by (S/N)²)
            average of source positions for all sources *with the same
            rootid* will be in these fields where there was no
            diaobject_position.  If you specify
