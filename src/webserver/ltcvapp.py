@@ -71,8 +71,8 @@ class GetManyLtcvs( BaseView ):
             kwargs = flask.request.json
             unknown = set( kwargs.keys() ) - { 'bands', 'which', 'offset', 'limit', 'nonevalue',
                                                'include_base_procver', 'include_source_positions',
-                                               'use_weighted_source_positions', 'always_use_weighted_source_positions',
-                                               'return_object_info', 'include_object_positions',
+                                               'use_weighted_source_positions',
+                                               'return_diaobject_positions', 'include_object_positions',
                                                'position_processing_version', 'mjd_now' }
             if len(unknown) > 0:
                 raise FASTDBWebException( f"Unknown data parameters: {unknown}" )
