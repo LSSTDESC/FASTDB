@@ -4,7 +4,7 @@ brokers:
     # Every time groupid, it's a new subscription.  If you change
     # filters, need to change groupid to make a new subscription.
     groupid: rknop-fastdb-test-{barf}
-    schemafile: /fastdb/share/avsc/lsst.v11_0.alert.avsc
+    schemafile: /fastdb/share/avsc/lsst.v11_1.alert.avsc
     mongodb_collection_base: pittgoogle_launcher_test
     brokername_for_alerts: "Pitt-Google"
     cache_alerts: true

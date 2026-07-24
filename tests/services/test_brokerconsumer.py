@@ -595,6 +595,10 @@ def test_pittgoogle_scipipe():
             col = mg.collection( 'fastdb_test_pittgoogle_supernnova_diasource' )
             assert srcids.issubset( set( c['diasourceid'] for c in col.find({}) ) )
 
+            # Right now this is here because I haven't run the test yet and
+            #   I want to manually poke into the mongo and see what's there.
+            import pdb; pdb.set_trace()
+            pass
             # Check other stuff?
 
     finally:
