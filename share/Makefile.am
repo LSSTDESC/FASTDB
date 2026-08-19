@@ -21,9 +21,9 @@ avsc_DATA = avsc/fastdb.v10_0_0.BrokerMessage.avsc \
 	avsc/lsst.v11_0.ssSource.avsc \
 	avsc/lsst.v11_0.mpc_orbits.avsc \
 	avsc/lsst.v11_1.alert.avsc \
-	avsc/lsst.v11_1.diaForcedSource.avsc \
 	avsc/lsst.v11_1.diaObject.avsc \
 	avsc/lsst.v11_1.diaSource.avsc \
-	avsc/lsst.v11_1.mpc_orbits.avsc \
+	avsc/lsst.v11_1.diaForcedSource.avsc \
 	avsc/lsst.v11_1.ssObject.avsc \
-	avsc/lsst.v11_1.ssSource.avsc
+	avsc/lsst.v11_1.ssSource.avsc \
+	avsc/lsst.v11_1.mpc_orbits.avsc
