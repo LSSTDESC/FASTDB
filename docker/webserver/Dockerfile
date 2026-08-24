@@ -68,37 +68,52 @@ RUN DEBIAN_FRONTEND="noninteractive" TZ="UTC" \
 RUN mkdir /venv
 RUN python3 -mvenv /venv
 
+# TODO -- fink-client 11 is out, try it
+# Also look for and try other package updates
 RUN source /venv/bin/activate && \
     pip --no-cache install \
-       apscheduler==3.11.2 \
-       astropy==7.2.0 \
-       confluent_kafka==2.13.2 \
+       "apscheduler>=3.11.3,<4.0.0" \
+       "astropy>=7.2.2,<8.0.0" \
+       "confluent_kafka==2.15.0,<3.0.0" \
        "fastavro>=1.10.0,<2.0.0" \
-       fink-client==10.1 \
-       flask==3.1.3 \
-       flask-session==0.8.0 \
-       flask-sock==0.7.0 \
-       gevent==25.9.1 \
-       gunicorn==25.1.0 \
-       nested-pandas==0.6.8 \
-       numpy==2.4.3 \
-       pandas==2.3.3 \
-       pittgoogle-client==0.3.19 \
-       polars==1.38.1 \
-       psycopg==3.3.3 \
-       pycryptodome==3.23.0 \
-       pymongo==4.16.0 \
-       pytest==9.0.2 \
-       pytest-timestamper==0.0.10 \
-       python-dateutil==2.9.0.post0 \
-       pytz==2026.1.post1 \
-       remote-pdb==2.1.0 \
-       requests==2.32.5 \
-       simplejson==3.20.2
+       "fink-client>=10.1,<11.0" \
+       "flask>=3.1.3,<4.0.0" \
+       "flask-session>=0.8.0,<0.9.0" \
+       "flask-sock>=0.7.0,<0.8.0" \
+       "gevent>=26.7.0,<27.0.0" \
+       "gunicorn>=25.3.0,<26.0.0" \
+       "nested-pandas>=0.7.0,<0.8.0" \
+       "numpy>=2.5.1,<3.0.0" \
+       "pandas>=3.0.5,<4.0.0" \
+       "polars>=1.43.0,<2.0.0" \
+       "psycopg>=3.3.4,<4.0.0" \
+       "pycryptodome>=3.23.0,<4.0.0" \
+       "pymongo>=4.17.0,<5.0.0" \
+       "pytest==9.1.1,<10.0.0" \
+       "pytest-timestamper==0.0.10" \
+       "python-dateutil==2.9.0.post0" \
+       "pytz==2026.2" \
+       "remote-pdb>=2.1.0,<3.0.0" \
+       "requests==2.34.2,<3.0.0" \
+       "simplejson>=3.20.2,<4.0.0"
 
-# Our own customization of pubsub
-COPY pubsub.patch /tmp/pubsub.patch
-RUN patch /venv/lib/python3.13/site-packages/pittgoogle/pubsub.py /tmp/pubsub.patch
+# Our own customization of pubsub in pittgoogle-client.
+# Check it out and diff vs. upstream to see what's different.
+# We have put in a PR to integrate this with standard
+# pittgoogle-client, but it may not be accepted.
+# ...maybe should move this from my (rknop's) git account
+# to LSSTDESC?  Wait and see if the PR is accepted.
+RUN source /venv/bin/activate \
+    && git clone https://github.com/rknop/pittgoogle-client.git \
+    && cd pittgoogle-client \
+    && git checkout fastdb \
+    && pip install . \
+    && cd .. \
+    && rm -rf pittgoogle-client \
+    && deactivate
+
+# COPY pubsub.patch /tmp/pubsub.patch
+# RUN patch /venv/lib/python3.13/site-packages/pittgoogle/pubsub.py /tmp/pubsub.patch
 
 # Irritating that the mongodb debian apt aarchive doesn't have debian
 #   arm packages for mongodb-database-tools, nor does it have them for

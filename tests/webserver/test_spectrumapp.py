@@ -291,7 +291,8 @@ def test_ask_for_spectra( procver_collection, alerts_90days_sent_received_and_im
         # Get some hot lightcurves
         df, objdf = ltcv.get_hot_ltcvs( rtpv.description, mjd_now=60328., source_patch=True, return_format='pandas' )
         assert df.index.get_level_values('mjd').max() < 60328.
-        assert len(objdf.rootid.unique()) == 13
+        assert ( df.index.get_level_values('rootid').unique() == objdf.index ).all()
+        assert len(objdf) == 13
         assert len(df) == 294
 
         # Pick out three objects to ask for spectra.
@@ -299,7 +300,7 @@ def test_ask_for_spectra( procver_collection, alerts_90days_sent_received_and_im
         #   the same rootid.  But, for the loaded SNANA set, I know that won't happen.
 
         objdex = numpy.array([1, 5, 7])
-        chosenids = [ str(objdf.iloc[i].rootid) for i in objdex ]
+        chosenids = [ str(objdf.index.values[i]) for i in objdex ]
         chosenras = [ objdf.iloc[i].ra for i in objdex ]
         chosendecs = [ objdf.iloc[i].dec for i in objdex ]
         chosenishosts = [ False, True, False ]

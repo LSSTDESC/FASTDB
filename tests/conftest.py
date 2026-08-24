@@ -3,6 +3,7 @@ import pytest
 import pathlib
 import uuid
 import itertools
+import copy
 
 import numpy as np
 import numpy.random
@@ -301,6 +302,11 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
     #    photometry through 60015 and forced through 60010 in bpv1a
     #    photometry through 60030 and forced through 60025 in bpv1
     #
+    # For all diasource and diaforcedsource:
+    #   in bpv0 they point to the object in bpv0
+    #   in bpv1 they point to the object in bpv1
+    #   in bpv2 or bpv3, they point to the object in bpv2
+    #
     # RETURN STRUCTURE:
     # [
     #    { 'root':  RootDiaObject,
@@ -351,7 +357,7 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
         #   we'll only use <1/25 of them.  Computers are fast.
         # Do np.floor(mjd*10) to get the index into these arrays.
         # We'll use the mjd=lowestmjd time for all forced photometry.  I think.
-        # 1σ scatter is going to be 0.2". (Yes, regardless of the S/N of hte
+        # 1σ scatter is going to be 0.2". (Yes, regardless of the S/N of the
         #   detection.  See NOTE below.)
         # Not going to worry about cos(dec)
         # NOTE : every object is going to scatter in the same direction
@@ -485,7 +491,8 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
                                      band=( 'r' if visit%2==0 else 'i' ),
                                      midpointmjdtai=sourcemjd,
                                      psfflux=psfflux, psffluxerr=psffluxerr,
-                                     ra=ra['realtime'], dec=dec['realtime'] )
+                                     ra=ra['realtime'], dec=dec['realtime'],
+                                     raerr=0.2/3600., decerr=0.2/3600., ra_dec_cov=(0.05/3600.)**2 )
                     srcobjs.append( src )
                     rootdict['src']['realtime_diasource'].append( src )
 
@@ -540,7 +547,7 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
                     else:
                         rootdict['frcex']['realtime_diaforcedsource'].append( None )
 
-                # everything is in bpv2, bpv2a, bp3
+                # everything is in bpv2, bpv2a, bpv3
                 for bpv in [ 'bpv2', 'bpv2a', 'bpv3' ]:
                     # bpv2a only has sources for [ 60020, 60030 ] and forced sources for [ 60020, 60025 ]
                     if ( bpv == 'bpv2a' ) and ( ( sourcemjd < 60020. ) or ( sourcemjd > 60030. ) ):
@@ -562,7 +569,10 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
                                      psfflux=psfflux,
                                      psffluxerr=psffluxerr,
                                      ra=ra[bpv],
-                                     dec=dec[bpv] )
+                                     dec=dec[bpv],
+                                     raerr=0.2/3600.,
+                                     decerr=0.2/3600.,
+                                     ra_dec_cov=(0.05/3600.)**2 )
                     srcobjs.append( src )
                     rootdict['src'][f'{bpv}_diasource'].append( src )
 
@@ -630,7 +640,10 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
                                          psfflux=psfflux,
                                          psffluxerr=psffluxerr,
                                          ra=ra[bpv],
-                                         dec=dec[bpv] )
+                                         dec=dec[bpv],
+                                         raerr=0.2/3600.,
+                                         decerr=0.2/3600.,
+                                         ra_dec_cov=(0.05/3600.)**2 )
                         srcobjs.append( src )
                         rootdict['src'][f'{bpv}_diasource'].append( src )
 
@@ -983,12 +996,11 @@ def mongoclient_rw():
 @pytest.fixture( scope='module' )
 def lightcurve_checker( set_of_lightcurves, procver_collection ):
 
-    def check_ltcv_res( procver, expected_roots, expected_diaobjectids, res, single=False,
+    def check_ltcv_res( procver, expected_roots, expected_diaobjectids, res, single=False, rootid_is_uuid=True,
                         mjd_now=None, bands=None, which='patch', return_object_info=False,
-                        include_object_positions=False,
+                        return_diaobject_positions=False,
                         include_base_procver=False, include_source_ids=False, include_source_positions=False,
-                        use_weighted_source_positions=False, always_use_weighted_source_positions=False,
-                        expect_all_roots=True ):
+                        use_weighted_source_positions=False, expect_all_roots=True ):
         # This has a lot of redundancy with test_ltcv.py::compare_ltcv_to_expected
         bpvs, pvs, pvinfo = procver_collection
         roots = set_of_lightcurves
@@ -1003,7 +1015,9 @@ def lightcurve_checker( set_of_lightcurves, procver_collection ):
         pvrow = pvrow[0]
 
         expected_root_ids = [ roots[i]['root'].id for i in expected_roots ]
-        use_weighted_source_positions = use_weighted_source_positions or always_use_weighted_source_positions
+
+        # Make a copy of res so we can screw it up without worry
+        res = copy.deepcopy( res )
 
         # ...there are a few different tests that call this that get things wrapped different ways.
         if return_object_info:
@@ -1036,12 +1050,17 @@ def lightcurve_checker( set_of_lightcurves, procver_collection ):
                 ltcvs = res
             infos = None
 
-        if ( len(ltcvs) > 0 ) and isinstance( ltcvs[0]['rootid'], uuid.UUID ):
-            rootid_is_uuid = True
+        if rootid_is_uuid:
             assert all( isinstance( lc['rootid'], uuid.UUID ) for lc in ltcvs )
         else:
-            rootid_is_uuid = False
             assert all( isinstance( lc['rootid'], str ) for lc in ltcvs )
+            # Convert to UUIDs for the convenience of the rest of this function
+            #   (Also has the happy side effect of raising an exception if any
+            #   of the strings aren't uuidifiable.)
+            for lc in ltcvs:
+                lc['rootid'] = asUUID( lc['rootid'] )
+
+        assert all( all( isinstance( lc[col], list ) for col in lc.keys() if col != 'rootid' ) for lc in ltcvs )
 
         expected_keys = [ 'rootid', 'mjd', 'diasourceid', 'source_diaobjectid',
                           'visit', 'band', 'flux', 'fluxerr', 'isdet' ]
@@ -1059,37 +1078,32 @@ def lightcurve_checker( set_of_lightcurves, procver_collection ):
         if not single:
             if expect_all_roots:
                 assert len( ltcvs ) == len( expected_roots )
-                if rootid_is_uuid:
-                    assert set( lc['rootid'] for lc in ltcvs ) == set( expected_root_ids )
-                else:
-                    assert set( lc['rootid'] for lc in ltcvs ) == set( str(r) for r in expected_root_ids )
+                assert set( lc['rootid'] for lc in ltcvs ) == set( expected_root_ids )
             else:
                 assert len( set( lc['rootid'] for lc in ltcvs ) ) == len( ltcvs )
-                if rootid_is_uuid:
-                    assert set( lc['rootid'] for lc in ltcvs ).issubset( expected_root_ids )
-                else:
-                    assert set( lc['rootid'] for lc in ltcvs ).issubset( set( str(r) for r in expected_root_ids ) )
+                assert set( lc['rootid'] for lc in ltcvs ).issubset( expected_root_ids )
 
         datacache = {}
         for rootid in expected_root_ids:
-            rdex = None
-            for i, root in enumerate( roots ):
-                if root['root'].id == rootid:
-                    rdex = i
-                    break
-            if rdex is None:
+            try:
+                rdex = [ r['root'].id for r in roots ].index( rootid )
+            except ValueError:
                 raise ValueError( "Failed to find root object {rootid}" )
 
             if single:
                 thisltcv = ltcvs[0]
-                assert thisltcv['rootid'] == ( rootid if rootid_is_uuid else str(rootid) )
+                assert thisltcv['rootid'] == rootid
             elif len(ltcvs) == 0:
                 # Logically, if we get here, expect_all_roots must be false
                 continue
 
-            dexen = [ i for i, lc in enumerate( ltcvs )
-                      if lc['rootid'] == ( rootid if rootid_is_uuid else str(rootid) ) ]
-            assert len(dexen) == 1
+            dexen = [ i for i, lc in enumerate( ltcvs ) if lc['rootid'] == rootid ]
+            if len(dexen) > 1:
+                raise RuntimeError( "This should never happen." )
+            elif len(dexen) == 0:
+                assert not expect_all_roots
+                continue
+
             thisltcv = ltcvs[ dexen[0] ]
 
             assert all( len(thisltcv[k]) == len(thisltcv['mjd']) for k in expected_keys
@@ -1230,164 +1244,202 @@ def lightcurve_checker( set_of_lightcurves, procver_collection ):
                         assert thisltcv['det_ra_dec_cov'][i] == pytest.approx( d['src'].ra_dec_cov, abs=0.0001/3600. )
 
         if infos is not None:
-
-            expected_obj_keys = { 'diaobjectid', 'rootid' }
+            expected_obj_keys = { 'rootid', 'diaobjectid', 'ra', 'dec' }
             if include_base_procver:
                 expected_obj_keys.add( 'obj_base_procver' )
-            if include_object_positions:
-                expected_obj_keys = expected_obj_keys.union( { 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' } )
+            if use_weighted_source_positions:
+                expected_obj_keys = expected_obj_keys.union( { 'raerr', 'decerr', 'ra_dec_cov' } )
+            if include_base_procver:
+                expected_obj_keys.add( 'obj_base_procver' )
+            if return_diaobject_positions:
+                expected_obj_keys = expected_obj_keys.union( { 'diaobject_ra', 'diaobject_dec', 'diaobject_raerr',
+                                                               'diaobject_decerr', 'diaobject_ra_dec_cov' } )
                 if include_base_procver:
                     expected_obj_keys.add( 'pos_base_procver' )
 
             assert set( infos.keys() ) == expected_obj_keys
 
-            if ( len(infos['rootid'])> 0 ) and ( isinstance( infos['rootid'][0], uuid.UUID ) ):
-                assert set( infos['rootid'] ) == set( expected_root_ids )
+            if rootid_is_uuid:
+                assert all( isinstance( i, uuid.UUID ) for i in infos['rootid'] )
             else:
-                assert set( infos['rootid'] ) == set( str(e) for e in expected_root_ids )
-            assert len( infos['diaobjectid'] ) == len( expected_diaobjectids )
-            assert set( infos['diaobjectid'] ) == set( expected_diaobjectids )
+                assert all( isinstance( i, str ) for i in infos['rootid'] )
+                infos['rootid'] = [ asUUID(i) for i in infos['rootid'] ]
 
-            for r in expected_roots:
+            if expect_all_roots:
+                assert len( infos['rootid'] ) == len( expected_root_ids )
+                assert set( infos['rootid'] ) == set( expected_root_ids )
+                assert set( expected_diaobjectids ) == set( itertools.chain( *(infos['diaobjectid']) ) )
+            else:
+                assert set( infos['rootid'] ).issubset( set(expected_root_ids) )
+                assert set( itertools.chain( *(infos['diaobjectid']) ) ).issubset( set( expected_diaobjectids ) )
 
-                # These next two lines are gratitous, but can be useful for debugging
-                dexen = [ i for i, lc in enumerate( ltcvs )
-                          if lc['rootid'] == ( roots[r]['root'].id if rootid_is_uuid
-                                               else str(roots[r]['root'].id) ) ]
-                thisltcv = ltcvs[dexen[0]]
+            for dex, rid in enumerate( infos['rootid'] ):
+                assert ltcvs[dex]['rootid'] == rid
+                exproot = [ r for r in roots if r['root'].id == rid ]
+                if len(exproot) != 1:
+                    # The assert that infos['rootid'] and expected_root_ids have the same
+                    #   contents above means that this should never have len 0.  If it has
+                    #   len 1, then there's a constructor error in roots, and that fixture
+                    #   needs to be fixed.
+                    raise RuntimeError( "Something bad has happened." )
+                exproot = exproot[0]
 
-                for diaobjectid in expected_diaobjectids:
-                    if diaobjectid not in roots[r]['obj'].keys():
-                        # ... is this an error?
-                        continue
-                    diaobject = roots[r]['obj'][diaobjectid]
-                    dex = infos['diaobjectid'].index( diaobjectid )
-                    if isinstance( infos['rootid'][dex], uuid.UUID ):
-                        assert infos['rootid'][dex] == diaobject.rootid
-                    else:
-                        assert infos['rootid'][dex] == str( diaobject.rootid )
-                    if include_base_procver:
-                        # TODO : make sure the *right* processing version was returned!
-                        # ...actually... the fixtures only have objects in a single base processing
-                        # version for each processing version, so that wouldn't be an interesting test right now.
-                        bpv = [ b[0] for b in pvrow['diaobject'] if b[0].description==infos['obj_base_procver'][dex] ]
-                        assert len(bpv) == 1
-                        bpv = bpv[0]
-                        assert diaobject.base_procver_id == bpv.id
+                if not use_weighted_source_positions:
+                    assert infos['ra'][dex] == pytest.approx( exproot['root'].ra, rel=1e-12 )
+                    assert infos['dec'][dex] == pytest.approx( exproot['root'].dec, rel=1-12 )
+                else:
+                    # Sanity check.  There are other tests that make
+                    # sure that many_object_ltcvs returned the right
+                    # stuff, but here we want to make sure that all the
+                    # utterly tangled data sturcture wrangling we've
+                    # done is right so that we calculate the mean
+                    # positions we expect to calculate.
+                    thisdatacache = datacache[exproot['root'].id]
+                    expecteddex = np.array( [ i for i, dc in enumerate(thisdatacache)
+                                              if ( ( which == 'patch' )
+                                                   or ( ( which == 'detections' ) and ( dc['src'] is not None ) )
+                                                   or ( ( which == 'forced' ) and ( dc['frc'] is not None ) )
+                                                  )
+                                             ] )
+                    if which != 'forced':
+                        assert len(expecteddex) == len( ltcvs[dex]['diasourceid'] )
+                    if which != 'detections':
+                        assert len(expecteddex) == len( ltcvs[dex]['diaforcedsourceid'] )
+                    for li, di in enumerate( expecteddex ):
+                        if which != 'forced':
+                            assert ( ( ( thisdatacache[di]['src'] is None )
+                                       and ( ltcvs[dex]['diasourceid'][li] is None ) )
+                                     or ( thisdatacache[di]['src'].diasourceid
+                                          == ltcvs[dex]['diasourceid'][li] )
+                                    )
+                        if which != 'detections':
+                            assert ( ( ( thisdatacache[di]['frc'] is None )
+                                       and ( ltcvs[dex]['diaforcedsourceid'][li] is None ) )
+                                     or ( thisdatacache[di]['frc'].diaforcedsourceid
+                                          == ltcvs[dex]['diaforcedsourceid'][li] )
+                                    )
+                        if which == 'detections':
+                            assert ltcvs[dex]['flux'][li] == pytest.approx( thisdatacache[di]['src'].psfflux,
+                                                                            rel=1e-5 )
 
-                    if include_object_positions:
-                        pos = None
+                            assert ltcvs[dex]['fluxerr'][li] == pytest.approx( thisdatacache[di]['src'].psffluxerr,
+                                                                               rel=1e-5 )
+                        elif which == 'forced':
+                            assert ltcvs[dex]['flux'][li] == pytest.approx( thisdatacache[di]['frc'].psfflux,
+                                                                            rel=1e-5 )
 
-                        if always_use_weighted_source_positions:
-                            pos = None
-                            if include_base_procver and return_object_info:
-                                assert infos['pos_base_procver'][dex] is None
-
+                            assert ltcvs[dex]['fluxerr'][li] == pytest.approx( thisdatacache[di]['frc'].psffluxerr,
+                                                                               rel=1e-5 )
                         else:
-                            # There are multiple positions, so make sure we got the highest priority one that exists
-                            #
-                            # OMG this is becoming such an ugly hack of how I store data, this is what
-                            #   happens when you just need to get stuff done fast and can't go back
-                            #   and refactor.
-                            pos = None
-                            posbpv = None
-                            for proposedposbpv, prio, bpvkey in pvrow['diaobject_position']:
-                                if (diaobjectid, bpvkey) in roots[r]['pos'].keys():
-                                    pos = roots[r]['pos'][ (diaobjectid, bpvkey) ]
-                                    posbpv = proposedposbpv
-                                    break
+                            assert ( ( ( thisdatacache[di]['frc'] is None )
+                                       and
+                                       ( ltcvs[dex]['flux'][li] == pytest.approx( thisdatacache[di]['src'].psfflux,
+                                                                                  rel=1e-5 ) )
+                                       and
+                                       ( ltcvs[dex]['fluxerr'][li] ==
+                                         pytest.approx( thisdatacache[di]['src'].psffluxerr, rel=1e-5 ) )
+                                      )
+                                     or
+                                     ( ( thisdatacache[di]['frc'] is not None )
+                                       and
+                                       ( ltcvs[dex]['flux'][li] == pytest.approx( thisdatacache[di]['frc'].psfflux,
+                                                                                  rel=1e-5 ) )
+                                       and
+                                       ( ltcvs[dex]['fluxerr'][li] ==
+                                         pytest.approx( thisdatacache[di]['frc'].psffluxerr, rel=1e-5 ) )
+                                      )
+                                    )
+                    # Uf-da
 
-                            if include_base_procver:
-                                if ( pos is None ) or always_use_weighted_source_positions:
-                                    assert infos['pos_base_procver'][dex] is None
-                                else:
-                                    assert infos['pos_base_procver'][dex] == posbpv.description
+                    justsrcs = [ d for d in datacache[exproot['root'].id] if d['src'] is not None ]
+                    srcra = np.array( [ j['src'].ra for j in justsrcs ] )
+                    srcdec = np.array( [ j['src'].dec for j in justsrcs ] )
+                    srcraerr = np.array( [ j['src'].raerr for j in justsrcs ] )
+                    srcdecerr = np.array( [ j['src'].decerr for j in justsrcs ] )
+                    src_ra_dec_cov = np.array( [ j['src'].ra_dec_cov for j in justsrcs ] )
 
-                            if pos is not None:
-                                assert infos['ra'][dex] == pytest.approx( pos.ra, rel=1e-12 )
-                                assert infos['dec'][dex] == pytest.approx( pos.dec, rel=1e-12 )
-                                assert infos['raerr'][dex] == pytest.approx( pos.raerr, rel=1e-6 )
-                                assert infos['decerr'][dex] == pytest.approx( pos.decerr, rel=1e-6 )
-                                # Fixture didn't put any correlations in but for random variancer
-                                assert infos['ra_dec_cov'][dex] == pytest.approx( pos.ra_dec_cov, abs=0.0001/3600. )
+                    if which == 'detections':
+                        sn = np.array( [ j['src'].psfflux / j['src'].psffluxerr for j in justsrcs ] )
+                    else:
+                        # ... this may be wholly gratuitous because I don't think
+                        #     the fixtures set a different forced flux from the source flux
+                        # However, this is the equivalent logic server-side.
+                        sn = np.array( [ ( j['frc'].psfflux / j['frc'].psffluxerr )
+                                         if j['frc'] is not None
+                                         else ( j['src'].psfflux / j['src'].psffluxerr )
+                                         for j in justsrcs ] )
+                    w = np.where( sn > 3 )[0]
+                    srcra = srcra[w]
+                    srcdec = srcdec[w]
+                    weight = sn[w] ** 2
+                    meanra = ( srcra * weight ).sum() / ( weight.sum() )
+                    meandec = ( srcdec * weight ).sum() / ( weight.sum() )
+                    raerr = np.sqrt( ( weight * ( srcra - meanra )**2 ).sum() / weight.sum() )
+                    decerr = np.sqrt( ( weight * ( srcdec - meandec )**2 ).sum() / weight.sum() )
+                    ra_dec_cov = ( weight * ( srcra - meanra ) * ( srcdec - meandec ) ).sum() / weight.sum()
 
-                        if use_weighted_source_positions:
-                            justsrcs = [ d for d in datacache[roots[r]['root'].id] if d['src'] is not None ]
-                            srcra = np.array( [ j['src'].ra for j in justsrcs ] )
-                            srcdec = np.array( [ j['src'].dec for j in justsrcs ] )
+                    if len(srcra) == 0:
+                        # No sources to calculate mean positions, so we should just get the
+                        # root position back
+                        assert infos['ra'][dex] == pytest.approx( exproot['root'].ra, rel=1e-12 )
+                        assert infos['dec'][dex] == pytest.approx( exproot['root'].dec, rel=1e-12 )
+                        assert all( ( infos[i][dex] is None ) or np.isnan( infos[i][dex] )
+                                    for i in ( 'raerr', 'decerr', 'ra_dec_cov' ) )
+                    elif len(srcra) > 1:
+                        # Should *not* match the root ra and dec
+                        assert infos['ra'][dex] != pytest.approx( exproot['root'].ra, rel=1e-9 )
+                        assert infos['dec'][dex] != pytest.approx( exproot['root'].dec, rel=1e-9 )
+                        # Check the weighted calculation.  (I.e. make sure that either the code in
+                        # ltcv.py is right and my code above is right, or that both of them are wrong
+                        # in the same way....)
+                        assert infos['ra'][dex] == pytest.approx( meanra, rel=1e-12 )
+                        assert infos['dec'][dex] == pytest.approx( meandec, rel=1e-12 )
+                        assert infos['raerr'][dex] == pytest.approx( raerr, rel=1e-6 )
+                        assert infos['decerr'][dex] == pytest.approx( decerr, rel=1e-6 )
+                        # Fixture didn't put any correlations in
+                        assert infos['ra_dec_cov'][dex] == pytest.approx( ra_dec_cov, abs=0.0001/3600. )
+                    elif len(srcra) == 1:
+                        # ...might match the root ra and dec... maybe... probably not... eh, whatevs
+                        assert infos['ra'][dex] == pytest.approx( srcra[0], rel=1e-12 )
+                        assert infos['dec'][dex] == pytest.approx( srcdec[0], rel=1e-12 )
+                        assert infos['raerr'][dex] == pytest.approx( srcraerr[0], rel=1e-6 )
+                        assert infos['decerr'][dex] == pytest.approx( srcdecerr[0], rel=1e-6 )
+                        assert infos['ra_dec_cov'][dex] == pytest.approx( src_ra_dec_cov[0],
+                                                                          abs=0.0001/3600. )
+                    else:
+                        raise RuntimeError( "This *really* should never happen." )
 
-                            if which == 'detections':
-                                sn = np.array( [ j['src'].psfflux / j['src'].psffluxerr for j in justsrcs ] )
+                for i in range( len (infos['diaobjectid'][dex] ) ):
+                    objid = infos['diaobjectid'][dex][i]
+                    assert objid in exproot['obj'].keys()
+                    if include_base_procver:
+                        assert asUUID( infos['obj_base_procver'][dex][i] ) == exproot['obj'][objid].base_procver_id
+                    if return_diaobject_positions:
+                        # There are multiple positions, so make sure we got the highest priority one that exists
+                        #
+                        # OMG this is becoming such an ugly hack of how I store data, this is what
+                        #   happens when you just need to get stuff done fast and can't go back
+                        #   and refactor.
+                        pos = None
+                        posbpv = None
+                        for proposedposbpv, prio, bpvkey in pvrow['diaobject_position']:
+                            if (objid, bpvkey) in exproot['pos'].keys():
+                                pos = exproot['pos'][ (objid, bpvkey) ]
+                                posbpv = proposedposbpv
+                                break
+                        if include_base_procver:
+                            if pos is None:
+                                assert infos['pos_base_procver'][dex][i] is None
                             else:
-                                # ... this may be wholly gratuitous because I don't think
-                                #     the fixtures set a different forced flux from the source flux
-                                # However, this is the equivalent logic server-side.
-                                sn = np.array( [ ( j['frc'].psfflux / j['frc'].psffluxerr )
-                                                 if j['frc'] is not None
-                                                 else ( j['src'].psfflux / j['src'].psffluxerr )
-                                                 for j in justsrcs ] )
-                            w = np.where( sn > 3 )[0]
+                                assert asUUID( infos['pos_base_procver'][dex][i] ) == posbpv.id
+                        for attr in [ 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ]:
+                            col = f"diaobject_{attr}"
+                            rel = 1e-12 if col in [ 'ra', 'dec' ] else 1e-6
+                            assert ( ( ( infos[col][dex][i] is None ) and ( pos is None ) )
+                                     or
+                                     ( infos[col][dex][i] == pytest.approx( getattr(pos, attr), rel=rel ) )
+                                    )
 
-                            # ****
-                            # ltcvras = np.array( [ thisltcv['det_ra'][i] for i in range(len(thisltcv['isdet']))
-                            #                       if thisltcv['isdet'][i] ] )
-                            # ltcvdecs = np.array( [ thisltcv['det_dec'][i] for i in range(len(thisltcv['isdet']))
-                            #                        if thisltcv['isdet'][i] ] )
-                            # ltcvfluxes = np.array( [ thisltcv['flux'][i] for i in range(len(thisltcv['isdet']))
-                            #                          if thisltcv['isdet'][i] ] )
-                            # ltcvfluxerrs = np.array( [ thisltcv['fluxerr'][i] for i in range(len(thisltcv['isdet']))
-                            #                            if thisltcv['isdet'][i] ] )
-                            # justfluxes = np.array( [ s['src'].psfflux for s in justsrcs ] )
-                            # justfluxerrs = np.array( [ s['src'].psffluxerr for s in justsrcs ] )
-
-                            # FDBLogger.info( f"procver={procver}, which={which}, rootid={roots[r]['root'].id}, "
-                            #                 f"diaobjectid={diaobjectid}\n"
-                            #                 f"  ( thisltcv.det_ra - srcra ) / srcra = "
-                            #                 f"{( ltcvras - srcra ) / srcra}\n"
-                            #                 f"  ( thisltcv.det_dec - srcdec ) / srcdec = "
-                            #                 f"{( ltcvdecs - srcdec ) / srcdec}\n"
-                            #                 f"  ( thisltcv.flux - justfluxes ) / justfluxes = "
-                            #                 f"{( ltcvfluxes - justfluxes ) / justfluxes}\n"
-                            #                 f"  ( thisltcv.fluxerr - justfluxerrs ) / justfluxerrs = "
-                            #                 f"{( ltcvfluxerrs - justfluxerrs ) / justfluxerrs}\n"
-                            #                 f"( sn[w] - ltcvfluxes[w]/ltcvfluxerrs[w] ) = "
-                            #                 f"{sn[w] - ltcvfluxes[w]/ltcvfluxerrs[w]}\n"
-                            #                 f"sn[w] = {sn[w]}\n" )
-                            # ****
-
-                            srcra = srcra[w]
-                            srcdec = srcdec[w]
-                            weight = sn[w] ** 2
-                            meanra = ( srcra * weight ).sum() / ( weight.sum() )
-                            meandec = ( srcdec * weight ).sum() / ( weight.sum() )
-                            raerr = np.sqrt( ( weight * ( srcra - meanra )**2 ).sum() / weight.sum() )
-                            decerr = np.sqrt( ( weight * ( srcdec - meandec )**2 ).sum() / weight.sum() )
-                            ra_dec_cov = ( weight * ( srcra - meanra ) * ( srcdec - meandec ) ).sum() / weight.sum()
-
-                            if ( pos is None ) or always_use_weighted_source_positions:
-                                if pos is not None:
-                                    # In this case, the position should *not* match the
-                                    #   diaobject_position value too closely
-                                    assert not infos['ra'][dex] != pytest.approx( pos.ra, abs=0.01/3600. )
-                                    assert not infos['dec'][dex] != pytest.approx( pos.dec, abs=0.01/3600. )
-                                # But should be good within numerical precision to the calculated positions (modulo
-                                # order of operations and floating roundoff).  (And, in fact, I might be
-                                # surprised that it's this good, cause the weights come from fluxes which are
-                                # stored as 32-bit floats.  Order of operations here and in the main code
-                                # may just be close enough...?)  (Or, just a whole lot of luck that
-                                # things worked out that way, except for once?)
-                                #
-                                # ....*if* there were enough sources to calculate a position from!
-                                if len(srcra) > 0:
-                                    assert infos['ra'][dex] == pytest.approx( meanra, rel=1e-12 )
-                                    assert infos['dec'][dex] == pytest.approx( meandec, rel=1e-12 )
-                                    assert infos['raerr'][dex] == pytest.approx( raerr, rel=1e-6 )
-                                    assert infos['decerr'][dex] == pytest.approx( decerr, rel=1e-6 )
-                                    # Fixture didn't put any correlations in
-                                    assert infos['ra_dec_cov'][dex] == pytest.approx( ra_dec_cov, abs=0.0001/3600. )
-                                else:
-                                    assert all( ( infos[i][dex] is None ) or np.isnan( infos[i][dex] )
-                                                for i in ( 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ) )
     return check_ltcv_res
 
 

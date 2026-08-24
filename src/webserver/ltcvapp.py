@@ -1,7 +1,10 @@
 import textwrap
+import datetime
 
 from psycopg import sql
 import flask
+
+import astropy.time
 
 import db
 import ltcv
@@ -17,7 +20,7 @@ from webserver.baseview import BaseView, FASTDBWebException
 # POST body must be json, must include objids.  May include bands, which, mjd_now
 
 class GetManyLtcvs( BaseView ):
-    def get_ltcvs( self, procver, objids, dbcon=None ):
+    def get_ltcvs( self, procver, objids=None, dbcon=None ):
         """Return lightcurves of objects as json.
 
         Reads the following parameters from the POST data, which must be
@@ -34,8 +37,10 @@ class GetManyLtcvs( BaseView ):
           procver : uuid or str
             The processing version to pull lightcurves from.
 
-          objids : int, uuid, list of int, or list of uuid
-            The object IDs to pull lightcurves for.
+          objids : int, uuid, list of int, list of uuid, or None
+            The object IDs to pull lightcurves for.  If None, will
+            get... too many...  If you do this, really
+            you should give offset and limit in the POST data.
 
           dbcon : db.DBCon or psycopg.Connection, default None
             Database connection.  If None, opens a new one and closes it
@@ -47,30 +52,34 @@ class GetManyLtcvs( BaseView ):
 
           If return_object_info is True, then this is a dict with keys 'ltcvs' and 'obinfo'.  ROB DOCUMENT.
 
-
         """
 
-        if not util.isSequence( objids ):
-            objids = [ objids ]
-        try:
-            objids = [ int( o ) for o in objids ]
-        except ValueError:
+        if objids is not None:
+            if not util.isSequence( objids ):
+                objids = [ objids ]
             try:
-                objids = [ util.asUUID( o ) for o in objids ]
+                objids = [ int( o ) for o in objids ]
             except ValueError:
-                raise FASTDBWebException( f"objids must be a list of integers or a list of uuids, got {objids}" )
-        if len( objids ) == 0:
-            raise FASTDBWebException( "no objids requested" )
+                try:
+                    objids = [ util.asUUID( o ) for o in objids ]
+                except ValueError:
+                    raise FASTDBWebException( f"objids must be a list of integers or a list of uuids, got {objids}" )
+            if len( objids ) == 0:
+                raise FASTDBWebException( "no objids requested" )
 
         if flask.request.is_json:
             kwargs = flask.request.json
-            unknown = set( kwargs.keys() ) - { 'bands', 'which', 'include_base_procver', 'include_source_positions',
-                                               'use_weighted_source_positions', 'always_use_weighted_source_positions',
-                                               'return_object_info', 'include_object_positions',
+            if not isinstance( kwargs, dict ):
+                raise FASTDBWebException( "POST data must be a dict passed as json" )
+            unknown = set( kwargs.keys() ) - { 'bands', 'which', 'offset', 'limit', 'nonevalue',
+                                               'include_base_procver', 'include_source_positions',
+                                               'use_weighted_source_positions', 'return_object_info',
+                                               'return_diaobject_positions', 'include_object_positions',
                                                'position_processing_version', 'mjd_now' }
             if len(unknown) > 0:
                 raise FASTDBWebException( f"Unknown data parameters: {unknown}" )
         else:
+            FDBLogger.info( f"fask.request.data is type {type(flask.request.data)}" )
             kwargs = {}
 
         try:
@@ -87,11 +96,16 @@ class GetManyLtcvs( BaseView ):
 
 
     def do_the_things( self, procver='default' ):
-        if ( not flask.request.is_json ) or ( 'objids' not in flask.request.json ):
-            raise FASTDBWebException( "Must pass POST data as a json dict with at least objids as a key" )
-        objids = flask.request.json['objids']
-        del flask.request.json['objids']
-        return self.get_ltcvs( procver, objids )
+        try:
+            objids = None
+            if ( flask.request.is_json ) and ( 'objids' in flask.request.json ):
+                objids = flask.request.json['objids']
+                del flask.request.json['objids']
+            return self.get_ltcvs( procver, objids )
+        except FASTDBWebException:
+            raise
+        except Exception as ex:
+            raise FASTDBWebException( str(ex) )
 
 
 
@@ -249,9 +263,9 @@ class GetHotTransients( BaseView ):
     """
 
     def do_the_things( self, procver='realtime' ):
-        known_keys = { 'position_processing_version', 'include_object_positions',
+        known_keys = { 'position_processing_version', 'return_diaobject_positions',
                        'include_source_positions', 'include_base_procver',
-                       'use_weighted_source_positions', 'always_use_weighted_source_positions',
+                       'use_weighted_source_positions',
                        'detected_since_mjd', 'detected_in_last_days', 'mjd_now',
                        'source_patch' }
 
@@ -276,60 +290,181 @@ class GetHotTransients( BaseView ):
 
 # **********************************************************************
 
+class KnownBrokerTopics( BaseView ):
+    def do_the_things( self, processing_version='realtime' ):
+        try:
+            with db.DBCon() as con:
+                pvid = db.ProcessingVersion.procver_id( processing_version, dbcon=con )
+                rows, _cols = con.execute( sql.SQL( textwrap.dedent(
+                    """\
+                    SELECT DISTINCT ON (b.brokername, b.topic) b.brokername, b.topic
+                    FROM diasource_brokerinfo b
+                    INNER JOIN base_procver_of_procver pv ON b.base_procver_id=pv.base_procver_id
+                    WHERE pv.procver_id={pvid}
+                    ORDER BY brokername, topic
+                    """
+                ) ).format( pvid=pvid ) )
+                return rows
+
+        except Exception as ex:
+            raise FASTDBWebException( str(ex) )
+
+
+# **********************************************************************
 
 class GetBrokerInfo( BaseView ):
     def do_the_things( self, processing_version='realtime' ):
-        global app
-        if ( not flask.request.is_json ) or ( not isinstance( flask.request.json, dict ) ):
-            raise FASTDBWebException( "Post data was not a JSON dict, expected a dict as JSON post data." )
-        jsondata = flask.request.json
-        if 'diasourceids' not in jsondata:
-            raise FASTDBWebException( "Post data dict must include key diasourceids with list of source ids." )
-        srcids = jsondata['diasourceids']
-        srcids = list( srcids ) if util.isSequence(srcids) else [ srcids ]
-        brokername = None if 'brokername' not in jsondata else jsondata['brokername']
-        topic = None if 'topic' not in jsondata else jsondata[ 'topic' ]
+        try:
+            if ( not flask.request.is_json ) or ( not isinstance( flask.request.json, dict ) ):
+                raise FASTDBWebException( "Post data was not a JSON dict, expected a dict as JSON post data." )
+            jsondata = flask.request.json
+            if 'diasourceids' not in jsondata:
+                raise FASTDBWebException( "Post data dict must include key diasourceids with list of source ids." )
+            srcids = jsondata['diasourceids']
+            srcids = list( srcids ) if util.isSequence(srcids) else [ srcids ]
+            brokername = None if 'brokername' not in jsondata else jsondata['brokername']
+            topic = None if 'topic' not in jsondata else jsondata[ 'topic' ]
 
-        with db.DBCon() as con:
-            try:
+            with db.DBCon() as con:
+                try:
+                    pvid = db.ProcessingVersion.procver_id( processing_version, dbcon=con )
+                except Exception:
+                    raise FASTDBWebException( f"Unknown processing version {processing_version}" )
+                q = sql.SQL( textwrap.dedent(
+                    """\
+                    SELECT DISTINCT ON (b.diasourceid, b.brokername, b.topic)
+                       b.diasourceid, b.brokername, b.topic, b.info
+                    FROM diasource_brokerinfo b
+                    INNER JOIN base_procver_of_procver pv ON b.base_procver_id=pv.base_procver_id
+                                                         AND pv.procver_id={pvid}
+                    WHERE b.diasourceid=ANY({srcids})
+                    """
+                ) ).format( pvid=pvid, srcids=srcids )
+                if brokername is not None:
+                    q += sql.SQL( "  AND b.brokername={brokername}\n" ).format( brokername=brokername )
+                if topic is not None:
+                    q += sql.SQL("   AND b.topic={topic}\n" ).format( topic=topic )
+                q += sql.SQL( textwrap.dedent(
+                    """\
+                    ORDER BY b.diasourceid, b.brokername, b.topic
+                    """
+                ) )
+                rows, _cols = con.execute( q )
+
+            rval = {}
+            curdiasourceid = None
+            for row in rows:
+                if row[0] != curdiasourceid:
+                    curdiasourceid = row[0]
+                    rval[ curdiasourceid ] = []
+                rval[ curdiasourceid ].append( { 'brokername': row[1],
+                                                 'topic': row[2],
+                                                 'info': row[3] } )
+
+            return rval
+
+        except FASTDBWebException:
+            raise
+        except Exception as ex:
+            raise FASTDBWebException( str(ex) )
+
+
+
+# **********************************************************************
+
+class SourcesFromBroker( BaseView ):
+    def do_the_things( self, broker=None, topic=None, processing_version='realtime' ):
+        try:
+            known_keys = { 'detected_in_last_days', 'detected_since_mjd', 'mjd_now', 'broker', 'topic' }
+            if not flask.request.is_json:
+                kwargs = dict()
+            else:
+                kwargs = flask.request.json
+
+            unknown = set( kwargs.keys() ) - known_keys
+            if len(unknown) > 0:
+                raise FASTDBWebException( f"Unknown data parameters: {unknown}" )
+
+            broker = broker if broker is not None else kwargs['broker'] if 'broker' in kwargs else None
+            if ( 'broker' in kwargs ) and ( broker != kwargs['broker'] ):
+                raise FASTDBWebException( f"Broker in url {broker} doesn't match broker in data {kwargs['broker']}" )
+            topic = topic if topic is not None else kwargs['topic'] if 'topic' in kwargs else None
+            if ( 'topic' in kwargs ) and ( topic != kwargs['topic'] ):
+                raise FASTDBWebException( f"Topic in url {topic} doesn't match topic in data {kwargs['topic']}" )
+            if ( broker is None ) or ( topic is None ):
+                raise FASTDBWebException( "Must specify both broker and topic" )
+
+            if 'mjd_now' in kwargs:
+                now = kwargs['mjd_now']
+            else:
+                now = astropy.time.Time( datetime.datetime.now( tz=datetime.UTC ), format='datetime' ).mjd
+
+            if 'detected_since_mjd' in kwargs:
+                t0 = float( kwargs['detected_since_mjd'] )
+            elif 'detected_in_last_days' in kwargs:
+                t0 = now - float( kwargs['detected_in_last_days'] )
+            else:
+                t0 = now - 7.
+
+            with db.DBCon( dictcursor=True ) as con:
                 pvid = db.ProcessingVersion.procver_id( processing_version, dbcon=con )
-            except Exception:
-                raise FASTDBWebException( f"Unknown processing version {processing_version}" )
-            q = sql.SQL( textwrap.dedent(
-                """\
-                SELECT DISTINCT ON (b.diasourceid, b.brokername, b.topic)
-                   b.diasourceid, b.brokername, b.topic, b.info
-                FROM diasource_brokerinfo b
-                INNER JOIN base_procver_of_procver pv ON b.base_procver_id=pv.base_procver_id
-                                                     AND pv.procver_id={pvid}
-                WHERE b.diasourceid=ANY({srcids})
-                """
-            ) ).format( pvid=pvid, srcids=srcids )
-            if brokername is not None:
-                q += sql.SQL( "  AND b.brokername={brokername}\n" ).format( brokername=brokername )
-            if topic is not None:
-                q += sql.SQL("   AND b.topic={topic}\n" ).format( topic=topic )
-            q += sql.SQL( textwrap.dedent(
-                """\
-                ORDER BY b.diasourceid, b.brokername, b.topic
-                """
-            ) )
-            rows, _cols = con.execute( q )
+                q = sql.SQL( textwrap.dedent(
+                    """\
+                    SELECT b.*
+                    FROM (
+                      SELECT DISTINCT ON (s.diasourceid)
+                               o.diaobjectid, o.rootid,
+                               s.diasourceid, s.midpointmjdtai, s.visit, s.band, s.psfflux, s.psffluxerr,
+                               s.ra, s.dec, s.raerr, s.decerr, s.ra_dec_cov,
+                               b.info, b.msgtime, b.receivedtime, b.importtime
+                      FROM diasource_brokerinfo b
+                      INNER JOIN diasource s ON b.diasourceid=s.diasourceid AND b.base_procver_id=s.base_procver_id
+                      INNER JOIN diaobject o ON b.diaobjectid=o.diaobjectid
+                      INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id
+                                                           AND pv.procver_id={procver}
+                      WHERE b.brokername={broker}
+                        AND b.topic={topic}
+                        AND s.midpointmjdtai<={now}
+                        AND s.midpointmjdtai>={t0}
+                      ORDER BY s.diasourceid, pv.priority DESC
+                    ) b
+                    ORDER BY rootid, midpointmjdtai
+                    """
+                ) ).format( procver=pvid, broker=broker, topic=topic, now=now, t0=t0 )
+                rows = con.execute( q )
 
-        rval = {}
-        curdiasourceid = None
-        for row in rows:
-            if row[0] != curdiasourceid:
-                curdiasourceid = row[0]
-                rval[ curdiasourceid ] = []
-            rval[ curdiasourceid ].append( { 'brokername': row[1],
-                                             'topic': row[2],
-                                             'info': row[3] } )
+            colmap = { k: k for k in [ 'diasourceid', 'visit', 'band', 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov',
+                                       'info', 'msgtime', 'receivedtime', 'importtime' ] }
+            colmap.update( { 'midpointmjdtai': 'mjd',
+                             'psfflux': 'flux',
+                             'psffluxerr': 'fluxerr' } )
 
-        return rval
+            roots = {}
+            curroot = None
+            currootinfo = None
+            for row in rows:
+                if str( row['rootid'] ) != curroot:
+                    curroot = str( row['rootid'] )
+                    roots[curroot] = { 'diaobjectids': set(),
+                                       'diasources': { v: [] for v in colmap.values() } }
+                    currootinfo = roots[curroot]
 
+                currootinfo['diaobjectids'].add( row['diaobjectid'] )
+                for rowdex, field in colmap.items():
+                    val = row[rowdex]
+                    if isinstance( val, datetime.datetime ):
+                        val = val.isoformat()
+                    currootinfo['diasources'][field].append( val )
 
+            for record in roots.values():
+                record['diaobjectids'] = list( record['diaobjectids'] )
 
+            return roots
+
+        except FASTDBWebException:
+            raise
+        except Exception as ex:
+            raise FASTDBWebException( str(ex) )
 
 
 
@@ -348,8 +483,14 @@ urls = {
     "/getrandomltcv/<procver>": GetRandomLtcv,
     "/gethottransients": GetHotTransients,
     "/gethottransients/<procver>": GetHotTransients,
+    "/knownbrokertopics": KnownBrokerTopics,
+    "/knownbrokertopics/<processing_version>": KnownBrokerTopics,
     "/getbrokerinfo": GetBrokerInfo,
-    "/getbrokerinfo/<processing_version>": GetBrokerInfo
+    "/getbrokerinfo/<processing_version>": GetBrokerInfo,
+    "/sourcesfrombroker": SourcesFromBroker,
+    "/sourcesfrombroker/<broker>": SourcesFromBroker,
+    "/sourcesfrombroker/<broker>/<topic>": SourcesFromBroker,
+    "/sourcesfrombroker/<broker>/<topic>/<processing_version>": SourcesFromBroker,
 }
 
 usedurls = {}
