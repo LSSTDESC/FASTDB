@@ -132,7 +132,7 @@ services:
         condition: service_started
       queryrunner:
         condition: service_started
-    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-webap:${DOCKER_VERSION:-test20260615}
+    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-webap:${DOCKER_VERSION:-test20260824}
     build:
       context: ./docker/webserver
       target: webserver
@@ -188,7 +188,7 @@ services:
         condition: service_healthy
       createdb:
         condition: service_completed_successfully
-    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-shell:${DOCKER_VERSION:-test20260615}
+    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-shell:${DOCKER_VERSION:-test20260824}
     environment:
       - MONGODB_HOST=mongodb
       - MONGODB_DBNAME=brokeralert
@@ -236,7 +236,7 @@ services:
         condition: service_healthy
       mongodb:
         condition: service_healthy
-    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-shell:${DOCKER_VERSION:-test20260615}
+    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-shell:${DOCKER_VERSION:-test20260824}
     environment:
       - MONGODB_HOST=mongodb
       - MONGODB_DBNAME=brokeralert
@@ -279,7 +279,7 @@ services:
     working_dir: /code
 
   makeinstall:
-    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-shell:${DOCKER_VERSION:-test20260615}
+    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-shell:${DOCKER_VERSION:-test20260824}
     user: ${USERID:-0}:${GROUPID:-0}
     volumes:
       - type: bind
@@ -314,7 +314,7 @@ services:
         condition: service_started   # TODO : health test for webap
       makeinstall:
         condition: service_completed_successfully
-    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-shell:${DOCKER_VERSION:-test20260615}
+    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-shell:${DOCKER_VERSION:-test20260824}
     environment:
       - MONGODB_HOST=mongodb
       - MONGODB_DBNAME=brokeralert
