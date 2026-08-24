@@ -302,6 +302,11 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
     #    photometry through 60015 and forced through 60010 in bpv1a
     #    photometry through 60030 and forced through 60025 in bpv1
     #
+    # For all diasource and diaforcedsource:
+    #   in bpv0 they point to the object in bpv0
+    #   in bpv1 they point to the object in bpv1
+    #   in bpv2 or bpv3, they point to the object in bpv2
+    #
     # RETURN STRUCTURE:
     # [
     #    { 'root':  RootDiaObject,
@@ -352,7 +357,7 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
         #   we'll only use <1/25 of them.  Computers are fast.
         # Do np.floor(mjd*10) to get the index into these arrays.
         # We'll use the mjd=lowestmjd time for all forced photometry.  I think.
-        # 1σ scatter is going to be 0.2". (Yes, regardless of the S/N of hte
+        # 1σ scatter is going to be 0.2". (Yes, regardless of the S/N of the
         #   detection.  See NOTE below.)
         # Not going to worry about cos(dec)
         # NOTE : every object is going to scatter in the same direction
@@ -542,7 +547,7 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
                     else:
                         rootdict['frcex']['realtime_diaforcedsource'].append( None )
 
-                # everything is in bpv2, bpv2a, bp3
+                # everything is in bpv2, bpv2a, bpv3
                 for bpv in [ 'bpv2', 'bpv2a', 'bpv3' ]:
                     # bpv2a only has sources for [ 60020, 60030 ] and forced sources for [ 60020, 60025 ]
                     if ( bpv == 'bpv2a' ) and ( ( sourcemjd < 60020. ) or ( sourcemjd > 60030. ) ):
@@ -1408,7 +1413,7 @@ def lightcurve_checker( set_of_lightcurves, procver_collection ):
                     objid = infos['diaobjectid'][dex][i]
                     assert objid in exproot['obj'].keys()
                     if include_base_procver:
-                        assert infos['obj_base_procver'][dex][i] == exproot['obj'][objid].base_procver_id
+                        assert asUUID( infos['obj_base_procver'][dex][i] ) == exproot['obj'][objid].base_procver_id
                     if return_diaobject_positions:
                         # There are multiple positions, so make sure we got the highest priority one that exists
                         #
@@ -1426,7 +1431,7 @@ def lightcurve_checker( set_of_lightcurves, procver_collection ):
                             if pos is None:
                                 assert infos['pos_base_procver'][dex][i] is None
                             else:
-                                assert infos['pos_base_procver'][dex][i] == posbpv.id
+                                assert asUUID( infos['pos_base_procver'][dex][i] ) == posbpv.id
                         for attr in [ 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ]:
                             col = f"diaobject_{attr}"
                             rel = 1e-12 if col in [ 'ra', 'dec' ] else 1e-6

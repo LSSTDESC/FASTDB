@@ -478,9 +478,9 @@ def test_object_ltcv( set_of_lightcurves, procver_collection, lightcurve_checker
         { 'use_weighted_source_positions': 1, 'return_diaobject_positions': 1, 'return_object_info': 1 },
         { 'use_weighted_source_positions': 1, 'include_source_positions': 1,
           'return_object_info': 1, 'return_diaobject_positions': 1 },
-        { 'always_use_weighted_source_positions': 1, 'include_source_positions': 1,
+        { 'use_weighted_source_positions': 1, 'include_source_positions': 1,
           'return_object_info': 1, 'return_diaobject_positions': 1 },
-        { 'mjd_now': 60061., 'always_use_weighted_source_positions': 1, 'include_base_procver': 1,
+        { 'mjd_now': 60061., 'use_weighted_source_positions': 1, 'include_base_procver': 1,
           'include_source_positions': 1, 'return_diaobject_positions': 1, 'return_object_info': 1 },
     ]
 
@@ -539,16 +539,64 @@ def test_many_object_ltcvs( procver_collection, set_of_lightcurves, lightcurve_c
     check_ltcv = lightcurve_checker
 
     ltcvlist = [
+        { 'procver': 'pvc_pv1',
+          'request_objs': None,
+          'expected_roots': [ 0 ],
+          'expected_diaobjids': [ 100 ],
+          'procver_key': 'pv1'
+         },
+        { 'procver': 'pvc_pv2',
+          'request_objs': None,
+          'expected_roots': [ 0, 1, 2, 3 ],
+          'expected_diaobjids': [ 200, 201, 2011, 202, 203 ],
+          'procver_key': 'pv2'
+         },
+        { 'procver': 'pvc_pv3',
+          'request_objs': None,
+          'expected_roots': [ 0, 1, 2, 3 ],
+          'expected_diaobjids': [ 200, 201, 2011, 202, 203 ],
+          'procver_key': 'pv3'
+         },
         # Object 1 is not in pv1, so ony expect object 0 back
-        ( 'pvc_pv1', [ str(roots[i]['root'].id) for i in [0, 1] ], [0], [100], 'pv1' ),
-        ( 'pvc_pv1', [100, 101], [0], [100], 'pv1' ),
+        { 'procver': 'pvc_pv1',
+          'request_objs': [ str(roots[i]['root'].id) for i in [0, 1] ],
+          'expected_roots': [0],
+          'expected_diaobjids': [100],
+          'procver_key': 'pv1'
+         },
+        { 'procver': 'pvc_pv1',
+          'request_objs': [100, 101],
+          'expected_roots': [0],
+          'expected_diaobjids': [100],
+          'procver_key': 'pv1'
+          },
         # pvc_pv2 should be the default
-        ( None, [ str(roots[i]['root'].id) for i in [0, 2] ], [0, 2], [200, 202], 'pv2' ),
+        { 'procver': None,
+          'request_objs': [ str(roots[i]['root'].id) for i in [0, 2] ],
+          'expected_roots': [0, 2],
+          'expected_diaobjids': [200, 202],
+          'procver_key': 'pv2'
+         },
         # If we ask for diaobjects that are in the wrong processing version, we still get
         #   back the corresponding ones from the sources in this processing version
-        ( 'pvc_pv2', [0, 2], [0, 2], [200, 202], 'pv2' ),
-        ( 'pvc_pv2', [0, 1, 2], [0, 1, 2], [200, 201, 2011, 202], 'pv2' ),
-        ( 'realtime', [0, 1, 2], [0, 1, 2], [0, 1, 2], 'realtime' ),
+        { 'procver': 'pvc_pv2',
+          'request_objs': [0, 2],
+          'expected_roots': [0, 2],
+          'expected_diaobjids': [200, 202],
+          'procver_key': 'pv2'
+         },
+        { 'procver': 'pvc_pv2',
+          'request_objs': [0, 1, 2],
+          'expected_roots': [0, 1, 2],
+          'expected_diaobjids': [200, 201, 2011, 202],
+          'procver_key': 'pv2'
+         },
+        { 'procver': 'realtime',
+          'request_objs': [0, 1, 2],
+          'expected_roots': [0, 1, 2],
+          'expected_diaobjids': [0, 1, 2],
+          'procver_key':'realtime'
+         }
     ]
 
     extras = [
@@ -558,8 +606,7 @@ def test_many_object_ltcvs( procver_collection, set_of_lightcurves, lightcurve_c
         #   is only one detection with S/N>3
         { 'mjd_now': 60045.5, 'use_weighted_source_positions': 1, 'return_object_info': 1 },
         # ...and this is to explicitly test the case where there are no detections
-        { 'mjd_now': 60039., 'use_weighted_source_positions': 1, 'return_object_info': 1,
-          'expect_all_roots': { 'detections': False } },
+        { 'mjd_now': 60039., 'use_weighted_source_positions': 1, 'return_object_info': 1 },
         { 'bands': 'r' },
         { 'bands': ['r'] },
         { 'include_source_positions': 1 },
@@ -583,26 +630,41 @@ def test_many_object_ltcvs( procver_collection, set_of_lightcurves, lightcurve_c
     tpd = 0
     n = 0
     with db.DBCon( echoqueries=True, alwaysexplain=True, alwaysanalyze=True ) as dbcon:
-        for ltcvreq in ltcvlist:
+        for ltcvreq_raw in ltcvlist:
             for which in [ None, 'patch', 'detections', 'forced' ]:
                 for extra in extras:
-                    # ****
-                    # if ( ( 'mjd_now' in extra ) and ( extra['mjd_now'] == 60041. ) and
-                    #      ( 'use_weighted_source_positions' in extra ) and
-                    #      ( extra['use_weighted_source_positions'] ) and
-                    #      ( ltcvreq[0] == 'pvc_pv2' )
-                    #     ):
-                    #     import pdb; pdb.set_trace()
-                    # ****
+                    # Make copies so we can mung them
+                    ltcvreq = copy.deepcopy( ltcvreq_raw )
                     kwargs = copy.deepcopy( extra )
-                    expect_all_roots = True
-                    if 'expect_all_roots' in kwargs:
-                        if which in kwargs['expect_all_roots']:
-                            expect_all_roots = kwargs['expect_all_roots'][which]
-                        del kwargs['expect_all_roots']
-                    kwargs['objids'] = ltcvreq[1]
-                    if ltcvreq[0] is not None:
-                        kwargs['processing_version'] = ltcvreq[0]
+
+                    # ...GAH, OK.  Object 2 (the third object) is only
+                    #   detected on mjd 60040, and Object 3 (the fourth
+                    #   object) is only detected on mjd 60050.  We also
+                    #   only have forced photometry from 10 days before
+                    #   the first detection.  So, we have to edit the
+                    #   expected list of objects when mjd_now is given
+                    #   and early enough.
+                    if ( 'mjd_now' in extra ):
+                        if ( ( extra['mjd_now'] < 60040 ) or
+                             ( ( which == 'detections' ) and ( extra['mjd_now'] < 60050 ) )
+                            ):
+                            if 3 in ltcvreq['expected_roots']:
+                                ltcvreq['expected_roots'].remove( 3 )
+                            for objid in [ 3, 203, 303 ]:
+                                if objid in ltcvreq['expected_diaobjids']:
+                                    ltcvreq['expected_diaobjids'].remove(objid )
+                        if ( ( extra['mjd_now'] < 60030 ) or
+                             ( ( which == 'detections' ) and ( extra['mjd_now'] < 60040 ) )
+                            ):
+                            if 2 in ltcvreq['expected_roots']:
+                                ltcvreq['expected_roots'].remove( 2 )
+                            for objid in [ 2, 202, 302 ]:
+                                if objid in ltcvreq['expected_diaobjids']:
+                                    ltcvreq['expected_diaobjids'].remove(objid )
+
+                    kwargs['objids'] = ltcvreq['request_objs']
+                    if ltcvreq['procver'] is not None:
+                        kwargs['processing_version'] = ltcvreq['procver']
                     if which is not None:
                         kwargs['which'] = which
 
@@ -621,11 +683,12 @@ def test_many_object_ltcvs( procver_collection, set_of_lightcurves, lightcurve_c
                     del kwargs['objids']
                     if which is None:
                         kwargs['which'] = 'patch'
-                    if ltcvreq[0] is not None:
+                    if ltcvreq['procver'] is not None:
                         del kwargs['processing_version']
 
                     # Verify the "json" (really, list/dict) return is right
-                    check_ltcv( ltcvreq[4], ltcvreq[2], ltcvreq[3], jsres, expect_all_roots=expect_all_roots, **kwargs )
+                    check_ltcv( ltcvreq['procver_key'], ltcvreq['expected_roots'], ltcvreq['expected_diaobjids'],
+                                jsres, **kwargs )
 
                     # Make sure pandas return is consistent
                     if isinstance( pdres, tuple ):
@@ -812,8 +875,7 @@ def test_get_hot_ltcvs( set_of_lightcurves, lightcurve_checker ):
         { 'include_base_procver': 1 },
         { 'include_base_procver': 1, 'return_diaobject_positions': 1 },
         { 'use_weighted_source_positions': 1, 'return_diaobject_positions': 1, 'include_base_procver': 1 },
-        { 'always_use_weighted_source_positions': 1, 'return_diaobject_positions': 1, 'include_base_procver': 1 },
-        { 'always_use_weighted_source_positions': 1, 'return_diaobject_positions': 1 },
+        { 'use_weighted_source_positions': 1, 'return_diaobject_positions': 1 },
     ]
 
     n = 0

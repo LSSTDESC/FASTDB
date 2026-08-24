@@ -347,16 +347,15 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
       processing_version : UUID or str, default 'default'
          The processing version (or alias) to search photometry.
 
-      objids: int, uuid, list of int, or list of uuid
-         Objects to search for.  If None, will get ALL OBJECTS; if
-         you're doing this, you probably want to use limit and offset,
-         but those aren't implemented yet, so don't do this!  If the
-         values ints, they are interpreted as be diaobjectids.  If the
-         values or uuids (or strings that can be made into uuids), they
-         will be interpreted as rootids.  If ints, the diaobjectid must
-         be consistent with processing_version, or nothing will be
-         found.  If uuids, then the diaobjectids found will be the ones
-         that match the photometry with the right processing_version.
+      objids: int, uuid, list of int, or list of uuid Objects to search
+         for.  If None, will get ALL OBJECTS; if you're doing this, you
+         probably want to use limit and offset.  If the values ints,
+         they are interpreted as be diaobjectids.  If the values or
+         uuids (or strings that can be made into uuids), they will be
+         interpreted as rootids.  If ints, the diaobjectid must be
+         consistent with processing_version, or nothing will be found.
+         If uuids, then the diaobjectids found will be the ones that
+         match the photometry with the right processing_version.
 
       objids_table : str, default None
          If not None, then this is the name of a table (probably a
@@ -489,7 +488,7 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
         indexes (rootid, mjd).  The columns are:
 
             diasourceid : bigint, the diaSoruceId, or null
-            [ diafordedsourceid : bigint or null; only included if which isn't 'detections' ]
+            [ diaforcedsourceid : bigint or null; only included if which isn't 'detections' ]
             source_diaobjectid : bigint or None, the diaObjectId associated with this diasource
             [ forced_diaobjectid : bigint or None, the diaObjectId associated with this forcedsource ]
             visit : bigint
@@ -543,6 +542,13 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
          want is the union of those.)
 
     """
+
+    # NOTE TO DEVELOPERS : look at the list of fields in "Returns" in
+    # the docstring above.  Make sure that's up to date if you edit this
+    # function.  If you do, *also* make sure that the "dtypes" dict in
+    # the "if return_format='pandas'" block below is up to date with all
+    # of the fields.
+
     FDBLogger.debug( "Starting many_object_ltcvs..." )
 
     if nonevalue is not None:
@@ -683,8 +689,8 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                 dbcon.execute( q )
 
             # Extract detections
-            pos_fields = sql.SQL( "ra AS det_ra, dec AS det_dec, raerr AS det_raerr, "
-                                  "decerr AS det_decerr, ra_dec_cov AS det_ra_dec_cov, "
+            pos_fields = sql.SQL( "s.ra AS det_ra, s.dec AS det_dec, s.raerr AS det_raerr, "
+                                  "s.decerr AS det_decerr, s.ra_dec_cov AS det_ra_dec_cov, "
                                   if must_get_source_positions
                                   else "" )
             procver_fields = sql.SQL( "p.description AS base_procver_s, " if include_base_procver else "" )
@@ -1011,19 +1017,27 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                 del row['forced_obj_bpv']
 
     if return_format == 'pandas':
-        ltcvs = pandas.DataFrame( [ { k: v if k == 'rootid' else pandas.array(v)
-                                      for k, v in row.items() }
-                                    for row in ltcvs ] )
-        ltcvs = ltcvs.explode( [ c for c in ltcvs.columns if c != 'rootid' ] )
-        ltcvs.set_index( ['rootid', 'mjd'], inplace=True )
-        # ltcvs = laboriously_construct_pandas( ltcvs, keyname='rootid', indices=['mjd'],
-        #                                       int64cols=['diaforcedsourceid', 'diasourceid', 'visit',
-        #                                                  'source_diaobjectid', 'forced_diaobjectid'],
-        #                                       floatcols=['flux', 'fluxerr', 'det_raerr',
-        #                                                  'det_decerr', 'det_ra_dec_cov'],
-        #                                       doublecols=['mjd', 'det_ra', 'det_dec'],
-        #                                       boolcols=['isdet', 'ispatch'],
-        #                                       ignore_missing_cols=True )
+        # pandas.DataFrame.explode will turn everything into "object",
+        # so we have to manually set the types; use capital-I Int to get
+        # nullable integer types (which the pandas doc says is
+        # experimental, but we're going to trust it...).
+        dtypes = {}
+        dtypes.update( { k: 'Int64' for k in [ 'diasourceid', 'diaforcedsourceid',
+                                               'source_diaobjectid', 'forced_diaobjectid',
+                                               'visit' ] } )
+        dtypes.update( { k: 'Float32' for k in [ 'flux', 'fluxerr' ] } )
+        dtypes.update( { k: 'Float64' for k in [ 'mjd', 'det_ra', 'det_dec',
+                                                 'det_raerr', 'det_decerr', 'det_ra_dec_cov' ] } )
+        dtypes.update( { k: 'Int16' for k in [ 'isdet', 'ispatch' ] } )
+        dtypes.update( { k: 'object' for k in [ 'rootid', 'base_procver_s', 'base_procver_f' ] } )
+        dtypes['band'] = 'str'
+        dtypes = { k: v for k, v in dtypes.items() if k in row.keys() }
+        pd_ltcvs = pandas.DataFrame( [ { k: v if k == 'rootid' else pandas.array(v)
+                                         for k, v in row.items() }
+                                       for row in ltcvs ] )
+        pd_ltcvs = pd_ltcvs.explode( [ c for c in pd_ltcvs.columns if c != 'rootid' ] ).astype( dtypes )
+        pd_ltcvs.set_index( ['rootid', 'mjd'], inplace=True )
+        ltcvs = pd_ltcvs
 
     FDBLogger.debug( "...done with many_object_ltcvs" )
     if return_object_info:
@@ -1034,9 +1048,9 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
 
 def object_ltcv( processing_version='default', diaobjectid=None, bands=None, which='patch',
                  include_base_procver=False, include_source_positions=False,
-                 use_weighted_source_positions=False, always_use_weighted_source_positions=False,
+                 use_weighted_source_positions=False,
                  return_format='json',
-                 return_object_info=False, include_object_positions=False, position_processing_version=None,
+                 return_object_info=False, return_diaobject_positions=False, position_processing_version=None,
                  mjd_now=None, dbcon=None ):
     """Get the lightcurve for an object.
 
@@ -1107,10 +1121,9 @@ def object_ltcv( processing_version='default', diaobjectid=None, bands=None, whi
                               include_base_procver=include_base_procver,
                               include_source_positions=include_source_positions,
                               return_object_info=return_object_info,
-                              include_object_positions=include_object_positions,
+                              return_diaobject_positions=return_diaobject_positions,
                               position_processing_version=position_processing_version,
                               use_weighted_source_positions=use_weighted_source_positions,
-                              always_use_weighted_source_positions=always_use_weighted_source_positions,
                               return_format=return_format,
                               mjd_now=mjd_now,
                               dbcon=dbcon )
@@ -1396,8 +1409,8 @@ def object_search( processing_version='default', just_objids=False, searchband=N
 
 
 def get_hot_ltcvs( processing_version, position_processing_version=None,
-                   include_object_positions=True, include_source_positions=False, include_base_procver=False,
-                   use_weighted_source_positions=False, always_use_weighted_source_positions=False,
+                   return_diaobject_positions=True, include_source_positions=False, include_base_procver=False,
+                   use_weighted_source_positions=False,
                    detected_since_mjd=None, detected_in_last_days=None,
                    mjd_now=None, source_patch=True, return_format='json', dbcon=None ):
     """Get lightcurves of objects with a recent detection.
@@ -1409,8 +1422,8 @@ def get_hot_ltcvs( processing_version, position_processing_version=None,
         alias, to use for searching diasource and diaforcedsource tables.
 
       position_processing_version: string, default None
-        Ignored if always_use_weighted_source_positions is True or if
-        include_object_positions=False.  The processing version for
+        Ignored if use_weighted_sourcepositions=True or
+        return_diaobject_positions=False.  The processing version for
         getting object positions.  If not given, will use
         object_processing_version.  If the position from the desired
         processing version isn't found, then the position fields in the
@@ -1425,15 +1438,7 @@ def get_hot_ltcvs( processing_version, position_processing_version=None,
         there aren't any sources with S/N>3, then you won't get an
         a weighted source position for that object.
 
-      always_use_weighted_source_positions: bool, default False
-        Don't bother searching for object positions, just use weighted
-        source positions.  Implies use_weighted_source_positions, and
-        implies include_object_positions=False.  (These positions may
-        be better than the ones you get from the diaobject_position table,
-        at least for realtime sources.  The case may be different in the
-        future when we've loaded in actual data releases.)
-
-      include_object_positions: bool, default True
+      return_diaobject_positions: bool, default True
         Include positions from the diaobject_position table.
 
       include_source_positions: bool, default False
@@ -1530,7 +1535,7 @@ def get_hot_ltcvs( processing_version, position_processing_version=None,
         objinfo: pandas.DataFrame
            Information about the objects.  Sorted and indexed by
            diaobjectid.  Will have a colum rootid (uuid) with the rootid
-           of the object.  If either include_objecT_positions or
+           of the object.  If either return_diaobject_positions or
            use_weighted_source_positions is True, will also have give
            additional columns, ra, dec, raerr, decerr, ra_dec_cov.
 
@@ -1539,16 +1544,13 @@ def get_hot_ltcvs( processing_version, position_processing_version=None,
            for objects ingested from alerts is not completely clear.
            The columns will be null for objects that don't have an entry
            with the right processing version in diaobject_positions.  If
-           you specify use_weighted_source_positions, then were no
-           diaobject_position was available, a weighted (by (S/N)²)
+           you specify use_weighted_source_positions, then a weighted (by (S/N)²)
            average of source positions for all sources *with the same
            rootid* will be in these fields where there was no
            diaobject_position.  If you specify
            always_use_weighted_source_positions, then the position
            fields will *only* have positions from weighted source
-           positions.  (They can still be null if there are no sources
-           with S/N>3, or if there are sources in the database for which
-           the ra/dec columns weren't filled.)
+           positions. [I think... verify this.]
 
            WARNING: this may well have a different number of rows than
            ltcvdf, because there may be multiple diaObjectIds in a given
@@ -1621,8 +1623,7 @@ def get_hot_ltcvs( processing_version, position_processing_version=None,
                                       include_base_procver=include_base_procver,
                                       include_source_positions=include_source_positions,
                                       use_weighted_source_positions=use_weighted_source_positions,
-                                      always_use_weighted_source_positions=always_use_weighted_source_positions,
-                                      include_object_positions=include_object_positions,
+                                      return_diaobject_positions=return_diaobject_positions,
                                       return_object_info=True )
 
         finally:

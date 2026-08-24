@@ -82,6 +82,7 @@ RUN source /venv/bin/activate && \
        "flask-sock>=0.7.0,<0.8.0" \
        "gevent>=26.7.0,<27.0.0" \
        "gunicorn>=25.3.0,<26.0.0" \
+       "nested-pandas>=0.7.0,<0.8.0" \
        "numpy>=2.5.1,<3.0.0" \
        "pandas>=3.0.5,<4.0.0" \
        "polars>=1.43.0,<2.0.0" \

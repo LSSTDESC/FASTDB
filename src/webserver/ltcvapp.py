@@ -69,6 +69,8 @@ class GetManyLtcvs( BaseView ):
 
         if flask.request.is_json:
             kwargs = flask.request.json
+            if not isinstance( kwargs, dict ):
+                raise FASTDBWebException( "POST data must be a dict passed as json" )
             unknown = set( kwargs.keys() ) - { 'bands', 'which', 'offset', 'limit', 'nonevalue',
                                                'include_base_procver', 'include_source_positions',
                                                'use_weighted_source_positions', 'return_object_info',
@@ -77,6 +79,7 @@ class GetManyLtcvs( BaseView ):
             if len(unknown) > 0:
                 raise FASTDBWebException( f"Unknown data parameters: {unknown}" )
         else:
+            FDBLogger.info( f"fask.request.data is type {type(flask.request.data)}" )
             kwargs = {}
 
         try:
@@ -260,9 +263,9 @@ class GetHotTransients( BaseView ):
     """
 
     def do_the_things( self, procver='realtime' ):
-        known_keys = { 'position_processing_version', 'include_object_positions',
+        known_keys = { 'position_processing_version', 'return_diaobject_positions',
                        'include_source_positions', 'include_base_procver',
-                       'use_weighted_source_positions', 'always_use_weighted_source_positions',
+                       'use_weighted_source_positions',
                        'detected_since_mjd', 'detected_in_last_days', 'mjd_now',
                        'source_patch' }
 
