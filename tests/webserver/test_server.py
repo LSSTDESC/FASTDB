@@ -183,7 +183,10 @@ def test_getdiaobjectinfo( fastdb_client, procver_collection, set_of_lightcurves
         with pytest.raises( RuntimeError, match=( 'Error response from server, status 422: '
                                                   'Conflicting processing versions; .* specified in the URL, '
                                                   'but .* passed in the body' ) ):
-            res = fastdb_client.post( '/getdiaobjectinfo/realtime', json={ 'processing_version': 'pvc_pv2' } )
+            res = fastdb_client.post( '/getdiaobjectinfo/realtime/0', json={ 'processing_version': 'pvc_pv2' } )
+        with pytest.raises( RuntimeError, match=( 'Error response from server, status 422: '
+                                                  'objids must be a list of integers or a list of uuids' ) ):
+            res = fastdb_client.post( '/getdiaobjectinfo/foo', json={ 'processing_version': 'pvc_pv2' } )
         with pytest.raises( RuntimeError, match=( 'Error response from server, status 422: '
                                                   'objids must be a list of integers or a list of uuids' ) ):
             res = fastdb_client.post( '/getdiaobjectinfo/realtime' )
@@ -206,17 +209,18 @@ def test_getdiaobjectinfo( fastdb_client, procver_collection, set_of_lightcurves
         # assert res['rootid'] == [ str(roots[0]['root'].id), str(roots[1]['root'].id), str(roots[2]['root'].id) ]
 
         res = fastdb_client.post( "/getdiaobjectinfo/pvc_pv2", json={ 'objectids': [ 200, 201 ] } )
-        assert res['diaobjectid'] == [ [ 200 ], [ 201, 2011 ] ]
-        assert res['rootid'] == [ str(roots[i]['root'].id) for i in [ 0, 1 ] ]
+        assert sorted( res['diaobjectid'] ) == [ [ 200 ], [ 201, 2011 ] ]
+        assert res['rootid'] == sorted( [ str(roots[i]['root'].id) for i in [ 0, 1 ] ] )
         assert set( res.keys() ) == { 'diaobjectid', 'rootid', 'obj_base_procver', 'pos_base_procver',
                                       'ra', 'dec',
                                       'diaobject_ra', 'diaobject_dec', 'diaobject_raerr',
                                       'diaobject_decerr', 'diaobject_ra_dec_cov' }
 
         res = fastdb_client.post( "/getdiaobjectinfo/pvc_pv2", json={ 'objectids': [ 200, 201, 202 ],
-                                                                      'columns': [ 'diaobjectid', 'ra', 'dec' ] } )
-        assert res['diaobjectid'] == [ [ 200 ], [ 201, 2011 ], [ 202 ] ]
-        assert set( res.keys() ) == { 'diaobjectid', 'ra', 'dec' }
+                                                                      'return_diaobject_positions': 0 } )
+        assert sorted( res['diaobjectid'] ) == [ [ 200 ], [ 201, 2011 ], [ 202 ] ]
+        assert res['rootid'] == sorted( [ str(roots[i]['root'].id) for i in [ 0, 1, 2 ] ] )
+        assert set( res.keys() ) == { 'rootid', 'ra', 'dec', 'diaobjectid', 'obj_base_procver' }
 
 
     finally:

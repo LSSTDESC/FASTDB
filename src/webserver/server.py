@@ -219,40 +219,44 @@ class GetDiaObjectInfo( BaseView ):
     def do_the_things( self, procver=None, objid=None ):
         if flask.request.is_json:
             data = flask.request.json
+            if not isinstance( data, dict ):
+                raise FASTDBWebException( "POST data must be a JSON dict" )
             kwargs = copy.deepcopy( data )
 
-            known_kwargs = [ 'objectids', 'processing_version', 'position_processing_version',
-                             'base_procvers', 'return_diaobject_positions' ]
+            known_kwargs = { 'objectids', 'processing_version', 'position_processing_version',
+                             'base_procvers', 'return_diaobject_positions' }
             unknown = set( kwargs.keys() ) - known_kwargs
             if len( unknown ) > 0:
                 raise FASTDBWebException( f"Unknown data parameters: {unknown}" )
+        else:
+            kwargs = {}
 
-            if 'objectids' in kwargs:
-                if objid is not None:
-                    raise FASTDBWebException( "Error, object id given in both URL and body.  Only do one." )
-                objid = kwargs['objectids']
-                procver = ( procver if procver is not None
-                            else kwargs['processing_version'] if 'processing_version' in kwargs
-                            else 'default' )
-                del kwargs['objectids']
-            elif objid is None:
-                # OK, calling semantics are kinda complicated here.  If no objids were specified
-                #   in the data, and there was only one REST argument, then we actually assume
-                #   it's an objid rather than a procver.
-                objid = procver
-                procver = 'default' if 'processing_version' not in kwargs else kwargs['processing_version']
+        if 'objectids' in kwargs:
+            if objid is not None:
+                raise FASTDBWebException( "Error, object id given in both URL and body.  Only do one." )
+            objid = kwargs['objectids']
+            procver = ( procver if procver is not None
+                        else kwargs['processing_version'] if 'processing_version' in kwargs
+                        else 'default' )
+            del kwargs['objectids']
+        elif objid is None:
+            # OK, calling semantics are kinda complicated here.  If no objids were specified
+            #   in the data, and there was only one REST argument, then we actually assume
+            #   it's an objid rather than a procver.
+            objid = procver
+            procver = 'default' if 'processing_version' not in kwargs else kwargs['processing_version']
 
-            if 'processing_version' in kwargs:
-                if ( procver is not None ) and ( kwargs['processing_version'] != procver ):
-                    raise FASTDBWebException( f"Conflicting processing versions; {procver} specified in the URL, "
-                                              f"but {kwargs['processing_version']} passed in the body!" )
-                else:
-                    procver = kwargs['processing_version']
+        if 'processing_version' in kwargs:
+            if ( procver is not None ) and ( kwargs['processing_version'] != procver ):
+                raise FASTDBWebException( f"Conflicting processing versions; {procver} specified in the URL, "
+                                          f"but {kwargs['processing_version']} passed in the body!" )
+            else:
+                procver = kwargs['processing_version']
 
-            kwargs['processing_version'] = procver if procver is not None else 'default'
+        kwargs['processing_version'] = procver if procver is not None else 'default'
 
         try:
-            return ltcv.get_object_infos( objid, processing_version=procver, return_format='json', **kwargs )
+            return ltcv.get_object_infos( objid, return_format='json', **kwargs )
         except Exception as ex:
             raise FASTDBWebException( str(ex) )
 
