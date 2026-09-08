@@ -220,6 +220,7 @@ def messy_import_30days( sourceimporter_args, alerts_30days_sent_and_brokermessa
             col = db.get_mongo_collection( mg, 'source_thumbnails' )
             col.delete_many({})
 
+
 @pytest.fixture( scope='module' )
 def messy_import_30days_batched( sourceimporter_args, alerts_30days_sent_and_brokermessage_consumed ):
     try:
@@ -245,6 +246,7 @@ def messy_import_30days_batched( sourceimporter_args, alerts_30days_sent_and_bro
         with db.MG() as mg:
             col = db.get_mongo_collection( mg, 'source_thumbnails' )
             col.delete_many({})
+
 
 # Import days 30-90 after importing days 0-30, and update the diasource_import_time table
 # Fixture yields the numbers from the import of days 30-90 (also include fixture
@@ -832,10 +834,9 @@ def test_import_30days( messy_import_30days, alerts_30days_sent_and_brokermessag
         assert t1 < now
         assert t1 > t0
 
+
 # This is maybe a trivial alert to test batching. Nothing is loaded since they are imported already?
 def test_import_30days_batched( messy_import_30days_batched, alerts_30days_sent_and_brokermessage_consumed ):
-    t0 = alerts_30days_sent_and_brokermessage_consumed
-    now = datetime.datetime.now( tz=datetime.UTC )
     nobj, nroot, npos, nsrc, nfrc, ninfo = messy_import_30days_batched
     print(nobj, nroot, npos, nsrc, nfrc, ninfo)
     assert nobj == 0
