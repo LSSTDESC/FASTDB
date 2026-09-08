@@ -286,15 +286,18 @@ class SourceImporter:
                             rejects.add( row[rejectid] )
 
                     else:
-                        # This is probably inefficient.  Generator to list to tuple.  python makes
-                        #   writing this easy, but it's probably doing multiple gratuitous memory copies
-                        data = [ None if row[f] is None
-                                 else simplejson.dumps(row[f], ignore_nan=True) if isinstance( row[f], dict )
-                                 else row[f]
-                                 for f in fields ]
+                        data = []
+                        for f in fields:
+                            if row[f] is None:
+                                data.append(None)
+                            elif isinstance(row[f], dict):
+                                data.append(simplejson.dumps(row[f], ignore_nan=True))
+                            else:
+                                data.append(row[f])
+
                         if base_procver_id is not None:
-                            data.append( base_procver_id )
-                        pgcopy.write_row( tuple( data ) )
+                            data.append(base_procver_id)
+                        pgcopy.write_row(data)
                         n += 1
 
             FDBLogger.debug( f"      ...wrote {n} rows to {temptable}" )
@@ -678,7 +681,7 @@ class SourceImporter:
     #
     # It seems that python won't let you name a method "import"
 
-    def import_from_mongo( self, t1=None ):
+    def import_from_mongo(self, t1=None, batch_mins: int = 0):
         """Import data from the mongodb database to PostgreSQL tables.
 
         Will find all broker alerts saved to the collections between
@@ -691,6 +694,11 @@ class SourceImporter:
           t1 : datetime.datetime, default None
             Only import alerts that were saved to the mongo database
             through this time.  If None, will use now.
+
+          batch_mins : integer of minutes per batch, default None
+            If provided will import alerts in batches of `batch_mins`
+            starting with the earliest alert. Meant to help with memory issues
+            when importing large amounts of alerts.
 
         Returns
         -------
@@ -707,54 +715,99 @@ class SourceImporter:
             with db.DBCon() as dbcon:
                 timestampexists = False
                 t0 = None
-                rows, _cols = dbcon.execute( "SELECT t FROM diasource_import_time WHERE collection=%(col)s",
-                                             { 'col': self.collection_base_name } )
+                rows, _cols = dbcon.execute(
+                    "SELECT t FROM diasource_import_time WHERE collection=%(col)s",
+                    {"col": self.collection_base_name}
+
+                )
                 if len(rows) > 0:
                     timestampexists = True
                     t0 = util.datetime_to_utc( rows[0][0], with_tz=True, now_on_none=False )
-
                 t1 = util.datetime_to_utc( t1, with_tz=True, now_on_none=True )
 
-                # Make sure foreign key constraints aren't goign to trip us up
-                #   below, but that they're only checked at the end of the transaction.
-                if not self.debug_just_read_mongo:
-                    dbcon.execute( "SET CONSTRAINTS fk_diasource_diaobject DEFERRED" )
-                    dbcon.execute( "SET CONSTRAINTS fk_diaforcedsource_diaobject DEFERRED" )
+                timeline = [t0, t1]
+                if not t0 and t1: # no t0, so first import
+                    # use the earliest `savetime` from the mongo collection to infer t0
+                    with db.MGCon() as mg:
+                        t0 = mg.collection(f"{self.collection_base_name}_diasource").find_one(
+                            sort={"savetime": 1} # pymongo.ASCENDING == 1
+                        )['savetime']
+                        t0 = util.datetime_to_utc(t0, with_tz=True, now_on_none=False)
 
-                FDBLogger.debug( "Importing objects..." )
-                nobj, nroot, npos = self.import_objects( t0, t1, dbcon=dbcon, commit=False )
-                FDBLogger.debug( "Importing sources..." )
-                nsrc = self.import_sources( t0, t1, dbcon=dbcon, commit=False )
-                FDBLogger.debug( "Importing forcedsources..." )
-                nfrc = self.import_forcedsources( t0, t1, dbcon=dbcon, commit=False )
-                FDBLogger.debug( "Importing brokerinfos..." )
-                ninfo = self.import_brokerinfo( t0, t1, dbcon=dbcon, commit=False )
+                # To batch we need to make sure t0 is not None in `timeline`. But otherwise t0 can be None
+                if type(batch_mins) is not int: raise ValueError("batch_mins argument must be integer.")
+                batch_mins = abs(batch_mins)
+                if (batch_mins > 0) and t0 and t1:
+                    tinterval = t1 - t0
 
+                    # batch the full time interval into chunks of `batch_mins` minutes
+                    tmins = tinterval.total_seconds() / 60
+                    nbatches = int(tmins // batch_mins)
+                    timeline = [t0]
+                    for i in range(nbatches):
+                        timeline.append(t0+(i+1)*datetime.timedelta(minutes=batch_mins))
+                    timeline.append(t1) # list of [t0, t0+batchduration, t0+2*batchduration, ..., t1]
 
-                with db.MGCon() as mg:
-                    FDBLogger.debug( "Importing cutouts..." )
-                    mongosession = self.import_cutouts( mg, t0, t1, commit=False )
-
+            if batch_mins > 0:
+                FDBLogger.debug(f"Importing in batches of {batch_mins} minute(s)...")
+            nobj, nroot, npos, nsrc, nfrc, ninfo = 0, 0, 0, 0, 0, 0
+            for i in range(len(timeline)-1):
+                ti, tf = timeline[i], timeline[i+1]
+                with db.DBCon() as dbcon:
+                    # Make sure foreign key constraints aren't goign to trip us up
+                    #   below, but that they're only checked at the end of the transaction.
                     if not self.debug_just_read_mongo:
-                        FDBLogger.debug( "Updating diasource_import_time..." )
-                        if timestampexists:
-                            dbcon.execute( "UPDATE diasource_import_time SET t=%(t)s WHERE collection=%(col)s",
-                                           { 't': t1, 'col': self.collection_base_name } )
-                        else:
-                            dbcon.execute( "INSERT INTO diasource_import_time(collection,t) "
-                                           "VALUES(%(col)s,%(t)s)",
-                                           { 't': t1, 'col': self.collection_base_name } )
+                        dbcon.execute( "SET CONSTRAINTS fk_diasource_diaobject DEFERRED" )
+                        dbcon.execute( "SET CONSTRAINTS fk_diaforcedsource_diaobject DEFERRED" )
 
-                    # Only commit once at the end.  That way, if anything goes wrong,
-                    #   the database will be rolled back.  No objects or sources will
-                    #   have been saved, and the timestamp will not have been updated.
-                    # The timestamp will be updated if and only if everything imported.
-                    if not self.debug_just_read_mongo:
-                        FDBLogger.debug( "Committing postgres..." )
-                        dbcon.commit()
-                        FDBLogger.debug( "Committing mongo..." )
-                        mongosession.commit_transaction()
-                        mongosession.end_session()
+                    FDBLogger.debug(f"Importing from {ti} to {tf}...")
+                    FDBLogger.debug( "Importing objects..." )
+                    nobji, nrooti, nposi = self.import_objects(
+                        ti, tf, dbcon=dbcon, commit=False
+                    )
+                    FDBLogger.debug( "Importing sources..." )
+                    nsrci = self.import_sources(
+                        ti, tf, dbcon=dbcon, commit=False
+                    )
+                    FDBLogger.debug( "Importing forcedsources..." )
+                    nfrci = self.import_forcedsources(
+                        ti, tf, dbcon=dbcon, commit=False
+                    )
+                    FDBLogger.debug( "Importing brokerinfos..." )
+                    ninfoi = self.import_brokerinfo(
+                        ti, tf, dbcon=dbcon, commit=False
+                    )
+                    nobj  += nobji
+                    nroot += nrooti
+                    npos  += nposi
+                    nsrc  += nsrci
+                    nfrc  += nfrci
+                    ninfo += ninfoi
+
+                    with db.MGCon() as mg:
+                        FDBLogger.debug( "Importing cutouts..." )
+                        mongosession = self.import_cutouts( mg, ti, tf, commit=False )
+
+                        if not self.debug_just_read_mongo:
+                            FDBLogger.debug( "Updating diasource_import_time..." )
+                            if timestampexists:
+                                dbcon.execute( "UPDATE diasource_import_time SET t=%(t)s WHERE collection=%(col)s",
+                                            { 't': tf, 'col': self.collection_base_name } )
+                            else:
+                                dbcon.execute( "INSERT INTO diasource_import_time(collection,t) "
+                                            "VALUES(%(col)s,%(t)s)",
+                                            { 't': tf, 'col': self.collection_base_name } )
+
+                        # Only commit once at the end of each batch.  That way, if anything goes wrong,
+                        #   the database will be rolled back.  No objects or sources will
+                        #   have been saved, and the timestamp will not have been updated.
+                        # The timestamp will be updated if and only if everything in the batch imported.
+                        if not self.debug_just_read_mongo:
+                            FDBLogger.debug( "Committing postgres..." )
+                            dbcon.commit()
+                            FDBLogger.debug( "Committing mongo..." )
+                            mongosession.commit_transaction()
+                            mongosession.end_session()
 
                 FDBLogger.debug( "Done." )
 
@@ -771,26 +824,58 @@ class SourceImporter:
 # ======================================================================
 
 def main():
-    parser = argparse.ArgumentParser( 'source_importer.py', description='Import sources from mongo to postgres',
-                                      formatter_class=argparse.ArgumentDefaultsHelpFormatter )
-    parser.add_argument( "-c", "--collection", required=True, nargs='+',
-                         help="MongoDB collections to import from" )
-    parser.add_argument( "-o", "--object-base-processing-version", default=None,
-                         help="Base processing version (uuid or text) to tag imported objects with." )
-    parser.add_argument( "-p", "--object-position-base-processing-version", default=None,
-                         help="Base processing version (uuid or text) to tag imported object positions with." )
-    parser.add_argument( "-s", "--source-base-processing-version", required=True,
-                         help="Base processing version (uuid or text) to tag imported sources with." )
-    parser.add_argument( "-f", "--forcedsource-base-processing-version", required=True,
-                         help="Base processing version (uuid or text) to tag imported forced sources with." )
-    parser.add_argument( "-H", "--host-base-processing-version", default=None,
-                         help=( "Base processing verson (uuid or text) to tag imported hosts with.  "
-                                "Not currently used." ) )
-    parser.add_argument( "--t1", default=None, help="Only load alerts received through this time (UTC) (ISO format)" )
-    parser.add_argument( "-d", "--debug-just-read-mongo", default=False, action='store_true',
-                         help="Don't write to postgres (even temporary tables), just read mongo for timing." )
-    parser.add_argument( "-v", "--verbose", action='store_true', default=False,
-                         help="Show debug log messages" )
+    parser = argparse.ArgumentParser(
+        "source_importer.py",
+        description="Import sources from mongo to postgres",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument("-c", "--collection", required=True, nargs="+", help="MongoDB collections to import from")
+    parser.add_argument(
+        "-o",
+        "--object-base-processing-version",
+        default=None,
+        help="Base processing version (uuid or text) to tag imported objects with.",
+    )
+    parser.add_argument(
+        "-p",
+        "--object-position-base-processing-version",
+        default=None,
+        help="Base processing version (uuid or text) to tag imported object positions with.",
+    )
+    parser.add_argument(
+        "-s",
+        "--source-base-processing-version",
+        # required=True,
+        help="Base processing version (uuid or text) to tag imported sources with.",
+    )
+    parser.add_argument(
+        "-f",
+        "--forcedsource-base-processing-version",
+        # required=True,
+        help="Base processing version (uuid or text) to tag imported forced sources with.",
+    )
+    parser.add_argument(
+        "-H",
+        "--host-base-processing-version",
+        default=None,
+        help=("Base processing verson (uuid or text) to tag imported hosts with.  Not currently used."),
+    )
+    parser.add_argument("--t1", default=None, help="Only load alerts received through this time (UTC) (ISO format)")
+    parser.add_argument(
+        '-b',
+        '--batchmins',
+        type=int,
+        default=0,
+        help="If provided, the number of minutes between each batch of alerts to save, based on save time."
+    )
+    parser.add_argument(
+        "-d",
+        "--debug-just-read-mongo",
+        default=False,
+        action="store_true",
+        help="Don't write to postgres (even temporary tables), just read mongo for timing.",
+    )
+    parser.add_argument("-v", "--verbose", action="store_true", default=False, help="Show debug log messages")
     args = parser.parse_args()
 
     if args.verbose:
@@ -820,7 +905,10 @@ def main():
                              debug_just_read_mongo=args.debug_just_read_mongo )
 
         try:
-            nobj, nroot, npos, nsrc, nfrc, ninfo = si.import_from_mongo( t1=t1 )
+            nobj, nroot, npos, nsrc, nfrc, ninfo = si.import_from_mongo(
+                t1=t1,
+                batch_mins=args.batchmins
+            )
         except Exception:
             # The traceback will have been printed in import_from_collection
             FDBLogger.error( "Fail." )
