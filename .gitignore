@@ -28,7 +28,7 @@ docs/_static/**
 docs/_templates/**
 !docs/_templates/.placeholder
 
-
+*.DS_Store
 
 # Test install location
 install/

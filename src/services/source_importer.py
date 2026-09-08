@@ -735,7 +735,7 @@ class SourceImporter:
                         t0 = util.datetime_to_utc(t0, with_tz=True, now_on_none=False)
 
                 # To batch we need to make sure t0 is not None in `timeline`. But otherwise t0 can be None
-                if type(batch_mins) != int: raise ValueError("batch_mins argument must be integer.")
+                if type(batch_mins) is not int: raise ValueError("batch_mins argument must be integer.")
                 batch_mins = abs(batch_mins)
                 if (batch_mins > 0) and t0 and t1:
                     tinterval = t1 - t0
@@ -866,7 +866,7 @@ def main():
         '--batchmins',
         type=int,
         default=0,
-        help="If provided, the number of minutes between in batch of alerts to save. Alerts are batched based on save time."
+        help="If provided, the number of minutes between each batch of alerts to save, based on save time."
     )
     parser.add_argument(
         "-d",
