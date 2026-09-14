@@ -742,7 +742,7 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                 tmpsmade.append( 'tmp_forced' )
                 q = sql.SQL( textwrap.dedent(
                     """\
-                    /*+ IndexScan(s idx_diaforcedsource_rootid)
+                    /*+ IndexScan(s idx_diaforcedsource_diaobjectid)
                         IndexScan(ot idx_diaobject_rootid)
                     */
                     SELECT DISTINCT ON (t.rootid, s.visit)
@@ -753,7 +753,7 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                     INTO tmp_forced
                     FROM {objids_table} t
                     INNER JOIN diaobject ot ON t.rootid=ot.rootid
-                    INNER JOIN diaforcedsource s ON s.rootid=ot.rootid
+                    INNER JOIN diaforcedsource s ON s.diaobjectid=ot.diaobjectid
                     INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id
                                                          AND pv._table='diaforcedsource'
                                                          AND pv.procver_id={procver}

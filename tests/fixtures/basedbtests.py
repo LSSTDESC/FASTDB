@@ -207,7 +207,6 @@ def obj1_frced1( obj1, procver_collection ):
     bpvs, _pvs, _pvinfo = procver_collection
     frc = DiaForcedSource( base_procver_id=bpvs['bpv1_diaforcedsource'].id,
                            diaobjectid=obj1.diaobjectid,
-                           rootid=obj1.rootid,
                            diaforcedsourceid=1,
                            visit=64,
                            band='r',
@@ -234,7 +233,6 @@ def obj1_frced2( obj1, procver_collection ):
     bpvs, _pvs, _pvinfo = procver_collection
     frc = DiaForcedSource( base_procver_id=bpvs['bpv1_diaforcedsource'].id,
                            diaobjectid=obj1.diaobjectid,
-                           rootid=obj1.rootid,
                            diaforcedsourceid=2,
                            visit=128,
                            band='i',
@@ -261,7 +259,6 @@ def obj1_frced3( obj1, procver_collection ):
     bpvs, _pvs, _pvinfo = procver_collection
     frc = DiaForcedSource( base_procver_id=bpvs['bpv1_diaforcedsource'].id,
                            diaobjectid=obj1.diaobjectid,
-                           rootid=obj1.rootid,
                            diaforcedsourceid=3,
                            visit=256,
                            band='z',

@@ -255,7 +255,7 @@ class SourceImporter:
                         ).format( temptable=sql.Identifier(temptable), liketable=sql.Identifier(liketable) )
             dbcon.execute( q )
 
-            # Some tables (right now, diaforcesource) have some columns
+            # Some tables (right now... well, nothing) have some columns
             # that aren't imported, but are updated after this function
             # is called.  Need to remove null constraints from them so
             # the import succeeds.
@@ -373,7 +373,6 @@ class SourceImporter:
                                      batchsize=batchsize,
                                      base_procver_id=self.forcedsource_base_processing_version,
                                      rejectfields={ 'diaobjectid': { 0, None } },
-                                     not_null_columns=[ 'rootid' ]
                                     )
 
             pipeline = []
@@ -385,18 +384,8 @@ class SourceImporter:
             self._read_mongo_fields( dbcon, collection, pipeline, self.diaforcedsource_extra_fields,
                                      "temp_prvdiaforcedsource_extra_import", "diaforcedsource_extra",
                                      batchsize=batchsize, base_procver_id=self.forcedsource_base_processing_version,
-                                     rejectfields={ 'diaobjectid': { 0, None } },
-                                     not_null_columns=[ 'rootid' ] )
-
-        # Have to update the temp table with rootid from the object table.  (That edp2 doesn't include
-        # diaforcedsourceid is extremely annoying.)
-        # I hope this isn't infinitely slow.
-        q = sql.SQL( "UPDATE temp_prvdiaforcedsource_import t SET rootid=o.rootid "
-                     "FROM diaobject o WHERE t.diaobjectid=o.diaobjectid" )
-        dbcon.execute( q )
-        q = sql.SQL( "UPDATE temp_prvdiaforcedsource_extra_import t SET rootid=o.rootid "
-                     "FROM diaobject o WHERE t.diaobjectid=o.diaobjectid" )
-        dbcon.execute( q )
+                                     rejectfields={ 'diaobjectid': { 0, None } }
+                                    )
 
 
     def read_mongo_brokerinfo( self, dbcon, t0=None, t1=None, batchsize=1000 ):
@@ -593,7 +582,7 @@ class SourceImporter:
             #  broker gives us something that a previous broker didn't.
             FDBLogger.debug( "   ...upserting into diaforcedsource_extra" )
             q = sql.SQL( "INSERT INTO diaforcedsource_extra ( SELECT * FROM temp_prvdiaforcedsource_extra_import )\n"
-                          "ON CONFLICT (base_procver_id, rootid, visit) DO UPDATE SET (\n" )
+                          "ON CONFLICT (base_procver_id, diaobjectid, visit) DO UPDATE SET (\n" )
             first = True
             for f in self.diaforcedsource_extra_fields:
                 if first:

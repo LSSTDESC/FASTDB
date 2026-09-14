@@ -130,7 +130,6 @@ class FITSFileHandler( SNANAColumnMapper ):
             self.diaobject_map_columns( diaobject )
             diaobject.add_column( self.base_processing_version['diaobject'], name='base_procver_id' )
             diaobject.add_column( [ str(uuid.uuid4()) for i in range(len(head)) ], name='rootid' )
-            rootmap = { r['diaobjectid']: r['rootid'] for r in diaobject }
 
             diaobject_position = astropy.table.Table( head )
             self.diaobject_position_map_columns( diaobject_position )
@@ -219,8 +218,6 @@ class FITSFileHandler( SNANAColumnMapper ):
             if self.really_do:
                 forcedphot = astropy.table.Table( phot )
                 forcedphot.remove_column( 'photflag' )
-                forcedroots = [ rootmap[f['diaobjectid']] for f in forcedphot ]
-                forcedphot.add_column( forcedroots, name='rootid' )
                 nfrc = DiaForcedSource.bulk_insert_or_upsert( dict(forcedphot), assume_no_conflict=True )
                 FDBLogger.info( f"PID {os.getpid()} loaded {nfrc} forced photometry points from {photfile.name}" )
                 del forcedphot
