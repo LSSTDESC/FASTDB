@@ -16,6 +16,7 @@ class TestDiaForcedSource( BaseTestDB ):
         self.columns = {
             'base_procver_id',
             'diaobjectid',
+            'rootid',
             'visit',
             'diaforcedsourceid',
             'midpointmjdtai',
@@ -37,6 +38,7 @@ class TestDiaForcedSource( BaseTestDB ):
 
         self.obj1 = DiaForcedSource( base_procver_id=bpv['bpv1_diaforcedsource'].id,
                                      diaobjectid=obj1.diaobjectid,
+                                     rootid=obj1.rootid,
                                      visit=1,
                                      diaforcedsourceid=1,
                                      band='r',
@@ -49,6 +51,7 @@ class TestDiaForcedSource( BaseTestDB ):
         self.dict1 = { k: getattr( self.obj1, k ) for k in self.columns }
         self.obj2 = DiaForcedSource( base_procver_id=bpv['bpv1_diaforcedsource'].id,
                                      diaobjectid=obj1.diaobjectid,
+                                     rootid=obj1.rootid,
                                      visit=2,
                                      diaforcedsourceid=2,
                                      band='i',
@@ -61,6 +64,7 @@ class TestDiaForcedSource( BaseTestDB ):
         self.dict2 = { k: getattr( self.obj2, k ) for k in self.columns }
         self.dict3 = { 'base_procver_id': bpv['bpv1_diaforcedsource'].id,
                        'diaobjectid': obj1.diaobjectid,
+                       'rootid': obj1.rootid,
                        'visit': 3,
                        'diaforcedsourceid': 3,
                        'band': 'g',
@@ -80,6 +84,9 @@ class TestDiaForcedSourceExtra( BaseTestDB ):
         self.columns = {
             'diaforcedsourceid',
             'base_procver_id',
+            'diaobjectid',
+            'rootid',
+            'visit',
             'detector',
             'scienceflux',
             'sciencefluxerr',
@@ -106,6 +113,9 @@ class TestDiaForcedSourceExtra( BaseTestDB ):
         t3 = util.mjd_from_mjd_or_datetime_or_timestring( t3 )
         t4 = util.mjd_from_mjd_or_datetime_or_timestring( t4 )
         self.obj1 = DiaForcedSourceExtra( diaforcedsourceid=obj1_frced1.diaforcedsourceid,
+                                          diaobjectid=obj1_frced1.diaobjectid,
+                                          rootid=obj1_frced1.rootid,
+                                          visit=obj1_frced1.visit,
                                           base_procver_id=obj1_frced1.base_procver_id,
                                           detector=1,
                                           scienceflux=234.5,
@@ -115,6 +125,9 @@ class TestDiaForcedSourceExtra( BaseTestDB ):
                                          )
         self.dict1 = { k: getattr( self.obj1, k ) for k in self.columns }
         self.obj2 = DiaForcedSourceExtra( diaforcedsourceid=obj1_frced2.diaforcedsourceid,
+                                          diaobjectid=obj1_frced2.diaobjectid,
+                                          rootid=obj1_frced2.rootid,
+                                          visit=obj1_frced2.visit,
                                           base_procver_id=obj1_frced2.base_procver_id,
                                           detector=2,
                                           scienceflux=235.5,
@@ -124,6 +137,9 @@ class TestDiaForcedSourceExtra( BaseTestDB ):
                                          )
         self.dict2 = { k: getattr( self.obj2, k ) for k in self.columns }
         self.dict3 = { 'diaforcedsourceid': obj1_frced3.diaforcedsourceid,
+                       'diaobjectid': obj1_frced3.diaobjectid,
+                       'rootid': obj1_frced3.rootid,
+                       'visit': obj1_frced3.visit,
                        'base_procver_id': obj1_frced3.base_procver_id,
                        'detector': 3,
                        'scienceflux': 233.4,
