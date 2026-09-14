@@ -26,8 +26,8 @@ import fastavro
 import astropy.time
 import rkwebutil
 
-_fastdb_schema_namespace = 'fastdb.v10_0_0'
-_lsst_schema_namespace = 'lsst.v10_0'
+_fastdb_schema_namespace = 'fastdb.v11_1_0'
+_lsst_schema_namespace = 'lsst.v11_1'
 
 _default_datefmt = '%Y-%m-%d %H:%M:%S'
 _default_log_level = logging.DEBUG

@@ -6,6 +6,7 @@ avscdir = @installdir@/share/avsc
 share_DATA = antares-ca.pem
 
 avsc_DATA = avsc/fastdb.v10_0_0.BrokerMessage.avsc \
+	avsc/fastdb.v11_1_0.BrokerMessage.avsc \
 	avsc/lsst.v10_0.alert.avsc \
 	avsc/lsst.v10_0.diaObject.avsc \
 	avsc/lsst.v10_0.diaSource.avsc \

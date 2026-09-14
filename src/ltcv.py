@@ -488,7 +488,10 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
         indexes (rootid, mjd).  The columns are:
 
             diasourceid : bigint, the diaSoruceId, or null
-            [ diaforcedsourceid : bigint or null; only included if which isn't 'detections' ]
+            [ diaforcedsourceid : bigint or null; only included if which isn't 'detections'
+                                  WARNING : may be null even if there is a forced source because
+                                  (at least) edp2 doesn't have diaforcedsourceid!  Use
+                                  forced_diaobjectidd to detect. ]
             source_diaobjectid : bigint or None, the diaObjectId associated with this diasource
             [ forced_diaobjectid : bigint or None, the diaObjectId associated with this forcedsource ]
             visit : bigint
@@ -739,7 +742,7 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                 tmpsmade.append( 'tmp_forced' )
                 q = sql.SQL( textwrap.dedent(
                     """\
-                    /*+ IndexScan(s idx_diaforcedsource_diaobjectid)
+                    /*+ IndexScan(s idx_diaforcedsource_rootid)
                         IndexScan(ot idx_diaobject_rootid)
                     */
                     SELECT DISTINCT ON (t.rootid, s.visit)
@@ -750,7 +753,7 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                     INTO tmp_forced
                     FROM {objids_table} t
                     INNER JOIN diaobject ot ON t.rootid=ot.rootid
-                    INNER JOIN diaforcedsource s ON s.diaobjectid=ot.diaobjectid
+                    INNER JOIN diaforcedsource s ON s.rootid=ot.rootid
                     INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id
                                                          AND pv._table='diaforcedsource'
                                                          AND pv.procver_id={procver}

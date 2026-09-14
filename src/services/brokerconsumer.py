@@ -25,7 +25,7 @@ import db
 from kafka_consumer import KafkaConsumer
 
 # Default location of BrokerMessage schema
-_default_brokermessage_schemafile = "/fastdb/share/avsc/fastdb.v10_0_0.BrokerMessage.avsc"
+_default_brokermessage_schemafile = "/fastdb/share/avsc/fastdb.v11_1_0.BrokerMessage.avsc"
 
 from concurrent.futures import ThreadPoolExecutor  # for pittgoogle
 import pittgoogle

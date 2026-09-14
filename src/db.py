@@ -1823,7 +1823,7 @@ class DiaSourceExtra( DBBase ):
     _pk = [ 'diasourceid', 'base_procver_id' ]
 
     # This is a mapping of the bit in the flags field
-    #   to the boolean in the lsst v10 alert
+    #   to the boolean in the lsst v11.1 alert
     _flags_bits = { 0x00000001: 'centroid_flag',
                     0x00000002: 'apFlux_flag',
                     0x00000004: 'apFlux_flag_apertureTruncated',
@@ -1842,10 +1842,11 @@ class DiaSourceExtra( DBBase ):
                     0x00008000: 'isDipole',
                     0x00010000: 'dipleFitAttempted',
                     0x00020000: 'glint_trail',
+                    0x00040000: 'trail_flag'
                    }
 
     # This is a mapping of the bit in the pixelflags field
-    #   to the boolean in the lsst v10 alert
+    #   to the boolean in the lsst v11.1 alert
     _pixelflags_bits = { 0x00000001: 'pixelFlags',
                          0x00000002: 'pixelFlags_bad',
                          0x00000004: 'pixelFlags_cr',
