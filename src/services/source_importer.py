@@ -49,7 +49,8 @@ class SourceImporter:
     diaforcedsource_fields = [ 'diaforcedsourceid', 'diaobjectid', 'visit', 'band', 'midpointmjdtai',
                                'psfflux', 'psffluxerr', 'ra', 'dec' ]
 
-    diaforcedsource_extra_fields = [ 'diaforcedsourceid', 'detector', 'scienceflux', 'sciencefluxerr',
+    diaforcedsource_extra_fields = [ 'diaforcedsourceid', 'diaobjectid', 'visit', 'detector',
+                                     'scienceflux', 'sciencefluxerr',
                                      'timeprocessedmjdtai', 'timewithdrawnmjdtai' ]
 
 
@@ -246,12 +247,23 @@ class SourceImporter:
 
     def _read_mongo_fields( self, dbcon, collection, pipeline, fields,
                             temptable, liketable, batchsize=10000,
-                            base_procver_id=None, rejectfields={}, rejectid=None ):
+                            base_procver_id=None, rejectfields={}, rejectid=None,
+                            not_null_columns=None ):
 
         if not self.debug_just_read_mongo:
             q = sql.SQL( "CREATE TEMP TABLE IF NOT EXISTS {temptable} (LIKE {liketable})"
                         ).format( temptable=sql.Identifier(temptable), liketable=sql.Identifier(liketable) )
             dbcon.execute( q )
+
+            # Some tables (right now... well, nothing) have some columns
+            # that aren't imported, but are updated after this function
+            # is called.  Need to remove null constraints from them so
+            # the import succeeds.
+            if not_null_columns is not None:
+                for col in not_null_columns:
+                    q = sql.SQL( "ALTER TABLE {temptable} ALTER COLUMN {col} DROP NOT NULL"
+                            ).format( temptable=sql.Identifier(temptable), col=sql.Identifier(col) )
+                    dbcon.execute( q )
 
         # ****
         # strio = io.StringIO()
@@ -277,7 +289,7 @@ class SourceImporter:
             with dbcon.cursor.copy( f"COPY {temptable}({','.join(writefields)}) FROM STDIN" ) as pgcopy:
                 for row in mongocursor:
                     # We may need to reject some things.  E.g., we may have pulled alerts that have
-                    #  no diaboejctid because they are solar system lists.
+                    #  no diabojectid because they are solar system lists.
                     # NOT PERFECT : because of how brokerconsumer works, we can't filter these rows
                     #  out thumbnails, so extra stuff will show up there.
                     if any( ( f in row ) and ( row[f] in bads ) for f, bads in rejectfields.items() ):
@@ -356,12 +368,12 @@ class SourceImporter:
             group.update( { k: { "$first": f"${k}" } for k in self.diaforcedsource_fields } )
             pipeline.append( { "$group": group } )
             collection = mg.collection( f"{self.collection_base_name}_diaforcedsource" )
-            rejects = self._read_mongo_fields( dbcon, collection, pipeline, self.diaforcedsource_fields,
-                                               "temp_prvdiaforcedsource_import", "diaforcedsource",
-                                               batchsize=batchsize,
-                                               base_procver_id=self.forcedsource_base_processing_version,
-                                               rejectfields={ 'diaobjectid': { 0, None } },
-                                               rejectid='diaforcedsourceid' )
+            self._read_mongo_fields( dbcon, collection, pipeline, self.diaforcedsource_fields,
+                                     "temp_prvdiaforcedsource_import", "diaforcedsource",
+                                     batchsize=batchsize,
+                                     base_procver_id=self.forcedsource_base_processing_version,
+                                     rejectfields={ 'diaobjectid': { 0, None } },
+                                    )
 
             pipeline = []
             self._add_mongo_time_limits_to_pipeline( pipeline, t0, t1 )
@@ -372,7 +384,8 @@ class SourceImporter:
             self._read_mongo_fields( dbcon, collection, pipeline, self.diaforcedsource_extra_fields,
                                      "temp_prvdiaforcedsource_extra_import", "diaforcedsource_extra",
                                      batchsize=batchsize, base_procver_id=self.forcedsource_base_processing_version,
-                                     rejectfields={ 'diaforcedsourceid': rejects } )
+                                     rejectfields={ 'diaobjectid': { 0, None } }
+                                    )
 
 
     def read_mongo_brokerinfo( self, dbcon, t0=None, t1=None, batchsize=1000 ):
@@ -569,7 +582,7 @@ class SourceImporter:
             #  broker gives us something that a previous broker didn't.
             FDBLogger.debug( "   ...upserting into diaforcedsource_extra" )
             q = sql.SQL( "INSERT INTO diaforcedsource_extra ( SELECT * FROM temp_prvdiaforcedsource_extra_import )\n"
-                          "ON CONFLICT (diaforcedsourceid, base_procver_id) DO UPDATE SET (\n" )
+                          "ON CONFLICT (base_procver_id, diaobjectid, visit) DO UPDATE SET (\n" )
             first = True
             for f in self.diaforcedsource_extra_fields:
                 if first:

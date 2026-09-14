@@ -37,6 +37,7 @@ class UUIDJSONEncoder( simplejson.JSONEncoder ):
 
 class FASTDBWebException( RuntimeError ):
     def __init__( self, *args, returncode=422, **kwargs ):
+        FDBLogger.error( f"Creating a FASTDBWebException with returncode {422}, args {args}, kwargs {kwargs}" )
         self.returncode = returncode
         super().__init__( *args, **kwargs )
 

@@ -449,12 +449,13 @@ def check_database_contents( bad_diaobjects ):
                                                .format( s=sql.Identifier("s", c), p=sql.Identifier("p", c),
                                                         c=sql.Identifier(c) )
                                                for c in [ 'detector', 'x', 'y', 'xerr', 'yerr',
-                                                          'x_y_cov', 'psflnl', 'psfchi2', 'psfndata', 'snr',
-                                                          # 'scienceflux', 'sciencefluxerr',
+                                                          'x_y_cov', 'psflnl', 'psfchi2', 'snr',
+                                                          # 'psfndata', 'scienceflux', 'sciencefluxerr',
                                                           'templateflux', 'templatefluxerr',
                                                           'reliability', 'ixx', 'iyy', 'ixxpsf', 'iyypsf',
                                                           'ixypsf', 'flags', 'pixelflags',
-                                                          'apflux', 'apfluxerr', 'bboxsize',
+                                                          'apflux', 'apfluxerr',
+                                                          # 'bboxsize',
                                                           'parentdiasourceid' ] )
                 frccols = sql.SQL(',').join( sql.SQL("( ( {s} IS NULL AND {p} IS NULL ) or ( {s}={p} ) ) AS {c}")
                                              .format( s=sql.Identifier("s", c), p=sql.Identifier("p", c),

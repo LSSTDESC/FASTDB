@@ -429,14 +429,14 @@ Do::
 
 where ``<version>`` is probably something like ``rknop-dev``.
 
-rknop_dev environment
----------------------
+production environment
+----------------------
 
 (This is a note for Rob about running a test environment on NERSC Spin.)
 
 The base installation directory is::
 
-  /global/cfs/cdirs/lsst/groups/TD/SOFTWARE/fastdb_deployment/rknop_dev
+  /global/cfs/cdirs/lsst/groups/TD/SOFTWARE/fastdb_deployment/production
 
 In that directory, make sure there are subdirectories ``install``, ``query_results``, and ``sessions``, in addition to the ``FASTDB`` checkout generated with::
 
@@ -445,14 +445,14 @@ In that directory, make sure there are subdirectories ``install``, ``query_resul
   git checkout <version>
   git submodule update --init
 
-The ``.yaml`` files defining the Spin workloads are in ``admin/spin/rknop_dev`` in the git archive.  (Note that, unless I've screwed up (...which has happened...), the files ``secrets.yaml`` and ``webserver-cert.yaml`` will not be complete, because those are the kinds of things you don't want to commit to a public git archive.  Edit those files to put in the actual passwords and SSL key/certificates before using them, and **make sure to remove the secret stuff before   committing anything to git**.  If you screw up, you have to change **all** the secrets.)  To install the code to work with those ``.yaml`` files, run::
+The ``.yaml`` files defining the Spin workloads are in ``admin/spin/production`` in the git archive.  (Note that, unless I've screwed up (...which has happened...), the files ``secrets.yaml`` and ``webserver-cert.yaml`` will not be complete, because those are the kinds of things you don't want to commit to a public git archive.  Edit those files to put in the actual passwords and SSL key/certificates before using them, and **make sure to remove the secret stuff before   committing anything to git**.  If you screw up, you have to change **all** the secrets.)  To install the code to work with those ``.yaml`` files, run::
 
-  cd /global/cfs/cdirs/lsst/groups/TD/SOFTWARE/fastdb_deployment/rknop_dev/FASTDB
+  cd /global/cfs/cdirs/lsst/groups/TD/SOFTWARE/fastdb_deployment/production/FASTDB
   touch aclocal.m4 configure
   find . -name Makefile.am -exec touch \{\} \;
   find . -name Makefile.in -exec touch \{\} \;
   ./configure \
-    --with-installdir=/global/cfs/cdirs/lsst/groups/TD/SOFTWARE/fastdb_deployment/rknop_dev/install \
+    --with-installdir=/global/cfs/cdirs/lsst/groups/TD/SOFTWARE/fastdb_deployment/production/install \
     --with-smtp-server=smtp.lbl.gov \
     --with-smtp-port=25 \
     --with-email-from=raknop@lbl.gov \

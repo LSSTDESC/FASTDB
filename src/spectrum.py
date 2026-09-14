@@ -246,8 +246,8 @@ def what_spectra_are_wanted( procver='realtime', position_procver=None,
 
         srcltcvs, objinfo = ltcv.many_object_ltcvs( processing_version=procver, which='detections',
                                                     objids_table='tmp_wanted_no_spec', return_format='pandas',
-                                                    return_object_info=True, include_object_positions=True,
-                                                    always_use_weighted_source_positions=True,
+                                                    return_object_info=True, return_diaobject_positions=True,
+                                                    use_weighted_source_positions=True,
                                                     mjd_now=mjdnow, dbcon=con )
         frcltcvs = ltcv.many_object_ltcvs( processing_version=procver, which='forced',
                                            objids_table='tmp_wanted_no_spec', return_format='pandas',
