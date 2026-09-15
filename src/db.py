@@ -995,8 +995,13 @@ class DBBase:
                 raise ValueError( "Can only pass column values as named arguments "
                                   "if cols and vals are both None" )
         else:
-            cols = kwargs.keys()
-            vals = kwargs.values()
+            cols = list( kwargs.keys() )
+            # ...is it rash to assume that keys() and values() will return
+            #   things in the same order in subsequent calls?  I know that
+            #   CPython implementation maintains insert order when you call#
+            #   either, but what is the python spec?  Be safe.
+            # vals = kwargs.values()
+            vals = [ kwargs[k] for k in cols ]
 
         keys = set( cols )
         if not keys.issubset( mycols ):
@@ -1892,6 +1897,22 @@ class DiaForcedSourceExtra( DBBase ):
     __tablename__ = "diaforcedsource_extra"
     _tablemeta = None
     _pk = [ 'diaforcedsourceid', 'base_procver_id' ]
+
+    # Try to keep these synced iwth DiaSourceExtra (no overlaps), just in
+    #   case a future LSST schema has new bools in one schema that were
+    #   previously already in the other.
+
+    _flags_bits = { 0x00000010: 'psfFlux_flag',
+                    0x00080000: 'invalidPsfFlag',
+                    0x00100000: 'psfDiffFlux_flag',
+                    0x00200000: 'diff_PixelFlags_nodataCenter'
+                   }
+
+    _pixelflags_bits = { k: v for k, v in DiaSourceExtra._pixelflags_bits.items()
+                         if v in ( 'pixelFlags_bad', 'pixelFlags_cr', 'pixelFlags_crCenter', 'pixelFlags_edge',
+                                   'pixelFlags_interpolated', 'pixelFlags_interpolatedCenter', 'pixelFlags_nodata',
+                                   'pixelFlags_saturated', 'pixelFlags_saturatedCenter', 'pixelFlags_suspect',
+                                   'pixelFlags_suspectCenter' ) }
 
 
 # ======================================================================
