@@ -2,6 +2,7 @@
 # Build and install FASTDB on the single-node Arbutus K3s cluster.
 set -euo pipefail
 
+# Define the deployment paths, names, and default image labels.
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 NAMESPACE="fastdb-arbutus-dev"
 RELEASE_NAME="fastdb"
@@ -9,14 +10,20 @@ VALUES_FILE="$REPO_ROOT/helm/fastdb/values-arbutus-dev.yaml"
 SECRETS_FILE="$REPO_ROOT/helm/fastdb/values-arbutus-secrets.yaml"
 EXTERNAL_URL="${FASTDB_EXTERNAL_URL:-http://localhost:30080/}"
 
+####################
+##### Preamble 
+####################
+
 export DOCKER_ARCHIVE="${DOCKER_ARCHIVE:-fastdb.local}"
 export DOCKER_VERSION="${DOCKER_VERSION:-test20260428}"
 
+# Require a normal user so generated files are not owned by root.
 if [[ $EUID -eq 0 ]]; then
   echo "Error: run this script as your normal user, not with sudo." >&2
   exit 1
 fi
 
+# Check that every command used by the installer is available.
 for command_name in curl docker git helm kubectl openssl; do
   command -v "$command_name" >/dev/null || {
     echo "Error: $command_name is required." >&2
@@ -24,17 +31,20 @@ for command_name in curl docker git helm kubectl openssl; do
   }
 done
 
+# Confirm that the current user can communicate with Docker.
 docker info >/dev/null 2>&1 || {
   echo "Error: cannot access Docker as $(id -un)." >&2
   echo "Log out and back in after running setup-arbutus-k3s.sh." >&2
   exit 1
 }
 
+# Confirm that kubectl can communicate with the K3s cluster.
 kubectl get node >/dev/null || {
   echo "Error: the K3s cluster is not accessible through kubectl." >&2
   exit 1
 }
 
+# Discover the node address used by K3s pods on this VM, needed for broker comsumer
 NODE_IP="$(
   kubectl get nodes \
     --output=jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}'
@@ -45,11 +55,17 @@ if [[ -z "$NODE_IP" ]]; then
 fi
 echo "K3s node address: $NODE_IP"
 
+# Confirm that the Arbutus Helm values file exists.
 if [[ ! -f "$VALUES_FILE" ]]; then
   echo "Error: values file not found: $VALUES_FILE" >&2
   exit 1
 fi
 
+####################
+##### End of Preamble 
+####################
+
+# Download any Git submodules required to build FASTDB.
 echo "Initializing Git submodules..."
 git -C "$REPO_ROOT" submodule update --init --recursive
 
@@ -66,6 +82,7 @@ for directory in "$REPO_ROOT/install" "$REPO_ROOT/db"; do
   fi
 done
 
+# Generate deployment credentials once and reuse them on later upgrades.
 if [[ ! -f "$SECRETS_FILE" ]]; then
   echo "Creating persistent development secrets in $SECRETS_FILE..."
   umask 077
@@ -87,6 +104,7 @@ secrets:
 EOF
 fi
 
+# check you have at least 10Gb free space
 AVAILABLE_KB="$(df -Pk / | awk 'NR == 2 { print $4 }')"
 if (( AVAILABLE_KB < 10 * 1024 * 1024 )); then
   echo "Warning: less than 10 GiB is available on the root filesystem." >&2
@@ -94,6 +112,7 @@ fi
 
 cd "$REPO_ROOT"
 
+# Pair each Docker Compose build target with the image it produces.
 services=(postgres mongodb createdb webap queryrunner)
 images=(
   "$DOCKER_ARCHIVE/fastdb-postgres:$DOCKER_VERSION"
@@ -107,6 +126,7 @@ built_images=()
 any_image_built=false
 any_image_exists=false
 
+# Report which reusable FASTDB images already exist in Docker.
 echo "Checking FASTDB container images..."
 for index in "${!services[@]}"; do
   image_name="${images[$index]}"
@@ -120,6 +140,7 @@ for index in "${!services[@]}"; do
   fi
 done
 
+# Let the user choose between rebuilding every image and reusing existing ones.
 rebuild_all=false
 if [[ "$any_image_exists" == true ]]; then
   read -r -p "Rebuild all FASTDB images from the current checkout? [y/N] " reply
@@ -139,6 +160,7 @@ else
   echo "No existing FASTDB images were found; building all images."
 fi
 
+# Use docker compose to build all requested images plus any image that is currently missing.
 for index in "${!services[@]}"; do
   service_name="${services[$index]}"
   image_name="${images[$index]}"
@@ -152,6 +174,7 @@ for index in "${!services[@]}"; do
   fi
 done
 
+# Generate the host-mounted FASTDB Python, SQL, configuration, and web files.
 echo "Building FASTDB install/ for $EXTERNAL_URL..."
 USERID="$(id -u)" GROUPID="$(id -g)" \
 docker compose run --rm --entrypoint "" makeinstall /bin/bash -ec "
@@ -166,11 +189,13 @@ docker compose run --rm --entrypoint "" makeinstall /bin/bash -ec "
   make install
 "
 
+# Reclaim temporary build layers when this run built any images.
 if [[ "$any_image_built" == true ]]; then
   echo "Removing Docker build cache to free space for K3s images..."
   docker builder prune --all --force
 fi
 
+# Import new images into K3s while retaining images it already has.
 echo "Checking K3s images..."
 for index in "${!images[@]}"; do
   image_name="${images[$index]}"
@@ -184,6 +209,7 @@ for index in "${!images[@]}"; do
   fi
 done
 
+# Install or upgrade the Kubernetes resources and wait for them to become ready.
 echo "Installing FASTDB with Helm..."
 # A Job's pod template is immutable. Recreate it so every upgrade runs current
 # database migrations without deleting the PostgreSQL PVC.
@@ -208,6 +234,7 @@ if ! helm upgrade --install "$RELEASE_NAME" "$REPO_ROOT/helm/fastdb" \
   exit 1
 fi
 
+# Restart services that must reload files from the host-mounted install directory.
 echo "Restarting services that load the host-mounted FASTDB code..."
 for deployment_name in webap queryrunner shell; do
   kubectl rollout restart "deployment/$deployment_name" --namespace "$NAMESPACE"
@@ -216,6 +243,7 @@ for deployment_name in webap queryrunner shell; do
     --timeout=180s
 done
 
+# Verify that the FASTDB web application responds from inside the VM.
 echo "Checking FASTDB WebAP..."
 curl --fail --silent --show-error \
   --retry 12 \
@@ -223,6 +251,7 @@ curl --fail --silent --show-error \
   --retry-delay 5 \
   "http://127.0.0.1:30080/" >/dev/null
 
+# Display final workload, storage, disk, and access information.
 echo
 kubectl get pods --namespace "$NAMESPACE"
 kubectl get pvc --namespace "$NAMESPACE"
