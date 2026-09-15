@@ -129,6 +129,12 @@ RUN git clone https://github.com/mongodb/mongo-tools.git \
   && cd .. \
   && rm -rf mongo-tools
 
+# lsdb in PyPi requires older versions of pandas and nested_pandas than
+# we want.  This dev branch has updates in pyproject.toml
+RUN source /venv/bin/activate \
+   && pip --nocache install "hats @ git+https://github.com/astronomy-commons/hats.git@pandas3" \
+                            "lsdb @ git+https://github.com/astronomy-commons/lsdb.git@pandas3"
+                  
 # ======================================================================
 # This is for the test webserver.  It installs crappy keys so you
 #   can connect via https.
