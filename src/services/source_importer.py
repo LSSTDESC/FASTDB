@@ -19,6 +19,7 @@ import simplejson
 import textwrap
 import logging
 import traceback
+import pymongo
 
 import psycopg.sql as sql
 import db
@@ -726,23 +727,23 @@ class SourceImporter:
                 t1 = util.datetime_to_utc( t1, with_tz=True, now_on_none=True )
 
                 timeline = [t0, t1]
-                if not t0 and t1: # no t0, so first import
+                if (t0 is None) and (t1 is not None): # no t0, so first import
                     # use the earliest `savetime` from the mongo collection to infer t0
                     with db.MGCon() as mg:
                         t0 = mg.collection(f"{self.collection_base_name}_diasource").find_one(
-                            sort={"savetime": 1} # pymongo.ASCENDING == 1
+                            sort={"savetime": pymongo.ASCENDING}
                         )['savetime']
                         t0 = util.datetime_to_utc(t0, with_tz=True, now_on_none=False)
 
                 # To batch we need to make sure t0 is not None in `timeline`. But otherwise t0 can be None
                 if type(batch_mins) is not int: raise ValueError("batch_mins argument must be integer.")
                 batch_mins = abs(batch_mins)
-                if (batch_mins > 0) and t0 and t1:
+                if (batch_mins > 0) and (t0 is not None) and (t1 is not None):
                     tinterval = t1 - t0
 
                     # batch the full time interval into chunks of `batch_mins` minutes
                     tmins = tinterval.total_seconds() / 60
-                    nbatches = int(tmins // batch_mins)
+                    nbatches = int(tmins / batch_mins)
                     timeline = [t0]
                     for i in range(nbatches):
                         timeline.append(t0+(i+1)*datetime.timedelta(minutes=batch_mins))
@@ -866,7 +867,7 @@ def main():
         '--batchmins',
         type=int,
         default=0,
-        help="If provided, the number of minutes between each batch of alerts to save, based on save time."
+        help="If greater than 0, the number of minutes between each batch of alerts to save, based on save time."
     )
     parser.add_argument(
         "-d",
