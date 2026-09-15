@@ -295,7 +295,11 @@ def main():
     parser.add_argument( "-c", '--create-processing-version', default=False, action='store_true',
                          help=( "Normally, the processing version must already exist.  Set this to create it "
                                 "if it doesn't." ) )
+    parser.add_argument( "-v", "--verbose", action='store_true', default=False,
+                         help="Log at DEBUG (default INFO)" )
     args = parser.parse_args()
+
+    FDBLogger.setLevel( "DEBUG" if args.verbose else "INFO" )
 
     loader = EDP2Loader( args.processing_version, create_pv=args.create_processing_version )
     loader.do_directory( args.direc )
