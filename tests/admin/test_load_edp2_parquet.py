@@ -1,48 +1,30 @@
-import textwrap
-
-from psycopg import sql
-
 import db
-from admin.load_edp2_parquet import EDP2Loader
 
 
-def test_load_edp2_parquet():
-    try:
-        loader = EDP2Loader( processing_version='test_load_edp2', create_pv=True )
-        loader.do_directory( "test_data/edp2" )
+def test_load_edp2_parquet( edp2_loaded_module ):
+    with db.DBCon( dictcursor=True ) as dbcon:
+        rows = dbcon.execute( "SELECT rootid, diaobjectid FROM diaobject" )
+        assert len(rows) == 100
+        # rootids = set( r['rootid'] for r in rows )
+        diaobjectids = set( r['diaobjectid'] for r in rows )
 
-        import pdb; pdb.set_trace()
-        pass
+        rows = dbcon.execute( "SELECT diasourceid, base_procver_id, diaobjectid FROM diasource" )
+        assert len(rows) == 716
+        diasources = set( ( r['diasourceid'], r['base_procver_id'] ) for r in rows )
+        assert all( r['diaobjectid'] in diaobjectids for r in rows )
+        rows = dbcon.execute( "SELECT diasourceid, base_procver_id FROM diasource_extra" )
+        assert len(rows) == 716
+        diasourceextras = set( ( r['diasourceid'], r['base_procver_id'] ) for r in rows )
+        assert diasourceextras == diasources
 
-    finally:
-        with db.DBCon() as dbcon:
-            rows, _cols = dbcon.execute( textwrap.dedent(
-                """\
-                SELECT b.base_procver_id, b._table FROM base_procver_of_procver b
-                INNER JOIN processing_version p ON b.procver_id=p.id
-                WHERE p.description='test_load_edp2'
-                  AND b._table IN ('diaobject', 'diaobject_position', 'diasource', 'diaforcedsource' )
-                """
-            ) )
-
-            bpvlist = [ row[0] for row in rows ]
-            baseprocvers = { row[1]: row[0] for row in rows }
-            if 'diasource' in bpvlist:
-                baseprocvers[ 'diasource_extra'] = baseprocvers['diasource']
-            if 'diaforcedsource' in bpvlist:
-                baseprocvers[ 'diaforcedsource_extra'] = baseprocvers['diaforcedsource']
-
-            for tab in ( 'diaforcedsource_extra', 'diaforcedsource', 'diasource_extra', 'diasource',
-                         'diaobject_position', 'diaobject' ):
-                if ( tab in baseprocvers ) and ( baseprocvers[tab] in bpvlist ):
-                    dbcon.execute( sql.SQL( "DELETE FROM {tab} WHERE base_procver_id={bpv}" )
-                                   .format( tab=sql.Identifier(tab), bpv=baseprocvers[tab] ) )
-
-            if len(bpvlist) > 0:
-                dbcon.execute( sql.SQL( "DELETE FROM base_procver_of_procver WHERE base_procver_id=ANY(ARRAY[{bpvs}])" )
-                               .format( bpvs=sql.SQL(",").join(bpvlist) ) )
-                dbcon.execute( sql.SQL( "DELETE FROM base_processing_version WHERE id=ANY(ARRAY[{bpvs}])" )
-                               .format( bpvs=sql.SQL(",").join(bpvlist) ) )
-            dbcon.execute( "DELETE FROM processing_version WHERE description='test_load_edp2'" )
-
-            dbcon.commit()
+        rows = dbcon.execute( "SELECT diaforcedsourceid, base_procver_id, diaobjectid, visit FROM diaforcedsource" )
+        assert len(rows) == 30620
+        diaforcedsources = set( ( r['base_procver_id'], r['diaobjectid'], r['visit'] ) for r in rows )
+        forcedobjs = set( r['diaobjectid'] for r in rows )
+        assert forcedobjs == diaobjectids
+        assert all( r['diaforcedsourceid'] is None for r in rows )
+        rows = dbcon.execute( "SELECT diaforcedsourceid, base_procver_id, diaobjectid, visit "
+                              "FROM diaforcedsource_extra" )
+        assert len(rows) == 30620
+        diaforcedsourceextras = set( ( r['base_procver_id'], r['diaobjectid'], r['visit'] ) for r in rows )
+        assert diaforcedsourceextras == diaforcedsources

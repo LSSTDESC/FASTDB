@@ -166,21 +166,22 @@ fastdbap.ObjectInfo = class
 
         // Object info on the left
 
-        rkWebUtil.elemaker( "h4", infodiv, { "text": "diaobject " + this.data.diaobjectid } );
+        rkWebUtil.elemaker( "h4", infodiv, { "text": "rootid " + this.data.objinfo.rootid } );
         table = rkWebUtil.elemaker( "table", infodiv, { "classes": [ "borderless" ] } );
-        tr = rkWebUtil.elemaker( "tr", table );
-        td = rkWebUtil.elemaker( "td", tr, { "text": "Processing Version:",
-                                             "classes": [ "right", "xmarginright" ] } );
-        td = rkWebUtil.elemaker( "td", tr, { "text": this.data.base_procver_id } );
         tr = rkWebUtil.elemaker( "tr", table );
         td = rkWebUtil.elemaker( "td", tr, { "text": "RA:",
                                              "classes": [ "right", "xmarginright" ] } );
-        td = rkWebUtil.elemaker( "td", tr, { "text": this.data.ra.toFixed(5) } );
+        td = rkWebUtil.elemaker( "td", tr, { "text": this.data.objinfo.ra.toFixed(5) } );
         tr = rkWebUtil.elemaker( "tr", table );
         td = rkWebUtil.elemaker( "td", tr, { "text": "Dec:",
                                              "classes": [ "right", "xmarginright" ] } );
-        td = rkWebUtil.elemaker( "td", tr, { "text": this.data.dec.toFixed(5) } );
-
+        td = rkWebUtil.elemaker( "td", tr, { "text": this.data.objinfo.dec.toFixed(5) } );
+        tr = rkWebUtil.elemaker( "tr", table );
+        td = rkWebUtil.elemaker( "td", tr, { "text": "diaobjectid:",
+                                             "classes": [ "right", "xmarginright" ] } );
+        td = rkWebUtil.elemaker( "td", tr );
+        td.innerHTML = this.data.objinfo.diaobjectid.map( (oid)=>rkWebUtil.escapeHTML(oid.toString()) ).join("<br />");
+    
         // Todo: info about nearby objects?  Probably need the server side to return that too
 
         let fields = [ 'mjd', 'band', 'flux', 'fluxerr', 's/n', 'isdet' ];
@@ -193,7 +194,7 @@ fastdbap.ObjectInfo = class
             let dettext = "";
             if ( data.isdet[i] ) dettext = "Yes";
             let args = {
-                'mjd':        [ "td", tr, { "text": data.mjd[i].toFixed(2) } ],
+                'mjd':        [ "td", tr, { "text": data.mjd[i].toFixed(4) } ],
                 'band':       [ "td", tr, { "text": data.band[i] } ],
                 'flux':    [ "td", tr, { "text": data.flux[i].toExponential(4) } ],
                 'fluxerr': [ "td", tr, { "text": data.fluxerr[i].toExponential(4) } ],

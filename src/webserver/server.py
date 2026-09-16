@@ -272,7 +272,9 @@ class ObjectSearch( BaseView ):
 
         FDBLogger.debug( f"ObjectSearch on processing version {processing_version} with search data {searchdata}" )
         try:
-            return ltcv.object_search( processing_version, **searchdata )
+            rval = ltcv.object_search( processing_version, **searchdata )
+            FDBLogger.debug( f"ObjectSearch returning {rval}" )
+            return rval
         except Exception as ex:
             raise FASTDBWebException( str(ex) )
 

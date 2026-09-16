@@ -205,6 +205,7 @@ a { color: var(--link-color); text-decoration: var(--link-decoration); cursor: p
 .xmargin { margin-left: 1ex; margin-right: 1ex }
 .mmargin { margin-left: 1em; margin-right: 1em }
 .xmarginright { margin-right: 1ex }
+.mmarginright { margin-right: 1em }
 .xmargintop { margin-top: 1ex }
 .hborder2px { border-top-width: 2px; border-bottom-width: 2px;
               border-top-color: var(--main-color);

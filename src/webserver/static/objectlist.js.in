@@ -29,63 +29,81 @@ fastdbap.ObjectList = class
         this.scrolltorow = null;
 
         // Calculate magnitudes assuming zp=31.4 (flux is nJy)
+        data[ 'magfirst' ] = []
+        data[ 'magfirsterr' ] = []
         data[ 'magmax' ] = []
         data[ 'magmaxerr' ] = []
         data[ 'maglast' ] = []
         data[ 'maglasterr' ] = []
         data[ 'magforcedlast' ] = []
         data[ 'magforcedlasterr' ] = []
-        for ( let i in data.diaobjectid ) {
-            if ( data.maxdetflux[i] > 0 ) {
-                data.magmax.push( -2.5 * Math.log10( data.maxdetflux[i] ) + 31.4 );
-                data.magmaxerr.push( 2.5 / Math.log(10.) * data.maxdetfluxerr[i] / data.maxdetflux[i] );
+        for ( let i in data.rootid ) {
+            if ( data.firstdet_flux[i] > 0 ) {
+                data.magfirst.push( -2.5 * Math.log10( data.firstdet_flux[i] ) + 31.4 );
+                data.magfirsterr.push( -2.5 / Math.log(10.) * data.firstdet_fluxerr[i] / data.firstdet_flux[i] );
+            } else {
+                data.magfirst.push( -99. );
+                data.magfirsterr.push( -99. );
+            }
+            if ( data.maxdet_flux[i] > 0 ) {
+                data.magmax.push( -2.5 * Math.log10( data.maxdet_flux[i] ) + 31.4 );
+                data.magmaxerr.push( 2.5 / Math.log(10.) * data.maxdet_fluxerr[i] / data.maxdet_flux[i] );
             } else {
                 data.magmax.push( -99 );
                 data.magmaxerr.push( -99 );
             }
-            if ( data.lastdetflux[i] > 0 ) {
-                data.maglast.push( -2.5 * Math.log10( data.lastdetflux[i] ) + 31.4 );
-                data.maglasterr.push( 2.5 / Math.log(10.) * data.lastdetfluxerr[i] / data.lastdetflux[i] );
+            if ( data.lastdet_flux[i] > 0 ) {
+                data.maglast.push( -2.5 * Math.log10( data.lastdet_flux[i] ) + 31.4 );
+                data.maglasterr.push( 2.5 / Math.log(10.) * data.lastdet_fluxerr[i] / data.lastdet_flux[i] );
             } else {
                 data.maglast.push( -99 );
                 data.maglasterr.push( -99 );
             }
-            if ( data.lastforcedflux[i] > 0 ) {
-                data.magforcedlast.push( -2.5 * Math.log10( data.lastforcedflux[i] ) + 31.4 );
-                data.magforcedlasterr.push( 2.5 / Math.log(10.) * data.lastforcedfluxerr[i] / data.lastforcedflux[i] );
+            if ( data.lastforced_flux[i] > 0 ) {
+                data.magforcedlast.push( -2.5 * Math.log10( data.lastforced_flux[i] ) + 31.4 );
+                data.magforcedlasterr.push( 2.5 / Math.log(10.) *
+                                            data.lastforced_fluxerr[i] / data.lastforced_flux[i] );
             } else {
                 data.magforcedlast.push( -99 );
                 data.magforcedlasterr.push( -99 );
             }
         }
 
-        let fields = [ 'diaobjectid',
+        let fields = [ 'rootid',
                        'ra',
                        'dec',
-                       'numdet',
-                       'lastdetmjd',
-                       'lastdetband',
+                       'ndets',
+                       'firstdet_mjd',
+                       'firstdet_band',
+                       'magfirst',
+                       'magfirsterr',
+                       'lastdet_mjd',
+                       'lastdet_band',
                        'maglast',
                        'maglasterr',
-                       'maxdetmjd',
-                       'maxdetband',
+                       'maxdet_mjd',
+                       'maxdet_band',
                        'magmax',
                        'magmaxerr',
-                       'lastforcedmjd',
-                       'lastforcedband',
+                       'lastforced_mjd',
+                       'lastforced_band',
                        'magforcedlast',
                        'magforcedlasterr' ]
-        let hdrs = { 'lastdetfluxmjd': 'mjd',
-                     'lastdetfluxband': 'band',
-                     'numdet': 'ndet',
+        let hdrs = { 'lastdet_mjd': 'mjd',
+                     'lastdet_fluxband': 'band',
+                     'ndets': 'ndets',
+                     'firstdet_mjd': 'mjd',
+                     'firstdet_band': 'mjd',
+                     'magfirst': 'mag',
+                     'magfirsterr': 'dmag',
                      'maglast': 'mag',
                      'maglasterr': 'dmag',
-                     'maxdetmjd': 'mjd',
-                     'maxdetband': 'band',
+                     'maxdet_mjd': 'mjd',
+                     'maxdet_band': 'band',
                      'magmax': 'mag',
                      'magmaxerr': 'dmag',
-                     'lastforcedmjd': 'mjd',
-                     'lastforcedband': 'band',
+                     'lastforced_mjd': 'mjd',
+                     'lastforced_band': 'band',
                      'magforcedlast': 'mag',
                      'magforcedlasterr': 'dmag' }
 
@@ -94,31 +112,36 @@ fastdbap.ObjectList = class
         let rowrenderer = function( data, fields, i ) {
             let tr, td;
             tr = rkWebUtil.elemaker( "tr", null );
-            self.tablerows[ data.diaobjectid[i] ] = tr;
+            self.tablerows[ data.rootid[i] ] = tr;
             let args = {
-                'diaobjectid':      [ "td", tr, { "text": data.diaobjectid[i],
-                                                  "classes": [ "link" ],
-                                                  "click": (e) => {
-                                                      self.highlight_row_with_diaobjectid( data.diaobjectid[i] );
-                                                      self.show_object_info( data.diaobjectid[i] );
+                'rootid':      [ "td", tr, { "text": data.rootid[i],
+                                             "classes": [ "link" ],
+                                             "click": (e) => {
+                                                 self.highlight_row_with_rootid( data.rootid[i] );
+                                                 self.show_object_info( data.rootid[i] );
                                                   }
                                                 } ],
                 'ra':               [ "td", tr, { "text": data.ra[i].toFixed(5) } ],
                 'dec':              [ "td", tr, { "text": data.dec[i].toFixed(5) } ],
-                'numdet':           [ "td", tr, { "text": data.numdet[i].toString() } ],
-                'lastdetmjd':       [ "td", tr, { "text": data.lastdetmjd[i].toFixed(2),
+                'ndets':            [ "td", tr, { "text": data.ndets[i].toString() } ],
+                'firstdet_mjd':     [ "td", tr, { "text": data.firstdet_mjd[i].toFixed(2),
                                                   "classes": [ "borderleft" ] } ],
-                'lastdetband':      [ "td", tr, { "text": data.lastdetband[i] } ],
+                'firstdet_band':    [ "td", tr, { "text": data.lastdet_band[i] } ],
+                'magfirst':         [ "td", tr, { "text": data.maglast[i].toFixed(2) } ],
+                'magfirsterr':      [ "td", tr, { "text": data.maglasterr[i].toFixed(2) } ],
+                'lastdet_mjd':      [ "td", tr, { "text": data.lastdet_mjd[i].toFixed(2),
+                                                  "classes": [ "borderleft" ] } ],
+                'lastdet_band':     [ "td", tr, { "text": data.lastdet_band[i] } ],
                 'maglast':          [ "td", tr, { "text": data.maglast[i].toFixed(2) } ],
                 'maglasterr':       [ "td", tr, { "text": data.maglasterr[i].toFixed(2) } ],
-                'maxdetmjd':        [ "td", tr, { "text": data.maxdetmjd[i].toFixed(2),
+                'maxdet_mjd':       [ "td", tr, { "text": data.maxdet_mjd[i].toFixed(2),
                                                   "classes": [ "borderleft" ] } ],
-                'maxdetband':       [ "td", tr, { "text": data.maxdetband[i] } ],
+                'maxdet_band':      [ "td", tr, { "text": data.maxdet_band[i] } ],
                 'magmax':           [ "td", tr, { "text": data.magmax[i].toFixed(2) } ],
                 'magmaxerr':        [ "td", tr, { "text": data.magmaxerr[i].toFixed(2) } ],
-                'lastforcedmjd':    [ "td", tr, { "text": data.lastforcedmjd[i].toFixed(2),
+                'lastforced_mjd':   [ "td", tr, { "text": data.lastforced_mjd[i].toFixed(2),
                                                   "classes": [ "borderleft" ] } ],
-                'lastforcedband':   [ "td", tr, { "text": data.lastforcedband[i] } ],
+                'lastforced_band':  [ "td", tr, { "text": data.lastforced_band[i] } ],
                 'magforcedlast':    [ "td", tr, { "text": data.magforcedlast[i].toFixed(2) } ],
                 'magforcedlasterr': [ "td", tr, { "text": data.magforcedlasterr[i].toFixed(2) } ]
             }
@@ -138,6 +161,9 @@ fastdbap.ObjectList = class
             ths[12].classList.add( "borderleft" );
             let tr = rkWebUtil.elemaker( "tr", null );
             rkWebUtil.elemaker( "th", tr, { "text": "",
+                                            "attributes": { "colspan": 4 },
+                                            "classes": [ "borderleft" ] } );
+            rkWebUtil.elemaker( "th", tr, { "text": "First Detection",
                                             "attributes": { "colspan": 4 },
                                             "classes": [ "borderleft" ] } );
             rkWebUtil.elemaker( "th", tr, { "text": "Last Detection",
@@ -182,10 +208,10 @@ fastdbap.ObjectList = class
     }
 
 
-    highlight_row_with_diaobjectid( diaobjectid )
+    highlight_row_with_rootid( rootid )
     {
         this.clear_row_highlight();
-        this.scrolltorow = this.tablerows[ diaobjectid ];
+        this.scrolltorow = this.tablerows[ rootid ];
         this.scrolltorow.scrollIntoView();
         this.scrolltorow.classList.add( "selected" );
     }
@@ -202,7 +228,8 @@ fastdbap.ObjectList = class
                               "classes": [ "warning", "bold", "italic" ] } );
         this.context.maintabs.selectTab( "objectinfo" );
 
-        this.context.connector.sendHttpRequest( "@external_url@ltcv/getltcv/" + pv + "/" + objid, {},
+        this.context.connector.sendHttpRequest( "@external_url@ltcv/getltcv/" + pv + "/" + objid,
+                                                { 'return_object_info': 1 },
                                                 (data) => { self.actually_show_object_info( data ) } );
     }
 

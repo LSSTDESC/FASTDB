@@ -1,36 +1,12 @@
-import uuid
 from types import SimpleNamespace
 import simplejson
-import numbers
-
-import pandas
 
 import flask
 import flask.views
 
 from db import DB
+import util
 from util import FDBLogger
-
-
-# ======================================================================
-# Encoder for simplejson
-#
-# Handels UUID (which is why it was named this, as it originally only did this),
-#   floats, and integers, converting numpy types to regular floats and ints.
-#   Also converts pandas NA to null.
-
-class UUIDJSONEncoder( simplejson.JSONEncoder ):
-    def default( self, obj ):
-        if isinstance( obj, pandas.api.typing.NAType ):
-            return None
-        if isinstance( obj, uuid.UUID ):
-            return str(obj)
-        elif isinstance( obj, numbers.Integral ):
-            return int(obj)
-        elif isinstance( obj, numbers.Real ):
-            return float(obj)
-        else:
-            return super().default( obj )
 
 
 # ======================================================================
@@ -103,15 +79,39 @@ class BaseView( flask.views.View ):
             # Can't just use the default JSON handling, because it
             #   writes out NaN which is not standard JSON and which
             #   the javascript JSON parser chokes on.  Sigh.
-            if isinstance( retval, dict ) or isinstance( retval, list ):
-                return ( simplejson.dumps( retval, ignore_nan=True, cls=UUIDJSONEncoder ),
-                         200, { 'Content-Type': 'application/json' } )
-            elif isinstance( retval, str ):
-                return retval, 200, { 'Content-Type': 'text/plain; charset=utf-8' }
-            elif isinstance( retval, tuple ):
-                return retval
-            else:
-                return retval, 200, { 'Content-Type': 'application/octet-stream' }
+            # Also, have some hardcoded detection of some of our fields
+            #   that we know are bigints in an attempt to avoid mangling
+            #   them.
+            rethdrs = None
+            httpcode = None
+            if isinstance( retval, tuple ):
+                if len(retval) >= 3:
+                    rethdrs = retval[2]
+                    if not isinstance( rethdrs, dict ):
+                        raise TypeError( f"Invalid return headers {rethdrs}, should be a dict." )
+                if len(retval) >= 2:
+                    httpcode = int( retval[1] )
+                retval = retval[0]
+
+            if httpcode is None:
+                httpcode = 200
+
+            if rethdrs is None:
+                if isinstance( retval, dict ) or isinstance( retval, list ):
+                    # I don't like this whole "it's a global variable, but, hey, you're good, it's
+                    #   what you want inside your object" thing, but whatever, it's what flask does.
+                    if flask.request.headers.get( 'Fastdb-Stringifyints' ) is not None:
+                        FDBLogger.warning( "Stringifying integers" )
+                        retval = util.stringify_integers( retval )
+                    retval = simplejson.dumps( retval, ignore_nan=True, default=util.fastdb_json_default )
+                    rethdrs = { 'Content-Type': 'application/json' }
+                elif isinstance( retval, str ):
+                    rethdrs = { 'Content-Type': 'text/plain; charset=utf-8' }
+                else:
+                    rethdrs = { 'Content-Type': 'application/octet-stream' }
+
+            return ( retval, httpcode, rethdrs )
+
         except Exception as ex:
             # sio = io.StringIO()
             # traceback.print_exc( file=sio )

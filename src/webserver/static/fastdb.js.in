@@ -20,7 +20,7 @@ fastdbap.Context = class
         this.objectsearch = null;
         this.maindiv = null;
 
-        this.connector = new rkWebUtil.Connector( "/" );
+        this.connector = new rkWebUtil.Connector( "/", { 'Fastdb-Stringifyints': 1} );
     };
 
     init()

@@ -24,7 +24,7 @@ class GetManyLtcvs( BaseView ):
         """Return lightcurves of objects as json.
 
         Reads the following parameters from the POST data, which must be
-        a json dictionary; they are all passed on as-is tp
+        a json dictionary; they are all passed on as-is to
         ltcv.py::many_object_ltcvs:
            'bands', 'which', 'include_base_procver', 'include_source_positions',
            'use_weighted_source_positions', 'always_use_weighted_source_positions',
@@ -123,7 +123,10 @@ class GetLtcv( GetManyLtcvs ):
             # This means we returned ltcvs and objinfo
             if len(mess['ltcvs']) == 0:
                 raise FASTDBWebException( f"Could not find lightcurve for {objid} in processing version {procver}" )
-            return { 'ltcv': mess['ltcvs'][0], 'objinfo': mess['objinfo'] }
+            elif len(mess['ltcvs']) > 1:
+                raise FASTDBWebException( f"More than one lightcurve for {objid} in processing version {procver}, "
+                                          f"this shouldn't happen." )
+            return { 'ltcv': mess['ltcvs'][0], 'objinfo': { k: v[0] for k, v in mess['objinfo'].items() } }
         else:
             if len(mess) == 0:
                 raise FASTDBWebException( f"Could not find lightcurve for {objid} in processing version {procver}" )

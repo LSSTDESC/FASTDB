@@ -38,7 +38,8 @@ from fastdb.fastdb_client import FASTDBClient
 #   should all live in the fixtures subdirectory.
 pytest_plugins = [ 'fixtures.alertcycle',
                    'fixtures.spectrum',
-                   'fixtures.basedbtests'
+                   'fixtures.basedbtests',
+                   'fixtures.edp2'
                   ]
 
 

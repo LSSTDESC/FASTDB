@@ -1,5 +1,5 @@
 __all__ = [ "FDBLogger", "parse_bool", "env_as_bool", "asUUID",
-            "isSequence", "allAreSequences", "anyIsSequence",
+            "isSequence", "allAreSequences", "anyIsSequence", "listify",
             "float_or_none_from_dict", "int_or_none_from_dict",
             "datetime_or_none_from_dict_mjd_or_timestring", "mjd_or_none_from_dict_mjd_or_timestring",
             "datetime_to_utc",
@@ -194,6 +194,38 @@ class FDBLogger:
 
 # ======================================================================
 
+def fastdb_json_default( obj ):
+    if isinstance( obj, pandas.api.typing.NAType ):
+        return None
+    if isinstance( obj, uuid.UUID ):
+        return str(obj)
+    elif isinstance( obj, numbers.Integral ):
+        return int(obj)
+    elif isinstance( obj, numbers.Real ):
+        return float(obj)
+    elif isinstance( obj, np.ndarray ):
+        return obj.tolist()
+    else:
+        raise TypeError( f"Don't know how to handle {obj} (type {type(obj)}" )
+
+
+# ======================================================================
+
+def stringify_integers( obj ):
+    """"WHY???   So we can pass 64-bit integers back to Javascript, which would otherwise destroy them."""
+
+    if isSequence( obj ):
+        return [ stringify_integers(o) for o in obj ]
+    elif isinstance( obj, dict ):
+        return { str(k): stringify_integers(v) for k, v in obj.items() }
+    elif isinstance( obj, numbers.Integral ):
+        return str(obj)
+    else:
+        return obj
+
+
+# ======================================================================
+
 def parse_bool( val ):
     """Check if a variable represents a boolean value is True or False."""
     if val is None:
@@ -276,6 +308,39 @@ def anyIsSequence( var ):
     return any( ( isinstance( elem, collections.abc.Sequence )
                   and not ( isinstance( elem, (str, bytes) ) ) )
                 for elem in var )
+
+
+def listify( val, require_string=False ):
+    """Return a list version of val.
+
+    If val is None, return None.  If val is an iterable (but not a str
+    or bytes), return list(val).  Otherwise, return [val].
+
+    Parameters
+    ----------
+    require_string: bool (default False)
+       If true, then val must either be a sequence of strings or a string
+
+    Returns
+    -------
+    list or None
+
+    """
+
+    if val is None:
+        return val
+
+    if isinstance( val, collections.abc.Iterable ):
+        if isinstance( val, str ) or isinstance( val, bytes ):
+            return [ val ]
+        else:
+            if require_string and ( not all( [ isinstance( i, str ) for i in val ] ) ):
+                raise TypeError( 'listify: all elements of passed sequence must be strings.' )
+            return list( val )
+    else:
+        if require_string and ( not isinstance( val, str ) ):
+            raise TypeError( f'listify wants a string, not a {type(val)}' )
+        return [ val ]
 
 
 # These next few will, by design, raise an exception of d[kw] isn't empty and can't be parsed to the right thing
