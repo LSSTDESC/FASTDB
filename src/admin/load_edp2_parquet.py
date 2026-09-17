@@ -140,7 +140,44 @@ class EDP2Loader:
                     knownobjects = { o: { 'ra': ra, 'dec': dec, 'base_procver_id': self.objbpv.id }
                                       for o, ra, dec in zip( df.diaObjectId, df.ra, df.dec ) }
                     if not self._test_only:
-                        dbcon.execute_nofetch( "LOCK TABLE root_diaobject" )
+                        # My goal: to make sure nobody else inserts into
+                        #   the root_diaobject table between when I read
+                        #   it and write to it, so I can be sure that
+                        #   what I'm writing isn't redundant with
+                        #   something already there.  (But, also, anbody
+                        #   else who is trying to do the same thing
+                        #   should have their read locked until I'm done
+                        #   here... which by default won't happen, so
+                        #   any other function, e.g. source importer,
+                        #   that mucks with root_diaobject would also
+                        #   need to use a consistent lock mode!)
+                        #
+                        # Cf: https://www.postgresql.org/docs/current/explicit-locking.html
+                        #
+                        # Tried straight-up locking (which defaults to
+                        #   ACCESS EXCLUSIVE), and EXCLUSIVE locking.
+                        #   In both cases, I saw processes sitting on
+                        #   the root acquire lock, where other processes
+                        #   were down on the INSERT into the data tables
+                        #   (i.e. outside the block where I want the
+                        #   lock to apply).  I think the issue is the
+                        #   root_diaobject foreign key on diaobject,
+                        #   which causes an implicit ROW SHARE lock on
+                        #   root_diaobject when we're in a transaction
+                        #   that INSERTs into diaobject.
+                        #
+                        # Trying SHARE ROW EXCLUSIVE because that conflicts
+                        #   with itself (so this block will only have one
+                        #   process at a time using it), but does not conflict
+                        #   with ROW SHARE.  TODO : this needs to be consistent
+                        #   with source_importer if this and source_importer
+                        #   are going to run at the same time!
+                        #
+                        # ...that seemed to have worked, but I'm not convinced
+                        #   that the overall process is *that* much faster.  I'd
+                        #   have to do lots of stress testing to really know.
+                        #   Whatevs.  Leaving it running.
+                        dbcon.execute_nofetch( "LOCK TABLE root_diaobject IN SHARE ROW EXCLUSIVE MODE" )
                     dbcon.execute( "CREATE TEMP TABLE temp_ra_dec(diaobjectid bigint, "
                                    "ra double precision, dec double precision)" )
                     with dbcon.cursor.copy( "COPY temp_ra_dec(diaobjectid, ra, dec) FROM STDIN" ) as copier:

@@ -76,12 +76,6 @@ class BaseView( flask.views.View ):
             return "Action requires admin", 500
         try:
             retval = self.do_the_things( *args, **kwargs )
-            # Can't just use the default JSON handling, because it
-            #   writes out NaN which is not standard JSON and which
-            #   the javascript JSON parser chokes on.  Sigh.
-            # Also, have some hardcoded detection of some of our fields
-            #   that we know are bigints in an attempt to avoid mangling
-            #   them.
             rethdrs = None
             httpcode = None
             if isinstance( retval, tuple ):
@@ -101,8 +95,15 @@ class BaseView( flask.views.View ):
                     # I don't like this whole "it's a global variable, but, hey, you're good, it's
                     #   what you want inside your object" thing, but whatever, it's what flask does.
                     if flask.request.headers.get( 'Fastdb-Stringifyints' ) is not None:
+                        # ...this is for Javascript, which will read JSON and turn all integers
+                        #   into doubles... thereby destroying 64-bit integers.  The fastdb
+                        #   javascript code sets the Fastdb-Stringifyints header to tell us
+                        #   to send integers back as strings so they won't get destroyed.
                         FDBLogger.warning( "Stringifying integers" )
                         retval = util.stringify_integers( retval )
+                    # Can't just use the default JSON handling, because it
+                    #   writes out NaN which is not standard JSON and which
+                    #   the javascript JSON parser chokes on.  Sigh.
                     retval = simplejson.dumps( retval, ignore_nan=True, default=util.fastdb_json_default )
                     rethdrs = { 'Content-Type': 'application/json' }
                 elif isinstance( retval, str ):

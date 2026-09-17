@@ -444,41 +444,76 @@ class SourceImporter:
                            "    o.diaobjectid=tdi.diaobjectid AND o.base_procver_id=tdi.base_procver_id "
                            "  WHERE o.diaobjectid IS NULL )" )
 
-            # Link new objects to existing root objects
-            # TODO : test this with multiple processing versions and multiple
-            #   objects that match!!!
-            FDBLogger.debug( "   ...linking to existing root diaobjects..." )
-            dbcon.execute( "UPDATE temp_new_diaobject tno SET rootid=r.id\n"
-                           "FROM root_diaobject r\n"
-                           "WHERE q3c_radial_query( r.ra, r.dec, tno.ra, tno.dec, %(rad)s)",
-                           { 'rad': self.object_match_radius/3600. } )
+            try:
+                # Get a SHARE ROW EXCLUSIVE lock on root_diaobject.
+                #   This lock conflicts with itself, so it will stop two
+                #   different processes running this code at the same
+                #   time.  We don't want another process searching the
+                #   root table to see what already exists until we're
+                #   done inserting the new things we decided needed to
+                #   be inserted.  However, we don't mind if other
+                #   processes try to do things like insert to diaobject
+                #   linking ot pre-existing roots; a straight-up ACCESS
+                #   EXCUSLIVE lock, or even a EXCLUSIVE lock, on
+                #   root_diaobject would conflict with that because the
+                #   root_diaboject forieng key in diaobject implicitly
+                #   grabs a ROW SHARE lock on root_diaobject.
+                FDBLogger.debug( "  ...starting root diaobject matching..." )
+                dbcon.execute( "LOCK TABLE root_diaboject IN SHARE ROW EXCLUSIVE MODE" )
 
-            # Create new root objects
-            FDBLogger.debug( "   ...creating new root diaobjects..." )
-            dbcon.execute( "CREATE TEMP TABLE temp_new_root_obj (id UUID, ra double precision, dec double precision)" )
-            dbcon.execute( "INSERT INTO temp_new_root_obj(id, ra, dec) "
-                           "( SELECT gen_random_uuid(), ra, dec FROM temp_new_diaobject "
-                           "  WHERE rootid IS NULL )" )
-            # This next one is byzantine.  I'm trying to say, "hey, there are n
-            # rows in temp_new_diaobject that have NULL rootid, and I've just
-            # created temp_new_root_obj with n rows, now just fill those n NULL rootids
-            # from the n rows in temp_new_root_obj".  There must be a less byzantine
-            # way to do this.
-            FDBLogger.debug( "   ...filling new rootid into temp table..." )
-            dbcon.execute( "UPDATE temp_new_diaobject tno SET rootid=r.id "
-                           "FROM ( ( SELECT id, ROW_NUMBER() OVER () AS n FROM temp_new_root_obj ) tnro "
-                           "       INNER JOIN "
-                           "       ( SELECT diaobjectid, rootid, ROW_NUMBER() OVER () AS n FROM "
-                           "         ( SELECT diaobjectid, rootid FROM temp_new_diaobject WHERE rootid IS NULL ) subq "
-                           "       ) tnd "
-                           "       ON tnro.n=tnd.n ) r "
-                        "WHERE r.diaobjectid=tno.diaobjectid" )
+                # Link new objects to existing root objects
+                # TODO : test this with multiple processing versions and multiple
+                #   objects that match!!!
+                FDBLogger.debug( "   ...linking to existing root diaobjects..." )
+                dbcon.execute( "UPDATE temp_new_diaobject tno SET rootid=r.id\n"
+                               "FROM root_diaobject r\n"
+                               "WHERE q3c_radial_query( r.ra, r.dec, tno.ra, tno.dec, %(rad)s)",
+                               { 'rad': self.object_match_radius/3600. } )
 
-            # Add the new root diaobjects
-            FDBLogger.debug( "   ...inserting new root objects into root_diaobject tables..." )
-            dbcon.execute( "INSERT INTO root_diaobject(id, ra, dec) ( SELECT id, ra, dec FROM temp_new_root_obj )" )
-            nroot = dbcon.cursor.rowcount
-            FDBLogger.debug( f"      ...inserted {nroot} objects" )
+                # Create new root objects
+                FDBLogger.debug( "   ...creating new root diaobjects..." )
+                dbcon.execute( "CREATE TEMP TABLE temp_new_root_obj (id UUID, ra double precision, "
+                               "                                     dec double precision)" )
+                dbcon.execute( "INSERT INTO temp_new_root_obj(id, ra, dec) "
+                               "( SELECT gen_random_uuid(), ra, dec FROM temp_new_diaobject "
+                               "  WHERE rootid IS NULL )" )
+                # This next one is byzantine.  I'm trying to say, "hey, there are n
+                # rows in temp_new_diaobject that have NULL rootid, and I've just
+                # created temp_new_root_obj with n rows, now just fill those n NULL rootids
+                # from the n rows in temp_new_root_obj".  There must be a less byzantine
+                # way to do this.
+                FDBLogger.debug( "   ...filling new rootid into temp table..." )
+                dbcon.execute( "UPDATE temp_new_diaobject tno SET rootid=r.id "
+                               "FROM ( ( SELECT id, ROW_NUMBER() OVER () AS n FROM temp_new_root_obj ) tnro "
+                               "       INNER JOIN "
+                               "       ( SELECT diaobjectid, rootid, ROW_NUMBER() OVER () AS n FROM "
+                               "         ( SELECT diaobjectid, rootid FROM temp_new_diaobject "
+                               "           WHERE rootid IS NULL ) subq "
+                               "       ) tnd "
+                               "       ON tnro.n=tnd.n ) r "
+                               "WHERE r.diaobjectid=tno.diaobjectid" )
+
+                # Add the new root diaobjects
+                FDBLogger.debug( "   ...inserting new root objects into root_diaobject tables..." )
+                dbcon.execute( "INSERT INTO root_diaobject(id, ra, dec) ( SELECT id, ra, dec FROM temp_new_root_obj )" )
+                nroot = dbcon.cursor.rowcount
+
+                # We want to commit here.  That'll save the new root
+                # objects.  That's ok, if things error out later, it
+                # won't hurt to have defined some new root objects that
+                # don't (yet) have any diaobjects associated with them.
+                # We don't want to delay committing, because we want to
+                # release that SHARE ROW EXCLUSIVE lock on
+                # root_diaobject.  (Committing ends the transaction, but
+                # not the session, so our temp tables will survive.)
+                dbcon.commit()
+                FDBLogger.debug( f"      ...inserted {nroot} objects" )
+
+            except Exception as ex:
+                FDBLogger.exception( f"Exception matching and creating root diaobjects: {ex}" )
+                # Make sure to release the lock!
+                dbcon.rollback()
+                raise
 
             # Add the new objects.
             FDBLogger.debug( "   ...inserting new diaobjects into diaobject table..." )
