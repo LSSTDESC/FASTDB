@@ -448,9 +448,17 @@ In that directory, make sure there are subdirectories ``install``, ``query_resul
 The ``.yaml`` files defining the Spin workloads are in ``admin/spin/production`` in the git archive.  (Note that, unless I've screwed up (...which has happened...), the files ``secrets.yaml`` and ``webserver-cert.yaml`` will not be complete, because those are the kinds of things you don't want to commit to a public git archive.  Edit those files to put in the actual passwords and SSL key/certificates before using them, and **make sure to remove the secret stuff before   committing anything to git**.  If you screw up, you have to change **all** the secrets.)  To install the code to work with those ``.yaml`` files, run::
 
   cd /global/cfs/cdirs/lsst/groups/TD/SOFTWARE/fastdb_deployment/production/FASTDB
+  #
+  # Only do the next line if you edited any of the Makefile.am (etc.) files
+  #
+  autoreconf --install
+  #
+  # Only do the next three lines if necessary; try ./configure first
+  #
   touch aclocal.m4 configure
   find . -name Makefile.am -exec touch \{\} \;
   find . -name Makefile.in -exec touch \{\} \;
+  # OK, do the rest
   ./configure \
     --with-installdir=/global/cfs/cdirs/lsst/groups/TD/SOFTWARE/fastdb_deployment/production/install \
     --with-smtp-server=smtp.lbl.gov \

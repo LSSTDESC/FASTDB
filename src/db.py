@@ -1442,7 +1442,7 @@ class DBBase:
 
     @classmethod
     def bulk_insert_or_upsert( cls, data, upsert=False, assume_no_conflict=False,
-                               dbcon=None, nocommit=False ):
+                               dbcon=None, nocommit=False, execute_even_if_nocommit=False ):
         """Try to efficiently insert a bunch of data into the database.
 
         ROB TODO DOCUMENT QUIRKS
@@ -1484,6 +1484,12 @@ class DBBase:
              the temp table before copying it over to the main table, in
              which case it's the caller's responsibility to do that copy
              and commit to the database.
+
+           execute_even_if_nocommit: bool, default False
+             ....but maybe you want to do the copy, and not the commit,
+             for some reason (like a test), so set this to True in
+             that case.  If you're using this, you better really know
+             what you're doing.
 
         Returns
         -------
@@ -1542,14 +1548,15 @@ class DBBase:
 
             q = f"INSERT INTO {cls.__tablename__} SELECT * FROM temp_bulk_upsert {conflict}"
 
-            if nocommit:
-                return q
-            else:
+            if ( not nocommit ) or ( execute_even_if_nocommit ):
                 con.execute_nofetch( q, explain=False, analyze=False )
                 ninserted = con.cursor.rowcount
                 con.execute_nofetch( "DROP TABLE temp_bulk_upsert", explain=False, analyze=False )
-                con.commit()
+                if not nocommit:
+                    con.commit()
                 return ninserted
+            else:
+                return q
 
 
 # ======================================================================
@@ -1845,7 +1852,7 @@ class DiaSourceExtra( DBBase ):
                     0x00002000: 'shape_flag_not_contained',
                     0x00004000: 'shape_flag_parent_source',
                     0x00008000: 'isDipole',
-                    0x00010000: 'dipleFitAttempted',
+                    0x00010000: 'dipoleFitAttempted',
                     0x00020000: 'glint_trail',
                     0x00040000: 'trail_flag'
                    }
@@ -1871,8 +1878,12 @@ class DiaSourceExtra( DBBase ):
                          0x00010000: 'pixelFlags_injected',
                          0x00020000: 'pixelFlags_injectedCenter',
                          0x00040000: 'pixelFlags_injected_template',
-                         0x00080000: 'pixelFlags_injectedd_templateCenter',
+                         0x00080000: 'pixelFlags_injected_templateCenter',
                         }
+
+
+DiaSourceExtra._flags_bits_inverse = { v: k for k, v in DiaSourceExtra._flags_bits.items() }
+DiaSourceExtra._pixelflags_bits_inverse = { v: k for k, v in DiaSourceExtra._pixelflags_bits.items() }
 
 
 # ======================================================================
@@ -1904,7 +1915,6 @@ class DiaForcedSourceExtra( DBBase ):
 
     _flags_bits = { 0x00000010: 'psfFlux_flag',
                     0x00080000: 'invalidPsfFlag',
-                    0x00100000: 'psfDiffFlux_flag',
                     0x00200000: 'diff_PixelFlags_nodataCenter'
                    }
 
@@ -1913,6 +1923,10 @@ class DiaForcedSourceExtra( DBBase ):
                                    'pixelFlags_interpolated', 'pixelFlags_interpolatedCenter', 'pixelFlags_nodata',
                                    'pixelFlags_saturated', 'pixelFlags_saturatedCenter', 'pixelFlags_suspect',
                                    'pixelFlags_suspectCenter' ) }
+
+
+DiaForcedSourceExtra._flags_bits_inverse = { v: k for k, v in DiaForcedSourceExtra._flags_bits.items() }
+DiaForcedSourceExtra._pixelflags_bits_inverse = { v: k for k, v in DiaForcedSourceExtra._pixelflags_bits.items() }
 
 
 # ======================================================================
