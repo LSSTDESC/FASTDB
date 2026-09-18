@@ -1,0 +1,90 @@
+# FASTDB development deployment on a single-node Arbutus K3s VM.
+# Images are pulled from the CanDIAPL project in the CANFAR Harbor registry.
+
+global:
+  namespace: fastdb-arbutus-dev
+  environment: dev
+  imageRegistry: images.canfar.net/candiapl
+  imageTag: manual-20260918
+  imagePullPolicy: IfNotPresent
+  imagePullSecrets:
+    - name: fastdb-harbor
+
+volumes:
+  type: pvc
+  storageClass: local-path
+  codeHostPath: true
+
+postgres:
+  enabled: true
+  persistence:
+    size: 8Gi
+    accessMode: ReadWriteOnce
+  externalAccess:
+    enabled: false
+
+# A standby on the same VM would consume resources without protecting against
+# failure of that VM.
+postgresStandby:
+  enabled: false
+
+mongodb:
+  enabled: true
+  persistence:
+    size: 8Gi
+    accessMode: ReadWriteOnce
+
+webap:
+  enabled: true
+  externalAccess:
+    enabled: true
+    type: NodePort
+    nodePort: 30080
+  volumes:
+    sessions:
+      size: 1Gi
+      accessMode: ReadWriteOnce
+    queryResults:
+      size: 1Gi
+      accessMode: ReadWriteOnce
+    logs:
+      size: 1Gi
+      accessMode: ReadWriteOnce
+
+shell:
+  enabled: true
+
+queryrunner:
+  enabled: true
+
+mailhog:
+  enabled: true
+  externalAccess:
+    enabled: true
+    type: NodePort
+    nodePort: 30025
+
+createdb:
+  enabled: true
+
+ingestion:
+  enabled: true
+  brokerConsumer:
+    name: lass
+    loggerName: LASS
+    server: host.docker.internal:19092
+    groupId: fastdb-arbutus-lass
+    topic: lass-topic
+    schemaFile: /fastdb/share/avsc/lsst.v10_0.alert.avsc
+    collectionBase: lass
+    brokerName: lass
+    # install-arbutus-fastdb.sh discovers the K3s node IP and supplies it to
+    # Helm, so this values file is reusable on different Arbutus VMs.
+    dockerHostIp: ""
+    # LASS advertises localhost:19092. This proxy forwards that pod-local
+    # address to the Docker-published Kafka port on the VM.
+    localhostProxy: true
+  processingVersion:
+    name: lass
+  sourceImporter:
+    schedule: "* * * * *"

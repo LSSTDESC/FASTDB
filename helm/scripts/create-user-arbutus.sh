@@ -3,10 +3,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-NAMESPACE="fastdb-arbutus-dev"
-DOCKER_ARCHIVE="${DOCKER_ARCHIVE:-fastdb.local}"
-DOCKER_VERSION="${DOCKER_VERSION:-test20260428}"
-SHELL_IMAGE="$DOCKER_ARCHIVE/fastdb-shell:$DOCKER_VERSION"
+NAMESPACE="${FASTDB_NAMESPACE:-fastdb-arbutus-dev}"
 
 if [[ $EUID -eq 0 ]]; then
   echo "Error: run this script as your normal user, not with sudo." >&2
@@ -30,9 +27,20 @@ kubectl get deployment/postgres --namespace "$NAMESPACE" >/dev/null || {
   exit 1
 }
 
+# Use the same shell image as the running FASTDB deployment.
+SHELL_IMAGE="$(
+  kubectl get deployment/shell \
+    --namespace "$NAMESPACE" \
+    --output=jsonpath='{.spec.template.spec.containers[0].image}'
+)"
+if [[ -z "$SHELL_IMAGE" ]]; then
+  echo "Error: could not determine the shell image in namespace $NAMESPACE." >&2
+  exit 1
+fi
+
 docker image inspect "$SHELL_IMAGE" >/dev/null 2>&1 || {
-  echo "Error: local image not found: $SHELL_IMAGE" >&2
-  echo "Run ./helm/scripts/install-arbutus-fastdb.sh first." >&2
+  echo "Error: shell image not found in Docker: $SHELL_IMAGE" >&2
+  echo "Pull or build this image before creating a user." >&2
   exit 1
 }
 

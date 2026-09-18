@@ -124,10 +124,23 @@ On an Ubuntu VM, set up the single-node K3s cluster once:
 ./helm/scripts/setup-arbutus-k3s.sh
 ```
 
-Then build and install FASTDB:
+To use the prebuilt images in CANFAR Harbor, log in once and install with the
+Harbor values file:
 
 ```bash
-./helm/scripts/install-arbutus-fastdb.sh
+docker login images.canfar.net
+./helm/scripts/install-arbutus-fastdb.sh \
+  ./helm/fastdb/values-arbutus-harbor.yaml
+```
+
+To build images from the current checkout instead, prepare the local Docker
+and K3s images first, then install with the local values file:
+
+```bash
+./helm/scripts/build-local-images.sh \
+  fastdb.local test20260428
+./helm/scripts/install-arbutus-fastdb.sh \
+  ./helm/fastdb/values-arbutus-dev.yaml
 ```
 
 Create the initial FASTDB user without requiring browser access to MailHog:
@@ -142,19 +155,18 @@ the FASTDB Python client is responsible for supplying its own credentials; a
 Kubernetes application will typically create and mount a Secret containing its
 `.fastdb.ini` file in that application's namespace.
 
-The installer builds images on the VM, imports them into K3s, and uses
-`values-arbutus-dev.yaml`. It generates development passwords on its first run
-in the ignored, mode-600 file `helm/fastdb/values-arbutus-secrets.yaml`; keep
-that file for later upgrades. PostgreSQL standby is disabled. Alert ingestion
-expects a LASS Kafka broker published on port 19092 of the same VM. The
-installer discovers the K3s node's internal address and uses it to connect the
-FASTDB broker consumer to LASS, so the values file does not contain a
-VM-specific IP address.
+The installer takes all Helm image settings from the selected values file. It
+uses the configured shell image to prepare the host-mounted `install/` tree,
+but it does not build deployment images. Kubernetes pulls Harbor images when
+needed; locally built images must first be loaded with
+`build-local-images.sh`.
 
-On later runs, the installer reports which FASTDB images are already present
-and asks whether to rebuild all images from the current checkout or reuse the
-existing images. If existing images are reused, any missing image is still
-built automatically. Rebuild after changing a Dockerfile or image dependency.
+The installer generates development passwords on its first run in the ignored,
+mode-600 file `helm/fastdb/values-arbutus-secrets.yaml`; keep that file for
+later upgrades. PostgreSQL standby is disabled. Alert ingestion expects a LASS
+Kafka broker published on port 19092 of the same VM. The installer discovers
+the K3s node's internal address and uses it to connect the FASTDB broker
+consumer to LASS, so the values files do not contain a VM-specific IP address.
 
 The K3s `local-path` provisioner stores the database PVCs on the VM's root
 filesystem. The Arbutus flavour's ephemeral disk is deliberately unused. Check

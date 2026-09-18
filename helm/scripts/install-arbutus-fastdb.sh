@@ -1,35 +1,65 @@
 #!/usr/bin/env bash
-# Build and install FASTDB on the single-node Arbutus K3s cluster.
+# Prepare and install FASTDB on a single-node Arbutus K3s cluster.
 set -euo pipefail
 
-# Define the deployment paths, names, and default image labels.
+####################
+##### Preamble
+####################
+
+# Locate the repository and require one environment-specific Helm values file.
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-NAMESPACE="fastdb-arbutus-dev"
 RELEASE_NAME="fastdb"
-VALUES_FILE="$REPO_ROOT/helm/fastdb/values-arbutus-dev.yaml"
 SECRETS_FILE="$REPO_ROOT/helm/fastdb/values-arbutus-secrets.yaml"
 EXTERNAL_URL="${FASTDB_EXTERNAL_URL:-http://localhost:30080/}"
-HARBOR_SERVER="${FASTDB_HARBOR_SERVER:-images.canfar.net}"
-HARBOR_REGISTRY="${FASTDB_HARBOR_REGISTRY:-$HARBOR_SERVER/candiapl}"
-HARBOR_TAG="${FASTDB_HARBOR_TAG:-manual-20260918}"
 HARBOR_PULL_SECRET="fastdb-harbor"
 
-#used if you build th eimages yourself
-LOCAL_IMAGE_REGISTRY="${DOCKER_ARCHIVE:-fastdb.local}"
-LOCAL_IMAGE_TAG="${DOCKER_VERSION:-test20260428}"
+if [[ $# -ne 1 ]]; then
+  echo "Usage: $0 <values-file>" >&2
+  echo "Example: $0 ../fastdb/values-arbutus-harbor.yaml" >&2
+  exit 1
+fi
 
+VALUES_FILE="$1"
+if [[ ! -f "$VALUES_FILE" ]]; then
+  echo "Error: values file not found: $VALUES_FILE" >&2
+  exit 1
+fi
+VALUES_FILE="$(cd "$(dirname "$VALUES_FILE")" && pwd)/$(basename "$VALUES_FILE")"
 
-####################
-##### Preamble 
-####################
+# Read one simple scalar from the controlled Arbutus values files without
+# requiring a separate YAML command-line tool.
+# We run makeinstall before Helm, so extract the image metadata that Docker
+# Compose needs from the values file.
+read_values_scalar() {
+  local key="$1"
+  local line
+  local value
 
-# Require a normal user so generated files are not owned by root.
+  line="$(grep -m1 -E "^[[:space:]]*${key}:" "$VALUES_FILE" || true)"
+  value="${line#*:}"
+  value="${value%%#*}"
+  value="$(printf '%s' "$value" | sed \
+    -e 's/^[[:space:]]*//' \
+    -e 's/[[:space:]]*$//' \
+    -e 's/^"//' -e 's/"$//' \
+    -e "s/^'//" -e "s/'$//")"
+  if [[ -z "$line" || -z "$value" ]]; then
+    echo "Error: could not read '$key' from $VALUES_FILE." >&2
+    exit 1
+  fi
+  printf '%s\n' "$value"
+}
+
+NAMESPACE="$(read_values_scalar namespace)"
+export DOCKER_ARCHIVE="$(read_values_scalar imageRegistry)"
+export DOCKER_VERSION="$(read_values_scalar imageTag)"
+SHELL_IMAGE="$DOCKER_ARCHIVE/fastdb-shell:$DOCKER_VERSION"
+
+# Require a normal user and every command used by the installer.
 if [[ $EUID -eq 0 ]]; then
   echo "Error: run this script as your normal user, not with sudo." >&2
   exit 1
 fi
-
-# Check that every command used by the installer is available.
 for command_name in curl docker git helm kubectl openssl; do
   command -v "$command_name" >/dev/null || {
     echo "Error: $command_name is required." >&2
@@ -37,20 +67,18 @@ for command_name in curl docker git helm kubectl openssl; do
   }
 done
 
-# Confirm that the current user can communicate with Docker.
+# Confirm that this user can access Docker and the K3s cluster.
 docker info >/dev/null 2>&1 || {
   echo "Error: cannot access Docker as $(id -un)." >&2
   echo "Log out and back in after running setup-arbutus-k3s.sh." >&2
   exit 1
 }
-
-# Confirm that kubectl can communicate with the K3s cluster.
 kubectl get node >/dev/null || {
   echo "Error: the K3s cluster is not accessible through kubectl." >&2
   exit 1
 }
 
-# Discover the node address used by K3s pods on this VM, needed for broker comsumer
+# Discover the node address used by the broker-consumer proxy.
 NODE_IP="$(
   kubectl get nodes \
     --output=jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}'
@@ -59,73 +87,10 @@ if [[ -z "$NODE_IP" ]]; then
   echo "Error: could not determine the K3s node's internal IP address." >&2
   exit 1
 fi
-echo "K3s node address: $NODE_IP"
 
-# Confirm that the Arbutus Helm values file exists.
-if [[ ! -f "$VALUES_FILE" ]]; then
-  echo "Error: values file not found: $VALUES_FILE" >&2
-  exit 1
-fi
-
-# Choose whether Kubernetes should pull prebuilt images or use images built on this VM.
-echo
-echo "Choose the FASTDB image source:"
-echo "  1. Use prebuilt images from Harbor (default)"
-echo "  2. Build images from the current checkout"
-read -r -p "Selection [1]: " image_source_reply
-case "$image_source_reply" in
-  ""|1)
-    IMAGE_SOURCE="harbor"
-    export DOCKER_ARCHIVE="$HARBOR_REGISTRY"
-    export DOCKER_VERSION="$HARBOR_TAG"
-    echo "Using prebuilt images from $DOCKER_ARCHIVE with tag $DOCKER_VERSION."
-    ;;
-  2)
-    IMAGE_SOURCE="build"
-    export DOCKER_ARCHIVE="$LOCAL_IMAGE_REGISTRY"
-    export DOCKER_VERSION="$LOCAL_IMAGE_TAG"
-    echo "Building images from the current checkout as $DOCKER_ARCHIVE/*:$DOCKER_VERSION."
-    ;;
-  *)
-    echo "Error: enter 1 or 2." >&2
-    exit 1
-    ;;
-esac
-
-# Local K3s image imports need root access. Authenticate now and keep the sudo
-# timestamp alive so a long image build can finish without another prompt.
-SUDO_KEEPALIVE_PID=""
-cleanup() {
-  if [[ -n "$SUDO_KEEPALIVE_PID" ]]; then
-    kill "$SUDO_KEEPALIVE_PID" 2>/dev/null || true
-    wait "$SUDO_KEEPALIVE_PID" 2>/dev/null || true
-  fi
-}
-trap cleanup EXIT
-
-if [[ "$IMAGE_SOURCE" == "build" ]]; then
-  echo "Administrator access will be needed later to import images into K3s."
-  sudo -v
-  (
-    while true; do
-      sudo -n -v || exit
-      sleep 60
-    done
-  ) &
-  SUDO_KEEPALIVE_PID=$!
-fi
-
-####################
-##### End of Preamble 
-####################
-
-# Download any Git submodules required to build FASTDB.
+# Initialize source dependencies and verify writable host-mounted directories.
 echo "Initializing Git submodules..."
 git -C "$REPO_ROOT" submodule update --init --recursive
-
-# Create bind-mount sources before Docker Compose sees them. If Docker creates
-# a missing bind-mount source, it may be owned by root and the non-root
-# makeinstall container will not be able to write to it.
 mkdir -p "$REPO_ROOT/install" "$REPO_ROOT/db"
 for directory in "$REPO_ROOT/install" "$REPO_ROOT/db"; do
   if [[ ! -w "$directory" || ! -x "$directory" ]]; then
@@ -135,6 +100,21 @@ for directory in "$REPO_ROOT/install" "$REPO_ROOT/db"; do
     exit 1
   fi
 done
+
+# Warn before deployment if the VM's root disk is running low on space.
+AVAILABLE_KB="$(df -Pk / | awk 'NR == 2 { print $4 }')"
+if (( AVAILABLE_KB < 10 * 1024 * 1024 )); then
+  echo "Warning: less than 10 GiB is available on the root filesystem." >&2
+fi
+
+echo "Values file: $VALUES_FILE"
+echo "Kubernetes namespace: $NAMESPACE"
+echo "FASTDB images: $DOCKER_ARCHIVE/fastdb-*:$DOCKER_VERSION"
+echo "K3s node address: $NODE_IP"
+
+####################
+##### End of preamble
+####################
 
 # Generate deployment credentials once and reuse them on later upgrades.
 if [[ ! -f "$SECRETS_FILE" ]]; then
@@ -158,143 +138,70 @@ secrets:
 EOF
 fi
 
-# check you have at least 10Gb free space
-AVAILABLE_KB="$(df -Pk / | awk 'NR == 2 { print $4 }')"
-if (( AVAILABLE_KB < 10 * 1024 * 1024 )); then
-  echo "Warning: less than 10 GiB is available on the root filesystem." >&2
-fi
-
 cd "$REPO_ROOT"
 
-# Pair each Docker Compose build target with the image it produces.
-services=(postgres mongodb createdb webap queryrunner)
-images=(
-  "$DOCKER_ARCHIVE/fastdb-postgres:$DOCKER_VERSION"
-  "$DOCKER_ARCHIVE/fastdb-mongodb:$DOCKER_VERSION"
-  "$DOCKER_ARCHIVE/fastdb-shell:$DOCKER_VERSION"
-  "$DOCKER_ARCHIVE/fastdb-webap:$DOCKER_VERSION"
-  "$DOCKER_ARCHIVE/fastdb-query-runner:$DOCKER_VERSION"
-)
-existing_images=()
-built_images=()
-any_image_built=false
-any_image_exists=false
+# The temporary makeinstall container needs the configured shell image before
+# Helm runs. Explain this separate Docker requirement before offering a pull.
+if ! docker image inspect "$SHELL_IMAGE" >/dev/null 2>&1; then
+  echo
+  echo "The FASTDB shell image is not available in Docker:"
+  echo "  $SHELL_IMAGE"
+  echo
+  echo "This image is needed before Helm runs because the temporary"
+  echo "makeinstall container uses it to prepare FASTDB/install/ from"
+  echo "the current checkout."
+  echo
 
-rebuild_all=false
-if [[ "$IMAGE_SOURCE" == "build" ]]; then
-  # Report which reusable FASTDB images already exist in Docker.
-  echo "Checking locally built FASTDB container images..."
-  for index in "${!services[@]}"; do
-    image_name="${images[$index]}"
-    if docker image inspect "$image_name" >/dev/null 2>&1; then
-      echo "  Found $image_name"
-      existing_images[$index]=true
-      any_image_exists=true
-    else
-      echo "  Missing $image_name"
-      existing_images[$index]=false
-    fi
-  done
-
-  # Let the user choose between rebuilding every image and reusing existing ones.
-  if [[ "$any_image_exists" == true ]]; then
-    read -r -p "Rebuild all FASTDB images from the current checkout? [y/N] " reply
-    case "$reply" in
-      y|Y|yes|YES|Yes)
-        rebuild_all=true
-        ;;
-      ""|n|N|no|NO|No)
-        echo "Reusing existing images; missing images will still be built."
-        ;;
-      *)
-        echo "Error: please answer y or n." >&2
-        exit 1
-        ;;
-    esac
-  else
-    echo "No existing FASTDB images were found; building all images."
+  if [[ "$DOCKER_ARCHIVE" == "fastdb.local" ]]; then
+    echo "fastdb.local is a local image label, not a remote registry."
+    echo "Build and load that image tag first:"
+    echo "  $REPO_ROOT/helm/scripts/build-local-images.sh '$DOCKER_ARCHIVE' '$DOCKER_VERSION'"
+    exit 1
   fi
 
-  # Use Docker Compose to build requested images plus any image that is missing.
-  for index in "${!services[@]}"; do
-    service_name="${services[$index]}"
-    image_name="${images[$index]}"
-    if [[ "$rebuild_all" == true || "${existing_images[$index]}" == false ]]; then
-      echo "  Building $service_name ($image_name)..."
-      docker compose build "$service_name"
-      built_images[$index]=true
-      any_image_built=true
-    else
-      built_images[$index]=false
-    fi
-  done
-else
-  # Check every Harbor reference before changing the Kubernetes deployment.
+  echo "The configured registry is:"
+  echo "  $DOCKER_ARCHIVE"
+  echo
+  read -r -p "Attempt to pull the shell image now? [y/N] " pull_reply
+  case "$pull_reply" in
+    y|Y|yes|YES|Yes)
+      docker pull "$SHELL_IMAGE"
+      ;;
+    ""|n|N|no|NO|No)
+      echo "Installation cancelled before Helm was run."
+      exit 0
+      ;;
+    *)
+      echo "Error: please answer y or n." >&2
+      exit 1
+      ;;
+  esac
+fi
+
+# For the CANFAR Harbor values, verify every deployment image and copy the
+# existing Docker login into the namespace for Kubernetes image pulls.
+if [[ "$DOCKER_ARCHIVE" == "images.canfar.net/candiapl" ]]; then
   echo "Checking prebuilt Harbor images..."
-  for image_name in "${images[@]}"; do
+  for repository in \
+    fastdb-postgres \
+    fastdb-mongodb \
+    fastdb-shell \
+    fastdb-webap \
+    fastdb-query-runner
+  do
+    image_name="$DOCKER_ARCHIVE/$repository:$DOCKER_VERSION"
     echo "  Checking $image_name"
     if ! docker manifest inspect "$image_name" >/dev/null 2>&1; then
       echo "Error: cannot access $image_name." >&2
-      echo "Run 'docker login $HARBOR_SERVER', verify the tag, and rerun this script." >&2
+      echo "Run 'docker login images.canfar.net', verify the tag, and rerun." >&2
       exit 1
     fi
   done
 
-  # The makeinstall helper runs through Docker Compose, so only its shell image
-  # must also exist in Docker's local image store. K3s pulls all pod images itself.
-  shell_image="$DOCKER_ARCHIVE/fastdb-shell:$DOCKER_VERSION"
-  if docker image inspect "$shell_image" >/dev/null 2>&1; then
-    echo "  Reusing $shell_image for makeinstall"
-  else
-    echo "  Pulling $shell_image for makeinstall..."
-    docker pull "$shell_image"
-  fi
-fi
-
-# Generate the host-mounted FASTDB Python, SQL, configuration, and web files.
-echo "Building FASTDB install/ for $EXTERNAL_URL..."
-USERID="$(id -u)" GROUPID="$(id -g)" \
-docker compose run --rm --entrypoint "" makeinstall /bin/bash -ec "
-  touch aclocal.m4 configure
-  find . -name Makefile.am -exec touch {} \\;
-  find . -name Makefile.in -exec touch {} \\;
-  ./configure \\
-    --with-installdir=/fastdb \\
-    --with-smtp-server=mailhog \\
-    --with-smtp-port=1025 \\
-    --with-external-url=$EXTERNAL_URL
-  make install
-"
-
-# Reclaim temporary build layers when this run built any images.
-if [[ "$any_image_built" == true ]]; then
-  echo "Removing Docker build cache to free space for K3s images..."
-  docker builder prune --all --force
-fi
-
-helm_image_args=()
-if [[ "$IMAGE_SOURCE" == "build" ]]; then
-  # Import new locally built images into K3s while retaining images it already has.
-  echo "Checking K3s images..."
-  for index in "${!images[@]}"; do
-    image_name="${images[$index]}"
-    if [[ "${built_images[$index]}" == true ]] ||
-       ! sudo k3s crictl inspecti "$image_name" >/dev/null 2>&1; then
-      echo "  Importing $image_name..."
-      docker image save "$image_name" |
-        sudo k3s ctr --namespace k8s.io images import -
-    else
-      echo "  Reusing $image_name"
-    fi
-  done
-else
-  # Copy the existing Docker login into Kubernetes so K3s can pull private
-  # Harbor images directly and retain any layers already present locally.
-  docker_config_dir="${DOCKER_CONFIG:-$HOME/.docker}"
-  docker_config_file="$docker_config_dir/config.json"
+  docker_config_file="${DOCKER_CONFIG:-$HOME/.docker}/config.json"
   if [[ ! -f "$docker_config_file" ]]; then
     echo "Error: Docker credentials not found at $docker_config_file." >&2
-    echo "Run 'docker login $HARBOR_SERVER' and rerun this script." >&2
+    echo "Run 'docker login images.canfar.net' and rerun this script." >&2
     exit 1
   fi
 
@@ -309,19 +216,27 @@ else
     --dry-run=client \
     --output=yaml |
     kubectl apply --filename=- >/dev/null
-
-  helm_image_args=(
-    --set-string "global.imageRegistry=$HARBOR_REGISTRY"
-    --set-string "global.imageTag=$HARBOR_TAG"
-    --set-string "global.imagePullPolicy=IfNotPresent"
-    --set-string "global.imagePullSecrets[0].name=$HARBOR_PULL_SECRET"
-  )
 fi
 
-# Install or upgrade the Kubernetes resources and wait for them to become ready.
+# Use the configured shell image to copy and configure the current checkout in
+# the host's install/ directory. Kubernetes later mounts it at /fastdb.
+echo "Building FASTDB install/ for $EXTERNAL_URL..."
+USERID="$(id -u)" GROUPID="$(id -g)" \
+docker compose run --rm --entrypoint "" makeinstall /bin/bash -ec "
+  touch aclocal.m4 configure
+  find . -name Makefile.am -exec touch {} \\;
+  find . -name Makefile.in -exec touch {} \\;
+  ./configure \\
+    --with-installdir=/fastdb \\
+    --with-smtp-server=mailhog \\
+    --with-smtp-port=1025 \\
+    --with-external-url=$EXTERNAL_URL
+  make install
+"
+
+# Recreate the immutable migration Job, then install or upgrade the resources
+# using image configuration directly from the selected values file.
 echo "Installing FASTDB with Helm..."
-# A Job's pod template is immutable. Recreate it so every upgrade runs current
-# database migrations without deleting the PostgreSQL PVC.
 kubectl delete job createdb \
   --namespace "$NAMESPACE" \
   --ignore-not-found
@@ -334,7 +249,6 @@ if ! helm upgrade --install "$RELEASE_NAME" "$REPO_ROOT/helm/fastdb" \
   --set-string "volumes.hostPaths.install=$REPO_ROOT/install" \
   --set-string "volumes.hostPaths.db=$REPO_ROOT/db" \
   --set-string "ingestion.brokerConsumer.dockerHostIp=$NODE_IP" \
-  "${helm_image_args[@]}" \
   --wait \
   --wait-for-jobs \
   --timeout 10m; then
@@ -344,7 +258,8 @@ if ! helm upgrade --install "$RELEASE_NAME" "$REPO_ROOT/helm/fastdb" \
   exit 1
 fi
 
-# Restart services that must reload files from the host-mounted install directory.
+# Restart long-running Python processes so they load code from the refreshed
+# host-mounted install/ directory.
 echo "Restarting services that load the host-mounted FASTDB code..."
 for deployment_name in webap queryrunner shell; do
   kubectl rollout restart "deployment/$deployment_name" --namespace "$NAMESPACE"
@@ -353,7 +268,7 @@ for deployment_name in webap queryrunner shell; do
     --timeout=180s
 done
 
-# Verify that the FASTDB web application responds from inside the VM.
+# Verify the web application, then display final workload and storage status.
 echo "Checking FASTDB WebAP..."
 curl --fail --silent --show-error \
   --retry 12 \
@@ -361,7 +276,6 @@ curl --fail --silent --show-error \
   --retry-delay 5 \
   "http://127.0.0.1:30080/" >/dev/null
 
-# Display final workload, storage, disk, and access information.
 echo
 kubectl get pods --namespace "$NAMESPACE"
 kubectl get pvc --namespace "$NAMESPACE"
