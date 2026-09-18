@@ -23,7 +23,7 @@ class TestDiaForcedSource( BaseTestDB ):
             'ra',
             'dec',
             'psfflux',
-            'psffluxerr',
+            'psffluxerr'
         }
         self.safe_to_modify = [
             'midpointmjdtai',
@@ -31,7 +31,7 @@ class TestDiaForcedSource( BaseTestDB ):
             'psfflux',
             'psffluxerr',
             'ra',
-            'dec',
+            'dec'
         ]
         self.uniques = []
 
@@ -87,6 +87,8 @@ class TestDiaForcedSourceExtra( BaseTestDB ):
             'sciencefluxerr',
             'timeprocessedmjdtai',
             'timewithdrawnmjdtai',
+            'flags',
+            'pixelflags'
         }
         self.safe_to_modify = [
             'detector',
@@ -94,6 +96,8 @@ class TestDiaForcedSourceExtra( BaseTestDB ):
             'sciencefluxerr',
             'timeprocessedmjdtai',
             'timewithdrawnmjdtai',
+            'flags',
+            'pixelflags'
         ]
         self.uniques = []
 

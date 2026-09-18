@@ -1,36 +1,12 @@
-import uuid
 from types import SimpleNamespace
 import simplejson
-import numbers
-
-import pandas
 
 import flask
 import flask.views
 
 from db import DB
+import util
 from util import FDBLogger
-
-
-# ======================================================================
-# Encoder for simplejson
-#
-# Handels UUID (which is why it was named this, as it originally only did this),
-#   floats, and integers, converting numpy types to regular floats and ints.
-#   Also converts pandas NA to null.
-
-class UUIDJSONEncoder( simplejson.JSONEncoder ):
-    def default( self, obj ):
-        if isinstance( obj, pandas.api.typing.NAType ):
-            return None
-        if isinstance( obj, uuid.UUID ):
-            return str(obj)
-        elif isinstance( obj, numbers.Integral ):
-            return int(obj)
-        elif isinstance( obj, numbers.Real ):
-            return float(obj)
-        else:
-            return super().default( obj )
 
 
 # ======================================================================
@@ -100,18 +76,60 @@ class BaseView( flask.views.View ):
             return "Action requires admin", 500
         try:
             retval = self.do_the_things( *args, **kwargs )
-            # Can't just use the default JSON handling, because it
-            #   writes out NaN which is not standard JSON and which
-            #   the javascript JSON parser chokes on.  Sigh.
+            rethdrs = None
+            httpcode = None
+            if isinstance( retval, tuple ):
+                if len(retval) >= 3:
+                    rethdrs = retval[2]
+                    if not isinstance( rethdrs, dict ):
+                        raise TypeError( f"Invalid return headers {rethdrs}, should be a dict." )
+                if len(retval) >= 2:
+                    httpcode = int( retval[1] )
+                retval = retval[0]
+
+            httpcode = 200 if httpcode is None else httpcode
+
             if isinstance( retval, dict ) or isinstance( retval, list ):
-                return ( simplejson.dumps( retval, ignore_nan=True, cls=UUIDJSONEncoder ),
-                         200, { 'Content-Type': 'application/json' } )
-            elif isinstance( retval, str ):
-                return retval, 200, { 'Content-Type': 'text/plain; charset=utf-8' }
-            elif isinstance( retval, tuple ):
-                return retval
-            else:
-                return retval, 200, { 'Content-Type': 'application/octet-stream' }
+                rethdrs = {} if rethdrs is None else rethdrs
+                if 'Content-Type' in rethdrs:
+                    if rethdrs['Content-Type'] != 'application/json':
+                        raise FASTDBWebException( f"Server error, tried to return a dict or list with "
+                                                  f"Content-Type {rethdrs['Content-Type']}, but it should be "
+                                                  f"application/json" )
+                else:
+                    rethdrs['Content-Type'] = 'application/json'
+
+                # I don't like this whole "it's a global variable, but, hey, you're good, it's
+                #   what you want inside your object" thing, but whatever, it's what flask does.
+                if flask.request.headers.get( 'Fastdb-Stringifyints' ) is not None:
+                    # ...this is for Javascript, which will read JSON and turn all integers
+                    #   into doubles... thereby destroying 64-bit integers.  The fastdb
+                    #   javascript code sets the Fastdb-Stringifyints header to tell us
+                    #   to send integers back as strings so they won't get destroyed.
+                    FDBLogger.warning( "Stringifying integers" )
+                    retval = util.stringify_integers( retval )
+                # Can't just use the default JSON handling, because it
+                #   writes out NaN which is not standard JSON and which
+                #   the javascript JSON parser chokes on.  simplejson
+                #   provides ignore_nan to convert NaN and inf to null,
+                #   which is more strict JSON compliant.  Also take the
+                #   opportunity to convert numpy types and UUIDs into
+                #   types JSON can handle, so that we don't have to do
+                #   that in every handler.
+                # Ponder if perhaps we should have the option to return
+                #   BSON or something similar that's
+                #   binary-encoded... might be useful for python apps
+                #   calling the api.
+                retval = simplejson.dumps( retval, ignore_nan=True, default=util.fastdb_json_default )
+
+            elif rethdrs is None:
+                if isinstance( retval, str ):
+                    rethdrs = { 'Content-Type': 'text/plain; charset=utf-8' }
+                else:
+                    rethdrs = { 'Content-Type': 'application/octet-stream' }
+
+            return ( retval, httpcode, rethdrs )
+
         except Exception as ex:
             # sio = io.StringIO()
             # traceback.print_exc( file=sio )

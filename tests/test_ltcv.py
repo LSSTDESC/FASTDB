@@ -13,10 +13,11 @@ from util import FDBLogger
 
 @pytest.fixture( scope='session' )
 def objstats_cols():
-    return { 'rootid', 'band', 'ra', 'dec',
+    return { 'rootid', 'ra', 'dec', 'band',
              'firstdet_mjd', 'firstdet_flux', 'firstdet_fluxerr',
              'lastdet_mjd', 'lastdet_flux', 'lastdet_fluxerr',
              'maxdet_mjd', 'maxdet_flux', 'maxdet_fluxerr',
+             'lastforced_mjd', 'lastforced_flux', 'lastforced_fluxerr',
              'ndets', 'ndets24', 'ndets23', 'ndets22', 'ndets21',
              'nsn10', 'nsn7', 'nsn5' }
 
@@ -36,7 +37,9 @@ def test_empty_objstats_realtime_view( procver_collection, objstats_cols ):
 
             rows, cols = con.execute( "SELECT * FROM objstatscomb_realtime" )
             assert len(rows) == 0
-            assert set(cols) == ( objstats_cols - { 'band' } )
+            assert set(cols) == ( objstats_cols.union( { 'firstdet_band', 'lastdet_band',
+                                                         'maxdet_band', 'lastforced_band' } )
+                                  - { 'band' } )
 
             # TODO : test that indexes got created
 
@@ -59,7 +62,9 @@ def test_create_objstats_realtime_view( objstats_realtime_view, objstats_cols ):
 
         rows, cols = con.execute( "SELECT * FROM objstatscomb_realtime" )
         assert len(rows) == 0
-        assert set(cols) == ( objstats_cols - { 'band' } )
+        assert set(cols) == ( objstats_cols.union( { 'firstdet_band', 'lastdet_band',
+                                                     'maxdet_band', 'lastforced_band' } )
+                              - { 'band' } )
 
 
 def test_objstats_view( objstats_realtime_view, set_of_lightcurves, check_db_rows_vs_expected ):
@@ -528,7 +533,8 @@ def test_object_ltcv( set_of_lightcurves, procver_collection, lightcurve_checker
                     jsobjinfo = None
                     pdobjinfo = None
 
-                compare_pandas_to_json( pdltcv, [jsltcv], pdobjinfo, jsobjinfo )
+                compare_pandas_to_json( pdltcv, [jsltcv], pdobjinfo,
+                                        None if jsobjinfo is None else { k: [v] for k, v in jsobjinfo.items() } )
 
     FDBLogger.info( f"{n} calls in {time.perf_counter()-t0:.2f} sec; js time={tjs:.2f}, pd time={tpd:.2f}" )
 

@@ -11,6 +11,7 @@ from services.projectsim import AlertSender
 from services.brokerconsumer import BrokerConsumer
 from util import logger
 import db
+import ltcv
 
 sys.path.insert( 0, pathlib.Path(__file__).parent )
 from fakebroker import FakeBroker
@@ -334,3 +335,17 @@ def fully_do_alerts_90days_sent_received_and_imported( barf, procver_collection,
             collection = db.get_mongo_collection( mongoclient, "source_thumbnails" )
             collection.delete_many( {} )
         # Other fixtures will remove the mongodb collections that brokerconsumer made
+
+
+# This next fixture won't work if you use the fully_do_alerts_90days_... fixture.
+# So, don't use it in any modules that use that fixture.
+@pytest.fixture( scope='module' )
+def alerts_materialized_view( alerts_90days_sent_received_and_imported ):
+    try:
+        ltcv.create_object_stats_materialized_view( 'realtime' )
+        yield True
+    finally:
+        with db.DBCon() as dbcon:
+            dbcon.execute( "DROP MATERIALIZED VIEW objstatscomb_realtime" )
+            dbcon.execute( "DROP MATERIALIZED VIEW objstats_realtime" )
+            dbcon.commit()
