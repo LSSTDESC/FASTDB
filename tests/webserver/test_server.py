@@ -17,28 +17,6 @@ def test_just_make_a_user( test_user ):
     pass
 
 
-# This next one loads up with the database with the ELAsTiCC2 excerpt
-#   loaded from snana files, the first 90 days of that having been run
-#   through the alert cycle (using the "fast" method of loading the cached
-#   data; see services/test_sourceimporter.py), and with edp2 loaded from
-#   the test parquet files.
-#
-# ELAsTiCC2 data are in processing version "realtime", and edp2 data are in
-#   processing version "test_load_edp2".
-#
-# Run this with
-#   pytest -v --trace webserver/test_server.py::test_elasticc2_edp2_loaded
-# And now you can experiment with the webap at:
-#   http://localhost:8080
-# (unless you've used the WEBPORT env var to change the port the webap
-# listens when starting the docker compose environment).  You can also
-# get to it via https, but you will have to confirm a security override
-# on your browser to use a self-signed cert.  Log in with user 'test' and
-# password 'test_password'.
-def test_elasticc2_edp2_loaded( test_user, alerts_materialized_view, edp2_materialized_view ):
-    pass
-
-
 def test_getprocvers( procver_collection, test_user, fastdb_client ):
     res = fastdb_client.post( '/getprocvers' )
     assert isinstance( res, dict )
@@ -342,3 +320,27 @@ def test_objectsearch( fastdb_client, procver_collection, objstats_realtime_view
                                      .format( view=sql.Identifier( f'objstats_{procver}' ) ) )
 
             con.commit()
+
+
+# ======================================================================
+
+# This next one loads up with the database with the ELAsTiCC2 excerpt
+#   loaded from snana files, the first 90 days of that having been run
+#   through the alert cycle (using the "fast" method of loading the cached
+#   data; see services/test_sourceimporter.py), and with edp2 loaded from
+#   the test parquet files.
+#
+# ELAsTiCC2 data are in processing version "realtime", and edp2 data are in
+#   processing version "test_load_edp2".
+#
+# Run this with
+#   pytest -v --trace webserver/test_server.py::test_elasticc2_edp2_loaded
+# And now you can experiment with the webap at:
+#   http://localhost:8080
+# (unless you've used the WEBPORT env var to change the port the webap
+# listens when starting the docker compose environment).  You can also
+# get to it via https, but you will have to confirm a security override
+# on your browser to use a self-signed cert.  Log in with user 'test' and
+# password 'test_password'.
+def test_elasticc2_edp2_loaded( test_user, alerts_materialized_view, edp2_materialized_view ):
+    pass

@@ -1035,6 +1035,7 @@ def lightcurve_checker( set_of_lightcurves, procver_collection ):
         # ...there are a few different tests that call this that get things wrapped different ways.
         if return_object_info:
             if isinstance( res, tuple ):
+                assert isinstance( res[1], dict )
                 if single:
                     assert isinstance( res[0], dict )
                     ltcvs = [ res[0] ]
@@ -1043,21 +1044,19 @@ def lightcurve_checker( set_of_lightcurves, procver_collection ):
                 else:
                     assert isinstance( res[0], list )
                     ltcvs = res[0]
-                    assert isinstance( res[1], dict )
                     assert all( isinstance( v, list ) for v in res[1].values() )
                     infos = res[1]
             else:
                 assert isinstance( res, dict )
+                assert isinstance( res['objinfo'], dict )
                 if single:
                     assert set( res.keys() ) == { 'ltcv', 'objinfo' }
                     assert isinstance( res['ltcv'], dict )
-                    assert isinstance( res['objinfo'],dict )
                     ltcvs = [ res['ltcv'] ]
                     infos = { k: [v] for k, v in res['objinfo'].items() }
                 else:
                     assert set( res.keys() ) == { 'ltcvs', 'objinfo' }
                     assert isinstance( res['ltcvs'], list )
-                    assert isinstance( res['objinfo'], list )
                     assert all( isinstance( v, list ) for v in res['objinfo'].values() )
                     ltcvs = res['ltcvs']
                     infos = res['objinfo']
@@ -1285,12 +1284,6 @@ def lightcurve_checker( set_of_lightcurves, procver_collection ):
                     expected_obj_keys.add( 'pos_base_procver' )
 
             assert set( infos.keys() ) == expected_obj_keys
-
-            if rootid_is_uuid:
-                assert all( isinstance( oid, uuid.UUID ) for oid in infos['rootid'] )
-            else:
-                assert all( isinstance( oi, str ) for oi in infos['rootid'] )
-                infos['rootid'] = [ asUUID(oid) for oid in infos['rootid'] ]
 
             for dex in range( len(infos['rootid']) ):
                 ltcv = ltcvs[dex]
