@@ -137,7 +137,7 @@ RUN source /venv/bin/activate \
     && rm -rf pittgoogle-client \
     && deactivate
 
-# Install mongodump and mongorestore.  Fortunately these only totaly ~40MB,
+# Install mongodump and mongorestore.  Fortunately these only total ~40MB,
 #   unlike the monster mongosh.
 # (Even though this needs golang installed for ./make build to even run,
 #  the first thing it does it download go....)
@@ -155,36 +155,8 @@ RUN source /venv/bin/activate \
    && pip --no-cache install "hats @ git+https://github.com/astronomy-commons/hats.git@pandas3" \
                              "lsdb @ git+https://github.com/astronomy-commons/lsdb.git@pandas3"
 
-# # ======================================================================
-# # This is for the test webserver.  It installs crappy keys so you
-# #   can connect via https.
-# # The production webserver is going to be on Spin and won't do
-# #   SSL management itself (the spin ingress handles that).
-# # (
-# FROM base AS test
-#
-# COPY --from=build /venv/ /venv/
-# COPY --from=build /usr/local/bin/mongodump /usr/local/bin/mongodump
-# COPY --from=build /usr/local/bin/mongorestore /usr/local/bin/mongorestore
-# ENV PATH=/venv/bin:$PATH
-#
-# RUN mkdir -p /fastdb/webserver
-# ENV PYTHONPATH=/fastdb
-# WORKDIR /fastdb/webserver
-#
-# RUN mkdir /sessions
-#
-# COPY docker_flask/createdb.py /usr/src/createdb.py
-# COPY docker_flask/key.pem /usr/src/key.pem
-# COPY docker_flask/cert.pem /usr/src/cert.pem
-#
-# EXPOSE 8080
-# ENTRYPOINT [ "gunicorn", "--certfile", "/usr/src/cert.pem", "--keyfile", "/usr/src/key.pem", \
-#            "-w", "1", "--threads", "10", "-b", "0.0.0.0:8080", "--timeout", "0", "server:app" ]
-
 # ======================================================================
-# This is for interaction.  It runs something that will stay up
-#   that you can exec a shell on.
+# This is for interaction.  It runs something that will stay up that you can exec a shell on.
 FROM base AS shell
 
 COPY --from=build /venv/ /venv/

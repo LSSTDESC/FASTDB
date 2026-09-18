@@ -47,7 +47,7 @@ from util import FDBLogger
 # explaining can slow down queries as sometimes it seems that
 # postgres really wants to think about what it's doing before giving you
 # a query plan (I don't know why; is it a pg_hint_plan thing?)
-_echoqueries = True
+_echoqueries = False
 _alwaysexplain = False
 _alwaysanalyze = False
 
@@ -995,13 +995,12 @@ class DBBase:
                 raise ValueError( "Can only pass column values as named arguments "
                                   "if cols and vals are both None" )
         else:
-            cols = list( kwargs.keys() )
-            # ...is it rash to assume that keys() and values() will return
-            #   things in the same order in subsequent calls?  I know that
-            #   CPython implementation maintains insert order when you call#
-            #   either, but what is the python spec?  Be safe.
-            # vals = kwargs.values()
-            vals = [ kwargs[k] for k in cols ]
+            # Note: as of Python 3.7, dictionaries are supposed to maintain
+            #   insertion order.  Relevant here is that there's no need to
+            #   worry that the values() call after the keys() call won't
+            #   return things in the right order.
+            cols = kwargs.keys()
+            vals = kwargs.values()
 
         keys = set( cols )
         if not keys.issubset( mycols ):

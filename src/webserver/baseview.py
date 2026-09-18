@@ -87,26 +87,43 @@ class BaseView( flask.views.View ):
                     httpcode = int( retval[1] )
                 retval = retval[0]
 
-            if httpcode is None:
-                httpcode = 200
+            httpcode = 200 if httpcode is None else httpcode
 
-            if rethdrs is None:
-                if isinstance( retval, dict ) or isinstance( retval, list ):
-                    # I don't like this whole "it's a global variable, but, hey, you're good, it's
-                    #   what you want inside your object" thing, but whatever, it's what flask does.
-                    if flask.request.headers.get( 'Fastdb-Stringifyints' ) is not None:
-                        # ...this is for Javascript, which will read JSON and turn all integers
-                        #   into doubles... thereby destroying 64-bit integers.  The fastdb
-                        #   javascript code sets the Fastdb-Stringifyints header to tell us
-                        #   to send integers back as strings so they won't get destroyed.
-                        FDBLogger.warning( "Stringifying integers" )
-                        retval = util.stringify_integers( retval )
-                    # Can't just use the default JSON handling, because it
-                    #   writes out NaN which is not standard JSON and which
-                    #   the javascript JSON parser chokes on.  Sigh.
-                    retval = simplejson.dumps( retval, ignore_nan=True, default=util.fastdb_json_default )
-                    rethdrs = { 'Content-Type': 'application/json' }
-                elif isinstance( retval, str ):
+            if isinstance( retval, dict ) or isinstance( retval, list ):
+                rethdrs = {} if rethdrs is None else rethdrs
+                if 'Content-Type' in rethdrs:
+                    if rethdrs['Content-Type'] != 'application/json':
+                        raise FASTDBWebException( f"Server error, tried to return a dict or list with "
+                                                  f"Content-Type {rethdrs['Content-Type']}, but it should be "
+                                                  f"application/json" )
+                else:
+                    rethdrs['Content-Type'] = 'application/json'
+
+                # I don't like this whole "it's a global variable, but, hey, you're good, it's
+                #   what you want inside your object" thing, but whatever, it's what flask does.
+                if flask.request.headers.get( 'Fastdb-Stringifyints' ) is not None:
+                    # ...this is for Javascript, which will read JSON and turn all integers
+                    #   into doubles... thereby destroying 64-bit integers.  The fastdb
+                    #   javascript code sets the Fastdb-Stringifyints header to tell us
+                    #   to send integers back as strings so they won't get destroyed.
+                    FDBLogger.warning( "Stringifying integers" )
+                    retval = util.stringify_integers( retval )
+                # Can't just use the default JSON handling, because it
+                #   writes out NaN which is not standard JSON and which
+                #   the javascript JSON parser chokes on.  simplejson
+                #   provides ignore_nan to convert NaN and inf to null,
+                #   which is more strict JSON compliant.  Also take the
+                #   opportunity to convert numpy types and UUIDs into
+                #   types JSON can handle, so that we don't have to do
+                #   that in every handler.
+                # Ponder if perhaps we should have the option to return
+                #   BSON or something similar that's
+                #   binary-encoded... might be useful for python apps
+                #   calling the api.
+                retval = simplejson.dumps( retval, ignore_nan=True, default=util.fastdb_json_default )
+
+            elif rethdrs is None:
+                if isinstance( retval, str ):
                     rethdrs = { 'Content-Type': 'text/plain; charset=utf-8' }
                 else:
                     rethdrs = { 'Content-Type': 'application/octet-stream' }

@@ -1729,12 +1729,9 @@ def create_object_stats_materialized_view( procver ):
             """
             CREATE MATERIALIZED VIEW {viewname} AS (
                SELECT r.rootid, r.ra, r.dec, r.band,
-                   d0.midpointmjdtai AS firstdet_mjd, d0.psfflux AS firstdet_flux,
-                     d0.psffluxerr AS firstdet_fluxerr,
-                   dn.midpointmjdtai AS lastdet_mjd, dn.psfflux AS lastdet_flux,
-                     dn.psffluxerr AS lastdet_fluxerr,
-                   dx.midpointmjdtai AS maxdet_mjd, dx.psfflux AS maxdet_flux,
-                     dx.psffluxerr AS maxdet_fluxerr,
+                   d0.midpointmjdtai AS firstdet_mjd, d0.psfflux AS firstdet_flux, d0.psffluxerr AS firstdet_fluxerr,
+                   dn.midpointmjdtai AS lastdet_mjd, dn.psfflux AS lastdet_flux, dn.psffluxerr AS lastdet_fluxerr,
+                   dx.midpointmjdtai AS maxdet_mjd, dx.psfflux AS maxdet_flux, dx.psffluxerr AS maxdet_fluxerr,
                    fn.midpointmjdtai AS lastforced_mjd, fn.psfflux AS lastforced_flux,
                      fn.psffluxerr AS lastforced_fluxerr,
                    n.ndets,
@@ -1944,15 +1941,16 @@ def create_object_stats_materialized_view( procver ):
             CREATE MATERIALIZED VIEW {combviewname} AS (
               SELECT s.rootid, s.ra, s.dec,
                      fd.mjd AS firstdet_mjd, fd.band AS firstdet_band,
-                     fd.flux AS firstdet_flux, fd.fluxerr AS firstdet_fluxerr,
+                       fd.flux AS firstdet_flux, fd.fluxerr AS firstdet_fluxerr,
                      ld.mjd AS lastdet_mjd, ld.band AS lastdet_band,
-                     ld.flux AS lastdet_flux, ld.fluxerr AS lastdet_fluxerr,
+                       ld.flux AS lastdet_flux, ld.fluxerr AS lastdet_fluxerr,
                      xd.mjd AS maxdet_mjd, xd.band AS maxdet_band,
-                     xd.flux AS maxdet_flux, xd.fluxerr AS maxdet_fluxerr,
+                       xd.flux AS maxdet_flux, xd.fluxerr AS maxdet_fluxerr,
                      lf.mjd AS lastforced_mjd, lf.band AS lastforced_band,
-                     lf.flux AS lastforced_flux, lf.fluxerr AS lastforced_fluxerr,
-                     s.ndets AS ndets, s.ndets24 AS ndets24, s.ndets23 AS ndets23, s.ndets22 AS ndets22,
-                     s.ndets21 AS ndets21, s.nsn10 AS nsn10, s.nsn7 AS nsn7, s.nsn5 AS nsn5
+                       lf.flux AS lastforced_flux, lf.fluxerr AS lastforced_fluxerr,
+                     s.ndets AS ndets, s.ndets24 AS ndets24, s.ndets23 AS ndets23,
+                       s.ndets22 AS ndets22, s.ndets21 AS ndets21,
+                     s.nsn10 AS nsn10, s.nsn7 AS nsn7, s.nsn5 AS nsn5
               FROM (
                 SELECT rootid, ra, dec, SUM(ndets) AS ndets, SUM(ndets24) AS ndets24, SUM(ndets23) AS ndets23,
                        SUM(ndets22) AS ndets22, SUM(ndets21) AS ndets21, SUM(nsn10) AS nsn10,
