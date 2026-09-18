@@ -84,6 +84,11 @@ postgres:
     tag: ""  # Falls back to global.imageTag
   replicas: 1
 
+  # Stop the existing PostgreSQL pod before starting its replacement so that
+  # both pods never try to use the same database files simultaneously.
+  updateStrategy:
+    type: Recreate
+
   persistence:
     size: 10Gi
     accessMode: ReadWriteOnce
@@ -139,6 +144,11 @@ mongodb:
     repository: fastdb-mongodb
     tag: ""
   replicas: 1
+
+  # Stop the existing MongoDB pod before starting its replacement so that
+  # both pods never try to use the same database files simultaneously.
+  updateStrategy:
+    type: Recreate
 
   persistence:
     size: 5Gi

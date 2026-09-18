@@ -11,6 +11,8 @@ metadata:
     app: postgres
 spec:
   replicas: {{ .Values.postgres.replicas }}
+  strategy:
+    type: {{ .Values.postgres.updateStrategy.type }}
   selector:
     matchLabels:
       app: postgres

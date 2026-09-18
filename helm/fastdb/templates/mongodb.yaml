@@ -11,6 +11,8 @@ metadata:
     app: mongodb
 spec:
   replicas: {{ .Values.mongodb.replicas }}
+  strategy:
+    type: {{ .Values.mongodb.updateStrategy.type }}
   selector:
     matchLabels:
       app: mongodb
