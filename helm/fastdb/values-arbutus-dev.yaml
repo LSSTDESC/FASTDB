@@ -4,7 +4,7 @@
 global:
   namespace: fastdb-arbutus-dev
   environment: dev
-  # Images are built from this checkout and imported directly into K3s. This is a local image name, not a remote registry used for pulling images.
+  # Images are built manually using build-local-images.sh and imported directly into K3s. This is a local image name, not a remote registry used for pulling images.
   imageRegistry: fastdb.local
   imageTag: test20260428
   imagePullPolicy: Never
