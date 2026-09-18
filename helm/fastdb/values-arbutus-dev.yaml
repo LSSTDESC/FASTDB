@@ -1,10 +1,10 @@
 # FASTDB development deployment on a single-node Arbutus K3s VM.
-# Use helm/scripts/install-arbutus-fastdb.sh rather than invoking Helm directly.
+# Images should be pre-built with build-local-images.sh and imported into k3s
 
 global:
   namespace: fastdb-arbutus-dev
   environment: dev
-  # Images are built manually using build-local-images.sh and imported directly into K3s. This is a local image name, not a remote registry used for pulling images.
+  # This is a local image name, not a remote registry used for pulling images.
   imageRegistry: fastdb.local
   imageTag: test20260428
   imagePullPolicy: Never
