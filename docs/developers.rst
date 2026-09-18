@@ -449,7 +449,7 @@ The ``.yaml`` files defining the Spin workloads are in ``admin/spin/production``
 
   cd /global/cfs/cdirs/lsst/groups/TD/SOFTWARE/fastdb_deployment/production/FASTDB
   #
-  # Only do the next line if you edited any of the Makefile.am (etc.) files
+  # Only do the next line if you edited configure.ac or any of the Makefile.am files
   #
   autoreconf --install
   #

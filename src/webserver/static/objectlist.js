@@ -228,7 +228,7 @@ fastdbap.ObjectList = class
                               "classes": [ "warning", "bold", "italic" ] } );
         this.context.maintabs.selectTab( "objectinfo" );
 
-        this.context.connector.sendHttpRequest( "@external_url@ltcv/getltcv/" + pv + "/" + objid,
+        this.context.connector.sendHttpRequest( "ltcv/getltcv/" + pv + "/" + objid,
                                                 { 'return_object_info': 1 },
                                                 (data) => { self.actually_show_object_info( data ) } );
     }

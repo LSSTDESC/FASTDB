@@ -4,16 +4,11 @@ AC_CONFIG_FILES([
   Makefile
   src/Makefile
   src/webserver/Makefile
-  src/config.py
-  src/webserver/static/fastdb.js
-  src/webserver/static/fastdb_start.js
-  src/webserver/static/objectinfo.js
-  src/webserver/static/objectlist.js
-  src/webserver/static/objectsearch.js
-  src/webserver/static/resetpasswd_start.js
-  src/webserver/templates/fastdb_webap.html
   share/Makefile
   client/Makefile
+  src/config.py
+  src/webserver/static/resetpasswd_start.js
+  src/webserver/templates/fastdb_webap.html
 ])
 
 AC_ARG_WITH( installdir,

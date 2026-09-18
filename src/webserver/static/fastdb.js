@@ -67,7 +67,7 @@ fastdbap.Context = class
         rkWebUtil.elemaker( "option", this.procver_widget, { "value": "—select one—",
                                                              "text": "—select one—",
                                                              "attributes": { "selected": 1 } } );
-        this.connector.sendHttpRequest( "@external_url@getprocvers", {},
+        this.connector.sendHttpRequest( "getprocvers", {},
                                         (data) => { self.populate_procver_widget(data); } );
 
         p = rkWebUtil.elemaker( "p", this.basicstats );
@@ -133,17 +133,17 @@ fastdbap.Context = class
         this.sources_span.innerHTML = "(loading...) sources";
         this.forced_span.innerHTML = "(loading...) forced";
 
-        this.connector.sendHttpRequest( "@external_url@count/object/" + encodeURIComponent( pv ),
+        this.connector.sendHttpRequest( "count/object/" + encodeURIComponent( pv ),
                                         { 'estimate': false },
                                         (data) => {
                                             self.objects_span.innerHTML = data.count.toString() + " objects";
                                         } );
-        this.connector.sendHttpRequest( "@external_url@count/source/" + encodeURIComponent( pv ),
+        this.connector.sendHttpRequest( "count/source/" + encodeURIComponent( pv ),
                                         { 'estimate': false },
                                         (data) => {
                                             self.sources_span.innerHTML = data.count.toString() + " sources";
                                         } );
-        this.connector.sendHttpRequest( "@external_url@count/forced/" + encodeURIComponent( pv ),
+        this.connector.sendHttpRequest( "count/forced/" + encodeURIComponent( pv ),
                                         { 'estimate': false },
                                         (data) => {
                                             self.forced_span.innerHTML = data.count.toString() + " forced";
