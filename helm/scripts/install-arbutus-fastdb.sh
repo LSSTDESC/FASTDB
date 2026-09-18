@@ -9,13 +9,19 @@ RELEASE_NAME="fastdb"
 VALUES_FILE="$REPO_ROOT/helm/fastdb/values-arbutus-dev.yaml"
 SECRETS_FILE="$REPO_ROOT/helm/fastdb/values-arbutus-secrets.yaml"
 EXTERNAL_URL="${FASTDB_EXTERNAL_URL:-http://localhost:30080/}"
+HARBOR_SERVER="${FASTDB_HARBOR_SERVER:-images.canfar.net}"
+HARBOR_REGISTRY="${FASTDB_HARBOR_REGISTRY:-$HARBOR_SERVER/candiapl}"
+HARBOR_TAG="${FASTDB_HARBOR_TAG:-manual-20260918}"
+HARBOR_PULL_SECRET="fastdb-harbor"
+
+#used if you build th eimages yourself
+LOCAL_IMAGE_REGISTRY="${DOCKER_ARCHIVE:-fastdb.local}"
+LOCAL_IMAGE_TAG="${DOCKER_VERSION:-test20260428}"
+
 
 ####################
 ##### Preamble 
 ####################
-
-export DOCKER_ARCHIVE="${DOCKER_ARCHIVE:-fastdb.local}"
-export DOCKER_VERSION="${DOCKER_VERSION:-test20260428}"
 
 # Require a normal user so generated files are not owned by root.
 if [[ $EUID -eq 0 ]]; then
@@ -59,6 +65,54 @@ echo "K3s node address: $NODE_IP"
 if [[ ! -f "$VALUES_FILE" ]]; then
   echo "Error: values file not found: $VALUES_FILE" >&2
   exit 1
+fi
+
+# Choose whether Kubernetes should pull prebuilt images or use images built on this VM.
+echo
+echo "Choose the FASTDB image source:"
+echo "  1. Use prebuilt images from Harbor (default)"
+echo "  2. Build images from the current checkout"
+read -r -p "Selection [1]: " image_source_reply
+case "$image_source_reply" in
+  ""|1)
+    IMAGE_SOURCE="harbor"
+    export DOCKER_ARCHIVE="$HARBOR_REGISTRY"
+    export DOCKER_VERSION="$HARBOR_TAG"
+    echo "Using prebuilt images from $DOCKER_ARCHIVE with tag $DOCKER_VERSION."
+    ;;
+  2)
+    IMAGE_SOURCE="build"
+    export DOCKER_ARCHIVE="$LOCAL_IMAGE_REGISTRY"
+    export DOCKER_VERSION="$LOCAL_IMAGE_TAG"
+    echo "Building images from the current checkout as $DOCKER_ARCHIVE/*:$DOCKER_VERSION."
+    ;;
+  *)
+    echo "Error: enter 1 or 2." >&2
+    exit 1
+    ;;
+esac
+
+# Local K3s image imports need root access. Authenticate now and keep the sudo
+# timestamp alive so a long image build can finish without another prompt.
+SUDO_KEEPALIVE_PID=""
+cleanup() {
+  if [[ -n "$SUDO_KEEPALIVE_PID" ]]; then
+    kill "$SUDO_KEEPALIVE_PID" 2>/dev/null || true
+    wait "$SUDO_KEEPALIVE_PID" 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT
+
+if [[ "$IMAGE_SOURCE" == "build" ]]; then
+  echo "Administrator access will be needed later to import images into K3s."
+  sudo -v
+  (
+    while true; do
+      sudo -n -v || exit
+      sleep 60
+    done
+  ) &
+  SUDO_KEEPALIVE_PID=$!
 fi
 
 ####################
@@ -126,53 +180,76 @@ built_images=()
 any_image_built=false
 any_image_exists=false
 
-# Report which reusable FASTDB images already exist in Docker.
-echo "Checking FASTDB container images..."
-for index in "${!services[@]}"; do
-  image_name="${images[$index]}"
-  if docker image inspect "$image_name" >/dev/null 2>&1; then
-    echo "  Found $image_name"
-    existing_images[$index]=true
-    any_image_exists=true
-  else
-    echo "  Missing $image_name"
-    existing_images[$index]=false
-  fi
-done
-
-# Let the user choose between rebuilding every image and reusing existing ones.
 rebuild_all=false
-if [[ "$any_image_exists" == true ]]; then
-  read -r -p "Rebuild all FASTDB images from the current checkout? [y/N] " reply
-  case "$reply" in
-    y|Y|yes|YES|Yes)
-      rebuild_all=true
-      ;;
-    ""|n|N|no|NO|No)
-      echo "Reusing existing images; missing images will still be built."
-      ;;
-    *)
-      echo "Error: please answer y or n." >&2
-      exit 1
-      ;;
-  esac
-else
-  echo "No existing FASTDB images were found; building all images."
-fi
+if [[ "$IMAGE_SOURCE" == "build" ]]; then
+  # Report which reusable FASTDB images already exist in Docker.
+  echo "Checking locally built FASTDB container images..."
+  for index in "${!services[@]}"; do
+    image_name="${images[$index]}"
+    if docker image inspect "$image_name" >/dev/null 2>&1; then
+      echo "  Found $image_name"
+      existing_images[$index]=true
+      any_image_exists=true
+    else
+      echo "  Missing $image_name"
+      existing_images[$index]=false
+    fi
+  done
 
-# Use docker compose to build all requested images plus any image that is currently missing.
-for index in "${!services[@]}"; do
-  service_name="${services[$index]}"
-  image_name="${images[$index]}"
-  if [[ "$rebuild_all" == true || "${existing_images[$index]}" == false ]]; then
-    echo "  Building $service_name ($image_name)..."
-    docker compose build "$service_name"
-    built_images[$index]=true
-    any_image_built=true
+  # Let the user choose between rebuilding every image and reusing existing ones.
+  if [[ "$any_image_exists" == true ]]; then
+    read -r -p "Rebuild all FASTDB images from the current checkout? [y/N] " reply
+    case "$reply" in
+      y|Y|yes|YES|Yes)
+        rebuild_all=true
+        ;;
+      ""|n|N|no|NO|No)
+        echo "Reusing existing images; missing images will still be built."
+        ;;
+      *)
+        echo "Error: please answer y or n." >&2
+        exit 1
+        ;;
+    esac
   else
-    built_images[$index]=false
+    echo "No existing FASTDB images were found; building all images."
   fi
-done
+
+  # Use Docker Compose to build requested images plus any image that is missing.
+  for index in "${!services[@]}"; do
+    service_name="${services[$index]}"
+    image_name="${images[$index]}"
+    if [[ "$rebuild_all" == true || "${existing_images[$index]}" == false ]]; then
+      echo "  Building $service_name ($image_name)..."
+      docker compose build "$service_name"
+      built_images[$index]=true
+      any_image_built=true
+    else
+      built_images[$index]=false
+    fi
+  done
+else
+  # Check every Harbor reference before changing the Kubernetes deployment.
+  echo "Checking prebuilt Harbor images..."
+  for image_name in "${images[@]}"; do
+    echo "  Checking $image_name"
+    if ! docker manifest inspect "$image_name" >/dev/null 2>&1; then
+      echo "Error: cannot access $image_name." >&2
+      echo "Run 'docker login $HARBOR_SERVER', verify the tag, and rerun this script." >&2
+      exit 1
+    fi
+  done
+
+  # The makeinstall helper runs through Docker Compose, so only its shell image
+  # must also exist in Docker's local image store. K3s pulls all pod images itself.
+  shell_image="$DOCKER_ARCHIVE/fastdb-shell:$DOCKER_VERSION"
+  if docker image inspect "$shell_image" >/dev/null 2>&1; then
+    echo "  Reusing $shell_image for makeinstall"
+  else
+    echo "  Pulling $shell_image for makeinstall..."
+    docker pull "$shell_image"
+  fi
+fi
 
 # Generate the host-mounted FASTDB Python, SQL, configuration, and web files.
 echo "Building FASTDB install/ for $EXTERNAL_URL..."
@@ -195,19 +272,51 @@ if [[ "$any_image_built" == true ]]; then
   docker builder prune --all --force
 fi
 
-# Import new images into K3s while retaining images it already has.
-echo "Checking K3s images..."
-for index in "${!images[@]}"; do
-  image_name="${images[$index]}"
-  if [[ "${built_images[$index]}" == true ]] ||
-     ! sudo k3s crictl inspecti "$image_name" >/dev/null 2>&1; then
-    echo "  Importing $image_name..."
-    docker image save "$image_name" |
-      sudo k3s ctr --namespace k8s.io images import -
-  else
-    echo "  Reusing $image_name"
+helm_image_args=()
+if [[ "$IMAGE_SOURCE" == "build" ]]; then
+  # Import new locally built images into K3s while retaining images it already has.
+  echo "Checking K3s images..."
+  for index in "${!images[@]}"; do
+    image_name="${images[$index]}"
+    if [[ "${built_images[$index]}" == true ]] ||
+       ! sudo k3s crictl inspecti "$image_name" >/dev/null 2>&1; then
+      echo "  Importing $image_name..."
+      docker image save "$image_name" |
+        sudo k3s ctr --namespace k8s.io images import -
+    else
+      echo "  Reusing $image_name"
+    fi
+  done
+else
+  # Copy the existing Docker login into Kubernetes so K3s can pull private
+  # Harbor images directly and retain any layers already present locally.
+  docker_config_dir="${DOCKER_CONFIG:-$HOME/.docker}"
+  docker_config_file="$docker_config_dir/config.json"
+  if [[ ! -f "$docker_config_file" ]]; then
+    echo "Error: Docker credentials not found at $docker_config_file." >&2
+    echo "Run 'docker login $HARBOR_SERVER' and rerun this script." >&2
+    exit 1
   fi
-done
+
+  kubectl create namespace "$NAMESPACE" \
+    --dry-run=client \
+    --output=yaml |
+    kubectl apply --filename=- >/dev/null
+  kubectl create secret generic "$HARBOR_PULL_SECRET" \
+    --namespace "$NAMESPACE" \
+    --type=kubernetes.io/dockerconfigjson \
+    --from-file=.dockerconfigjson="$docker_config_file" \
+    --dry-run=client \
+    --output=yaml |
+    kubectl apply --filename=- >/dev/null
+
+  helm_image_args=(
+    --set-string "global.imageRegistry=$HARBOR_REGISTRY"
+    --set-string "global.imageTag=$HARBOR_TAG"
+    --set-string "global.imagePullPolicy=IfNotPresent"
+    --set-string "global.imagePullSecrets[0].name=$HARBOR_PULL_SECRET"
+  )
+fi
 
 # Install or upgrade the Kubernetes resources and wait for them to become ready.
 echo "Installing FASTDB with Helm..."
@@ -225,6 +334,7 @@ if ! helm upgrade --install "$RELEASE_NAME" "$REPO_ROOT/helm/fastdb" \
   --set-string "volumes.hostPaths.install=$REPO_ROOT/install" \
   --set-string "volumes.hostPaths.db=$REPO_ROOT/db" \
   --set-string "ingestion.brokerConsumer.dockerHostIp=$NODE_IP" \
+  "${helm_image_args[@]}" \
   --wait \
   --wait-for-jobs \
   --timeout 10m; then
