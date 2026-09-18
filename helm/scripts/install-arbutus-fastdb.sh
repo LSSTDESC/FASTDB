@@ -234,10 +234,10 @@ docker compose run --rm --entrypoint "" makeinstall /bin/bash -ec "
   make install
 "
 
-# Recreate the immutable migration Job, then install or upgrade the resources
-# using image configuration directly from the selected values file.
+# Recreate one-shot Jobs because Kubernetes does not allow Helm to update their
+# pod templates in place, then install or upgrade the remaining resources.
 echo "Installing FASTDB with Helm..."
-kubectl delete job createdb \
+kubectl delete job createdb ingestion-processing-version \
   --namespace "$NAMESPACE" \
   --ignore-not-found
 
