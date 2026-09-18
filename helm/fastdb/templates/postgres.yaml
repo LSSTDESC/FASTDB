@@ -13,6 +13,9 @@ spec:
   replicas: {{ .Values.postgres.replicas }}
   strategy:
     type: {{ .Values.postgres.updateStrategy.type }}
+    {{- if eq .Values.postgres.updateStrategy.type "Recreate" }}
+    rollingUpdate: null
+    {{- end }}
   selector:
     matchLabels:
       app: postgres
