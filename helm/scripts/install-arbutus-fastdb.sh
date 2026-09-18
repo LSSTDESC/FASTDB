@@ -11,11 +11,11 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 RELEASE_NAME="fastdb"
 SECRETS_FILE="$REPO_ROOT/helm/fastdb/values-arbutus-secrets.yaml"
 EXTERNAL_URL="${FASTDB_EXTERNAL_URL:-http://localhost:30080/}"
-HARBOR_PULL_SECRET="fastdb-harbor"
+REGISTRY_PULL_SECRET="fastdb-registry"
 
 if [[ $# -ne 1 ]]; then
   echo "Usage: $0 <values-file>" >&2
-  echo "Example: $0 ../fastdb/values-arbutus-harbor.yaml" >&2
+  echo "Example: $0 ../fastdb/values-arbutus.yaml" >&2
   exit 1
 fi
 
@@ -54,6 +54,7 @@ NAMESPACE="$(read_values_scalar namespace)"
 export DOCKER_ARCHIVE="$(read_values_scalar imageRegistry)"
 export DOCKER_VERSION="$(read_values_scalar imageTag)"
 SHELL_IMAGE="$DOCKER_ARCHIVE/fastdb-shell:$DOCKER_VERSION"
+REGISTRY_HOST="${DOCKER_ARCHIVE%%/*}"
 
 # Require a normal user and every command used by the installer.
 if [[ $EUID -eq 0 ]]; then
@@ -178,10 +179,11 @@ if ! docker image inspect "$SHELL_IMAGE" >/dev/null 2>&1; then
   esac
 fi
 
-# For the CANFAR Harbor values, verify every deployment image and copy the
-# existing Docker login into the namespace for Kubernetes image pulls.
-if [[ "$DOCKER_ARCHIVE" == "images.canfar.net/candiapl" ]]; then
-  echo "Checking prebuilt Harbor images..."
+# For any remote registry, verify every deployment image before running Helm.
+# If the values file requests the standard pull secret, copy the existing
+# Docker login into the namespace so Kubernetes can authenticate to it.
+if [[ "$DOCKER_ARCHIVE" != "fastdb.local" ]]; then
+  echo "Checking prebuilt registry images..."
   for repository in \
     fastdb-postgres \
     fastdb-mongodb \
@@ -193,29 +195,31 @@ if [[ "$DOCKER_ARCHIVE" == "images.canfar.net/candiapl" ]]; then
     echo "  Checking $image_name"
     if ! docker manifest inspect "$image_name" >/dev/null 2>&1; then
       echo "Error: cannot access $image_name." >&2
-      echo "Run 'docker login images.canfar.net', verify the tag, and rerun." >&2
+      echo "Run 'docker login $REGISTRY_HOST', verify the repository and tag, and rerun." >&2
       exit 1
     fi
   done
 
-  docker_config_file="${DOCKER_CONFIG:-$HOME/.docker}/config.json"
-  if [[ ! -f "$docker_config_file" ]]; then
-    echo "Error: Docker credentials not found at $docker_config_file." >&2
-    echo "Run 'docker login images.canfar.net' and rerun this script." >&2
-    exit 1
-  fi
+  if grep -Eq "^[[:space:]]*-[[:space:]]*name:[[:space:]]*$REGISTRY_PULL_SECRET([[:space:]]|$)" "$VALUES_FILE"; then
+    docker_config_file="${DOCKER_CONFIG:-$HOME/.docker}/config.json"
+    if [[ ! -f "$docker_config_file" ]]; then
+      echo "Error: Docker credentials not found at $docker_config_file." >&2
+      echo "Run 'docker login $REGISTRY_HOST' and rerun this script." >&2
+      exit 1
+    fi
 
-  kubectl create namespace "$NAMESPACE" \
-    --dry-run=client \
-    --output=yaml |
-    kubectl apply --filename=- >/dev/null
-  kubectl create secret generic "$HARBOR_PULL_SECRET" \
-    --namespace "$NAMESPACE" \
-    --type=kubernetes.io/dockerconfigjson \
-    --from-file=.dockerconfigjson="$docker_config_file" \
-    --dry-run=client \
-    --output=yaml |
-    kubectl apply --filename=- >/dev/null
+    kubectl create namespace "$NAMESPACE" \
+      --dry-run=client \
+      --output=yaml |
+      kubectl apply --filename=- >/dev/null
+    kubectl create secret generic "$REGISTRY_PULL_SECRET" \
+      --namespace "$NAMESPACE" \
+      --type=kubernetes.io/dockerconfigjson \
+      --from-file=.dockerconfigjson="$docker_config_file" \
+      --dry-run=client \
+      --output=yaml |
+      kubectl apply --filename=- >/dev/null
+  fi
 fi
 
 # Use the configured shell image to copy and configure the current checkout in

@@ -124,13 +124,14 @@ On an Ubuntu VM, set up the single-node K3s cluster once:
 ./helm/scripts/setup-arbutus-k3s.sh
 ```
 
-To use the prebuilt images in CANFAR Harbor, log in once and install with the
-Harbor values file:
+To use prebuilt images from a private registry, log in once and install with a
+values file that identifies the registry, tag, and `fastdb-registry` pull
+secret. The included example uses the CanDIAPL project in CANFAR Harbor:
 
 ```bash
 docker login images.canfar.net
 ./helm/scripts/install-arbutus-fastdb.sh \
-  ./helm/fastdb/values-arbutus-harbor.yaml
+  ./helm/fastdb/values-arbutus.yaml
 ```
 
 To build images from the current checkout instead, prepare the local Docker
@@ -157,8 +158,8 @@ Kubernetes application will typically create and mount a Secret containing its
 
 The installer takes all Helm image settings from the selected values file. It
 uses the configured shell image to prepare the host-mounted `install/` tree,
-but it does not build deployment images. Kubernetes pulls Harbor images when
-needed; locally built images must first be loaded with
+but it does not build deployment images. Kubernetes pulls remote registry
+images when needed; locally built images must first be loaded with
 `build-local-images.sh`.
 
 The installer generates development passwords on its first run in the ignored,

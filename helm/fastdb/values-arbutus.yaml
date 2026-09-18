@@ -1,5 +1,5 @@
 # FASTDB development deployment on a single-node Arbutus K3s VM.
-# Images are pulled from the CanDIAPL project in the CANFAR Harbor registry.
+# This example uses prebuilt images from the CanDIAPL registry namespace.
 
 global:
   namespace: fastdb-arbutus-dev
@@ -8,7 +8,7 @@ global:
   imageTag: manual-20260918
   imagePullPolicy: IfNotPresent
   imagePullSecrets:
-    - name: fastdb-harbor
+    - name: fastdb-registry
 
 volumes:
   type: pvc
