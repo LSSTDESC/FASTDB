@@ -13,9 +13,6 @@ spec:
   replicas: {{ .Values.mongodb.replicas }}
   strategy:
     type: {{ .Values.mongodb.updateStrategy.type }}
-    {{- if eq .Values.mongodb.updateStrategy.type "Recreate" }}
-    rollingUpdate: null
-    {{- end }}
   selector:
     matchLabels:
       app: mongodb
