@@ -12,6 +12,7 @@
 /client/Makefile
 /src/config.py
 /src/webserver/static/rkauth.js
+/src/webserver/static/resetpasswd_start.js
 /src/webserver/templates/fastdb_webap.html
 
 # Sphinx debris
