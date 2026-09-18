@@ -290,7 +290,7 @@ class SourceImporter:
             with dbcon.cursor.copy( f"COPY {temptable}({','.join(writefields)}) FROM STDIN" ) as pgcopy:
                 for row in mongocursor:
                     # We may need to reject some things.  E.g., we may have pulled alerts that have
-                    #  no diabojectid because they are solar system lists.
+                    #  no diaobjectid because they are solar system lists.
                     # NOT PERFECT : because of how brokerconsumer works, we can't filter these rows
                     #  out thumbnails, so extra stuff will show up there.
                     if any( ( f in row ) and ( row[f] in bads ) for f, bads in rejectfields.items() ):
@@ -456,10 +456,10 @@ class SourceImporter:
                 #   linking ot pre-existing roots; a straight-up ACCESS
                 #   EXCUSLIVE lock, or even a EXCLUSIVE lock, on
                 #   root_diaobject would conflict with that because the
-                #   root_diaboject forieng key in diaobject implicitly
+                #   root_diaobject forieng key in diaobject implicitly
                 #   grabs a ROW SHARE lock on root_diaobject.
                 FDBLogger.debug( "  ...starting root diaobject matching..." )
-                dbcon.execute( "LOCK TABLE root_diaboject IN SHARE ROW EXCLUSIVE MODE" )
+                dbcon.execute( "LOCK TABLE root_diaobject IN SHARE ROW EXCLUSIVE MODE" )
 
                 # Link new objects to existing root objects
                 # TODO : test this with multiple processing versions and multiple

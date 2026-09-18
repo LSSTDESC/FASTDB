@@ -886,7 +886,7 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                                             position_processing_version=pospvid, return_format=return_format,
                                             dbcon=dbcon )
 
-                # ...make sure that the objinfo came back in the same order as the lightcruves we're
+                # ...make sure that the objinfo came back in the same order as the lightcurves we're
                 #    gonna return.  That means first removing things from objinfo that aren't
                 #   in ltcvs (which will happen if you ask for an object that has no photometry
                 #   in the specified processing version), and then verifying that the order
@@ -1672,11 +1672,11 @@ def create_object_stats_materialized_view( procver ):
                          "WHERE c.relname={viewname} AND a.attnum>0"
                         ).format( viewname=f'objstats_{procver}' )
             rows = dbcon.execute( q )
-            expectedcols = { 'rootid', 'ra', 'dec',
-                             'firstdet_mjd', 'firstdet_band', 'firstdet_flux', 'firstdet_fluxerr',
-                             'lastdet_mjd', 'lastdet_band', 'lastdet_flux', 'lastdet_fluxerr',
-                             'maxdet_mjd', 'maxdet_band', 'maxdet_flux', 'maxdet_fluxerr',
-                             'lastforced_mjd', 'lastforced_band', 'lastforced_flux', 'lastforced_fluxerr',
+            expectedcols = { 'rootid', 'ra', 'dec', 'band',
+                             'firstdet_mjd', 'firstdet_flux', 'firstdet_fluxerr',
+                             'lastdet_mjd', 'lastdet_flux', 'lastdet_fluxerr',
+                             'maxdet_mjd', 'maxdet_flux', 'maxdet_fluxerr',
+                             'lastforced_mjd', 'lastforced_flux', 'lastforced_fluxerr',
                              'ndets', 'ndets24', 'ndets23', 'ndets22', 'ndets21', 'nsn10', 'nsn7', 'nsn5' }
             if set( r['attname'] for r in rows ) != expectedcols:
                 raise RuntimeError( f"postgres view objstats_{procver} has the wrong set of columns" )
@@ -1695,8 +1695,9 @@ def create_object_stats_materialized_view( procver ):
                          "WHERE c.relname={viewname} AND a.attnum>0"
                         ).format( viewname=f'objstatscomb_{procver}' )
             rows = dbcon.execute( q )
-            if set( r['attname'] for r in rows ) != ( expectedcols - { 'firstdet_band', 'lastdet_band',
-                                                                       'maxdet_band', 'lastforced_band' } ):
+            if set( r['attname'] for r in rows ) != ( expectedcols.union( { 'firstdet_band', 'lastdet_band',
+                                                                            'maxdet_band', 'lastforced_band' } )
+                                                      - { 'band' } ):
                 raise RuntimeError( f"postgrew view objstatscomb_{procver} has the wrong set of columns" )
 
 
@@ -1727,16 +1728,16 @@ def create_object_stats_materialized_view( procver ):
         q = sql.SQL( textwrap.dedent(
             """
             CREATE MATERIALIZED VIEW {viewname} AS (
-               SELECT r.id AS rootid, r.ra AS ra, r.dec AS dec,
-                   d0.midpointmjdtai AS firstdet_mjd, d0.band AS firstdet_band,
-                   d0.psfflux AS firstdet_flux, d0.psffluxerr AS firstdet_fluxerr,
-                   dn.midpointmjdtai AS lastdet_mjd, dn.band AS lastdet_band,
-                   dn.psfflux AS lastdet_flux, dn.psffluxerr AS lastdet_fluxerr,
-                   dx.midpointmjdtai AS maxdet_mjd, dx.band AS maxdet_band,
-                   dx.psfflux AS maxdet_flux, dx.psffluxerr AS maxdet_fluxerr,
-                   n.ndets AS ndets,
-                   fn.midpointmjdtai AS lastforced_mjd, fn.band AS lastforced_band,
-                   fn.psfflux AS lastforced_flux, fn.psffluxerr AS lastforced_fluxerr,
+               SELECT r.rootid, r.ra, r.dec, r.band,
+                   d0.midpointmjdtai AS firstdet_mjd, d0.psfflux AS firstdet_flux,
+                     d0.psffluxerr AS firstdet_fluxerr,
+                   dn.midpointmjdtai AS lastdet_mjd, dn.psfflux AS lastdet_flux,
+                     dn.psffluxerr AS lastdet_fluxerr,
+                   dx.midpointmjdtai AS maxdet_mjd, dx.psfflux AS maxdet_flux,
+                     dx.psffluxerr AS maxdet_fluxerr,
+                   fn.midpointmjdtai AS lastforced_mjd, fn.psfflux AS lastforced_flux,
+                     fn.psffluxerr AS lastforced_fluxerr,
+                   n.ndets,
                    CASE WHEN n24.ndets IS NULL THEN 0 ELSE n24.ndets END as ndets24,
                    CASE WHEN n23.ndets IS NULL THEN 0 ELSE n23.ndets END AS ndets23,
                    CASE WHEN n22.ndets IS NULL THEN 0 ELSE n22.ndets END AS ndets22,
@@ -1744,56 +1745,72 @@ def create_object_stats_materialized_view( procver ):
                    CASE WHEN sn10.ndets IS NULL THEN 0 ELSE sn10.ndets END AS nsn10,
                    CASE WHEN sn7.ndets IS NULL THEN 0 ELSE sn7.ndets END AS nsn7,
                    CASE WHEN sn5.ndets IS NULL THEN 0 ELSE sn5.ndets END AS nsn5
-               FROM root_diaobject r
-               INNER JOIN (
-                  SELECT DISTINCT ON(rootid, band) rootid, band, midpointmjdtai, psfflux, psffluxerr
-                  FROM (
-                     SELECT DISTINCT ON(o.rootid, s.visit) o.rootid, s.band, s.midpointmjdtai, s.psfflux, s.psffluxerr
-                     FROM diasource s
-                     INNER JOIN diaobject o ON s.diaobjectid=o.diaobjectid
-                     INNER JOIN base_procver_of_procver j ON s.base_procver_id=j.base_procver_id
-                                                         AND j.procver_id={pvid}
-                     ORDER BY o.rootid, s.visit, j.priority DESC
-                  ) subq
-                  ORDER BY rootid, band, midpointmjdtai
-               ) d0 ON d0.rootid=r.id
-               INNER JOIN (
-                  SELECT DISTINCT ON(rootid, band) rootid, band, midpointmjdtai, psfflux, psffluxerr
-                  FROM (
-                     SELECT DISTINCT ON(o.rootid, s.visit) o.rootid, s.band, s.midpointmjdtai, s.psfflux, s.psffluxerr
-                     FROM diasource s
-                     INNER JOIN diaobject o ON s.diaobjectid=o.diaobjectid
-                     INNER JOIN base_procver_of_procver j ON s.base_procver_id=j.base_procver_id
-                                                         AND j.procver_id={pvid}
-                     ORDER BY o.rootid, s.visit, j.priority DESC
-                  ) subq
-                  ORDER BY rootid, band, midpointmjdtai DESC
-               ) dn ON d0.rootid=dn.rootid AND d0.band=dn.band
-               INNER JOIN (
-                  SELECT DISTINCT ON(rootid, band) rootid, band, midpointmjdtai, psfflux, psffluxerr
-                  FROM (
+               FROM (
+                 ( SELECT DISTINCT ON(o.rootid, s.band) o.rootid, r.ra, r.dec, s.band
+                   FROM root_diaobject r
+                   INNER JOIN diaobject o ON o.rootid=r.id
+                   INNER JOIN diasource s ON s.diaobjectid=o.diaobjectid
+                   INNER JOIN base_procver_of_procver j ON s.base_procver_id=j.base_procver_id
+                                                       AND j.procver_id={pvid}
+                 )
+                 UNION
+                 ( SELECT DISTINCT ON(o.rootid, s.band) o.rootid, r.ra, r.dec, s.band
+                   FROM root_diaobject r
+                   INNER JOIN diaobject o ON o.rootid=r.id
+                   INNER JOIN diaforcedsource s ON s.diaobjectid=o.diaobjectid
+                   INNER JOIN base_procver_of_procver j ON s.base_procver_id=j.base_procver_id
+                                                       AND j.procver_id={pvid}
+                 )
+               ) r
+               LEFT JOIN (
+                 SELECT DISTINCT ON(rootid, band) rootid, band, midpointmjdtai, psfflux, psffluxerr
+                 FROM (
+                    SELECT DISTINCT ON(o.rootid, s.visit) o.rootid, s.band, s.midpointmjdtai, s.psfflux, s.psffluxerr
+                    FROM diasource s
+                    INNER JOIN diaobject o ON s.diaobjectid=o.diaobjectid
+                    INNER JOIN base_procver_of_procver j ON s.base_procver_id=j.base_procver_id
+                                                        AND j.procver_id={pvid}
+                    ORDER BY o.rootid, s.visit, j.priority DESC
+                 ) subq
+                 ORDER BY rootid, band, midpointmjdtai
+               ) d0 ON d0.rootid=r.rootid AND d0.band=r.band
+               LEFT JOIN (
+                 SELECT DISTINCT ON(rootid, band) rootid, band, midpointmjdtai, psfflux, psffluxerr
+                 FROM (
+                    SELECT DISTINCT ON(o.rootid, s.visit) o.rootid, s.band, s.midpointmjdtai, s.psfflux, s.psffluxerr
+                    FROM diasource s
+                    INNER JOIN diaobject o ON s.diaobjectid=o.diaobjectid
+                    INNER JOIN base_procver_of_procver j ON s.base_procver_id=j.base_procver_id
+                                                        AND j.procver_id={pvid}
+                    ORDER BY o.rootid, s.visit, j.priority DESC
+                 ) subq
+                 ORDER BY rootid, band, midpointmjdtai DESC
+               ) dn ON dn.rootid=r.rootid AND dn.band=r.band
+               LEFT JOIN (
+                 SELECT DISTINCT ON(rootid, band) rootid, band, midpointmjdtai, psfflux, psffluxerr
+                 FROM (
+                    SELECT DISTINCT ON(o.rootid, s.visit) o.rootid, s.band, s.midpointmjdtai, s.psfflux, s.psffluxerr
+                    FROM diasource s
+                    INNER JOIN diaobject o ON s.diaobjectid=o.diaobjectid
+                    INNER JOIN base_procver_of_procver j ON s.base_procver_id=j.base_procver_id
+                                                        AND j.procver_id={pvid}
+                    ORDER BY o.rootid, s.visit, j.priority DESC
+                 ) subq
+                 ORDER BY rootid, band, psfflux DESC
+               ) dx ON dx.rootid=r.rootid AND dx.band=r.band
+               LEFT JOIN (
+                 SELECT DISTINCT ON(rootid, band) rootid, band, midpointmjdtai, psfflux, psffluxerr
+                 FROM (
                     SELECT DISTINCT ON(o.rootid, f.visit) o.rootid, f.band, f.midpointmjdtai, f.psfflux, f.psffluxerr
                     FROM diaforcedsource f
                     INNER JOIN diaobject o ON f.diaobjectid=o.diaobjectid
                     INNER JOIN base_procver_of_procver j ON f.base_procver_id=j.base_procver_id
                                                         AND j.procver_id={pvid}
                     ORDER BY o.rootid, f.visit, j.priority DESC
-                  ) subq
-                  ORDER BY rootid, band, midpointmjdtai DESC
-               ) fn ON d0.rootid=fn.rootid AND d0.band=fn.band
-               INNER JOIN (
-                  SELECT DISTINCT ON(rootid, band) rootid, band, midpointmjdtai, psfflux, psffluxerr
-                  FROM (
-                     SELECT DISTINCT ON(o.rootid, s.visit) o.rootid, s.band, s.midpointmjdtai, s.psfflux, s.psffluxerr
-                     FROM diasource s
-                     INNER JOIN diaobject o ON s.diaobjectid=o.diaobjectid
-                     INNER JOIN base_procver_of_procver j ON s.base_procver_id=j.base_procver_id
-                                                         AND j.procver_id={pvid}
-                     ORDER BY o.rootid, s.visit, j.priority DESC
-                  ) subq
-                  ORDER BY rootid, band, psfflux DESC
-               ) dx ON d0.rootid=dx.rootid AND d0.band=dx.band
-               INNER JOIN (
+                 ) subq
+                 ORDER BY rootid, band, midpointmjdtai DESC
+               ) fn ON fn.rootid=r.rootid AND fn.band=r.band
+               LEFT JOIN (
                   SELECT rootid, band, COUNT(diasourceid) AS ndets
                   FROM (
                      SELECT DISTINCT ON(o.rootid, s.visit) o.rootid, s.band, s.diasourceid
@@ -1804,7 +1821,7 @@ def create_object_stats_materialized_view( procver ):
                      ORDER BY o.rootid, s.visit, j.priority DESC
                   ) subq
                   GROUP BY rootid, band
-               ) n ON d0.rootid=n.rootid AND d0.band=n.band
+               ) n ON r.rootid=n.rootid AND r.band=n.band
                LEFT JOIN (
                   SELECT rootid, band, COUNT(diasourceid) AS ndets
                   FROM (
@@ -1817,7 +1834,7 @@ def create_object_stats_materialized_view( procver ):
                   ) subq
                   WHERE psfflux >= 912
                   GROUP BY rootid, band
-               ) n24 ON d0.rootid=n24.rootid AND d0.band=n24.band
+               ) n24 ON r.rootid=n24.rootid AND r.band=n24.band
                LEFT JOIN (
                   SELECT rootid, band, COUNT(diasourceid) AS ndets
                   FROM (
@@ -1830,7 +1847,7 @@ def create_object_stats_materialized_view( procver ):
                   ) subq
                   WHERE psfflux >= 2291
                   GROUP BY rootid, band
-               ) n23 ON d0.rootid=n23.rootid AND d0.band=n23.band
+               ) n23 ON r.rootid=n23.rootid AND r.band=n23.band
                LEFT JOIN (
                   SELECT rootid, band, COUNT(diasourceid) AS ndets
                   FROM (
@@ -1843,7 +1860,7 @@ def create_object_stats_materialized_view( procver ):
                   ) subq
                   WHERE psfflux >= 5754
                   GROUP BY rootid, band
-               ) n22 ON d0.rootid=n22.rootid AND d0.band=n22.band
+               ) n22 ON r.rootid=n22.rootid AND r.band=n22.band
                LEFT JOIN (
                   SELECT rootid, band, COUNT(diasourceid) AS ndets
                   FROM (
@@ -1856,7 +1873,7 @@ def create_object_stats_materialized_view( procver ):
                   ) subq
                   WHERE psfflux >= 14454
                   GROUP BY rootid, band
-               ) n21 ON d0.rootid=n21.rootid AND d0.band=n21.band
+               ) n21 ON r.rootid=n21.rootid AND r.band=n21.band
                LEFT JOIN (
                   SELECT rootid, band, COUNT(diasourceid) AS ndets
                   FROM (
@@ -1869,7 +1886,7 @@ def create_object_stats_materialized_view( procver ):
                   ) subq
                   WHERE psfflux / psffluxerr >= 10
                   GROUP BY rootid, band
-               ) sn10 ON d0.rootid=sn10.rootid AND d0.band=sn10.band
+               ) sn10 ON r.rootid=sn10.rootid AND r.band=sn10.band
                LEFT JOIN (
                   SELECT rootid, band, COUNT(diasourceid) AS ndets
                   FROM (
@@ -1882,7 +1899,7 @@ def create_object_stats_materialized_view( procver ):
                   ) subq
                   WHERE psfflux / psffluxerr >= 7
                   GROUP BY rootid, band
-               ) sn7 ON d0.rootid=sn7.rootid AND d0.band=sn7.band
+               ) sn7 ON r.rootid=sn7.rootid AND r.band=sn7.band
                LEFT JOIN (
                   SELECT rootid, band, COUNT(diasourceid) AS ndets
                   FROM (
@@ -1895,7 +1912,7 @@ def create_object_stats_materialized_view( procver ):
                   ) subq
                   WHERE psfflux / psffluxerr >= 5
                   GROUP BY rootid, band
-               ) sn5 ON d0.rootid=sn5.rootid AND d0.band=sn5.band
+               ) sn5 ON r.rootid=sn5.rootid AND r.band=sn5.band
             )
             """
         ) ).format( viewname=sql.Identifier( f'objstats_{procver}' ), pvid=pvid )
@@ -1943,30 +1960,35 @@ def create_object_stats_materialized_view( procver ):
                 FROM {viewname}
                 GROUP BY rootid, ra, dec
               ) s
-              INNER JOIN (
-                SELECT DISTINCT ON(rootid) rootid, firstdet_mjd AS mjd, firstdet_band AS band,
+              LEFT JOIN (
+                SELECT DISTINCT ON(rootid) rootid, band, firstdet_mjd AS mjd,
                                            firstdet_flux AS flux, firstdet_fluxerr AS fluxerr
                 FROM {viewname}
+                WHERE firstdet_mjd IS NOT NULL
                 ORDER BY rootid, firstdet_mjd
               ) fd ON s.rootid=fd.rootid
-              INNER JOIN (
-                SELECT DISTINCT ON(rootid) rootid, lastdet_mjd AS mjd, lastdet_band AS band,
+              LEFT JOIN (
+                SELECT DISTINCT ON(rootid) rootid, band, lastdet_mjd AS mjd,
                                            lastdet_flux AS flux, lastdet_fluxerr AS fluxerr
                 FROM {viewname}
+                WHERE lastdet_mjd IS NOT NULL
                 ORDER BY rootid, lastdet_mjd DESC
               ) ld ON s.rootid=ld.rootid
-              INNER JOIN (
-                SELECT DISTINCT ON(rootid) rootid, maxdet_mjd AS mjd, maxdet_band AS band,
+              LEFT JOIN (
+                SELECT DISTINCT ON(rootid) rootid, band, maxdet_mjd AS mjd,
                                            maxdet_flux AS flux, maxdet_fluxerr AS fluxerr
                 FROM {viewname}
+                WHERE maxdet_mjd IS NOT NULL
                 ORDER BY rootid, maxdet_flux DESC
               ) xd ON s.rootid=xd.rootid
-              INNER JOIN (
-                SELECT DISTINCT ON(rootid) rootid, lastforced_mjd AS mjd, lastforced_band AS band,
+              LEFT JOIN (
+                SELECT DISTINCT ON(rootid) rootid, band,lastforced_mjd AS mjd,
                                            lastforced_flux AS flux, lastforced_fluxerr AS Fluxerr
                 FROM {viewname}
+                WHERE lastforced_mjd IS NOT NULL
                 ORDER BY rootid, lastforced_mjd DESC
               ) lf ON s.rootid=lf.rootid
+              WHERE fd.mjd IS NOT NULL OR lf.mjd IS NOT NULL
             )
             """ ) ).format( viewname=sql.Identifier(f'objstats_{procver}'),
                             combviewname=sql.Identifier(f'objstatscomb_{procver}') )

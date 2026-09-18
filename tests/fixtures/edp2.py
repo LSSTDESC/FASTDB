@@ -12,7 +12,7 @@ from admin.load_edp2_parquet import EDP2Loader
 def edp2_loaded_module():
     try:
         loader = EDP2Loader( processing_version='test_load_edp2', create_pv=True )
-        loader.do_directory( "test_data/edp2" )
+        loader( "test_data/edp2" )
 
         yield True
 

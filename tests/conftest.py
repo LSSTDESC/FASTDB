@@ -1038,22 +1038,29 @@ def lightcurve_checker( set_of_lightcurves, procver_collection ):
                 if single:
                     assert isinstance( res[0], dict )
                     ltcvs = [ res[0] ]
+                    assert isinstance( res[1], dict )
+                    infos = { k: [v] for k, v in res[1].items() }
                 else:
                     assert isinstance( res[0], list )
                     ltcvs = res[0]
-                infos = res[1]
+                    assert isinstance( res[1], dict )
+                    assert all( isinstance( v, list ) for v in res[1].values() )
+                    infos = res[1]
             else:
                 assert isinstance( res, dict )
                 if single:
                     assert set( res.keys() ) == { 'ltcv', 'objinfo' }
                     assert isinstance( res['ltcv'], dict )
+                    assert isinstance( res['objinfo'],dict )
                     ltcvs = [ res['ltcv'] ]
+                    infos = { k: [v] for k, v in res['objinfo'].items() }
                 else:
                     assert set( res.keys() ) == { 'ltcvs', 'objinfo' }
                     assert isinstance( res['ltcvs'], list )
+                    assert isinstance( res['objinfo'], list )
+                    assert all( isinstance( v, list ) for v in res['objinfo'].values() )
                     ltcvs = res['ltcvs']
-                assert isinstance( res['objinfo'], dict )
-                infos = res[ 'objinfo' ]
+                    infos = res['objinfo']
         else:
             if single:
                 assert isinstance( res, dict )
@@ -1065,6 +1072,8 @@ def lightcurve_checker( set_of_lightcurves, procver_collection ):
 
         if rootid_is_uuid:
             assert all( isinstance( lc['rootid'], uuid.UUID ) for lc in ltcvs )
+            if return_object_info:
+                assert all( isinstance( oi, uuid.UUID ) for oi in infos['rootid'] )
         else:
             assert all( isinstance( lc['rootid'], str ) for lc in ltcvs )
             # Convert to UUIDs for the convenience of the rest of this function
@@ -1072,6 +1081,11 @@ def lightcurve_checker( set_of_lightcurves, procver_collection ):
             #   of the strings aren't uuidifiable.)
             for lc in ltcvs:
                 lc['rootid'] = asUUID( lc['rootid'] )
+            if return_object_info:
+                assert all( isinstance( oi, str ) for oi in infos['rootid'] )
+                infos['rootid'] = [ asUUID(oi) for oi in infos['rootid'] ]
+        if return_object_info:
+            assert all( ltcvs[i]['rootid'] == r for i, r in enumerate( infos['rootid'] ) )
 
         assert all( all( isinstance( lc[col], list ) for col in lc.keys() if col != 'rootid' ) for lc in ltcvs )
 
@@ -1273,27 +1287,16 @@ def lightcurve_checker( set_of_lightcurves, procver_collection ):
             assert set( infos.keys() ) == expected_obj_keys
 
             if rootid_is_uuid:
-                assert all( isinstance( i, uuid.UUID ) for i in infos['rootid'] )
+                assert all( isinstance( oid, uuid.UUID ) for oid in infos['rootid'] )
             else:
-                assert all( isinstance( i, str ) for i in infos['rootid'] )
-                infos['rootid'] = [ asUUID(i) for i in infos['rootid'] ]
+                assert all( isinstance( oi, str ) for oi in infos['rootid'] )
+                infos['rootid'] = [ asUUID(oid) for oid in infos['rootid'] ]
 
-            if expect_all_roots:
-                assert len( infos['rootid'] ) == len( expected_root_ids )
-                assert set( infos['rootid'] ) == set( expected_root_ids )
-                assert set( expected_diaobjectids ) == set( itertools.chain( *(infos['diaobjectid']) ) )
-            else:
-                assert set( infos['rootid'] ).issubset( set(expected_root_ids) )
-                assert set( itertools.chain( *(infos['diaobjectid']) ) ).issubset( set( expected_diaobjectids ) )
-
-            for dex, rid in enumerate( infos['rootid'] ):
-                assert ltcvs[dex]['rootid'] == rid
-                exproot = [ r for r in roots if r['root'].id == rid ]
+            for dex in range( len(infos['rootid']) ):
+                ltcv = ltcvs[dex]
+                assert ltcv['rootid'] == infos['rootid'][dex]
+                exproot = [ r for r in roots if r['root'].id == infos['rootid'][dex] ]
                 if len(exproot) != 1:
-                    # The assert that infos['rootid'] and expected_root_ids have the same
-                    #   contents above means that this should never have len 0.  If it has
-                    #   len 1, then there's a constructor error in roots, and that fixture
-                    #   needs to be fixed.
                     raise RuntimeError( "Something bad has happened." )
                 exproot = exproot[0]
 
@@ -1315,50 +1318,50 @@ def lightcurve_checker( set_of_lightcurves, procver_collection ):
                                                   )
                                              ] )
                     if which != 'forced':
-                        assert len(expecteddex) == len( ltcvs[dex]['diasourceid'] )
+                        assert len(expecteddex) == len( ltcv['diasourceid'] )
                     if which != 'detections':
-                        assert len(expecteddex) == len( ltcvs[dex]['diaforcedsourceid'] )
+                        assert len(expecteddex) == len( ltcv['diaforcedsourceid'] )
                     for li, di in enumerate( expecteddex ):
                         if which != 'forced':
                             assert ( ( ( thisdatacache[di]['src'] is None )
-                                       and ( ltcvs[dex]['diasourceid'][li] is None ) )
+                                       and ( ltcv['diasourceid'][li] is None ) )
                                      or ( thisdatacache[di]['src'].diasourceid
-                                          == ltcvs[dex]['diasourceid'][li] )
+                                          == ltcv['diasourceid'][li] )
                                     )
                         if which != 'detections':
                             assert ( ( ( thisdatacache[di]['frc'] is None )
-                                       and ( ltcvs[dex]['diaforcedsourceid'][li] is None ) )
+                                       and ( ltcv['diaforcedsourceid'][li] is None ) )
                                      or ( thisdatacache[di]['frc'].diaforcedsourceid
-                                          == ltcvs[dex]['diaforcedsourceid'][li] )
+                                          == ltcv['diaforcedsourceid'][li] )
                                     )
                         if which == 'detections':
-                            assert ltcvs[dex]['flux'][li] == pytest.approx( thisdatacache[di]['src'].psfflux,
+                            assert ltcv['flux'][li] == pytest.approx( thisdatacache[di]['src'].psfflux,
                                                                             rel=1e-5 )
 
-                            assert ltcvs[dex]['fluxerr'][li] == pytest.approx( thisdatacache[di]['src'].psffluxerr,
+                            assert ltcv['fluxerr'][li] == pytest.approx( thisdatacache[di]['src'].psffluxerr,
                                                                                rel=1e-5 )
                         elif which == 'forced':
-                            assert ltcvs[dex]['flux'][li] == pytest.approx( thisdatacache[di]['frc'].psfflux,
+                            assert ltcv['flux'][li] == pytest.approx( thisdatacache[di]['frc'].psfflux,
                                                                             rel=1e-5 )
 
-                            assert ltcvs[dex]['fluxerr'][li] == pytest.approx( thisdatacache[di]['frc'].psffluxerr,
+                            assert ltcv['fluxerr'][li] == pytest.approx( thisdatacache[di]['frc'].psffluxerr,
                                                                                rel=1e-5 )
                         else:
                             assert ( ( ( thisdatacache[di]['frc'] is None )
                                        and
-                                       ( ltcvs[dex]['flux'][li] == pytest.approx( thisdatacache[di]['src'].psfflux,
+                                       ( ltcv['flux'][li] == pytest.approx( thisdatacache[di]['src'].psfflux,
                                                                                   rel=1e-5 ) )
                                        and
-                                       ( ltcvs[dex]['fluxerr'][li] ==
+                                       ( ltcv['fluxerr'][li] ==
                                          pytest.approx( thisdatacache[di]['src'].psffluxerr, rel=1e-5 ) )
                                       )
                                      or
                                      ( ( thisdatacache[di]['frc'] is not None )
                                        and
-                                       ( ltcvs[dex]['flux'][li] == pytest.approx( thisdatacache[di]['frc'].psfflux,
+                                       ( ltcv['flux'][li] == pytest.approx( thisdatacache[di]['frc'].psfflux,
                                                                                   rel=1e-5 ) )
                                        and
-                                       ( ltcvs[dex]['fluxerr'][li] ==
+                                       ( ltcv['fluxerr'][li] ==
                                          pytest.approx( thisdatacache[di]['frc'].psffluxerr, rel=1e-5 ) )
                                       )
                                     )
@@ -1496,10 +1499,12 @@ def accumulate_expected_stats( set_of_lightcurves, procver_collection ):
             if band is not None:
                 thisexp['band'] = [ band, None, None ]
 
-            for n in [ 'firstdet', 'lastdet', 'maxdet' ]:
+            for n in [ 'firstdet', 'lastdet', 'lastforced', 'maxdet' ]:
                 thisexp[ f'{n}_mjd' ] = [ 1e32 if n=='firstdet' else -1e32, 0.0001, None ]
                 thisexp[ f'{n}_flux' ] = [ -1e32, None, 1e-6 ]
                 thisexp[ f'{n}_fluxerr' ] = [ None, None, 1e-6 ]
+                if band is None:
+                    thisexp[ f'{n}_band'] = [ None, None, None ]
             thisexp[ 'ndets' ] = [ 0, None, None ]
 
             for mag in [ 21, 22, 23, 24 ]:
@@ -1518,12 +1523,14 @@ def accumulate_expected_stats( set_of_lightcurves, procver_collection ):
                 cond = lambda s: True
 
             src_bpvkeys = [ p[2] for p in pvrow['diasource'] ]
+            frc_bpvkeys = [ p[2] for p in pvrow['diaforcedsource'] ]
             reindexed_srces = { k: { s.visit: s for s in root['src'][k] if cond(s) }
                                 for k in src_bpvkeys if k in root['src'].keys() }
+            reindexed_frced = { k: { f.visit: f for f in root['frc'][k] if cond(f) }
+                                for k in frc_bpvkeys if k in root['frc'].keys() }
 
+            # Extract the expected source values for this root object
             seenvisits = set()
-
-            # Extract the expected values for this root object
             for bpv, srces in reindexed_srces.items():
                 for visit, src in srces.items():
                     if visit in seenvisits:
@@ -1535,14 +1542,20 @@ def accumulate_expected_stats( set_of_lightcurves, procver_collection ):
 
                     if src.midpointmjdtai < thisexp['firstdet_mjd'][0]:
                         thisexp['firstdet_mjd'][0] = src.midpointmjdtai
+                        if band is None:
+                            thisexp['firstdet_band'][0] = src.band
                         thisexp['firstdet_flux'][0] = src.psfflux
                         thisexp['firstdet_fluxerr'][0] = src.psffluxerr
                     if src.midpointmjdtai > thisexp['lastdet_mjd'][0]:
                         thisexp['lastdet_mjd'][0] = src.midpointmjdtai
+                        if band is None:
+                            thisexp['lastdet_band'][0] = src.band
                         thisexp['lastdet_flux'][0] = src.psfflux
                         thisexp['lastdet_fluxerr'][0] = src.psffluxerr
                     if src.psfflux > thisexp['maxdet_flux'][0]:
                         thisexp['maxdet_mjd'][0] = src.midpointmjdtai
+                        if band is None:
+                            thisexp['maxdet_band'][0] = src.band
                         thisexp['maxdet_flux'][0] = src.psfflux
                         thisexp['maxdet_fluxerr'][0] = src.psffluxerr
 
@@ -1557,6 +1570,21 @@ def accumulate_expected_stats( set_of_lightcurves, procver_collection ):
                     for sn in [ 5, 7, 10 ]:
                         if ( src.psfflux / src.psffluxerr ) >= sn:
                             thisexp[ f'nsn{sn}' ][0] += 1
+
+            # Extract the expected forced source values for this root object
+            seenvisits = set()
+            for bpv, frces in reindexed_frced.items():
+                for visit, frc in frces.items():
+                    if visit in seenvisits:
+                        # already have a higher prio bpv
+                        continue
+                    seenvisits.add( visit )
+                    if frc.midpointmjdtai > thisexp['lastforced_mjd'][0]:
+                        thisexp['lastforced_mjd'][0] = frc.midpointmjdtai
+                        if band is None:
+                            thisexp['lastforced_band'][0] = frc.band
+                        thisexp['lastforced_flux'][0] = frc.psfflux
+                        thisexp['lastforced_fluxerr'][0] = frc.psffluxerr
 
             expected[ root['root'].id ] = thisexp
 
