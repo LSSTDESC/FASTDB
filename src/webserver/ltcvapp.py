@@ -90,7 +90,7 @@ class GetManyLtcvs( BaseView ):
 
         if ( 'return_object_info' in kwargs ) and ( kwargs['return_object_info'] ):
             rval = { 'ltcvs': rval[0], 'objinfo': rval[1] }
-            FDBLogger.error( f"Returning: {rval}\n" )
+            FDBLogger.debug( f"Returning: {rval}\n" )
 
         return rval
 
@@ -144,11 +144,14 @@ class GetLtcv( GetManyLtcvs ):
 
 class GetRandomLtcv( GetLtcv ):
     def do_the_things( self, procver="default" ):
+        FDBLogger.debug( "Getting random lightcurve." )
         with db.DBCon() as dbcon:
             pv = db.ProcessingVersion.procver_id( procver, dbcon=dbcon  )
 
             q = sql.SQL(
                 """
+                /*+ IndexScan(o idx_diaobject_procver)
+                */
                 SELECT diaobjectid
                 FROM (
                   SELECT DISTINCT ON (o.diaobjectid) o.diaobjectid
@@ -160,12 +163,17 @@ class GetRandomLtcv( GetLtcv ):
                 ORDER BY random() LIMIT 1
                 """
             ).format( procver=pv )
-            rows, _cols = dbcon.execute( q )
+            rows, _cols = dbcon.execute( q, explain=True )
 
-            mess = self.get_ltcvs( pv, [ rows[0][0] ], dbcon=dbcon )
+            doid = rows[0][0]
+            FDBLogger.debug( f"Getting lightcurve for diaobjectid {doid}" )
+            rval = self.get_ltcvs( pv, [ doid ], dbcon=dbcon )
+        rval['ltcv'] = rval['ltcvs'][0]
+        del rval['ltcvs']
+        rval['objinfo'] = { k: v[0] for k, v in rval['objinfo'].items() }
 
-        key0 = list( mess.keys() )[0]
-        return mess[ key0 ]
+        FDBLogger.debug( f"Returning lightcurve for {rval['ltcv']['rootid']} ({doid})" )
+        return rval
 
 
 # ======================================================================

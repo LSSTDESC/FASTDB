@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 import simplejson
+import copy
+import re
 
 import flask
 import flask.views
@@ -45,6 +47,21 @@ class BaseView( flask.views.View ):
 
     def __init__( self, *args, **kwargs ):
         super().__init__( *args, **kwargs )
+
+    def argstr_to_args( self, argstr, initargs={} ):
+        """Parse argstr as a bunch of /kw=val to a dictionary, update with request body if it's json."""
+
+        args = copy.deepcopy( initargs )
+        if argstr is not None:
+            for arg in argstr.split("/"):
+                match = re.search( '^(?P<k>[^=]+)=(?P<v>.*)$', arg )
+                if match is None:
+                    FDBLogger( f"error parsing url argument {arg}, must be key=value" )
+                    raise FASTDBWebException( f'error parsing url argument {arg}, must be key=value' )
+                args[ match.group('k') ] = match.group('v')
+        if flask.request.is_json:
+            args.update( flask.request.json )
+        return args
 
     def check_auth( self ):
         self.username = flask.session['username'] if 'username' in flask.session else '(None)'

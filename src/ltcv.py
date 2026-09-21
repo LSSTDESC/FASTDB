@@ -1299,6 +1299,9 @@ def object_search( processing_version='default', just_objids=False, searchband=N
           nsn5: int
              Number of detections with S/N > 5
 
+          nfrc: int
+             Number of diaforcedsources
+
     Returns
     -------
       dict
@@ -1327,6 +1330,7 @@ def object_search( processing_version='default', just_objids=False, searchband=N
           nsn10             : int, number of detections with flux/fluxerr ≥ 10
           nsn7              : int, number of detections with flux/fluxerr ≥ 7
           nsn5              : int, number of detections with flux/fluxerr ≥ 5
+          nfrc              : int, number of forced-photometry points
 
     """
 
@@ -1356,6 +1360,7 @@ def object_search( processing_version='default', just_objids=False, searchband=N
         'nsn10':            { 'mult': False,  'sbustr': False, 'minmax': True, 'dtype': np.int16 },
         'nsn7':             { 'mult': False,  'sbustr': False, 'minmax': True, 'dtype': np.int16 },
         'nsn5':             { 'mult': False,  'sbustr': False, 'minmax': True, 'dtype': np.int16 },
+        'nfrc':             { 'mult': False,  'sbustr': False, 'minmax': True, 'dtype': np.int16 },
     }
 
     radius = None
@@ -1658,6 +1663,7 @@ def get_hot_ltcvs( processing_version, position_processing_version=None,
 
 
 def create_object_stats_materialized_view( procver ):
+    FDBLogger.info( f"Creating or refreshing object statistics materialized views for processing version {procver}" )
     with db.DBCon( dictcursor=True ) as dbcon:
         # Check to see if it already exists
         q = sql.SQL( "SELECT * FROM pg_class WHERE relname={viewname}" ).format( viewname=f'objstats_{procver}' )
@@ -1710,7 +1716,7 @@ def create_object_stats_materialized_view( procver ):
                         ).format( viewname=sql.Identifier( f'objstatscomb_{procver}' ) )
             dbcon.execute( q )
             dbcon.commit()
-            FDBLogger.info( f"Done refreshing materialized views for {procver}" )
+            FDBLogger.info( f"Done refreshing object statistics materialized views for {procver}" )
             return
 
         # If we get here, the materialized view does not exist
@@ -1741,7 +1747,8 @@ def create_object_stats_materialized_view( procver ):
                    CASE WHEN n21.ndets IS NULL THEN 0 ELSE n21.ndets END AS ndets21,
                    CASE WHEN sn10.ndets IS NULL THEN 0 ELSE sn10.ndets END AS nsn10,
                    CASE WHEN sn7.ndets IS NULL THEN 0 ELSE sn7.ndets END AS nsn7,
-                   CASE WHEN sn5.ndets IS NULL THEN 0 ELSE sn5.ndets END AS nsn5
+                   CASE WHEN sn5.ndets IS NULL THEN 0 ELSE sn5.ndets END AS nsn5,
+                   nf.nfrc
                FROM (
                  ( SELECT DISTINCT ON(o.rootid, s.band) o.rootid, r.ra, r.dec, s.band
                    FROM root_diaobject r
@@ -1751,11 +1758,11 @@ def create_object_stats_materialized_view( procver ):
                                                        AND j.procver_id={pvid}
                  )
                  UNION
-                 ( SELECT DISTINCT ON(o.rootid, s.band) o.rootid, r.ra, r.dec, s.band
+                 ( SELECT DISTINCT ON(o.rootid, f.band) o.rootid, r.ra, r.dec, f.band
                    FROM root_diaobject r
                    INNER JOIN diaobject o ON o.rootid=r.id
-                   INNER JOIN diaforcedsource s ON s.diaobjectid=o.diaobjectid
-                   INNER JOIN base_procver_of_procver j ON s.base_procver_id=j.base_procver_id
+                   INNER JOIN diaforcedsource f ON f.diaobjectid=o.diaobjectid
+                   INNER JOIN base_procver_of_procver j ON f.base_procver_id=j.base_procver_id
                                                        AND j.procver_id={pvid}
                  )
                ) r
@@ -1767,6 +1774,7 @@ def create_object_stats_materialized_view( procver ):
                     INNER JOIN diaobject o ON s.diaobjectid=o.diaobjectid
                     INNER JOIN base_procver_of_procver j ON s.base_procver_id=j.base_procver_id
                                                         AND j.procver_id={pvid}
+                    WHERE s.psfflux > 0
                     ORDER BY o.rootid, s.visit, j.priority DESC
                  ) subq
                  ORDER BY rootid, band, midpointmjdtai
@@ -1779,6 +1787,7 @@ def create_object_stats_materialized_view( procver ):
                     INNER JOIN diaobject o ON s.diaobjectid=o.diaobjectid
                     INNER JOIN base_procver_of_procver j ON s.base_procver_id=j.base_procver_id
                                                         AND j.procver_id={pvid}
+                    WHERE s.psfflux > 0
                     ORDER BY o.rootid, s.visit, j.priority DESC
                  ) subq
                  ORDER BY rootid, band, midpointmjdtai DESC
@@ -1791,6 +1800,7 @@ def create_object_stats_materialized_view( procver ):
                     INNER JOIN diaobject o ON s.diaobjectid=o.diaobjectid
                     INNER JOIN base_procver_of_procver j ON s.base_procver_id=j.base_procver_id
                                                         AND j.procver_id={pvid}
+                    WHERE s.psfflux > 0
                     ORDER BY o.rootid, s.visit, j.priority DESC
                  ) subq
                  ORDER BY rootid, band, psfflux DESC
@@ -1910,15 +1920,27 @@ def create_object_stats_materialized_view( procver ):
                   WHERE psfflux / psffluxerr >= 5
                   GROUP BY rootid, band
                ) sn5 ON r.rootid=sn5.rootid AND r.band=sn5.band
+               LEFT JOIN (
+                  SELECT rootid, band, COUNT(*) AS nfrc
+                  FROM (
+                     SELECT DISTINCT ON(o.rootid, f.visit) o.rootid, f.band
+                     FROM diaforcedsource f
+                     INNER JOIN diaobject o ON f.diaobjectid=o.diaobjectid
+                     INNER JOIN base_procver_of_procver j ON f.base_procver_id=j.base_procver_id
+                                                         AND j.procver_id={pvid}
+                     ORDER BY o.rootid, f.visit, j.priority DESC
+                  ) subq
+                  GROUP BY rootid, band
+               ) nf ON r.rootid=n.rootid AND r.band=n.band
             )
             """
         ) ).format( viewname=sql.Identifier( f'objstats_{procver}' ), pvid=pvid )
 
-        dbcon.execute_nofetch( q, explain=False )
+        dbcon.execute_nofetch( q, explain=True )
 
         indexcols = [ 'rootid', 'firstdet_mjd', 'lastdet_mjd', 'maxdet_mjd',
                      'firstdet_flux', 'lastdet_flux', 'maxdet_flux',
-                     'ndets', 'ndets24', 'ndets23', 'ndets22', 'ndets21', 'nsn10', 'nsn7', 'nsn5' ]
+                     'ndets', 'ndets24', 'ndets23', 'ndets22', 'ndets21', 'nsn10', 'nsn7', 'nsn5', 'nfrc' ]
         for col in indexcols:
             q = sql.SQL( 'CREATE INDEX {idxname} ON {viewname}({col})'
                         ).format( idxname=sql.Identifier( f'idx_obstats_{procver}_{col}' ),
@@ -1950,11 +1972,12 @@ def create_object_stats_materialized_view( procver ):
                        lf.flux AS lastforced_flux, lf.fluxerr AS lastforced_fluxerr,
                      s.ndets AS ndets, s.ndets24 AS ndets24, s.ndets23 AS ndets23,
                        s.ndets22 AS ndets22, s.ndets21 AS ndets21,
-                     s.nsn10 AS nsn10, s.nsn7 AS nsn7, s.nsn5 AS nsn5
+                     s.nsn10 AS nsn10, s.nsn7 AS nsn7, s.nsn5 AS nsn5,
+                     s.nfrc AS nfrc
               FROM (
                 SELECT rootid, ra, dec, SUM(ndets) AS ndets, SUM(ndets24) AS ndets24, SUM(ndets23) AS ndets23,
                        SUM(ndets22) AS ndets22, SUM(ndets21) AS ndets21, SUM(nsn10) AS nsn10,
-                       SUM(nsn7) AS nsn7, SUM(nsn5) AS nsn5
+                       SUM(nsn7) AS nsn7, SUM(nsn5) AS nsn5, SUM(nfrc) AS nfrc
                 FROM {viewname}
                 GROUP BY rootid, ra, dec
               ) s
@@ -1990,7 +2013,7 @@ def create_object_stats_materialized_view( procver ):
             )
             """ ) ).format( viewname=sql.Identifier(f'objstats_{procver}'),
                             combviewname=sql.Identifier(f'objstatscomb_{procver}') )
-        dbcon.execute( q, explain=False )
+        dbcon.execute( q, explain=True )
 
         for col in indexcols:
             q = sql.SQL( 'CREATE INDEX {idxname} ON {viewname}({col})'
@@ -2005,4 +2028,4 @@ def create_object_stats_materialized_view( procver ):
         dbcon.execute( q, explain=False )
 
         dbcon.commit()
-        FDBLogger.info( f"Done creating materialized view objstats_{procver}" )
+        FDBLogger.info( f"Done creating object statistics materialized views for {procver}" )
