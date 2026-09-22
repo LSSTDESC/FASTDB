@@ -83,6 +83,10 @@ fastdbap.ObjectSearch = class
                                                                        "attributes": { "value": sortkey } } );
             if ( sortkey == "rootid" ) wid.setAttribute( "selected", 1 );
         }
+        this.sortorder = rkWebUtil.elemaker( "select", subdiv, { "classes": [ "xmarglinleft" ] } );
+        for ( let order of [ "ascending", "descending" ] ) {
+            rkWebUtil.elemaker( "option", this.sortorder, { "text":  order, "attributes": { "value": order } } );
+        }
 
 
         // search by ra/dec
@@ -137,10 +141,10 @@ fastdbap.ObjectSearch = class
                                                                "attributes": { "type": "checkbox",
                                                                                "checked": 1 } } );
         rkWebUtil.elemaker( "label", hbox, { "text": "Y ", "attributes": { "for": "y_statband_checkbox" } } );
-        
-        
+
+
         // search by first/max/last mjd/mag
-        
+
         vbox = rkWebUtil.elemaker( "div", div, { "classes": [ "vbox", "xmarginright", "searchinner" ] } );
         table = rkWebUtil.elemaker( "table", vbox, { "classes": [ "borderless"] } );
         tr = rkWebUtil.elemaker( "tr", table );
@@ -150,7 +154,7 @@ fastdbap.ObjectSearch = class
         td = rkWebUtil.elemaker( "th", tr );
         td = rkWebUtil.elemaker( "th", tr, { "text": "min" } );
         td = rkWebUtil.elemaker( "th", tr, { "text": "max" } );
-        
+
         tr = rkWebUtil.elemaker( "tr", table );
         td = rkWebUtil.elemaker( "td", tr, { "text": "First detection mjd", "classes": [ "right" ] } );
         td = rkWebUtil.elemaker( "td", tr );
@@ -228,8 +232,8 @@ fastdbap.ObjectSearch = class
         tr = rkWebUtil.elemaker( "tr", table );
         td = rkWebUtil.elemaker( "td", tr, { "text": "s/n ≥ 10", "classes": [ "right" ] } );
         this.mindetsngt10_widget = rkWebUtil.elemaker( "input", td, { "attributes": { "size": 4 } } );
-        
-        
+
+
         // Window... not currently supported by ltcv.py::object_search
 
         // vbox = rkWebUtil.elemaker( "div", div, { "classes": [ "vbox", "xmarginright", "searchinner" ] } );
@@ -271,7 +275,7 @@ fastdbap.ObjectSearch = class
         // If all are checked, don't include it as a criterion
         if ( statbands.length < 6 )
             searchcriteria.searchband = statbands;
-        
+
         if ( this.firstdetminmjd_widget.value.trim().length > 0 )
             searchcriteria.firstdet_mjd_min = this.firstdetminmjd_widget.value.trim();
         if ( this.firstdetmaxmjd_widget.value.trim().length > 0 )
@@ -282,7 +286,7 @@ fastdbap.ObjectSearch = class
         if ( this.firstdetmaxmag_widget.value.trim().length > 0 )
             searchcriteria.firstdet_flux_min = (
                 10 ** ( ( 31.4 - parseFloat(this.firstdetmaxmag_widget.value.trim()) ) / 2.5 ) );
-            
+
         if ( this.lastdetminmjd_widget.value.trim().length > 0 )
             searchcriteria.lastdet_mjd_min = this.lastdetminmjd_widget.value.trim();
         if ( this.lastdetmaxmjd_widget.value.trim().length > 0 )
@@ -293,7 +297,7 @@ fastdbap.ObjectSearch = class
         if ( this.lastdetmaxmag_widget.value.trim().length > 0 )
              searchcriteria.lastdet_flux_min = (
                 10 ** ( ( 31.4 - parseFloat(this.lastdetmaxmag_widget.value.trim()) ) / 2.5 ) );
-            
+
         if ( this.maxdetminmjd_widget.value.trim().length > 0 )
             searchcriteria.maxdet_mjd_min = this.maxdetminmjd_widget.value.trim();
         if ( this.maxdetmaxmjd_widget.value.trim().length > 0 )
@@ -333,22 +337,34 @@ fastdbap.ObjectSearch = class
 
         // Sort, Limit, Offset
 
+        let descending = false
+        if ( this.sortorder.value == 'descending' ) descending = true;
+
         let sortby = this.searchsort.value;
         if ( sortby == 'SPECIAL-ra/dec' ) {
-            sortby = [ 'ra', 'dec' ];
+            if ( descending )
+                sortby = [ '-ra', '-dec' ];
+            else
+                sortby = [ 'ra', 'dec' ];
         }
         else if ( sortby == 'SPECIAL-/dec/ra' ) {
-            sortby = [ 'dec', 'ra' ];
+            if ( descending )
+                sortby = [ '-dec', '-ra' ];
+            else
+                sortby = [ 'dec', 'ra' ];
         }
         if ( sortby != null ) {
-            searchcriteria['orderby'] = sortby;
+            if ( descending )
+                searchcriteria['orderby'] = "-" + sortby;
+            else
+                searchcriteria['orderby'] = sortby;
         }
 
         searchcriteria['limit'] = this.searchlimit.value;
         searchcriteria['offset'] = this.searchoffset.value;
-        
+
         // Do
-        
+
         rkWebUtil.wipeDiv( this.context.objectlistdiv );
         this.context.maintabs.selectTab( "objectlist" );
         rkWebUtil.elemaker( "p", this.context.objectlistdiv, { "text": "Searching for objects...",
