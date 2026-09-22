@@ -83,7 +83,7 @@ fastdbap.ObjectSearch = class
                                                                        "attributes": { "value": sortkey } } );
             if ( sortkey == "rootid" ) wid.setAttribute( "selected", 1 );
         }
-        this.sortorder = rkWebUtil.elemaker( "select", subdiv, { "classes": [ "xmarglinleft" ] } );
+        this.sortorder = rkWebUtil.elemaker( "select", subdiv, { "classes": [ "xmarginleft" ] } );
         for ( let order of [ "ascending", "descending" ] ) {
             rkWebUtil.elemaker( "option", this.sortorder, { "text":  order, "attributes": { "value": order } } );
         }
