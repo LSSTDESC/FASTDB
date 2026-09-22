@@ -17,7 +17,7 @@ fastdbap.ObjectSearch = class
     render_page()
     {
         let self = this;
-        let table, tr, td, div, hbox, vbox, p;
+        let table, tr, td, div, superdiv, subdiv,hbox, vbox, p;
 
         rkWebUtil.wipeDiv( this.topdiv );
 
@@ -32,14 +32,63 @@ fastdbap.ObjectSearch = class
         p = rkWebUtil.elemaker( "p", div );
         rkWebUtil.button( p, "Show Random Obj", (e) => { self.show_random_obj(); } );
 
+        // More general search
+
+        superdiv = rkWebUtil.elemaker( "div", this.topdiv, { "classes": [ "vbox" ] } );
+        div = rkWebUtil.elemaker( "div", superdiv, { "classes": [ "maxwcontent", "hbox" ] } );
+        subdiv = rkWebUtil.elemaker( "div", superdiv, { "classes": [ "maxwcontent", "hbox", "searchinner" ] } );
+        rkWebUtil.button( subdiv, "Search", (e) => { self.object_search() } );
+        rkWebUtil.elemaker( "span", subdiv, { "text": "Limit:", "classes": [ "mmarginleft" ] } );
+        this.searchlimit = rkWebUtil.elemaker( "input", subdiv, { "classes": [ "mmarginright" ],
+                                                                  "attributes": { "type": "number",
+                                                                                  "min": 10,
+                                                                                  "max": 1000,
+                                                                                  "value": 100,
+                                                                                  "sytle": "width: 4em" } } );
+        this.searchlimit.addEventListener( "blur", (e) => {
+            self.searchlimit.value = rkWebUtil.parseIntInRange( self.searchlimit.value, 10, 1000, 100 )
+        } );
+        rkWebUtil.elemaker( "text", subdiv, { "text": "Offset:" } );
+        this.searchoffset = rkWebUtil.elemaker( "input", subdiv, { "classes": [ "mmarginright" ],
+                                                                   "attributes": { "type": "number",
+                                                                                   "min": 0,
+                                                                                   "value": 0,
+                                                                                   "style": "width: 6em" } } );
+        rkWebUtil.elemaker( "text", subdiv, { "text": "Sort by:" } );
+        this.searchsort = rkWebUtil.elemaker( "select", subdiv );
+        let sorttext = { 'rootid': 'rootid',
+                         'ra/dec': 'SPECIAL-ra/dec',
+                         'dec/ra': 'SPECIAL-dec/ra',
+                         'mjd_firstdetection': 'firstdet_mjd',
+                         'mjd_lastdetection': 'lastdet_mjd',
+                         'mjd_maxdetection': 'maxdet_mjd',
+                         'mjd_lastforced': 'lastforced_mjd',
+                         'flux_firstdetection': 'firstdet_flux',
+                         'flux_lastdetection': 'lastdet_flux',
+                         'flux_maxdetection': 'maxdet_flux',
+                         'flux_lastforced': 'lastforced_flux',
+                         'n detections': 'ndets',
+                         'n forced phot points': 'nfrc',
+                         'n dets mag≤24': 'ndets24',
+                         'n dets mag≤23': 'ndets23',
+                         'n dets mag≤22': 'ndets22',
+                         'n dets mag≤21': 'ndets21',
+                         'n s/n ≥10': 'nsn10',
+                         'n s/n ≥7': 'nsn10',
+                         'n s/n ≥5': 'nsn10'
+                       }
+        for ( let sortdisplay in sorttext ) {
+            let sortkey = sorttext[ sortdisplay ];
+            let wid = rkWebUtil.elemaker( "option", this.searchsort, { "text": sortdisplay,
+                                                                       "attributes": { "value": sortkey } } );
+            if ( sortkey == "rootid" ) wid.setAttribute( "selected", 1 );
+        }
+
+
         // search by ra/dec
 
-        div = rkWebUtil.elemaker( "div", this.topdiv, { "classes": [ "maxwcontent", "hbox" ] } );
         vbox = rkWebUtil.elemaker( "div", div, { "classes": [ "vbox", "xmarginright", "searchinner" ] } );
         table = rkWebUtil.elemaker( "table", vbox, { "classes": [ "borderless" ] } );
-        tr = rkWebUtil.elemaker( "tr", table );
-        td = rkWebUtil.elemaker( "td", tr );
-        rkWebUtil.button( td, "Search", (e) => { self.object_search() } );
         tr = rkWebUtil.elemaker( "tr", table );
         td = rkWebUtil.elemaker( "td", tr, { "text": "RA:", "classes": [ "right" ] } );
         td = rkWebUtil.elemaker( "td", tr );
@@ -267,13 +316,13 @@ fastdbap.ObjectSearch = class
 
         for ( let maglim of [ 21, 22, 23, 24 ] ) {
             let val = this['mindetmaglt' + maglim + "_widget"].value.trim();
-            if ( val.length > 0 ) searchcriteria['ndets' + maglim] = val;
+            if ( val.length > 0 ) searchcriteria['ndets' + maglim + '_min'] = val;
         }
         for ( let snlim of [ 5, 7, 10 ] ) {
             let val = this['mindetsngt' + snlim + '_widget'].value.trim();
-            if ( val.length > 0 ) searchcriteria['nsn' + snlim] = val;
+            if ( val.length > 0 ) searchcriteria['nsn' + snlim + '_min'] = val;
         }
-        
+
         // ltcv.object_search doesn't have a search window
         // if ( this.window_mjd0_widget.value.trim().length > 0 )
         //     searchcriteria.window_t0 = this.window_mjd0_widget.value.trim();
@@ -281,7 +330,24 @@ fastdbap.ObjectSearch = class
         //     searchcriteria.window_t1 = this.window_mjd1_widget.value.trim();
         // if ( this.dets_in_window_widget.value.trim().length > 0 )
         //     searchcriteria.min_window_numdetections = this.dets_in_window_widget.value.trim();
+
+        // Sort, Limit, Offset
+
+        let sortby = this.searchsort.value;
+        if ( sortby == 'SPECIAL-ra/dec' ) {
+            sortby = [ 'ra', 'dec' ];
+        }
+        else if ( sortby == 'SPECIAL-/dec/ra' ) {
+            sortby = [ 'dec', 'ra' ];
+        }
+        if ( sortby != null ) {
+            searchcriteria['orderby'] = sortby;
+        }
+
+        searchcriteria['limit'] = this.searchlimit.value;
+        searchcriteria['offset'] = this.searchoffset.value;
         
+        // Do
         
         rkWebUtil.wipeDiv( this.context.objectlistdiv );
         this.context.maintabs.selectTab( "objectlist" );

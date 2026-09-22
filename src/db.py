@@ -47,7 +47,7 @@ from util import FDBLogger
 # explaining can slow down queries as sometimes it seems that
 # postgres really wants to think about what it's doing before giving you
 # a query plan (I don't know why; is it a pg_hint_plan thing?)
-_echoqueries = False
+_echoqueries = True
 _alwaysexplain = False
 _alwaysanalyze = False
 
@@ -506,16 +506,16 @@ def construct_pgsql_where_clause( searchspec, where="WHERE", **kwargs ):
             if util.isSequence( kwargs[field] ):
                 if not fieldinfo[ 'mult' ]:
                     raise ValueError( f"Field {field} can't be a list" )
-                q += sql.SQL( "{where} {field}=ANY(%({sfield})s)" ).format( where=sql.SQL(where),
-                                                                            field=sql.Identifier(field),
-                                                                            sfield=sql.SQL(field) )
+                q += sql.SQL( "{where} {field}=ANY(%({sfield})s)\n" ).format( where=sql.SQL(where),
+                                                                              field=sql.Identifier(field),
+                                                                              sfield=sql.SQL(field) )
                 subdict[field] = list( kwargs[field] )
             else:
-                q += sql.SQL( "{where} {field}=%({sfield})s" ).format( where=sql.SQL(where),
-                                                                       field=sql.Identifier(field),
-                                                                       sfield=sql.SQL(field) )
+                q += sql.SQL( "{where} {field}=%({sfield})s\n" ).format( where=sql.SQL(where),
+                                                                         field=sql.Identifier(field),
+                                                                         sfield=sql.SQL(field) )
                 subdict[field] = kwargs[field]
-            where = " AND"
+            where = "  AND"
             del kwargs[field]
 
         if f'{field}_contains' in kwargs:
@@ -534,14 +534,14 @@ def construct_pgsql_where_clause( searchspec, where="WHERE", **kwargs ):
                                     sfield=sql.SQL(field),
                                     i=sql.SQL(str(i)) ) )
                     subdict[f'{field}_contains_{i}'] = f'%{val}%'
-                q += sql.SQL( ")" )
-                where = " AND"
+                q += sql.SQL( ")\n" )
+                where = "  AND"
             else:
-                q += sql.SQL( "{where} {field} LIKE %({sfield}_contains)s" ).format( where=sql.SQL(where),
-                                                                                     field=sql.Identifier(field),
-                                                                                     sfield=sql.SQL(field) )
+                q += sql.SQL( "{where} {field} LIKE %({sfield}_contains)s\n" ).format( where=sql.SQL(where),
+                                                                                       field=sql.Identifier(field),
+                                                                                       sfield=sql.SQL(field) )
                 subdict[f'{field}_contains'] = f"%{kwargs[f'{field}_contains']}%"
-                where = " AND"
+                where = "  AND"
             del kwargs[f'{field}_contains']
 
         if f'{field}_min' in kwargs:
@@ -549,11 +549,11 @@ def construct_pgsql_where_clause( searchspec, where="WHERE", **kwargs ):
                 raise ValueError( f'Field {field} doesn\'t work with "min"' )
             if util.isSequence( kwargs[f'{field}_min'] ):
                 raise ValueError( f"{field}_max can't be a list" )
-            q += sql.SQL( "{where} {field}>=%({sfield}_min)s" ).format( where=sql.SQL(where),
-                                                                        field=sql.Identifier(field),
-                                                                        sfield=sql.SQL(field) )
+            q += sql.SQL( "{where} {field}>=%({sfield}_min)s\n" ).format( where=sql.SQL(where),
+                                                                          field=sql.Identifier(field),
+                                                                          sfield=sql.SQL(field) )
             subdict[f'{field}_min'] = kwargs[f'{field}_min']
-            where = " AND"
+            where = "  AND"
             del kwargs[f'{field}_min']
 
         if f'{field}_max' in kwargs:
@@ -561,11 +561,11 @@ def construct_pgsql_where_clause( searchspec, where="WHERE", **kwargs ):
                 raise ValueError( f'Field {field} doesn\'t work with "max"' )
             if util.isSequence( kwargs[f'{field}_max'] ):
                 raise ValueError( f"{field}_max can't be a list" )
-            q += sql.SQL( "{where} {field}<=%({sfield}_max)s" ).format( where=sql.SQL(where),
-                                                                        field=sql.Identifier(field),
-                                                                        sfield=sql.SQL(field) )
+            q += sql.SQL( "{where} {field}<=%({sfield}_max)s\n" ).format( where=sql.SQL(where),
+                                                                          field=sql.Identifier(field),
+                                                                          sfield=sql.SQL(field) )
             subdict[f'{field}_max'] = kwargs[f'{field}_max']
-            where = " AND"
+            where = "  AND"
             del kwargs[f'{field}_max']
 
     # Differences

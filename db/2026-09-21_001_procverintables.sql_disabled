@@ -17,7 +17,7 @@ FROM (
  FROM diaobject_position p
  INNER JOIN base_procver_of_procver j ON p.base_procver_id=j.base_procver_id
 ) q
-WHERE q.diaobjectid=o.diaobjectid;
+WHERE q.diaobjectid=p.diaobjectid;
 
 UPDATE diasource s SET procver_id=q.procver_id
 FROM (
@@ -25,15 +25,15 @@ FROM (
  FROM diasource s
  INNER JOIN base_procver_of_procver j ON s.base_procver_id=j.base_procver_id
 ) q
-WHERE q.diasourceid=o.diasourceid;
+WHERE q.diasourceid=s.diasourceid;
 
 UPDATE diaforcedsource f SET procver_id=q.procver_id
 FROM (
- SELECT f.diaforcedsourceid j.procver_id
+ SELECT f.diaforcedsourceid, j.procver_id
  FROM diaforcedsource f
  INNER JOIN base_procver_of_procver j ON f.base_procver_id=j.base_procver_id
 ) q
-WHERE q.diaforcedsourceid=o.diaforcedsourceid;
+WHERE q.diaforcedsourceid=f.diaforcedsourceid;
 
 ALTER INDEX idx_diaobject_base_procver_id RENAME TO idx_diaobject_position_base_procver_id;
 ALTER INDEX idx_diaobject_procver RENAME TO idx_diaobject_base_procver_id;

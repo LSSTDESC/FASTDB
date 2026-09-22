@@ -33,7 +33,7 @@ class EDP2Loader:
                 except Exception:
                     col = 'description'
                 if self._slow_test or ( not self._test_only ):
-                    pgdb.execute( "LOCK TABLE processing_version" )
+                    pgdb.execute( "LOCK TABLE processing_version", explain=False )
                 rows = pgdb.execute( sql.SQL( "SELECT * FROM processing_version WHERE {col}={pv}" )
                                      .format( col=sql.Identifier(col), pv=processing_version ) )
                 if len(rows) > 0:

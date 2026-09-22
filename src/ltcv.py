@@ -1181,7 +1181,8 @@ _object_search_timings = {}
 _object_search_timings_count = {}
 
 
-def object_search( processing_version='default', just_objids=False, searchband=None, dbcon=None, **kwargs ):
+def object_search( processing_version='default', just_objids=False, searchband=None, orderby="rootid",
+                   limit=None, offset=None, dbcon=None, **kwargs ):
     """Search for objects.
 
     This is a relatively fast search that only looks at object stats
@@ -1201,6 +1202,19 @@ def object_search( processing_version='default', just_objids=False, searchband=N
          If None, then all the cuts will be for any band.  If a band or
          list of bands is given, then the cuts will only consider
          photometry with this band or these bands.
+
+      orderby: str or list of str, default rootid
+         Sort the returned objects by these fields.  Fields can include
+         (almost) anything that's in the return.  Prepend "-" to the
+         name to make it a descending sort rather than an ascending
+         sort.
+
+      limit: int or None
+         If given, only return this many rows.
+
+      offset: int or None
+         If given, return limit rows starting at this offset.
+
 
       SEARCH FIELDS:
 
@@ -1310,27 +1324,30 @@ def object_search( processing_version='default', just_objids=False, searchband=N
       column values.  It should be safe to stuff this directly into
       pandas.DataFrame().  Column names are:
 
-          rootid            : UUID, the rootid of the object
-          ra                : float
-          dec               : float
-          firstdet_mjd      : float, mjd of first detection (diasource)
-          firstdet_flux     : float, flux in nJy (zeropoint 31.4) of first detection
-          firstdet_fluxerr  : float
-          lastdet_mjd       : float, mjd of last detection (diasource)
-          lastdet_flux      : float, flux in nJy (zeropoint 31.4) of last detection
-          lastdet_fluxerr   : float
-          maxdet_mjd        : float, mjd of max (i.e. highest-flux) detection (diasource)
-          maxdet_flux       : float, flux in nJy (zeropoint 31.4) of max detection
-          maxdet_fluxerr    : float
-          ndets             : int, number of detections (diasources for this processing version and rootid)
-          ndets24           : int, number of detections with mag ≤ 24
-          ndets23           : int, number of detections with mag ≤ 23
-          ndets22           : int, number of detections with mag ≤ 22
-          ndets21           : int, number of detections with mag ≤ 21
-          nsn10             : int, number of detections with flux/fluxerr ≥ 10
-          nsn7              : int, number of detections with flux/fluxerr ≥ 7
-          nsn5              : int, number of detections with flux/fluxerr ≥ 5
-          nfrc              : int, number of forced-photometry points
+          rootid             : UUID, the rootid of the object
+          ra                 : float
+          dec                : float
+          firstdet_mjd       : float, mjd of first detection (diasource)
+          firstdet_flux      : float, flux in nJy (zeropoint 31.4) of first detection
+          firstdet_fluxerr   : float
+          lastdet_mjd        : float, mjd of last detection (diasource)
+          lastdet_flux       : float, flux in nJy (zeropoint 31.4) of last detection
+          lastdet_fluxerr    : float
+          maxdet_mjd         : float, mjd of max (i.e. highest-flux) detection (diasource)
+          maxdet_flux        : float, flux in nJy (zeropoint 31.4) of max detection
+          maxdet_fluxerr     : float
+          lastforced_mjd     : float, mjd of the last forced photometry measurement we have
+          lastforced_flux    : float, flux in nJy (zeropoint 31.4) of last forced photometry point
+          lastforced_fluxerr : float
+          ndets              : int, number of detections (diasources for this processing version and rootid)
+          ndets24            : int, number of detections with mag ≤ 24
+          ndets23            : int, number of detections with mag ≤ 23
+          ndets22            : int, number of detections with mag ≤ 22
+          ndets21            : int, number of detections with mag ≤ 21
+          nsn10              : int, number of detections with flux/fluxerr ≥ 10
+          nsn7               : int, number of detections with flux/fluxerr ≥ 7
+          nsn5               : int, number of detections with flux/fluxerr ≥ 5
+          nfrc               : int, number of forced-photometry points
 
     """
 
@@ -1340,27 +1357,30 @@ def object_search( processing_version='default', just_objids=False, searchband=N
     viewname = f'objstatscomb_{pvobj.description}' if len(searchband) == 0 else f'objstats_{pvobj.description}'
 
     searchspec = {
-        'rootid':           { 'mult': True,   'substr': False, 'minmax': False, 'dtype': np.dtype('O') },
-        'ra':               { 'mult': False,  'sbustr': False, 'minmax': True, 'dtype': np.float64 },
-        'dec':              { 'mult': False,  'sbustr': False, 'minmax': True, 'dtype': np.float64 },
-        'firstdet_mjd':     { 'mult': False,  'sbustr': False, 'minmax': True, 'dtype': np.float64 },
-        'firstdet_flux':    { 'mult': False,  'sbustr': False, 'minmax': True, 'dtype': np.float32 },
-        'firstdet_fluxerr': { 'mult': False,  'sbustr': False, 'minmax': True, 'dtype': np.float32 },
-        'lastdet_mjd':      { 'mult': False,  'sbustr': False, 'minmax': True, 'dtype': np.float64 },
-        'lastdet_flux':     { 'mult': False,  'sbustr': False, 'minmax': True, 'dtype': np.float32 },
-        'lastdet_fluxerr':  { 'mult': False,  'sbustr': False, 'minmax': True, 'dtype': np.float32 },
-        'maxdet_mjd':       { 'mult': False,  'sbustr': False, 'minmax': True, 'dtype': np.float64 },
-        'maxdet_flux':      { 'mult': False,  'sbustr': False, 'minmax': True, 'dtype': np.float32 },
-        'maxdet_fluxerr':   { 'mult': False,  'sbustr': False, 'minmax': True, 'dtype': np.int16 },
-        'ndets':            { 'mult': False,  'sbustr': False, 'minmax': True, 'dtype': np.int16 },
-        'ndets24':          { 'mult': False,  'sbustr': False, 'minmax': True, 'dtype': np.int16 },
-        'ndets23':          { 'mult': False,  'sbustr': False, 'minmax': True, 'dtype': np.int16 },
-        'ndets22':          { 'mult': False,  'sbustr': False, 'minmax': True, 'dtype': np.int16 },
-        'ndets21':          { 'mult': False,  'sbustr': False, 'minmax': True, 'dtype': np.int16 },
-        'nsn10':            { 'mult': False,  'sbustr': False, 'minmax': True, 'dtype': np.int16 },
-        'nsn7':             { 'mult': False,  'sbustr': False, 'minmax': True, 'dtype': np.int16 },
-        'nsn5':             { 'mult': False,  'sbustr': False, 'minmax': True, 'dtype': np.int16 },
-        'nfrc':             { 'mult': False,  'sbustr': False, 'minmax': True, 'dtype': np.int16 },
+        'rootid':             { 'mult': True,   'substr': False, 'minmax': False, 'dtype': np.dtype('O') },
+        'ra':                 { 'mult': False,  'substr': False, 'minmax': True, 'dtype': np.float64 },
+        'dec':                { 'mult': False,  'substr': False, 'minmax': True, 'dtype': np.float64 },
+        'firstdet_mjd':       { 'mult': False,  'substr': False, 'minmax': True, 'dtype': np.float64 },
+        'firstdet_flux':      { 'mult': False,  'substr': False, 'minmax': True, 'dtype': np.float32 },
+        'firstdet_fluxerr':   { 'mult': False,  'substr': False, 'minmax': True, 'dtype': np.float32 },
+        'lastdet_mjd':        { 'mult': False,  'substr': False, 'minmax': True, 'dtype': np.float64 },
+        'lastdet_flux':       { 'mult': False,  'substr': False, 'minmax': True, 'dtype': np.float32 },
+        'lastdet_fluxerr':    { 'mult': False,  'substr': False, 'minmax': True, 'dtype': np.float32 },
+        'maxdet_mjd':         { 'mult': False,  'substr': False, 'minmax': True, 'dtype': np.float64 },
+        'maxdet_flux':        { 'mult': False,  'substr': False, 'minmax': True, 'dtype': np.float32 },
+        'maxdet_fluxerr':     { 'mult': False,  'substr': False, 'minmax': True, 'dtype': np.float32 },
+        'lastforced_mjd':     { 'mult': False,  'substr': False, 'minmax': True, 'dtype': np.float32 },
+        'lastforced_flux':    { 'mult': False,  'substr': False, 'minmax': True, 'dtype': np.int16 },
+        'lastforced_fluxerr': { 'mult': False,  'substr': False, 'minmax': True, 'dtype': np.int16 },
+        'ndets':              { 'mult': False,  'substr': False, 'minmax': True, 'dtype': np.int16 },
+        'ndets24':            { 'mult': False,  'substr': False, 'minmax': True, 'dtype': np.int16 },
+        'ndets23':            { 'mult': False,  'substr': False, 'minmax': True, 'dtype': np.int16 },
+        'ndets22':            { 'mult': False,  'substr': False, 'minmax': True, 'dtype': np.int16 },
+        'ndets21':            { 'mult': False,  'substr': False, 'minmax': True, 'dtype': np.int16 },
+        'nsn10':              { 'mult': False,  'substr': False, 'minmax': True, 'dtype': np.int16 },
+        'nsn7':               { 'mult': False,  'substr': False, 'minmax': True, 'dtype': np.int16 },
+        'nsn5':               { 'mult': False,  'substr': False, 'minmax': True, 'dtype': np.int16 },
+        'nfrc':               { 'mult': False,  'substr': False, 'minmax': True, 'dtype': np.int16 },
     }
 
     radius = None
@@ -1380,14 +1400,14 @@ def object_search( processing_version='default', just_objids=False, searchband=N
         if len( rows ) == 0:
             raise RuntimeError( f"Can't do object search, materialized view {viewname} doesn't exist" )
 
-        q = sql.SQL( "SELECT * FROM {viewname} " ).format( viewname=sql.Identifier(viewname) )
+        q = sql.SQL( "SELECT * FROM {viewname}\n" ).format( viewname=sql.Identifier(viewname) )
         where = "WHERE"
         if len(searchband) > 0:
             if len(searchband) == 1:
-                q += sql.SQL( "WHERE band={band}" ).format( searchband )
+                q += sql.SQL( "WHERE band={band}\n" ).format( searchband )
             else:
-                q += sql.SQL( "WHERE band=ANY(ARRAY[{band}])" ).format( sql.SQL(",").join(searchband) )
-            where = " AND"
+                q += sql.SQL( "WHERE band=ANY(ARRAY[{band}])\n" ).format( sql.SQL(",").join(searchband) )
+            where = "  AND"
 
         qwhere, subdict, remainder, where = db.construct_pgsql_where_clause( searchspec, where=where, **kwargs )
         if len(remainder) > 0:
@@ -1396,13 +1416,38 @@ def object_search( processing_version='default', just_objids=False, searchband=N
         q += qwhere
 
         if radius is not None:
-            q += sql.SQL( "{where} q3c_radial_query(ra, dec, {ra}, {dec}, {radius})"
+            q += sql.SQL( "{where} q3c_radial_query(ra, dec, {ra}, {dec}, {radius})\n"
                          ).format( where=sql.SQL(where), ra=float(ra), dec=float(dec), radius=float(radius)/3600. )
+
+        if orderby is not None:
+            orderby = util.listify( orderby )
+            if len( orderby ) > 0:
+                q += sql.SQL( "ORDER BY" )
+                comma = " "
+                for sortcol in orderby:
+                    desc = sql.SQL( "" )
+                    if sortcol[0] == "-":
+                        desc = sql.SQL( " DESC" )
+                        sortcol = sortcol[1:]
+                    if sortcol not in searchspec.keys():
+                        # ... this is bobby tables protection
+                        raise ValueError( f"Unknown column to sort by: {sortcol}" )
+                    q += sql.SQL( "{comma}{field}{desc}" ).format( comma=sql.SQL(comma),
+                                                                   field=sql.Identifier(sortcol), desc=desc )
+                    comma = ", "
+                q += sql.SQL( "\n" )
+
+        if limit is not None:
+            limit = int( limit )
+            q += sql.SQL( "LIMIT {limit}\n" ).format( limit=sql.SQL(str(limit)) )
+        if offset is not None:
+            offset = int( offset )
+            q += sql.SQL( "OFFSET {offset}\n" ).format( offset=sql.SQL(str(offset)) )
 
         FDBLogger.debug( "Starting object search query..." )
         barf = "".join( random.choices( "abcdefghijklmnopqrstuvwxyz", k=6 ) )
         cursor = dbcon.execute_nofetch( q, subdict, cursorname=f'object_search_{barf}' )
-        cursor.itersize = 1000
+        cursor.itersize = 1000 if limit is None else min( 1000, limit )
         FDBLogger.debug( "...fetching results from postgres..." )
         cols = [ desc[0] for desc in cursor.description ]
 
@@ -1683,7 +1728,8 @@ def create_object_stats_materialized_view( procver ):
                              'lastdet_mjd', 'lastdet_flux', 'lastdet_fluxerr',
                              'maxdet_mjd', 'maxdet_flux', 'maxdet_fluxerr',
                              'lastforced_mjd', 'lastforced_flux', 'lastforced_fluxerr',
-                             'ndets', 'ndets24', 'ndets23', 'ndets22', 'ndets21', 'nsn10', 'nsn7', 'nsn5' }
+                             'ndets', 'ndets24', 'ndets23', 'ndets22', 'ndets21', 'nfrc',
+                             'nsn10', 'nsn7', 'nsn5' }
             if set( r['attname'] for r in rows ) != expectedcols:
                 raise RuntimeError( f"postgres view objstats_{procver} has the wrong set of columns" )
 
@@ -1935,7 +1981,7 @@ def create_object_stats_materialized_view( procver ):
                      ORDER BY o.rootid, f.visit, j.priority DESC
                   ) subq
                   GROUP BY rootid, band
-               ) nf ON r.rootid=n.rootid AND r.band=n.band
+               ) nf ON r.rootid=nf.rootid AND r.band=nf.band
             )
             """
         ) ).format( viewname=sql.Identifier( f'objstats_{procver}' ), pvid=pvid )
