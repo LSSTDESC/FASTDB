@@ -1779,10 +1779,6 @@ def create_object_stats_materialized_view( procver ):
 
         q = sql.SQL( textwrap.dedent(
             """\
-            /*+ IndexScan (s idx_diasource_base_procver_id)
-                IndexScan (f idx_diaforcedsource_base_procver_id)
-                IndexScan (o idx_diaobject_diaobjectid idx_diaobject_procver)
-            */
             CREATE MATERIALIZED VIEW {viewname} AS (
                SELECT r.rootid, r.ra, r.dec, r.band,
                    d0.midpointmjdtai AS firstdet_mjd, d0.psfflux AS firstdet_flux, d0.psffluxerr AS firstdet_fluxerr,
@@ -1804,16 +1800,14 @@ def create_object_stats_materialized_view( procver ):
                    FROM root_diaobject r
                    INNER JOIN diaobject o ON o.rootid=r.id
                    INNER JOIN diasource s ON s.diaobjectid=o.diaobjectid
-                   INNER JOIN base_procver_of_procver j ON s.base_procver_id=j.base_procver_id
-                                                       AND j.procver_id={pvid}
+                   WHERE s.procver_id={pvid}
                  )
                  UNION
                  ( SELECT DISTINCT ON(o.rootid, f.band) o.rootid, r.ra, r.dec, f.band
                    FROM root_diaobject r
                    INNER JOIN diaobject o ON o.rootid=r.id
                    INNER JOIN diaforcedsource f ON f.diaobjectid=o.diaobjectid
-                   INNER JOIN base_procver_of_procver j ON f.base_procver_id=j.base_procver_id
-                                                       AND j.procver_id={pvid}
+                   WHERE f.procver_id={pvid}
                  )
                ) r
                LEFT JOIN (
