@@ -869,7 +869,7 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
             con.commit()
 
 
-@pytest.fixture( scope='session' )
+@pytest.fixture( scope='module' )
 def test_user():
     # Test user with password 'test_password'
     user = AuthUser( id=asUUID('788e391e-ca63-4057-8788-25cc8647e722'),
@@ -902,7 +902,7 @@ tyOci9saPPfI1bNnKD202zsCAwEAAQ==
     user.delete_from_db()
 
 
-@pytest.fixture( scope='session' )
+@pytest.fixture( scope='module' )
 def fastdb_client( test_user ):
     return FASTDBClient( 'http://webap:8080', username="test", password="test_password", verify=False, debug=True,
                          retrysleep=0.1, retries=2 )

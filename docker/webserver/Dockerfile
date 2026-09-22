@@ -106,6 +106,7 @@ RUN source /venv/bin/activate && \
        "fastavro>=1.10.0,<2.0.0" \
        "fink-client>=10.1,<11.0" \
        "healpy>=1.20.0,<2.0.0" \
+       "lsdb>=0.11.0,<1.0.0" \
        "nested-pandas>=0.7.1,<0.8.0" \
        "numpy>=2.5.1,<3.0.0" \
        "pandas>=3.0.5,<4.0.0" \
