@@ -1732,7 +1732,11 @@ def create_object_stats_materialized_view( procver ):
         pvid = db.ProcessingVersion.procver_id( procver, dbcon=dbcon )
 
         q = sql.SQL( textwrap.dedent(
-            """
+            """\
+            /*+ IndexScan (s idx_diasource_base_procver_id)
+                IndexScan (f idx_diaforcedsource_base_procver_id)
+                IndexScan (o idx_diaobject_diaobjectid idx_diaobject_procver)
+            */
             CREATE MATERIALIZED VIEW {viewname} AS (
                SELECT r.rootid, r.ra, r.dec, r.band,
                    d0.midpointmjdtai AS firstdet_mjd, d0.psfflux AS firstdet_flux, d0.psffluxerr AS firstdet_fluxerr,
