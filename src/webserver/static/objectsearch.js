@@ -17,7 +17,7 @@ fastdbap.ObjectSearch = class
     render_page()
     {
         let self = this;
-        let table, tr, td, div, superdiv, subdiv,hbox, vbox, p;
+        let table, tr, td, div, superdiv, subdiv,hbox, vbox, p, span;
 
         rkWebUtil.wipeDiv( this.topdiv );
 
@@ -206,32 +206,53 @@ fastdbap.ObjectSearch = class
 
         vbox = rkWebUtil.elemaker( "div", div, { "classes": [ "vbox", "xmarginright", "searchinner" ] } );
         hbox = rkWebUtil.elemaker( "div", vbox, { "classes": [ "hbox", "bold" ],
-                                                  "text": "Min # detections with:" } );
+                                                  "text": "Detections with:" } );
         hbox = rkWebUtil.elemaker( "div", vbox, { "classes": [ "hbox" ] } );
         table = rkWebUtil.elemaker( "table", hbox, { "classes": [ "borderless", "mmarginright" ] } );
         tr = rkWebUtil.elemaker( "tr", table );
         td = rkWebUtil.elemaker( "td", tr, { "text": "mag ≤ 24", "classes": [ "right" ] } );
+        td = rkWebUtil.elemaker( "td", tr, { "text": "≥" } );
         this.mindetmaglt24_widget = rkWebUtil.elemaker( "input", td, { "attributes": { "size": 4 } } );
+        td = rkWebUtil.elemaker( "td", tr, { "text": "≤" } );
+        this.maxdetmaglt24_widget = rkWebUtil.elemaker( "input", td, { "attributes": { "size": 4 } } );
         tr = rkWebUtil.elemaker( "tr", table );
         td = rkWebUtil.elemaker( "td", tr, { "text": "mag ≤ 23", "classes": [ "right" ] } );
+        td = rkWebUtil.elemaker( "td", tr, { "text": "≥" } );
         this.mindetmaglt23_widget = rkWebUtil.elemaker( "input", td, { "attributes": { "size": 4 } } );
+        td = rkWebUtil.elemaker( "td", tr, { "text": "≤" } );
+        this.maxdetmaglt23_widget = rkWebUtil.elemaker( "input", td, { "attributes": { "size": 4 } } );
         tr = rkWebUtil.elemaker( "tr", table );
         td = rkWebUtil.elemaker( "td", tr, { "text": "mag ≤ 22", "classes": [ "right" ] } );
+        td = rkWebUtil.elemaker( "td", tr, { "text": "≥" } );
         this.mindetmaglt22_widget = rkWebUtil.elemaker( "input", td, { "attributes": { "size": 4 } } );
+        td = rkWebUtil.elemaker( "td", tr, { "text": "≤" } );
+        this.maxdetmaglt22_widget = rkWebUtil.elemaker( "input", td, { "attributes": { "size": 4 } } );
         tr = rkWebUtil.elemaker( "tr", table );
         td = rkWebUtil.elemaker( "td", tr, { "text": "mag ≤ 21", "classes": [ "right" ] } );
+        td = rkWebUtil.elemaker( "td", tr, { "text": "≥" } );
         this.mindetmaglt21_widget = rkWebUtil.elemaker( "input", td, { "attributes": { "size": 4 } } );
+        td = rkWebUtil.elemaker( "td", tr, { "text": "≤" } );
+        this.maxdetmaglt21_widget = rkWebUtil.elemaker( "input", td, { "attributes": { "size": 4 } } );
 
         table = rkWebUtil.elemaker( "table", hbox, { "classes": [ "borderless" ] } );
         tr = rkWebUtil.elemaker( "tr", table );
         td = rkWebUtil.elemaker( "td", tr, { "text": "s/n ≥ 5", "classes": [ "right" ] } );
+        td = rkWebUtil.elemaker( "td", tr, { "text": "≥" } );
         this.mindetsngt5_widget = rkWebUtil.elemaker( "input", td, { "attributes": { "size": 4 } } );
+        td = rkWebUtil.elemaker( "td", tr, { "text": "≤" } );
+        this.maxdetsngt5_widget = rkWebUtil.elemaker( "input", td, { "attributes": { "size": 4 } } );
         tr = rkWebUtil.elemaker( "tr", table );
         td = rkWebUtil.elemaker( "td", tr, { "text": "s/n ≥ 7", "classes": [ "right" ] } );
+        td = rkWebUtil.elemaker( "td", tr, { "text": "≥" } )
         this.mindetsngt7_widget = rkWebUtil.elemaker( "input", td, { "attributes": { "size": 4 } } );
+        td = rkWebUtil.elemaker( "td", tr, { "text": "≤" } )
+        this.maxdetsngt7_widget = rkWebUtil.elemaker( "input", td, { "attributes": { "size": 4 } } );
         tr = rkWebUtil.elemaker( "tr", table );
         td = rkWebUtil.elemaker( "td", tr, { "text": "s/n ≥ 10", "classes": [ "right" ] } );
+        td = rkWebUtil.elemaker( "td", tr, { "text": "≥" } )
         this.mindetsngt10_widget = rkWebUtil.elemaker( "input", td, { "attributes": { "size": 4 } } );
+        td = rkWebUtil.elemaker( "td", tr, { "text": "≤" } )
+        this.maxdetsngt10_widget = rkWebUtil.elemaker( "input", td, { "attributes": { "size": 4 } } );
 
 
         // Window... not currently supported by ltcv.py::object_search
@@ -321,10 +342,14 @@ fastdbap.ObjectSearch = class
         for ( let maglim of [ 21, 22, 23, 24 ] ) {
             let val = this['mindetmaglt' + maglim + "_widget"].value.trim();
             if ( val.length > 0 ) searchcriteria['ndets' + maglim + '_min'] = val;
+            val = this['maxdetmaglt' + maglim + "_widget"].value.trim()
+            if ( val.length > 0 ) searchcriteria['ndets' + maglim + '_max'] = val;
         }
         for ( let snlim of [ 5, 7, 10 ] ) {
             let val = this['mindetsngt' + snlim + '_widget'].value.trim();
             if ( val.length > 0 ) searchcriteria['nsn' + snlim + '_min'] = val;
+            val = this['maxdetsngt' + snlim + '_widget'].value.trim();
+            if ( val.length > 0 ) searchcriteria['nsn' + snlim + '_max'] = val;
         }
 
         // ltcv.object_search doesn't have a search window
