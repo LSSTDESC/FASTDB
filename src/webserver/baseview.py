@@ -123,8 +123,9 @@ class BaseView( flask.views.View ):
                     #   into doubles... thereby destroying 64-bit integers.  The fastdb
                     #   javascript code sets the Fastdb-Stringifyints header to tell us
                     #   to send integers back as strings so they won't get destroyed.
-                    FDBLogger.warning( "Stringifying integers" )
+                    FDBLogger.warning( "Stringifying integers..." )
                     retval = util.stringify_integers( retval )
+                    FDBLogger.warning( "...done stringifying integers." )
                 # Can't just use the default JSON handling, because it
                 #   writes out NaN which is not standard JSON and which
                 #   the javascript JSON parser chokes on.  simplejson
