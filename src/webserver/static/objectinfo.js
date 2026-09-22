@@ -91,10 +91,15 @@ fastdbap.ObjectInfo = class
         this.allbands = this.allbands.concat( unknownbands );
         if ( fastdbap.ObjectInfo.shown_bands_cache == null ) {
             this.shownbands = [...this.allbands];
-            fastdbap.ObjectInfo.shown_bands_cache = [...this.shownbands];
         } else {
-            this.shownbands = [...fastdbap.ObjectInfo.shown_bands_cache];
+            this.shownbands = []
+            for ( let b of fastdbap.ObjectInfo.shown_bands_cache ) {
+                if ( this.allbands.includes( b ) ) {
+                    this.shownbands.push( b );
+                }
+            }
         }
+        fastdbap.ObjectInfo.shown_bands_cache = [...this.shownbands];
 
         this.datasets = {};
         for ( let b of this.allbands ) {
