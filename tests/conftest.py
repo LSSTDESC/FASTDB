@@ -1499,6 +1499,7 @@ def accumulate_expected_stats( set_of_lightcurves, procver_collection ):
                 if band is None:
                     thisexp[ f'{n}_band'] = [ None, None, None ]
             thisexp[ 'ndets' ] = [ 0, None, None ]
+            thisexp[ 'nfrc' ] = [ 0, None, None ]
 
             for mag in [ 21, 22, 23, 24 ]:
                 thisexp[ f'ndets{mag}' ] = [ 0, None, None ]
@@ -1572,6 +1573,7 @@ def accumulate_expected_stats( set_of_lightcurves, procver_collection ):
                         # already have a higher prio bpv
                         continue
                     seenvisits.add( visit )
+                    thisexp['nfrc'][0] += 1
                     if frc.midpointmjdtai > thisexp['lastforced_mjd'][0]:
                         thisexp['lastforced_mjd'][0] = frc.midpointmjdtai
                         if band is None:

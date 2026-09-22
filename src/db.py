@@ -594,13 +594,13 @@ def construct_pgsql_where_clause( searchspec, where="WHERE", **kwargs ):
 
         lege = ">=" if minmax == "min" else "<="
 
-        q += sql.SQL( "{where} {field}-{other}{op}%({kw})s" ).format( where=sql.SQL(where),
-                                                                      field=sql.Identifier(field),
-                                                                      other=sql.Identifier(other),
-                                                                      op=sql.SQL(lege),
-                                                                      kw=sql.SQL(kw) )
+        q += sql.SQL( "{where} {field}-{other}{op}%({kw})s\n" ).format( where=sql.SQL(where),
+                                                                        field=sql.Identifier(field),
+                                                                        other=sql.Identifier(other),
+                                                                        op=sql.SQL(lege),
+                                                                        kw=sql.SQL(kw) )
         subdict[kw] = kwargs[kw]
-        where = " AND"
+        where = "  AND"
         yanks.add( kw )
 
     for yank in yanks:
