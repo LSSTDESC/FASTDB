@@ -383,6 +383,9 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
         lastmag = [ 25.9, 25.1, 25.6, 26. ]
         zeromag = 32.
 
+        # Also random-but-deterministic reliabilities
+        reliability_rng = np.random.default_rng( 137 )
+
         visit = 0
         for i, rootobj in enumerate(rootobjinfo):
             robj = RootDiaObject( id=uuid.uuid4(), ra=rootobjinfo[i]['ra'], dec=rootobjinfo[i]['dec'] )
@@ -502,7 +505,9 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
                                                 base_procver_id=src.base_procver_id,
                                                 detector=0,
                                                 x=1,
-                                                y=1 )
+                                                y=1,
+                                                reliability=reliability_rng.random()
+                                               )
                         srcexobjs.append( srcex )
                         rootdict['srcex']['realtime_diasource'].append( srcex )
                     else:
@@ -584,11 +589,12 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
                                                 base_procver_id=src.base_procver_id,
                                                 detector=0,
                                                 x=1,
-                                                y=1 )
+                                                y=1,
+                                                reliability=reliability_rng.random() )
                         srcexobjs.append( srcex )
                         rootdict['srcex'][f'{bpv}_diasource'].append( srcex )
                     else:
-                        rootdict['srcex'][f'{bpv}_diasource'].append( srcex )
+                        rootdict['srcex'][f'{bpv}_diasource'].append( None )
 
                     if ( bpv != 'bpv2a' ) or ( sourcemjd <= 60025 ):
                         frc = DiaForcedSource( diaforcedsourceid=objtouse.diaobjectid * 1000000 + int(sourcemjd),
@@ -657,7 +663,8 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
                                                     base_procver_id=src.base_procver_id,
                                                     detector=0,
                                                     x=1,
-                                                    y=1 )
+                                                    y=1,
+                                                    reliability=reliability_rng.random() )
                             srcexobjs.append( srcex )
                             rootdict['srcex'][f'{bpv}_diasource'].append( srcex )
                         else:
@@ -1505,6 +1512,8 @@ def accumulate_expected_stats( set_of_lightcurves, procver_collection ):
                 thisexp[ f'ndets{mag}' ] = [ 0, None, None ]
             for sn in [ 5, 7, 10 ]:
                 thisexp[ f'nsn{sn}' ] = [ 0, None, None ]
+            for rcut in [ 50, 60, 70, 80, 90, 95 ]:
+                thisexp[ f'nrelgtp{rcut}' ] = [ 0, None, None ]
 
             # There are multiple base processing versions that have data.  We need to
             #  extract the highest priority for each.  To do this, rewrangle
@@ -1520,13 +1529,19 @@ def accumulate_expected_stats( set_of_lightcurves, procver_collection ):
             frc_bpvkeys = [ p[2] for p in pvrow['diaforcedsource'] ]
             reindexed_srces = { k: { s.visit: s for s in root['src'][k] if cond(s) }
                                 for k in src_bpvkeys if k in root['src'].keys() }
+            reindexed_srcextras = { k: { s.visit: se for s, se in zip(root['src'][k], root['srcex'][k]) if cond(s) }
+                                    for k in src_bpvkeys if k in root['src'].keys() }
             reindexed_frced = { k: { f.visit: f for f in root['frc'][k] if cond(f) }
                                 for k in frc_bpvkeys if k in root['frc'].keys() }
 
             # Extract the expected source values for this root object
             seenvisits = set()
-            for bpv, srces in reindexed_srces.items():
-                for visit, src in srces.items():
+            for bpv in reindexed_srces.keys():
+                srces = reindexed_srces[ bpv ]
+                srcextras = reindexed_srcextras[ bpv ]
+                for visit in srces.keys():
+                    src = srces[ visit ]
+                    srcex = srcextras[ visit ]
                     if visit in seenvisits:
                         # already have a higher prio bpv
                         continue
@@ -1564,6 +1579,9 @@ def accumulate_expected_stats( set_of_lightcurves, procver_collection ):
                     for sn in [ 5, 7, 10 ]:
                         if ( src.psfflux / src.psffluxerr ) >= sn:
                             thisexp[ f'nsn{sn}' ][0] += 1
+                    for rel in [ 50, 60, 70, 80, 90, 95 ]:
+                        if ( srcex is not None ) and ( srcex.reliability > rel / 100. ):
+                            thisexp[ f'nrelgtp{rel}' ][0] += 1
 
             # Extract the expected forced source values for this root object
             seenvisits = set()

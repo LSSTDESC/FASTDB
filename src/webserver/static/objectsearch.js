@@ -206,7 +206,7 @@ fastdbap.ObjectSearch = class
 
         vbox = rkWebUtil.elemaker( "div", div, { "classes": [ "vbox", "xmarginright", "searchinner" ] } );
         hbox = rkWebUtil.elemaker( "div", vbox, { "classes": [ "hbox", "bold" ],
-                                                  "text": "Detections with:" } );
+                                                  "text": "Number of Detections with:" } );
         hbox = rkWebUtil.elemaker( "div", vbox, { "classes": [ "hbox" ] } );
         table = rkWebUtil.elemaker( "table", hbox, { "classes": [ "borderless", "mmarginright" ] } );
         tr = rkWebUtil.elemaker( "tr", table );
@@ -254,7 +254,44 @@ fastdbap.ObjectSearch = class
         td = rkWebUtil.elemaker( "td", tr, { "text": "≤" } )
         this.maxdetsngt10_widget = rkWebUtil.elemaker( "input", td, { "attributes": { "size": 4 } } );
 
+        table = rkWebUtil.elemaker( "table", vbox );
+        tr = rkWebUtil.elemaker( "tr", table );
+        td = rkWebUtil.elemaker( "td", tr, { "text": "reliability > 0.5", "classes": [ "right" ] } );
+        td = rkWebUtil.elemaker( "td", tr, { "text": "≥" } );
+        this.minreliabilitygtp5_widget = rkWebUtil.elemaker( "input", td, { "attributes": { "size": 4 } } );
+        td = rkWebUtil.elemaker( "td", tr, { "text": "≤" } );
+        this.maxreliabilitygtp5_widget = rkWebUtil.elemaker( "input", td, { "attributes": { "size": 4 } } );
+        td = rkWebUtil.elemaker( "td", tr, { "text": "reliability > 0.8", "classes": [ "right" ] } );
+        td = rkWebUtil.elemaker( "td", tr, { "text": "≥" } );
+        this.minreliabilitygtp8_widget = rkWebUtil.elemaker( "input", td, { "attributes": { "size": 4 } } );
+        td = rkWebUtil.elemaker( "td", tr, { "text": "≤" } );
+        this.maxreliabilitygtp8_widget = rkWebUtil.elemaker( "input", td, { "attributes": { "size": 4 } } );
 
+        tr = rkWebUtil.elemaker( "tr", table );
+        td = rkWebUtil.elemaker( "td", tr, { "text": "reliability > 0.6", "classes": [ "right" ] } );
+        td = rkWebUtil.elemaker( "td", tr, { "text": "≥" } );
+        this.minreliabilitygtp6_widget = rkWebUtil.elemaker( "input", td, { "attributes": { "size": 4 } } );
+        td = rkWebUtil.elemaker( "td", tr, { "text": "≤" } );
+        this.maxreliabilitygtp6_widget = rkWebUtil.elemaker( "input", td, { "attributes": { "size": 4 } } );
+        td = rkWebUtil.elemaker( "td", tr, { "text": "reliability > 0.9", "classes": [ "right" ] } );
+        td = rkWebUtil.elemaker( "td", tr, { "text": "≥" } );
+        this.minreliabilitygtp9_widget = rkWebUtil.elemaker( "input", td, { "attributes": { "size": 4 } } );
+        td = rkWebUtil.elemaker( "td", tr, { "text": "≤" } );
+        this.maxreliabilitygtp9_widget = rkWebUtil.elemaker( "input", td, { "attributes": { "size": 4 } } );
+
+        tr = rkWebUtil.elemaker( "tr", table );
+        td = rkWebUtil.elemaker( "td", tr, { "text": "reliability > 0.7", "classes": [ "right" ] } );
+        td = rkWebUtil.elemaker( "td", tr, { "text": "≥" } );
+        this.minreliabilitygtp7_widget = rkWebUtil.elemaker( "input", td, { "attributes": { "size": 4 } } );
+        td = rkWebUtil.elemaker( "td", tr, { "text": "≤" } );
+        this.maxreliabilitygtp7_widget = rkWebUtil.elemaker( "input", td, { "attributes": { "size": 4 } } );
+        td = rkWebUtil.elemaker( "td", tr, { "text": "reliability > 0.95", "classes": [ "right" ] } );
+        td = rkWebUtil.elemaker( "td", tr, { "text": "≥" } );
+        this.minreliabilitygtp95_widget = rkWebUtil.elemaker( "input", td, { "attributes": { "size": 4 } } );
+        td = rkWebUtil.elemaker( "td", tr, { "text": "≤" } );
+        this.maxreliabilitygtp95_widget = rkWebUtil.elemaker( "input", td, { "attributes": { "size": 4 } } );
+
+        
         // Window... not currently supported by ltcv.py::object_search
 
         // vbox = rkWebUtil.elemaker( "div", div, { "classes": [ "vbox", "xmarginright", "searchinner" ] } );

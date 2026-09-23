@@ -18,8 +18,10 @@ def objstats_cols():
              'lastdet_mjd', 'lastdet_flux', 'lastdet_fluxerr',
              'maxdet_mjd', 'maxdet_flux', 'maxdet_fluxerr',
              'lastforced_mjd', 'lastforced_flux', 'lastforced_fluxerr',
-             'ndets', 'ndets24', 'ndets23', 'ndets22', 'ndets21', 'nfrc',
-             'nsn10', 'nsn7', 'nsn5' }
+             'ndets', 'nfrc',
+             'ndets24', 'ndets23', 'ndets22', 'ndets21',
+             'nsn10', 'nsn7', 'nsn5',
+             'nrelgtp50', 'nrelgtp60', 'nrelgtp70', 'nrelgtp80', 'nrelgtp90', 'nrelgtp95' }
 
 
 # THIS TEST MUST COME FIRST, because it depends on both the
