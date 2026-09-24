@@ -197,7 +197,7 @@ and K3s images first, then install with the local values file:
 Create the initial FASTDB user without requiring browser access to MailHog:
 
 ```bash
-./helm/scripts/create-user-arbutus.sh
+./helm/scripts/create-user-singlenode.sh
 ```
 
 The user script creates the server-side account only. It does not create a

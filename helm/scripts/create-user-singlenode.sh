@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Create a FASTDB user without requiring browser access to MailHog.
+# Create a FASTDB user on a single-node deployment without using MailHog.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

@@ -1,115 +1,95 @@
 # How to Create a User and Log In
 
-FASTDB uses challenge-response authentication (RKAuth). Users must exist
-in the `authuser` PostgreSQL table before they can log in. A password is
-set through a reset-password link delivered by email (captured by Mailhog
-in development).
+FASTDB uses challenge-response authentication (RKAuth). A user record must
+contain an RSA public key and an encrypted private key before that user can log
+in. The Helm deployment provides two ways to create those credentials:
 
-## Prerequisites
+1. Use a password-reset email captured by MailHog. This is the intended local
+   Kind workflow.
+2. Generate the credentials locally and insert them directly into PostgreSQL.
+   This is the intended single-node VM workflow.
 
-- Mailhog must be enabled in your deployment so the password-reset email
-  can be captured. In Helm values, set `mailhog.enabled: true`.
-- The `webap` pod must be running.
+## Local Kind: create a user through MailHog
 
-## 1. Create the user in PostgreSQL
+The local workflow exercises the same browser-based password-reset process a
+normal web user would use. MailHog captures the email locally instead of
+sending it to a real address.
 
-Open a psql session on the primary Postgres pod and insert a row into
-`authuser`. Only `username`, `displayname`, and `email` are required;
-the password fields (`pubkey`, `privkey`) are populated later via the
-password-reset flow.
-
-### Kubernetes (Helm deployment)
+First install FASTDB using the local Kind helpers:
 
 ```bash
-# Replace <namespace> with your namespace (e.g. fastdb-local, ccosta-dev)
-kubectl exec -it -n <namespace> deployment/postgres -- \
-  psql -U postgres -d fastdb -c \
-  "INSERT INTO authuser (username, displayname, email)
-   VALUES ('<username>', '<Display Name>', '<user>@mailhog');"
+./helm/scripts/create-local-cluster.sh
+./helm/scripts/install-local-fastdb.sh
 ```
 
-### Docker Compose (local development)
+Then run:
 
 ```bash
-docker compose exec postgres \
-  psql -U postgres -d fastdb -c \
-  "INSERT INTO authuser (username, displayname, email)
-   VALUES ('<username>', '<Display Name>', '<user>@mailhog');"
+./helm/scripts/create-user-local.sh
 ```
 
-Replace `<username>`, `<Display Name>`, and `<user>` with the desired
-values. The email domain does not matter for Mailhog — anything will be
-delivered — but `<user>@mailhog` is the convention used in tests.
+The script:
 
-## 2. Trigger a password-reset email
+1. Creates the fixed development account `test_user` in PostgreSQL.
+2. Requests a password-reset email from FASTDB.
+3. Reads the reset link from MailHog.
+4. Opens FASTDB, the reset page, and MailHog in the browser.
 
-1. Open the FASTDB web application in your browser.
-2. On the login page, click **"Request Password Reset"**.
-3. Enter either the **username** or **email** you used in step 1.
-4. Click **"Email Password Reset Link"**.
+Enter the desired password on the reset page. The browser generates the RSA
+key pair, encrypts the private key with the password, and stores the resulting
+credentials in FASTDB.
 
-The application sends an email containing a password-reset URL to the
-address on file. In development this email is captured by Mailhog.
+The local services are available at:
 
-## 3. Retrieve the reset link from Mailhog
-
-### Option A: Mailhog Web UI
-
-If Mailhog has external access enabled, open the web UI in a browser:
-
-| Deployment | URL |
+| Service | URL |
 |---|---|
-| Docker Compose | `http://localhost:8025` |
-| Kind (NodePort) | `http://localhost:30025` |
+| FASTDB | `http://localhost:8080` |
+| MailHog | `http://localhost:8025` |
 
-Find the email titled **"fastdb password reset"** and copy the reset
-URL from the message body.
+If `test_user` already exists, use the **Request Password Reset** option on the
+FASTDB login page rather than trying to create the account again.
 
-### Option B: kubectl logs
+## Single-node VM: insert a user directly
 
-If the Mailhog web UI is not exposed, the reset URL appears in the
-pod logs:
-
-```bash
-# Kubernetes
-kubectl logs -n <namespace> deployment/mailhog | grep resetpassword
-```
+A VM may not have browser access or a public route to its FASTDB and MailHog
+services. In that case, create a complete user record directly from the VM:
 
 ```bash
-# Docker Compose
-docker compose logs mailhog | grep resetpassword
+./helm/scripts/create-user-singlenode.sh
 ```
 
-The log line contains a URL of the form:
-
-```
-https://<host>/auth/resetpassword?uuid=<uuid>
-```
-
-## 4. Set the password
-
-1. Open the reset URL from step 3 in your browser.
-2. Enter and confirm a new password.
-3. Click the submit button.
-
-The browser generates an RSA key pair, encrypts the private key with
-your password, and stores both keys in the database. You can now log in
-with your username and password.
-
-## Quick-reference: full workflow in one go
+By default, the script operates in the `fastdb-arbutus-dev` namespace. Set a
+different namespace when necessary:
 
 ```bash
-NAMESPACE=fastdb-local   # adjust to your namespace
-
-# Create user
-kubectl exec -it -n "$NAMESPACE" deployment/postgres -- \
-  psql -U postgres -d fastdb -c \
-  "INSERT INTO authuser (username, displayname, email)
-   VALUES ('alice', 'Alice Developer', 'alice@mailhog');"
-
-# (In browser: go to the login page → "Request Password Reset" →
-#  enter "alice" → "Email Password Reset Link")
-
-# Grab the reset URL from mailhog logs
-kubectl logs -n "$NAMESPACE" deployment/mailhog | grep resetpassword
+FASTDB_NAMESPACE=<namespace> ./helm/scripts/create-user-singlenode.sh
 ```
+
+The script prompts for the username, display name, email, and password. It
+then:
+
+1. Uses the FASTDB shell image to generate the RKAuth keys and SQL.
+2. Sends the generated SQL directly to PostgreSQL through `kubectl exec`.
+3. Removes the password and generated SQL from its shell variables.
+
+The password is read without displaying it and is not included in the SQL or
+passed as a command-line argument. This workflow does not require MailHog or a
+browser-accessible password-reset link.
+
+After either workflow completes, log in with the username and password that
+were created. Applications using the FASTDB Python client will also need those
+credentials in their own `.fastdb.ini` configuration or secret-management
+system; neither user-creation script creates client configuration.
+
+## Manual MailHog reset
+
+To reset an existing user's password manually:
+
+1. Open the FASTDB login page.
+2. Select **Request Password Reset**.
+3. Enter the username or email address.
+4. Open MailHog and follow the link in the captured message.
+5. Enter and confirm the new password.
+
+This requires `mailhog.enabled: true` and network access to both FASTDB and the
+MailHog web interface.
