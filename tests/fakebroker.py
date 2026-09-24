@@ -18,8 +18,8 @@ from kafka_consumer import KafkaConsumer
 _rundir = pathlib.Path( __file__ ).parent
 
 # These next two are used as defaults
-_alert_schema_namespace = "lsst.v10_0"
-_brokermessage_schema_namespace = "fastdb.v10_0_0"
+_alert_schema_namespace = "lsst.v11_1"
+_brokermessage_schema_namespace = "fastdb.v11_1_0"
 
 
 # ======================================================================
@@ -110,7 +110,7 @@ class Classifier:
                             p['diaObjectId'] = setvalue
                     if alert['prvDiaForcedSources'] is not None:
                         for p in alert['prvDiaForcedSources']:
-                            # The lsst v10.0 schema doesn't allow for None diaObjectId in diaForcedSource
+                            # The lsst v11.1 schema doesn't allow for None diaObjectId in diaForcedSource
                             # p['diaObjectId'] = setvalue
                             p['diaObjectId'] = 0
                     alert['diaObject'] = None

@@ -4,6 +4,9 @@
  * rkwebutil is Copyright 2023-2024 by Robert Knop
  *
  * rkwebutil is free software under the BSD 3-clause license (see LICENSE)
+ *
+ * DO NOT EDIT resetpassword_start.js ; EDIT resetpassword_start.js.in
+ *    The former is built from the latter by autotools.
  */
 
 import { rkAuth } from "./rkauth.js"

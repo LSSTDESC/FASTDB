@@ -160,7 +160,7 @@ class DBCon:
 
     """
 
-    def __init__( self, con=None, dictcursor=False ):
+    def __init__( self, con=None, dictcursor=False, echoqueries=None, alwaysexplain=None, alwaysanalyze=None ):
         """Instantiate.
 
         If you use this, you should also use close(), and soon.
@@ -183,6 +183,15 @@ class DBCon:
             If False, then execute returns two lists: a list of tuples
             (the rows) and a list of strings (the column names).
 
+          echoqueries, alwaysexplain, alwaysanaylze : bool, default None
+            If any of these are None, they are inhertied from con if con
+            is a DBCon, otherwise they are inherited from the global
+            values of _echoqueries, _alwaysexplain, and _alwaysanalyze
+            defined in this module.  Set the default values for echo and
+            explain to calls to this DBCon's execute method, and for
+            echo, explain, and analyze to calls to this DBCon's
+            execute_nofetch method.
+
         """
 
         global dbuser, dbpasswd, dbhost, dbport, dbname
@@ -194,15 +203,15 @@ class DBCon:
             if isinstance( con, DBCon ):
                 self.con = con.con
                 self.timings = con.timings
-                self.echoqueries = con.echoqueries
-                self.alwaysexplain = con.alwaysexplain
-                self.alwaysanalyze = con.alwaysanalyze
+                self.echoqueries = echoqueries if echoqueries is not None else con.echoqueries
+                self.alwaysexplain = alwaysexplain if alwaysexplain is not None else con.alwaysexplain
+                self.alwaysanalyze = alwaysanalyze if alwaysanalyze is not None else con.alwaysanalyze
             elif isinstance( con, psycopg.Connection ):
                 self.con = con
                 self.timings = DBConTimings()
-                self.echoqueries = _echoqueries
-                self.alwaysexplain = _alwaysexplain
-                self.alwaysanalyze = _alwaysanalyze
+                self.echoqueries = echoqueries if echoqueries is not None else _echoqueries
+                self.alwaysexplain = alwaysexplain if alwaysexplain is not None else _alwaysexplain
+                self.alwaysanalyze = alwaysanalyze if alwaysanalyze is not None else _alwaysanalyze
             else:
                 raise TypeError( f"con must be None, a DBCon, or a psycopg.Connection, not a {type(con)}" )
             self._con_is_mine = False
@@ -210,9 +219,9 @@ class DBCon:
             self.con = psycopg.connect( dbname=dbname, user=dbuser, password=dbpasswd, host=dbhost, port=dbport )
             self._con_is_mine = True
             self.timings = DBConTimings()
-            self.echoqueries = _echoqueries
-            self.alwaysexplain = _alwaysexplain
-            self.alwaysanalyze = _alwaysanalyze
+            self.echoqueries = echoqueries if echoqueries is not None else _echoqueries
+            self.alwaysexplain = alwaysexplain if alwaysexplain is not None else _alwaysexplain
+            self.alwaysanalyze = alwaysanalyze if alwaysanalyze is not None else _alwaysanalyze
 
         self.dictcursor = dictcursor
         self.cursor = None
@@ -321,6 +330,21 @@ class DBCon:
             call close() on it!  Do NOT do this if you are getting back
             self.cursor.
 
+          echo, explain: bool, default None
+            Same as echo and explain passed to DBCon.execute().
+
+          analyze: bool, default None
+            If True, run the query with EXPLAIN ANALYZE, and send the
+            output to debug logging.  If False, don't.  if None, use the
+            value set by the alwaysanalyze parmeter passed to the DBCon
+            constructor.
+
+            If explain is False, and analyze is None, analyze will be
+            set to False even if the default would have otherwise been
+            True.  (The reason for this is so that if you've set explain
+            and analyze as defaults, but you want to pass a query without
+            either, you just have to say "explain=False".)
+
         """
 
         _curcursor = None
@@ -349,8 +373,8 @@ class DBCon:
         # ...should this be >=, not <=?  THINK.
         if FDBLogger.instance().get().level <= logging.DEBUG:
             echo = echo if echo is not None else self.echoqueries
+            analyze = False if explain is False else analyze if analyze is not None else self.alwaysanalyze
             explain = explain if explain is not None else self.alwaysexplain
-            analyze = analyze if analyze is not None else self.alwaysanalyze
             if echo:
                 FDBLogger.debug( f"Sending query\n{q.as_string()}\nwith substitutions: {subdict}" )
 
@@ -411,18 +435,26 @@ class DBCon:
 
           echo : bool, default None
             If True, echo queries before sending them.  If False, don't.
-            If None, use the default (self.echoqueries, initialized from
-            the _echoqueries variable at the top of this module).
+            If None, use value set by the echoqueries parameter passed
+            to the DBCon constructor.
 
           explain : bool, default None
             If True, before running the query run an EXPLAIN on it and
             send the output to debug logging.  If False, don't.  If
-            None, use the default (self.alwaysexplain, initialized from
-            the _alwaysexplain variable at the top of this module).
+            None, use the value set by the alwaysexplain parameter
+            passed to the DBCon constructor.
 
             WARNING: use of this makes you susceptible to SQL injection
             attacks if you aren't completely and totally confident about
             where your SQL came from.  Do not get bobby tablesed!
+
+            (Note that execute has no way of doing EXPLAIN ANALYZE, because
+            to get both the output of that and the output of a query with
+            returns, you'd have to run the query *twice*.  That raises
+            various issues about queries with side effects, etc., so
+            we just dodge the issue but not allowing it.  If you need to
+            EXPLAIN ANALYZE a query, use execute_nofetch.)
+
 
         Returns
         -------
@@ -963,6 +995,10 @@ class DBBase:
                 raise ValueError( "Can only pass column values as named arguments "
                                   "if cols and vals are both None" )
         else:
+            # Note: as of Python 3.7, dictionaries are supposed to maintain
+            #   insertion order.  Relevant here is that there's no need to
+            #   worry that the values() call after the keys() call won't
+            #   return things in the right order.
             cols = kwargs.keys()
             vals = kwargs.values()
 
@@ -1405,7 +1441,7 @@ class DBBase:
 
     @classmethod
     def bulk_insert_or_upsert( cls, data, upsert=False, assume_no_conflict=False,
-                               dbcon=None, nocommit=False ):
+                               dbcon=None, nocommit=False, execute_even_if_nocommit=False ):
         """Try to efficiently insert a bunch of data into the database.
 
         ROB TODO DOCUMENT QUIRKS
@@ -1447,6 +1483,12 @@ class DBBase:
              the temp table before copying it over to the main table, in
              which case it's the caller's responsibility to do that copy
              and commit to the database.
+
+           execute_even_if_nocommit: bool, default False
+             ....but maybe you want to do the copy, and not the commit,
+             for some reason (like a test), so set this to True in
+             that case.  If you're using this, you better really know
+             what you're doing.
 
         Returns
         -------
@@ -1505,14 +1547,15 @@ class DBBase:
 
             q = f"INSERT INTO {cls.__tablename__} SELECT * FROM temp_bulk_upsert {conflict}"
 
-            if nocommit:
-                return q
-            else:
+            if ( not nocommit ) or ( execute_even_if_nocommit ):
                 con.execute_nofetch( q, explain=False, analyze=False )
                 ninserted = con.cursor.rowcount
                 con.execute_nofetch( "DROP TABLE temp_bulk_upsert", explain=False, analyze=False )
-                con.commit()
+                if not nocommit:
+                    con.commit()
                 return ninserted
+            else:
+                return q
 
 
 # ======================================================================
@@ -1791,7 +1834,7 @@ class DiaSourceExtra( DBBase ):
     _pk = [ 'diasourceid', 'base_procver_id' ]
 
     # This is a mapping of the bit in the flags field
-    #   to the boolean in the lsst v10 alert
+    #   to the boolean in the lsst v11.1 alert
     _flags_bits = { 0x00000001: 'centroid_flag',
                     0x00000002: 'apFlux_flag',
                     0x00000004: 'apFlux_flag_apertureTruncated',
@@ -1808,12 +1851,13 @@ class DiaSourceExtra( DBBase ):
                     0x00002000: 'shape_flag_not_contained',
                     0x00004000: 'shape_flag_parent_source',
                     0x00008000: 'isDipole',
-                    0x00010000: 'dipleFitAttempted',
+                    0x00010000: 'dipoleFitAttempted',
                     0x00020000: 'glint_trail',
+                    0x00040000: 'trail_flag'
                    }
 
     # This is a mapping of the bit in the pixelflags field
-    #   to the boolean in the lsst v10 alert
+    #   to the boolean in the lsst v11.1 alert
     _pixelflags_bits = { 0x00000001: 'pixelFlags',
                          0x00000002: 'pixelFlags_bad',
                          0x00000004: 'pixelFlags_cr',
@@ -1833,8 +1877,12 @@ class DiaSourceExtra( DBBase ):
                          0x00010000: 'pixelFlags_injected',
                          0x00020000: 'pixelFlags_injectedCenter',
                          0x00040000: 'pixelFlags_injected_template',
-                         0x00080000: 'pixelFlags_injectedd_templateCenter',
+                         0x00080000: 'pixelFlags_injected_templateCenter',
                         }
+
+
+DiaSourceExtra._flags_bits_inverse = { v: k for k, v in DiaSourceExtra._flags_bits.items() }
+DiaSourceExtra._pixelflags_bits_inverse = { v: k for k, v in DiaSourceExtra._pixelflags_bits.items() }
 
 
 # ======================================================================
@@ -1859,6 +1907,25 @@ class DiaForcedSourceExtra( DBBase ):
     __tablename__ = "diaforcedsource_extra"
     _tablemeta = None
     _pk = [ 'diaforcedsourceid', 'base_procver_id' ]
+
+    # Try to keep these synced iwth DiaSourceExtra (no overlaps), just in
+    #   case a future LSST schema has new bools in one schema that were
+    #   previously already in the other.
+
+    _flags_bits = { 0x00000010: 'psfFlux_flag',
+                    0x00080000: 'invalidPsfFlag',
+                    0x00200000: 'diff_PixelFlags_nodataCenter'
+                   }
+
+    _pixelflags_bits = { k: v for k, v in DiaSourceExtra._pixelflags_bits.items()
+                         if v in ( 'pixelFlags_bad', 'pixelFlags_cr', 'pixelFlags_crCenter', 'pixelFlags_edge',
+                                   'pixelFlags_interpolated', 'pixelFlags_interpolatedCenter', 'pixelFlags_nodata',
+                                   'pixelFlags_saturated', 'pixelFlags_saturatedCenter', 'pixelFlags_suspect',
+                                   'pixelFlags_suspectCenter' ) }
+
+
+DiaForcedSourceExtra._flags_bits_inverse = { v: k for k, v in DiaForcedSourceExtra._flags_bits.items() }
+DiaForcedSourceExtra._pixelflags_bits_inverse = { v: k for k, v in DiaForcedSourceExtra._pixelflags_bits.items() }
 
 
 # ======================================================================

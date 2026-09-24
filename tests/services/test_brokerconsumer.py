@@ -522,7 +522,7 @@ def test_pittgoogle():
         t0 = time.perf_counter()
         pgb = PittGoogleConsumer( groupid=groupid, max_workers=2, batch_size=10, consume_timeout=2,
                                   survey='lsst', topic_name=brokertopic, cache_alerts=True,
-                                  schemafile='/fastdb/share/avsc/lsst.v10_0.alert.avsc',
+                                  schemafile='/fastdb/share/avsc/lsst.v11_1.alert.avsc',
                                   mongodb_collection_base='fastdb_test_pittgoogle' )
         FDBLogger.info( "Running PittGoogleBroker.poll() for 10s...." )
         pgb.poll( restart_time=datetime.timedelta( seconds=10 ), max_restarts=1 )
@@ -552,6 +552,61 @@ def test_pittgoogle():
         with db.MGCon() as mg:
             for col in expectedcollections:
                 mg.collection( col ).drop()
+
+
+@pytest.mark.skipif( not env_as_bool('RUN_PITTGOOGLE_TESTS'), reason='RUN_PITTGOOGLE_TESTS is not set' )
+def test_pittgoogle_scipipe():
+    barf = "".join( random.choices( 'abcdefghijklmnopqrstuvwxyz', k=6 ) )
+    brokertopic = 'loop-json'
+    groupid = f'fastdb-test-{barf}'
+    os.environ['GOOGLE_CLOUD_PROJECT'] = 'fastdb-test-20251103'
+    os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = '/secrets/fastdb-test-20251103-5a0f5182da01.json'
+
+    expectedcollections = [ f'fastdb_test_pittgoogle_scipipe_{s}' for s in
+                            [ 'diaobject', 'diasource', 'diasource_extra',
+                              'diaforcedsource', 'diaforcedsource_extra',
+                              'thumbnails', 'brokerinfo', 'alertcache' ] ]
+
+    try:
+        t0 = time.perf_counter()
+        pgb = PittGoogleConsumer( groupid=groupid, max_workers=2, batch_size=10, consume_timeout=2,
+                                  survey='lsst', topic_name=brokertopic, cache_alerts=True,
+                                  schemafile=None, alert_format='json',
+                                  mongodb_collection_base='fastdb_test_pittgoogle_scipipe' )
+        FDBLogger.info( "Running PittGoogleBroker.poll() for 10s...." )
+        pgb.poll( restart_time=datetime.timedelta( seconds=10 ), max_restarts=1 )
+        dt = time.perf_counter() - t0
+        FDBLogger.info( f"Returned from PittGoogleBroker.poll(), it handled {pgb.tot_n_messages_consumed} messages.  "
+                        f"Creation plus poll time: {dt:.2f} sec." )
+
+        with db.MGCon() as mg:
+            assert all( i in mg.db.list_collection_names() for i in expectedcollections )
+            nalerts = mg.collection( 'fastdb_test_pittgoogle_scipipe_alertcache' ).count_documents({})
+            assert nalerts == pgb.tot_n_messages_consumed
+            assert nalerts > 3
+            col = mg.collection( 'fastdb_test_pittgoogle_scipipe_brokerinfo' )
+            assert col.count_documents({}) == nalerts
+            srcids = set()
+            for doc in col.find( {} ):
+                assert doc['brokername'] == 'Pitt-Google'
+                assert doc['topic'] == f'lsst-{brokertopic}'
+                srcids.add( doc['diasourceid'] )
+
+            col = mg.collection( 'fastdb_test_pittgoogle_scipipe_diasource' )
+            assert srcids.issubset( set( c['diasourceid'] for c in col.find({}) ) )
+
+            # Right now this is here because I haven't run the test yet and
+            #   I want to manually poke into the mongo and see what's there.
+            import pdb; pdb.set_trace()
+            pass
+            # Check other stuff?
+
+    finally:
+        with db.MGCon() as mg:
+            for col in expectedcollections:
+                mg.collection( col ).drop()
+
+
 
 
 @pytest.mark.skipif( not env_as_bool('RUN_PITTGOOGLE_TESTS'), reason='RUN_PITTGOOGLE_TESTS is not set' )

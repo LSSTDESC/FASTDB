@@ -102,6 +102,7 @@ def test_alertsender_find_alerts( snana_fits_ppdb_loaded ):
                 q += f"{'' if first else ', '}({o},{v}) "
                 first = False
             q += ") AS vtab(o,v) ) subq ON s.diaobjectid=subq.o AND s.visit=subq.v"
+            q += " ORDER BY s.midpointmjdtai"
             cursor.execute( q )
             rows = cursor.fetchall()
             sourceids = [ (row[0], row[1]) for row in rows ]
@@ -129,6 +130,7 @@ def test_alertsender_find_alerts( snana_fits_ppdb_loaded ):
                 q += f"{'' if first else ', '}({o},{v}) "
                 first = False
             q += ") AS vtab(o,v) ) subq ON s.diaobjectid=subq.o AND s.visit=subq.v"
+            q += " ORDER BY s.midpointmjdtai"
             cursor.execute( q )
             rows = cursor.fetchall()
             early_srcids = [ ( row[0], row[1] ) for row in rows ]
@@ -165,6 +167,7 @@ def test_alertsender_find_alerts( snana_fits_ppdb_loaded ):
                 q += f"{'' if first else ', '}({o},{v}) "
                 first = False
             q += ") AS vtab(o,v) ) subq ON s.diaobjectid=subq.o AND s.visit=subq.v"
+            q += " ORDER BY s.midpointmjdtai"
             cursor.execute( q )
             rows = cursor.fetchall()
             new_srcids = [ (row[0], row[1]) for row in rows ]

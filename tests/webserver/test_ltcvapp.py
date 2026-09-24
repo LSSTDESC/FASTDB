@@ -1,4 +1,5 @@
 import pytest
+import copy
 import time
 
 from util import FDBLogger
@@ -9,57 +10,155 @@ def test_getmanyltcvs( test_user, fastdb_client, set_of_lightcurves, lightcurve_
     check_ltcv = lightcurve_checker
 
     ltcvlist = [
+        { 'procver': 'pvc_pv1',
+          'request_objs': 'do_not_request_any_objects_for_this_test',
+          'expected_roots': [ 0 ],
+          'expected_diaobjids': [ 100 ],
+          'procver_key': 'pv1'
+         },
+        { 'procver': 'pvc_pv2',
+          'request_objs': 'do_not_request_any_objects_for_this_test',
+          'expected_roots': [ 0, 1, 2, 3 ],
+          'expected_diaobjids': [ 200, 201, 2011, 202, 203 ],
+          'procver_key': 'pv2'
+         },
+        { 'procver': 'pvc_pv3',
+          'request_objs': 'do_not_request_any_objects_for_this_test',
+          'expected_roots': [ 0, 1, 2, 3 ],
+          'expected_diaobjids': [ 200, 201, 2011, 202, 203 ],
+          'procver_key': 'pv3'
+         },
+        { 'procver': 'pvc_pv1',
+          'request_objs': None,
+          'expected_roots': [ 0 ],
+          'expected_diaobjids': [ 100 ],
+          'procver_key': 'pv1' },
+        { 'procver': 'pvc_pv2',
+          'request_objs': None,
+          'expected_roots': [ 0, 1, 2, 3 ],
+          'expected_diaobjids': [ 200, 201, 2011, 202, 203 ],
+          'procver_key': 'pv2'
+         },
+        { 'procver': 'pvc_pv3',
+          'request_objs': None,
+          'expected_roots': [ 0, 1, 2, 3 ],
+          'expected_diaobjids': [ 200, 201, 2011, 202, 203 ],
+          'procver_key': 'pv3'
+         },
         # Object 1 is not in pv1, so ony expect object 0 back
-        ( 'pvc_pv1', [ str(roots[i]['root'].id) for i in [0, 1] ], [0], [100], 'pv1' ),
-        ( 'pvc_pv1', [100, 101], [0], [100], 'pv1' ),
+        { 'procver': 'pvc_pv1',
+          'request_objs': [ str(roots[i]['root'].id) for i in [0, 1] ],
+          'expected_roots': [0],
+          'expected_diaobjids': [100],
+          'procver_key': 'pv1'
+         },
+        { 'procver': 'pvc_pv1',
+          'request_objs': [100, 101],
+          'expected_roots': [0],
+          'expected_diaobjids': [100],
+          'procver_key': 'pv1'
+          },
         # pvc_pv2 should be the default
-        ( None, [ str(roots[i]['root'].id) for i in [0, 2] ], [0, 2], [200, 202], 'pv2' ),
+        { 'procver': None,
+          'request_objs': [ str(roots[i]['root'].id) for i in [0, 2] ],
+          'expected_roots': [0, 2],
+          'expected_diaobjids': [200, 202],
+          'procver_key': 'pv2'
+         },
         # If we ask for diaobjects that are in the wrong processing version, we still get
         #   back the corresponding ones from the sources in this processing version
-        ( 'pvc_pv2', [0, 2], [0, 2], [200, 202], 'pv2' ),
-        ( 'pvc_pv2', [0, 1, 2], [0, 1, 2], [200, 201, 2011, 202], 'pv2' ),
-        ( 'realtime', [0, 1, 2], [0, 1, 2], [0, 1, 2], 'realtime' ),
+        { 'procver': 'pvc_pv2',
+          'request_objs': [0, 2],
+          'expected_roots': [0, 2],
+          'expected_diaobjids': [200, 202],
+          'procver_key': 'pv2'
+         },
+        { 'procver': 'pvc_pv2',
+          'request_objs': [0, 1, 2],
+          'expected_roots': [0, 1, 2],
+          'expected_diaobjids': [200, 201, 2011, 202],
+          'procver_key': 'pv2'
+         },
+        { 'procver': 'realtime',
+          'request_objs': [0, 1, 2],
+          'expected_roots': [0, 1, 2],
+          'expected_diaobjids': [0, 1, 2],
+          'procver_key':'realtime'
+         }
     ]
 
     extras = [
         {},
         { 'mjd_now': 60041. },
+        # This next one is specifically to test the weighted source position case when there
+        #   is only one detection with S/N>3
+        { 'mjd_now': 60045.5, 'use_weighted_source_positions': 1, 'return_object_info': 1 },
+        # ...and this is to explicitly test the case where there are no detections
+        { 'mjd_now': 60039., 'use_weighted_source_positions': 1, 'return_object_info': 1 },
         { 'bands': 'r' },
         { 'bands': ['r'] },
         { 'include_source_positions': 1 },
         { 'return_object_info': 1 },
-        { 'return_object_info': 1, 'include_object_positions': 1 },
+        { 'return_object_info': 1, 'return_diaobject_positions': 1 },
         { 'return_object_info': 1, 'include_base_procver': 1 },
-        { 'return_object_info': 1, 'include_base_procver': 1, 'include_object_positions': 1 },
+        { 'return_object_info': 1, 'include_base_procver': 1, 'return_diaobject_positions': 1 },
         { 'use_weighted_source_positions': 1, 'include_base_procver': 1 },
-        { 'use_weighted_source_positions': 1, 'include_object_positions': 1 },
-        { 'use_weighted_source_positions': 1, 'include_object_positions': 1, 'return_object_info': 1 },
+        { 'use_weighted_source_positions': 1, 'return_diaobject_positions': 1 },
+        { 'use_weighted_source_positions': 1, 'return_diaobject_positions': 1, 'return_object_info': 1 },
         { 'use_weighted_source_positions': 1, 'include_source_positions': 1,
-          'return_object_info': 1, 'include_object_positions': 1 },
-        { 'always_use_weighted_source_positions': 1, 'include_source_positions': 1,
-          'return_object_info': 1, 'include_object_positions': 1 },
-        { 'mjd_now': 60061., 'always_use_weighted_source_positions': 1, 'include_base_procver': 1,
-          'include_source_positions': 1, 'include_object_positions': 1, 'return_object_info': 1 },
+          'return_object_info': 1, 'return_diaobject_positions': 1 },
+        { 'use_weighted_source_positions': 1, 'include_source_positions': 1,
+          'return_object_info': 1, 'return_diaobject_positions': 1 },
+        { 'mjd_now': 60061., 'use_weighted_source_positions': 1, 'include_base_procver': 1,
+          'include_source_positions': 1, 'return_diaobject_positions': 1, 'return_object_info': 1 },
     ]
 
     n = 0
     t0 = time.perf_counter()
     first = True
-    for ltcvreq in ltcvlist:
+    for ltcvreq_raw in ltcvlist:
         for which in [ None, 'patch', 'detections', 'forced' ]:
             for extra in extras:
-                if ltcvreq[0] is None:
+                # Make copies so we can mung them
+                ltcvreq = copy.deepcopy( ltcvreq_raw )
+                kwargs = copy.deepcopy( extra )
+
+                # ...GAH, OK.  Object 2 (the third object) is only
+                #   detected on mjd 60040, and Object 3 (the fourth
+                #   object) is only detected on mjd 60050.  We also
+                #   only have forced photometry from 10 days before
+                #   the first detection.  So, we have to edit the
+                #   expected list of objects when mjd_now is given
+                #   and early enough.
+                if ( 'mjd_now' in extra ):
+                    if ( ( extra['mjd_now'] < 60040 ) or
+                         ( ( which == 'detections' ) and ( extra['mjd_now'] < 60050 ) )
+                        ):
+                        if 3 in ltcvreq['expected_roots']:
+                            ltcvreq['expected_roots'].remove( 3 )
+                        for objid in [ 3, 203, 303 ]:
+                            if objid in ltcvreq['expected_diaobjids']:
+                                ltcvreq['expected_diaobjids'].remove(objid )
+                    if ( ( extra['mjd_now'] < 60030 ) or
+                         ( ( which == 'detections' ) and ( extra['mjd_now'] < 60040 ) )
+                        ):
+                        if 2 in ltcvreq['expected_roots']:
+                            ltcvreq['expected_roots'].remove( 2 )
+                        for objid in [ 2, 202, 302 ]:
+                            if objid in ltcvreq['expected_diaobjids']:
+                                ltcvreq['expected_diaobjids'].remove(objid )
+
+                if ltcvreq['procver'] is None:
                     url = '/ltcv/getmanyltcvs'
                 else:
-                    url = f'/ltcv/getmanyltcvs/{ltcvreq[0]}'
+                    url = f'/ltcv/getmanyltcvs/{ltcvreq["procver"]}'
 
                 if first:
                     first = False
-                    # Just check the missing objids call once
-                    for foo in [ extra, [], 'kitten' ]:
+                    # Just check the bad JSON once
+                    for foo in [ [], 'kitten' ]:
                         with pytest.raises( RuntimeError, match=( "^Error response from server, status 422: "
-                                                                  "Must pass POST data as a json dict with at least "
-                                                                  "objids as a key" ) ):
+                                                                  "POST data must be a dict passed as json" ) ):
                             n += 1
                             fastdb_client.post( url, json=foo )
 
@@ -67,19 +166,29 @@ def test_getmanyltcvs( test_user, fastdb_client, set_of_lightcurves, lightcurve_
                     with pytest.raises( RuntimeError, match=( "^Error response from server, status 422: "
                                                               "Unknown data parameters: {'foo'}" ) ):
                         n += 1
-                        fastdb_client.post( url, json={'objids': ltcvreq[1], 'foo': 'bar'} )
+                        fastdb_client.post( url, json={'objids': [0,1,2,3], 'foo': 'bar'} )
 
-                kwargs = extra.copy()
-                kwargs['objids'] = ltcvreq[1]
+                if ltcvreq['request_objs'] != 'do_not_request_any_objects_for_this_test':
+                    kwargs['objids'] = ltcvreq['request_objs']
                 if which is not None:
                     kwargs['which'] = which
-                n += 1
-                res = fastdb_client.post( url, json=kwargs )
-                if which is None:
-                    kwargs['which'] = 'patch'
-                del kwargs['objids']
-                check_ltcv( ltcvreq[4], ltcvreq[2], ltcvreq[3], res, **kwargs )
-                pass
+                for i in range(2):
+                    if i == 0:
+                        res = fastdb_client.post( url, json=kwargs )
+                    elif len(kwargs) == 0:
+                        import pdb; pdb.set_trace()
+                        res = fastdb_client.post( url )
+                    else:
+                        continue
+
+                    n += 1
+                    if which is None:
+                        kwargs['which'] = 'patch'
+                    if 'objids' in kwargs:
+                        del kwargs['objids']
+                    kwargs['rootid_is_uuid'] = False
+                    check_ltcv( ltcvreq['procver_key'], ltcvreq['expected_roots'], ltcvreq['expected_diaobjids'],
+                                res, **kwargs )
 
 
     FDBLogger.info( f"{n} requests in {time.perf_counter()-t0:.2f} sec." )
@@ -113,18 +222,18 @@ def test_getltcv( test_user, fastdb_client, set_of_lightcurves, lightcurve_check
         { 'bands': ['r'] },
         { 'include_source_positions': 1 },
         { 'return_object_info': 1 },
-        { 'return_object_info': 1, 'include_object_positions': 1 },
+        { 'return_object_info': 1, 'return_diaobject_positions': 1 },
         { 'return_object_info': 1, 'include_base_procver': 1 },
-        { 'return_object_info': 1, 'include_base_procver': 1, 'include_object_positions': 1 },
+        { 'return_object_info': 1, 'include_base_procver': 1, 'return_diaobject_positions': 1 },
         { 'use_weighted_source_positions': 1, 'include_base_procver': 1 },
-        { 'use_weighted_source_positions': 1, 'include_object_positions': 1 },
-        { 'use_weighted_source_positions': 1, 'include_object_positions': 1, 'return_object_info': 1 },
+        { 'use_weighted_source_positions': 1, 'return_diaobject_positions': 1 },
+        { 'use_weighted_source_positions': 1, 'return_diaobject_positions': 1, 'return_object_info': 1 },
         { 'use_weighted_source_positions': 1, 'include_source_positions': 1,
-          'return_object_info': 1, 'include_object_positions': 1 },
-        { 'always_use_weighted_source_positions': 1, 'include_source_positions': 1,
-          'return_object_info': 1, 'include_object_positions': 1 },
-        { 'mjd_now': 60061., 'always_use_weighted_source_positions': 1, 'include_base_procver': 1,
-          'include_source_positions': 1, 'include_object_positions': 1, 'return_object_info': 1 },
+          'return_object_info': 1, 'return_diaobject_positions': 1 },
+        { 'use_weighted_source_positions': 1, 'include_source_positions': 1,
+          'return_object_info': 1, 'return_diaobject_positions': 1 },
+        { 'mjd_now': 60061., 'use_weighted_source_positions': 1, 'include_base_procver': 1,
+          'include_source_positions': 1, 'return_diaobject_positions': 1, 'return_object_info': 1 },
     ]
 
 
@@ -187,6 +296,7 @@ def test_getltcv( test_user, fastdb_client, set_of_lightcurves, lightcurve_check
                         # In this case, every object should have a weighted source position
                         assert all( pbv is None for pbv in res['objinfo']['pos_base_procver'] )
 
+                    extra['rootid_is_uuid'] = False
                     check_ltcv( pv, ltcvreq[2], ltcvreq[3], res, single=True, **extra )
 
     FDBLogger.info( f"Sent {n} requests in {time.perf_counter()-t0:.2f} sec." )
@@ -256,15 +366,15 @@ def test_gethottransients( test_user, fastdb_client, set_of_lightcurves, lightcu
 
     extras = [
         {},
-        { 'include_object_positions': 1 },
-        { 'include_object_positions': 0 },
+        { 'return_diaobject_positions': 1 },
+        { 'return_diaobject_positions': 0 },
         { 'include_source_positions': 1 },
-        { 'include_object_positions': 1, 'include_source_positions': 1 },
+        { 'return_diaobject_positions': 1, 'include_source_positions': 1 },
         { 'include_base_procver': 1 },
-        { 'include_base_procver': 1, 'include_object_positions': 1 },
-        { 'use_weighted_source_positions': 1, 'include_object_positions': 1, 'include_base_procver': 1 },
-        { 'always_use_weighted_source_positions': 1, 'include_object_positions': 1, 'include_base_procver': 1 },
-        { 'always_use_weighted_source_positions': 1, 'include_object_positions': 1 },
+        { 'include_base_procver': 1, 'return_diaobject_positions': 1 },
+        { 'use_weighted_source_positions': 1, 'return_diaobject_positions': 1, 'include_base_procver': 1 },
+        { 'use_weighted_source_positions': 1, 'return_diaobject_positions': 1, 'include_base_procver': 1 },
+        { 'use_weighted_source_positions': 1, 'return_diaobject_positions': 1 },
     ]
 
 
@@ -288,9 +398,10 @@ def test_gethottransients( test_user, fastdb_client, set_of_lightcurves, lightcu
                     if yank in kwargs:
                         del kwargs[yank]
                 kwargs['which'] = 'patch' if source_patch in ( True, None ) else 'forced'
-                if 'include_object_positions' not in kwargs:
+                if 'return_diaobject_positions' not in kwargs:
                     # get_hot_ltcvs has a different default from many_object_ltcvs
-                    kwargs['include_object_positions'] = True
+                    kwargs['return_diaobject_positions'] = 1
+                kwargs['rootid_is_uuid'] = False
                 check_ltcv( lc['testprocver'], lc['exproot'], lc['expobj'], res,
                             return_object_info=True, **kwargs )
 

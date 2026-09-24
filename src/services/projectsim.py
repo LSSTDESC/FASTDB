@@ -16,6 +16,7 @@ import util
 
 import numpy as np
 from astropy.io import fits
+from astropy.time import Time
 
 _logger = logging.getLogger( __file__ )
 _logout = logging.StreamHandler( sys.stderr )
@@ -91,84 +92,70 @@ class AlertReconstructor:
         self.tottime = 0
 
 
-    def object_data_to_dicts( self, rows, columns ):
-        allfields = [ f['name'] for f in self.diaobject_schema['fields'] ]
-        lcfields = { 'diaObjectId', 'ra', 'raErr', 'dec', 'decErr', 'ra_dec_Cov', 'validityStartMjdTai' }
-        timefields = {}
-
+    def _data_to_dicts( self, rows, columns, allfields, required, notnull, timefields=set(), flagfieldses={} ):
         dicts = []
         for row in rows:
             curdict = {}
             for col in allfields:
-                if col in lcfields:
-                    curdict[col] = row[ columns[ col.lower()] ]
-                elif col in timefields:
-                    val = row[ columns[ timefields[col] ] ]
-                    curdict[col] = None if val is None else int( val.timestamp() * 1000 + 0.5 )
-                else:
-                    curdict[col] = None
+                if any( col in f.values() for f in flagfieldses.values() ):
+                    continue
+                dbcol = timefields[col] if col in timefields else col.lower()
+                val = ( None if dbcol not in columns
+                        else row[columns[dbcol]].timestamp() * 1000 + 0.5 if col in timefields
+                        else row[columns[dbcol]]
+                       )
+                if ( val is None ) and ( col in required ):
+                    raise ValueError( f"Missing required column {col}" )
+                if ( val is None ) and ( col in notnull ):
+                    val = notnull[ col ]
+                curdict[ col ] = val
+
+            for dbcol, flagfields in flagfieldses.items():
+                for mask, field in flagfields.items():
+                    curdict[field] = bool( row[columns[dbcol]] & mask )
+
             dicts.append( curdict )
 
         return dicts
 
+
+    def object_data_to_dicts( self, rows, columns ):
+        allfields = [ f['name'] for f in self.diaobject_schema['fields'] ]
+        required = { 'diaObjectId', 'ra', 'dec', 'validityStartMjdTai' }
+        notnull = { 'u_psfFluxNdata': 0,
+                    'g_psfFluxNdata': 0,
+                    'r_psfFluxNdata': 0,
+                    'i_psfFluxNdata': 0,
+                    'z_psfFluxNdata': 0,
+                    'y_psfFluxNdata': 0,
+                    'nDiaSources': 0 }
+
+        return self._data_to_dicts( rows, columns, allfields, required, notnull )
 
     def source_data_to_dicts( self, rows, columns ):
         allfields = [ f['name'] for f in self.diasource_schema['fields'] ]
-        lcfields = { 'diaSourceId', 'visit', 'detector', 'diaObjectId', 'ssObjectId',
-                     'parentDiaSourceId', 'midpointMjdTai', 'ra', 'raErr', 'dec', 'decErr', 'ra_dec_Cov',
-                     'x', 'xErr', 'y', 'yErr', 'apFlux', 'apFluxErr', 'snr',
-                     'psfFlux', 'psfFluxErr', 'psfFluxLnL', 'psfChi2', 'psfNdata',
-                     'scienceFlux', 'scienceFluxErr', 'templateFlux', 'templateFluxErr',
-                     'ixx', 'iyy', 'ixy', 'ixxPSF', 'iyyPSF', 'ixyPSF',
-                     'extendedness', 'realibility', 'band',
-                     'timeProcessedMjdTai', 'timeWithddrawnMjdTai', 'bboxSize' }
-        timefields = {}
+        required = { 'diaSourceId', 'visit', 'detector', 'ra', 'dec' }
+        notnull = { 'ra': -999.,
+                    'dec': -999.,
+                    'x': -999.,
+                    'y': -999.,
+                    'psfNdata': 0,
+                    'trailNdata': 0,
+                    'dipoleNdata': 0,
+                    'timeProcessedMjdTai': float( Time(datetime.datetime.now(tz=datetime.UTC)).mjd ),
+                    'bboxSize': 0
+                    }
 
-        dicts = []
-        for row in rows:
-            curdict = {}
-            for col in allfields:
-                if col in lcfields:
-                    curdict[col] = row[ columns[col.lower()] ]
-                elif col in timefields:
-                    val = row[ columns[ timefields[col] ] ]
-                    curdict[col] = None if val is None else int( val.timestamp() * 1000 + 0.5 )
-                else:
-                    curdict[col] = None
-
-            # diasource has some pixel flags that are converted to a bitmask in the database
-            for mask, field in db.DiaSourceExtra._flags_bits.items():
-                curdict[field] = bool( row[columns['flags']] & mask )
-
-            for mask, field in db.DiaSourceExtra._pixelflags_bits.items():
-                curdict[field] = bool( row[columns['pixelflags']] & mask )
-
-            dicts.append( curdict )
-
-        return dicts
-
+        return self._data_to_dicts( rows, columns, allfields, required, notnull,
+                                    flagfieldses = { 'flags': db.DiaSourceExtra._flags_bits,
+                                                     'pixelflags': db.DiaSourceExtra._pixelflags_bits } )
 
     def forced_source_data_to_dicts( self, rows, columns ):
         allfields = [ f['name'] for f in self.diaforcedsource_schema['fields'] ]
-        lcfields = [ 'diaForcedSourceId', 'diaObjectId', 'ra', 'dec', 'visit', 'detector',
-                     'psfFlux', 'psfFluxErr', 'midpointMjdTai', 'scienceFlux', 'scienceFluxErr',
-                     'band', 'timeProcessedMjdTai', 'timeWithdrawnMjdTai' ]
-        timefields = {}
+        required = { 'diaForcedSourceId', 'diaObjefctId', 'ra', 'dec', 'visit', 'detector', 'midpointMjdTai' }
+        notnull = { 'timeProcessedMjdTai': float( Time(datetime.datetime.now(tz=datetime.UTC)).mjd ) }
 
-        dicts = []
-        for row in rows:
-            curdict = {}
-            for col in allfields:
-                if col in lcfields:
-                    curdict[col] = row[ columns[col.lower()] ]
-                elif col in timefields:
-                    val = row[ columns[ timefields[col] ] ]
-                    curdict[col] = None if val is None else int( val.timestamp() * 1000 + 0.5 )
-                else:
-                    curdict[col] = None
-            dicts.append( curdict )
-
-        return dicts
+        return self._data_to_dicts( rows, columns, allfields, required, notnull )
 
 
     def previous_sources( self, diasource, con=None ):
