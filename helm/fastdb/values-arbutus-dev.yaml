@@ -77,8 +77,8 @@ ingestion:
     schemaFile: /fastdb/share/avsc/lsst.v10_0.alert.avsc
     collectionBase: lass
     brokerName: lass
-    # install-arbutus-fastdb.sh discovers the K3s node IP and supplies it to
-    # Helm, so this values file is reusable on different Arbutus VMs.
+    # install-singlenode-fastdb.sh discovers the Kubernetes node IP and
+    # supplies it to Helm, so this file is reusable on different Arbutus VMs.
     dockerHostIp: ""
     # LASS advertises localhost:19092. This proxy forwards that pod-local
     # address to the Docker-published Kafka port on the VM.

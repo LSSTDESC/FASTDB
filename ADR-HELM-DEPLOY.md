@@ -149,7 +149,7 @@ Mount the host filesystem directly into pods.
 
 ### Mitigations
 
-1. **Script is the documented deploy path** — `HELM_HOWTO.md` references the script as the primary method
+1. **Script is the documented deploy path** — `helm/README.md` references the script as the primary method
 2. **createdb retries automatically** — `restartPolicy: OnFailure` handles the timing gap
 3. **webap/queryrunner restart after copy** — ensures they always start with fresh code
 4. **`--skip-build` and `--skip-helm` flags** — allow partial runs for specific scenarios

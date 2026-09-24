@@ -2,6 +2,64 @@
 
 This guide explains how to deploy FASTDB to Kubernetes clusters using Helm.
 
+## Quickstart
+
+### Option 1: Install scripts
+
+Some site-specific installation scripts are available in [`helm/scripts/`](./scripts/). For example you can install fastdb on a single node kubernetes cluster with:
+
+```bash
+./helm/scripts/install-singlenode-fastdb.sh <values-file>
+```
+
+where the values file describes the specifics of the installation e.g. broker info, storage allocated to the data base, version numbers of images. Example values files are in [`helm/fastdb/`](./fastdb/), including [values-arbutus-dev.yaml](./fastdb/values-arbutus-dev.yaml) which contains the config for a small developement install simulated alerts from [LASS](https://github.com/CanDIAPL/lass).
+
+### Option 2: Direct install with helm scripts
+
+A FASTDB Helm deployment has two main stages: generate the runnable FASTDB
+files with the `makeinstall` container, then deploy the Kubernetes resources
+with Helm.
+
+#### 1. Generate `install/` with the `makeinstall` container
+
+The `makeinstall` Docker Compose service uses the FASTDB shell image.
+
+Obtain the shell image by either pulling a prebuilt image:
+
+```bash
+docker pull "<path-to-shell-image-on-registry>"
+```
+
+or building it from the current checkout:
+
+```bash
+docker compose build shell
+```
+
+Then run the container that configures FASTDB and writes the runnable files to
+`install/`:
+
+```bash
+USERID="$(id -u)" GROUPID="$(id -g)" \
+  docker compose run --rm makeinstall
+```
+
+#### 2. Install FASTDB with Helm
+
+Choose an environment-specific values file and run Helm:
+
+```bash
+helm upgrade --install fastdb ./helm/fastdb \
+  --namespace <namespace> \
+  --create-namespace \
+  --values ./helm/fastdb/<values-file>.yaml
+```
+
+Example values files are in [`helm/fastdb/`](./fastdb/), including local Kind,
+Arbutus, and SLAC configurations. Some environments also require a secrets
+values file, registry credentials, storage settings, or host-path overrides;
+the environment-specific sections below describe those additions.
+
 ## Conceptual Overview
 
 ### What is Helm?
@@ -46,15 +104,13 @@ helm/
 └─────────────┘     └─────────────┘     └──────────────────┘
 ```
 
-## Quick Start
+## Details
 
 ### Prerequisites
 
 - Kubernetes cluster (Kind, SLAC S3DF, NERSC SPIN, etc.)
 - `helm` CLI installed
 - `kubectl` configured to access your cluster
-- Docker Desktop for the recommended local Kind workflow. The general
-  `helm-deploy.sh` script can also use Podman for other deployments.
 - Docker images built and accessible
 - For private registries (GHCR, NERSC, etc.): a GitHub PAT with `read:packages` scope (see [Registry Credentials](#registry-credentials))
 
@@ -140,7 +196,7 @@ and K3s images first, then install with the local values file:
 ```bash
 ./helm/scripts/build-local-images.sh \
   fastdb.local test20260428
-./helm/scripts/install-arbutus-fastdb.sh \
+./helm/scripts/install-singlenode-fastdb.sh \
   ./helm/fastdb/values-arbutus-dev.yaml
 ```
 
