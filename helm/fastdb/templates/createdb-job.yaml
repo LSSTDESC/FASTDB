@@ -1,0 +1,55 @@
+{{- if .Values.createdb.enabled }}
+{{- $namespace := include "fastdb.namespace" . }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: createdb
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "fastdb.labels" . | nindent 4 }}
+spec:
+  ttlSecondsAfterFinished: {{ .Values.createdb.ttlSecondsAfterFinished }}
+  template:
+    spec:
+      {{- include "fastdb.imagePullSecrets" . | nindent 6 }}
+      restartPolicy: OnFailure
+      initContainers:
+      - name: wait-for-postgres
+        image: {{ include "fastdb.externalImage" .Values.utilityImages.busybox }}
+        imagePullPolicy: {{ .Values.utilityImages.busybox.pullPolicy }}
+        command: ["sh", "-c", "until nc -z postgres 5432; do echo 'Waiting for PostgreSQL...'; sleep 2; done"]
+      containers:
+      - name: createdb
+        image: {{ include "fastdb.image" (dict "image" .Values.createdb.image "global" .Values.global) }}
+        imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+        command: ["/bin/sh", "-c"]
+        args:
+        - 'exec python apply_migrations.py -p "$(cat /secrets/pgpasswd)"'
+        workingDir: /fastdb/db
+        volumeMounts:
+        - name: secrets
+          mountPath: /secrets
+          readOnly: true
+        {{- if .Values.volumes.codeHostPath }}
+        - name: fastdb-db
+          mountPath: /fastdb/db
+        {{- else if .Values.volumes.codePvc.enabled }}
+        - name: code
+          mountPath: /fastdb
+        {{- end }}
+      volumes:
+      - name: secrets
+        secret:
+          secretName: secrets
+      {{- if .Values.volumes.codeHostPath }}
+      - name: fastdb-db
+        hostPath:
+          path: {{ .Values.volumes.hostPaths.db | quote }}
+          type: Directory
+      {{- else if .Values.volumes.codePvc.enabled }}
+      - name: code
+        persistentVolumeClaim:
+          claimName: {{ $namespace }}-code-pvc
+      {{- end }}
+{{- end }}

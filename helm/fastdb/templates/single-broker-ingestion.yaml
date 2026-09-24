@@ -1,0 +1,227 @@
+{{- if .Values.ingestion.enabled }}
+{{- $namespace := include "fastdb.namespace" . }}
+{{- $image := include "fastdb.image" (dict "image" .Values.ingestion.image "global" .Values.global) }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ingestion-config
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "fastdb.labels" . | nindent 4 }}
+data:
+  brokerconsumer.yaml: |
+    brokers:
+      {{ required "ingestion.brokerConsumer.name is required when ingestion is enabled" .Values.ingestion.brokerConsumer.name | quote }}:
+        class: BrokerConsumer
+        server: {{ required "ingestion.brokerConsumer.server is required when ingestion is enabled" .Values.ingestion.brokerConsumer.server | quote }}
+        groupid: {{ required "ingestion.brokerConsumer.groupId is required when ingestion is enabled" .Values.ingestion.brokerConsumer.groupId | quote }}
+        topics: [{{ required "ingestion.brokerConsumer.topic is required when ingestion is enabled" .Values.ingestion.brokerConsumer.topic | quote }}]
+        schemaless: true
+        schemafile: {{ .Values.ingestion.brokerConsumer.schemaFile | quote }}
+        brokername_for_alerts: {{ .Values.ingestion.brokerConsumer.brokerName | quote }}
+        mongodb_collection_base: {{ .Values.ingestion.brokerConsumer.collectionBase | quote }}
+        loggername: {{ .Values.ingestion.brokerConsumer.loggerName | quote }}
+        loggername_prefix: ""
+        consume_timeout: 1
+        nomsg_sleeptime: 5
+        extraconfig:
+          auto.offset.reset: earliest
+        pollkwargs:
+          restart_time_min: {{ .Values.ingestion.brokerConsumer.poll.restartTimeMinutes }}
+          notopic_sleeptime: {{ .Values.ingestion.brokerConsumer.poll.noTopicSleepSeconds }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: brokerconsumer
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "fastdb.labels" . | nindent 4 }}
+    app: brokerconsumer
+spec:
+  replicas: {{ .Values.ingestion.brokerConsumer.replicas }}
+  selector:
+    matchLabels:
+      app: brokerconsumer
+  template:
+    metadata:
+      labels:
+        app: brokerconsumer
+    spec:
+      {{- include "fastdb.imagePullSecrets" . | nindent 6 }}
+      {{- if .Values.ingestion.brokerConsumer.dockerHostIp }}
+      hostAliases:
+      - ip: {{ .Values.ingestion.brokerConsumer.dockerHostIp | quote }}
+        hostnames:
+        - host.docker.internal
+      {{- end }}
+      containers:
+      {{- if .Values.ingestion.brokerConsumer.localhostProxy }}
+      - name: kafka-localhost-proxy
+        image: {{ $image }}
+        imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+        command:
+        - /bin/bash
+        - -ec
+        - |
+          socat TCP-LISTEN:19092,bind=127.0.0.1,fork,reuseaddr TCP:host.docker.internal:19092 &
+          exec socat TCP6-LISTEN:19092,bind=[::1],fork,reuseaddr TCP4:host.docker.internal:19092
+      {{- end }}
+      - name: brokerconsumer
+        image: {{ $image }}
+        imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+        command: ["/venv/bin/python", "/fastdb/services/brokerconsumer.py", "/config/brokerconsumer.yaml"]
+        envFrom:
+        - configMapRef:
+            name: mongodb-config
+        volumeMounts:
+        - name: config
+          mountPath: /config
+          readOnly: true
+        - name: secrets
+          mountPath: /secrets
+          readOnly: true
+        - name: logs
+          mountPath: /logs
+        {{- if .Values.volumes.codeHostPath }}
+        - name: fastdb-install
+          mountPath: /fastdb
+        {{- else if .Values.volumes.codePvc.enabled }}
+        - name: code
+          mountPath: /fastdb
+        {{- end }}
+      volumes:
+      - name: config
+        configMap:
+          name: ingestion-config
+      - name: secrets
+        secret:
+          secretName: secrets
+      - name: logs
+        persistentVolumeClaim:
+          claimName: {{ $namespace }}-logs-pvc
+      {{- if .Values.volumes.codeHostPath }}
+      - name: fastdb-install
+        hostPath:
+          path: {{ .Values.volumes.hostPaths.install | quote }}
+          type: Directory
+      {{- else if .Values.volumes.codePvc.enabled }}
+      - name: code
+        persistentVolumeClaim:
+          claimName: {{ $namespace }}-code-pvc
+      {{- end }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ingestion-processing-version
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "fastdb.labels" . | nindent 4 }}
+spec:
+  backoffLimit: 12
+  template:
+    spec:
+      {{- include "fastdb.imagePullSecrets" . | nindent 6 }}
+      restartPolicy: OnFailure
+      containers:
+      - name: setup-processing-version
+        image: {{ $image }}
+        imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+        command:
+        - /bin/bash
+        - -ec
+        - |
+          until /venv/bin/python -c 'import db; db.get_dbcon().close()'; do sleep 5; done
+          /venv/bin/python -c 'from admin.fastdb_loader import FastDBLoader; loader = FastDBLoader({{ .Values.ingestion.processingVersion.name | quote }}); loader.make_procver()'
+        volumeMounts:
+        - name: secrets
+          mountPath: /secrets
+          readOnly: true
+        {{- if .Values.volumes.codeHostPath }}
+        - name: fastdb-install
+          mountPath: /fastdb
+        {{- else if .Values.volumes.codePvc.enabled }}
+        - name: code
+          mountPath: /fastdb
+        {{- end }}
+      volumes:
+      - name: secrets
+        secret:
+          secretName: secrets
+      {{- if .Values.volumes.codeHostPath }}
+      - name: fastdb-install
+        hostPath:
+          path: {{ .Values.volumes.hostPaths.install | quote }}
+          type: Directory
+      {{- else if .Values.volumes.codePvc.enabled }}
+      - name: code
+        persistentVolumeClaim:
+          claimName: {{ $namespace }}-code-pvc
+      {{- end }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: source-importer
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "fastdb.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.ingestion.sourceImporter.schedule | quote }}
+  startingDeadlineSeconds: {{ .Values.ingestion.sourceImporter.startingDeadlineSeconds }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: {{ .Values.ingestion.sourceImporter.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.ingestion.sourceImporter.failedJobsHistoryLimit }}
+  jobTemplate:
+    spec:
+      backoffLimit: 3
+      template:
+        spec:
+          {{- include "fastdb.imagePullSecrets" . | nindent 10 }}
+          restartPolicy: OnFailure
+          containers:
+          - name: source-importer
+            image: {{ $image }}
+            imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+            command:
+            - /bin/bash
+            - -ec
+            - |
+              /venv/bin/python /fastdb/services/source_importer.py \
+                -c {{ .Values.ingestion.brokerConsumer.collectionBase | quote }} \
+                -o {{ .Values.ingestion.processingVersion.name | quote }} \
+                -p {{ .Values.ingestion.processingVersion.name | quote }} \
+                -s {{ .Values.ingestion.processingVersion.name | quote }} \
+                -f {{ .Values.ingestion.processingVersion.name | quote }}
+              /venv/bin/python -c 'import ltcv; ltcv.create_object_stats_materialized_view({{ .Values.ingestion.processingVersion.name | quote }})'
+            envFrom:
+            - configMapRef:
+                name: mongodb-config
+            volumeMounts:
+            - name: secrets
+              mountPath: /secrets
+              readOnly: true
+            {{- if .Values.volumes.codeHostPath }}
+            - name: fastdb-install
+              mountPath: /fastdb
+            {{- else if .Values.volumes.codePvc.enabled }}
+            - name: code
+              mountPath: /fastdb
+            {{- end }}
+          volumes:
+          - name: secrets
+            secret:
+              secretName: secrets
+          {{- if .Values.volumes.codeHostPath }}
+          - name: fastdb-install
+            hostPath:
+              path: {{ .Values.volumes.hostPaths.install | quote }}
+              type: Directory
+          {{- else if .Values.volumes.codePvc.enabled }}
+          - name: code
+            persistentVolumeClaim:
+              claimName: {{ $namespace }}-code-pvc
+          {{- end }}
+{{- end }}

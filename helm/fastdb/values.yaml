@@ -1,0 +1,299 @@
+# FASTDB Helm Chart Values
+# Base configuration - override with environment-specific values files
+
+# Global settings
+global:
+  namespace: fastdb
+  environment: dev
+
+  # Image configuration
+  imageRegistry: ""  # e.g., "ghcr.io/fifteen3", "registry.nersc.gov/m1727/raknop"
+  imageTag: "latest"
+  imagePullPolicy: Always
+  imagePullSecrets: []
+  # - name: ghcr-secret
+
+  # Registry credentials (creates imagePullSecret automatically)
+  # Pass via --set to avoid committing credentials:
+  #   --set global.registryCredentials.server=ghcr.io
+  #   --set global.registryCredentials.username=myuser
+  #   --set global.registryCredentials.password=mytoken
+  registryCredentials:
+    enabled: false
+    secretName: ghcr-secret
+    server: ""
+    username: ""
+    password: ""
+
+  # Namespace labels
+  namespaceLabels: {}
+  # owner: username
+  # environment: dev
+
+# Small third-party images used by chart infrastructure.
+utilityImages:
+  busybox:
+    registry: docker.io
+    repository: library/busybox
+    tag: "1.36.1"
+    pullPolicy: IfNotPresent
+
+# Volume configuration
+volumes:
+  # Type: "pvc" for persistent volume claims
+  type: pvc
+  storageClass: ""
+
+  # Enable hostPath for code directories (for local Kind deployment)
+  # When true, mounts /fastdb-install and /fastdb-db from Kind extraMounts
+  codeHostPath: false
+  hostPaths:
+    install: /fastdb-install
+    db: /fastdb-db
+
+  # Code PVC - for loading code via git clone (for vcluster/cloud deployments)
+  codePvc:
+    enabled: false
+    size: 2Gi
+    accessMode: ReadWriteMany
+    gitRepo: "https://github.com/LSSTDESC/FASTDB.git"
+    gitBranch: "main"
+
+# Secrets
+secrets:
+  postgres:
+    password: "changeme"
+    roPassword: "changeme"
+    replicatorPassword: "changeme"
+  secretKey: "changeme"
+
+  # MongoDB credentials
+  mongodb:
+    adminUser: "admin"
+    adminPassword: "changeme"
+    readerUser: "alertreader"
+    readerPassword: "changeme"
+    writerUser: "alertwriter"
+    writerPassword: "changeme"
+
+# PostgreSQL primary
+postgres:
+  enabled: true
+  image:
+    repository: fastdb-postgres
+    tag: ""  # Falls back to global.imageTag
+  replicas: 1
+
+  # Stop the existing PostgreSQL pod before starting its replacement so that
+  # both pods never try to use the same database files simultaneously.
+  updateStrategy:
+    type: Recreate
+
+  persistence:
+    size: 10Gi
+    accessMode: ReadWriteOnce
+
+  sharedMemory: 1Gi
+
+  service:
+    type: ClusterIP
+    port: 5432
+
+  # External access (NodePort or LoadBalancer)
+  externalAccess:
+    enabled: false
+    type: NodePort  # or LoadBalancer
+    nodePort: 30432
+    # LoadBalancer annotations (for SLAC metallb)
+    annotations: {}
+
+  # Security context
+  securityContext:
+    runAsUser: null  # null for local, 100 for SLAC
+    runAsNonRoot: false
+    allowPrivilegeEscalation: false
+
+  # WAL archiving for replication
+  walArchive:
+    enabled: false
+    size: 20Gi
+    accessMode: ReadWriteMany
+
+# PostgreSQL standby (read replica)
+postgresStandby:
+  enabled: false
+  image:
+    repository: fastdb-postgres
+    tag: ""
+  replicas: 1
+
+  persistence:
+    size: 10Gi
+    accessMode: ReadWriteOnce
+
+  sharedMemory: 1Gi
+
+  primaryHost: postgres
+  primaryPort: 5432
+  replicationSlot: standby_slot
+
+# MongoDB
+mongodb:
+  enabled: true
+  image:
+    repository: fastdb-mongodb
+    tag: ""
+  replicas: 1
+
+  # Stop the existing MongoDB pod before starting its replacement so that
+  # both pods never try to use the same database files simultaneously.
+  updateStrategy:
+    type: Recreate
+
+  persistence:
+    size: 5Gi
+    accessMode: ReadWriteOnce
+
+  config:
+    host: mongodb
+    database: brokeralert
+    collection: alerts
+
+# Web application
+webap:
+  enabled: true
+  image:
+    repository: fastdb-webap
+    tag: ""
+  replicas: 1
+
+  service:
+    type: ClusterIP
+    port: 8080
+
+  externalAccess:
+    enabled: false
+    type: NodePort
+    nodePort: 30080
+
+  # Base path for subdirectory deployments (sets SCRIPT_NAME env var)
+  basePath: ""
+
+  # Ingress configuration
+  ingress:
+    enabled: false
+    host: ""
+    path: "/"
+    annotations: {}
+    ingressClassName: ""
+    tls: false
+    tlsSecretName: ""
+
+  # Volume mounts
+  volumes:
+    sessions:
+      size: 1Gi
+      accessMode: ReadWriteMany
+    queryResults:
+      size: 1Gi
+      accessMode: ReadWriteMany
+    logs:
+      size: 1Gi
+      accessMode: ReadWriteMany
+
+# Shell pod for debugging
+shell:
+  enabled: true
+  image:
+    repository: fastdb-shell
+    tag: ""
+  replicas: 1
+
+# Query runner
+queryrunner:
+  enabled: true
+  image:
+    repository: fastdb-query-runner
+    tag: ""
+  replicas: 1
+
+# Mailhog (email testing)
+mailhog:
+  enabled: true
+  image:
+    repository: mailhog/mailhog
+    tag: "v1.0.1"
+    registry: "docker.io"
+    pullPolicy: IfNotPresent
+  replicas: 1
+
+  externalAccess:
+    enabled: false
+    type: NodePort
+    nodePort: 30025
+
+# Database migrations job
+createdb:
+  enabled: true
+  image:
+    repository: fastdb-shell
+    tag: ""
+  ttlSecondsAfterFinished: 300
+
+# Optional alert ingestion pipeline.  It is disabled by default because broker
+# addresses, topics, schemas, and processing-version policy are deployment
+# specific.  values-local.yaml enables it for a local LASS Kafka broker.
+ingestion:
+  enabled: false
+  image:
+    repository: fastdb-shell
+    tag: ""
+
+  brokerConsumer:
+    replicas: 1
+    name: broker
+    loggerName: BROKER
+    server: ""
+    groupId: fastdb
+    topic: ""
+    schemaFile: /fastdb/share/avsc/lsst.v10_0.alert.avsc
+    collectionBase: alerts
+    brokerName: kafka
+    # Optional IPv4 address for host.docker.internal.  Set this only when a
+    # local Docker-host Kafka listener must be reached from Kind.
+    dockerHostIp: ""
+    # When Kafka advertises localhost to clients, a local proxy lets the
+    # consumer follow that advertised address from inside its pod.
+    localhostProxy: false
+    poll:
+      restartTimeMinutes: 30
+      noTopicSleepSeconds: 10
+
+  processingVersion:
+    name: realtime
+
+  sourceImporter:
+    # A CronJob is used because SourceImporter persists its last successful
+    # import time in PostgreSQL, so each run imports only newly received data.
+    schedule: "0 * * * *"
+    startingDeadlineSeconds: 30
+    successfulJobsHistoryLimit: 1
+    failedJobsHistoryLimit: 3
+
+# WAL webserver (for replication - SLAC specific)
+walWebserver:
+  enabled: false
+  replicas: 1
+
+  image:
+    registry: docker.io
+    repository: library/nginx
+    tag: "1.27.4-alpine"
+    pullPolicy: IfNotPresent
+
+  ingress:
+    enabled: false
+    host: ""
+    path: /fastdb-wal
+    annotations: {}
+    tls: []

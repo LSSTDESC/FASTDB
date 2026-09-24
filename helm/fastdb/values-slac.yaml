@@ -1,0 +1,106 @@
+# FASTDB SLAC S3DF Environment Values
+# Usage: helm install fastdb ./helm/fastdb -f ./helm/fastdb/values-slac.yaml --set global.namespace=your-namespace
+
+global:
+  namespace: fastdb-slac  # Override with --set global.namespace=ccosta-dev
+  environment: dev
+
+  # GitHub Container Registry
+  imageRegistry: "ghcr.io/fifteen3"
+  imageTag: "latest"
+  imagePullPolicy: Always
+  imagePullSecrets:
+    - name: ghcr-secret
+
+  namespaceLabels:
+    owner: ""  # Override with --set global.namespaceLabels.owner=username
+    environment: dev
+
+# Use PVC-based storage
+volumes:
+  type: pvc
+  storageClass: ""  # Use default storage class
+
+# Secrets - should be overridden or managed externally
+secrets:
+  postgres:
+    password: "changeme"
+    roPassword: "changeme"
+    replicatorPassword: "changeme"
+  secretKey: "changeme"
+
+  mongodb:
+    adminUser: "admin"
+    adminPassword: "changeme"
+    readerUser: "alertreader"
+    readerPassword: "changeme"
+    writerUser: "alertwriter"
+    writerPassword: "changeme"
+
+# PostgreSQL with WAL archiving and LoadBalancer
+postgres:
+  enabled: true
+  persistence:
+    size: 10Gi
+
+  # Security context for SLAC
+  securityContext:
+    runAsUser: 100
+    runAsNonRoot: true
+    allowPrivilegeEscalation: false
+
+  # LoadBalancer for external access
+  externalAccess:
+    enabled: true
+    type: LoadBalancer
+    annotations:
+      metallb.io/address-pool: sdf-services
+
+  # WAL archiving for replication
+  walArchive:
+    enabled: true
+    size: 20Gi
+    accessMode: ReadWriteMany
+
+# Standby not enabled by default for SLAC
+postgresStandby:
+  enabled: false
+
+# MongoDB disabled for SLAC (postgres-only setup)
+mongodb:
+  enabled: false
+
+# Web application disabled for SLAC postgres-only setup
+webap:
+  enabled: false
+
+# Shell disabled
+shell:
+  enabled: false
+
+# Query runner disabled
+queryrunner:
+  enabled: false
+
+# Mailhog disabled
+mailhog:
+  enabled: false
+
+# Database migrations
+createdb:
+  enabled: true
+
+# WAL webserver for replication
+walWebserver:
+  enabled: true
+  replicas: 1
+
+  ingress:
+    enabled: true
+    host: desc-fastdb.slac.stanford.edu
+    path: /fastdb-wal
+    annotations:
+      nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+    tls:
+      - hosts:
+          - desc-fastdb.slac.stanford.edu

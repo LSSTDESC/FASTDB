@@ -1,0 +1,28 @@
+# Kind cluster config for local FASTDB Helm deployment.
+#
+# Used by helm/scripts/create-local-cluster.sh. The script replaces ${PWD} with
+# the repo root path before passing this file to `kind create cluster`.
+#
+# extraMounts expose the host build tree inside the Kind node so pods can
+# mount /fastdb-install and /fastdb-db via hostPath (values-local.yaml:
+# volumes.codeHostPath: true).
+#
+# extraPortMappings map the webap NodePort (30080) to localhost:8080 and the
+# MailHog HTTP NodePort (30025) to localhost:8025.
+
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+    extraMounts:
+      - hostPath: ${PWD}/install
+        containerPath: /fastdb-install
+      - hostPath: ${PWD}/db
+        containerPath: /fastdb-db
+    extraPortMappings:
+      - containerPort: 30080
+        hostPort: 8080
+        protocol: TCP
+      - containerPort: 30025
+        hostPort: 8025
+        protocol: TCP
