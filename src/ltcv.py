@@ -4,6 +4,7 @@ import datetime
 import numbers
 import textwrap
 import random
+import re
 import json   # noqa: F401
 
 from psycopg import sql
@@ -1720,20 +1721,30 @@ def get_hot_ltcvs( processing_version, position_processing_version=None,
 
 
 def create_object_stats_materialized_view( procver ):
-    FDBLogger.info( f"Creating or refreshing object statistics materialized views for processing version {procver}" )
     with db.DBCon( dictcursor=True ) as dbcon:
+        # Get the processing version; this will raise an exception if it's not found
+        pvobj = db.ProcessingVersion.get_procver( procver, dbcon=dbcon )
+
+        FDBLogger.info( f"Creating or refreshing object statistics materialized "
+                        f"views for processing version {pvobj.description}" )
+
+        # Do a quick bobby tables check
+        if not re.search( r'^[a-z0-9_]+$', pvobj.description ):
+            raise ValueError( f"Name {pvobj.description} for processing version {pvobj.id} is invalid; "
+                              f"Should only include lowercase letters, numbers, and underscore." )
+
         # Check to see if it already exists
-        q = sql.SQL( "SELECT * FROM pg_class WHERE relname={viewname}" ).format( viewname=f'objstats_{procver}' )
-        rows = dbcon.execute( q )
+        rows = dbcon.execute( sql.SQL( "SELECT * FROM pg_class WHERE relname={viewname}" )
+                              .format( viewname=f'objstats_{pvobj.description}' ) )
         if len(rows) > 0:
             row = rows[0]
             if row['relkind'] != 'm':
-                raise RuntimeError( f"postgres class objstats_{procver} exists, but is not a materialized "
+                raise RuntimeError( f"postgres class objstats_{pvobj.description} exists, but is not a materialized "
                                     f"view!  (It is a \"{row['relkind']}\")" )
             q = sql.SQL( "SELECT a.attname FROM pg_catalog.pg_attribute a "
                          "INNER JOIN pg_class c ON c.oid=a.attrelid "
                          "WHERE c.relname={viewname} AND a.attnum>0"
-                        ).format( viewname=f'objstats_{procver}' )
+                        ).format( viewname=f'objstats_{pvobj.description}' )
             rows = dbcon.execute( q )
             expectedcols = { 'rootid', 'ra', 'dec', 'band',
                              'firstdet_mjd', 'firstdet_flux', 'firstdet_fluxerr',
@@ -1744,38 +1755,39 @@ def create_object_stats_materialized_view( procver ):
                              'nsn10', 'nsn7', 'nsn5', 'nrelgtp50', 'nrelgtp60',
                              'nrelgtp70', 'nrelgtp80', 'nrelgtp90', 'nrelgtp95' }
             if set( r['attname'] for r in rows ) != expectedcols:
-                raise RuntimeError( f"postgres view objstats_{procver} has the wrong set of columns" )
+                raise RuntimeError( f"postgres view objstats_{pvobj.description} has the wrong set of columns" )
 
             q = sql.SQL( "SELECT * FROM pg_class WHERE relname={viewname}"
-                        ).format( viewname=f'objstatscomb_{procver}' )
+                        ).format( viewname=f'objstatscomb_{pvobj.description}' )
             rows = dbcon.execute( q )
             if len(rows) == 0:
-                raise RuntimeError( f"view objstats_{procver} exists, but objstatscomb_{procver} does not" )
+                raise RuntimeError( f"view objstats_{pvobj.description} exists, "
+                                    f"but objstatscomb_{pvobj.description} does not" )
             row = rows[0]
             if row['relkind'] != 'm':
-                raise RuntimeError( f"postgres class objstatscomb_{procver} exists, but is not a materialized "
-                                    f"view!  (It is a \"{row['relkind']}\")" )
+                raise RuntimeError( f"postgres class objstatscomb_{pvobj.description} exists, but is not a "
+                                    f"materialized view!  (It is a \"{row['relkind']}\")" )
             q = sql.SQL( "SELECT a.attname FROM pg_catalog.pg_attribute a "
                          "INNER JOIN pg_class c ON c.oid=a.attrelid "
                          "WHERE c.relname={viewname} AND a.attnum>0"
-                        ).format( viewname=f'objstatscomb_{procver}' )
+                        ).format( viewname=f'objstatscomb_{pvobj.description}' )
             rows = dbcon.execute( q )
             if set( r['attname'] for r in rows ) != ( expectedcols.union( { 'firstdet_band', 'lastdet_band',
                                                                             'maxdet_band', 'lastforced_band' } )
                                                       - { 'band' } ):
-                raise RuntimeError( f"postgrew view objstatscomb_{procver} has the wrong set of columns" )
+                raise RuntimeError( f"postgrew view objstatscomb_{pvobj.description} has the wrong set of columns" )
 
 
-            FDBLogger.info( f"Refreshing materizalized view objstats_{procver}" )
+            FDBLogger.info( f"Refreshing materizalized view objstats_{pvobj.description}" )
             q = sql.SQL( "REFRESH MATERIALIZED VIEW {viewname}"
-                        ).format( viewname=sql.Identifier( f'objstats_{procver}' ) )
+                        ).format( viewname=sql.Identifier( f'objstats_{pvobj.description}' ) )
             dbcon.execute( q )
-            FDBLogger.info( f"Refreshing materizalized view objstatscomb_{procver}" )
+            FDBLogger.info( f"Refreshing materizalized view objstatscomb_{pvobj.description}" )
             q = sql.SQL( "REFRESH MATERIALIZED VIEW {viewname}"
-                        ).format( viewname=sql.Identifier( f'objstatscomb_{procver}' ) )
+                        ).format( viewname=sql.Identifier( f'objstatscomb_{pvobj.description}' ) )
             dbcon.execute( q )
             dbcon.commit()
-            FDBLogger.info( f"Done refreshing object statistics materialized views for {procver}" )
+            FDBLogger.info( f"Done refreshing object statistics materialized views for {pvobj.description}" )
             return
 
         # If we get here, the materialized view does not exist
@@ -1787,8 +1799,7 @@ def create_object_stats_materialized_view( procver ):
         #     m = 22 : f =  5754
         #     m = 21 : f = 14454
 
-        FDBLogger.info( f"Creating materialized view objstats_{procver}" )
-        pvid = db.ProcessingVersion.procver_id( procver, dbcon=dbcon )
+        FDBLogger.info( f"Creating materialized view objstats_{pvobj.description}" )
 
         q = sql.SQL( textwrap.dedent(
             """\
@@ -1906,7 +1917,7 @@ def create_object_stats_materialized_view( procver ):
                   GROUP BY rootid, band
                ) nf ON r.rootid=nf.rootid AND r.band=nf.band
             """
-        ) ).format( viewname=sql.Identifier( f'objstats_{procver}' ), pvid=pvid )
+        ) ).format( viewname=sql.Identifier( f'objstats_{pvobj.description}' ), pvid=pvobj.id )
         for alias, flux in zip( [ 'n24', 'n23', 'n22', 'n21' ],
                                 [ 912, 2291, 5754, 14454 ] ):
             q += sql.SQL( textwrap.indent( textwrap.dedent(
@@ -1925,7 +1936,7 @@ def create_object_stats_materialized_view( procver ):
                   GROUP BY rootid, band
                ) {alias} ON r.rootid={alias}.rootid AND r.band={alias}.band
                 """
-                ), '   ' ) ).format( pvid=pvid, flux=sql.SQL(str(flux)), alias=sql.Identifier(alias) )
+                ), '   ' ) ).format( pvid=pvobj.id, flux=sql.SQL(str(flux)), alias=sql.Identifier(alias) )
         for alias, sn in zip( [ 'sn10', 'sn7', 'sn5' ], [ 10, 7, 5 ] ):
             q += sql.SQL( textwrap.indent( textwrap.dedent(
                 """\
@@ -1943,7 +1954,7 @@ def create_object_stats_materialized_view( procver ):
                   GROUP BY rootid, band
                ) {alias} ON r.rootid={alias}.rootid AND r.band={alias}.band
                 """
-                ), '   ' ) ).format( pvid=pvid, sn=sql.SQL(str(sn)), alias=sql.Identifier(alias) )
+                ), '   ' ) ).format( pvid=pvobj.id, sn=sql.SQL(str(sn)), alias=sql.Identifier(alias) )
         for alias, rel in zip( [ 'relp5', 'relp6', 'relp7', 'relp8', 'relp9', 'relp95' ],
                                [ 0.5, 0.6, 0.7, 0.8, 0.9, 0.95 ] ):
             q += sql.SQL( textwrap.indent( textwrap.dedent(
@@ -1964,12 +1975,12 @@ def create_object_stats_materialized_view( procver ):
                  GROUP BY rootid, band
                ) {alias} ON r.rootid={alias}.rootid AND r.band={alias}.band
                 """
-                ), '   ' ) ).format( pvid=pvid, rel=sql.SQL(f'{rel:.1f}'), alias=sql.Identifier(alias) )
+                ), '   ' ) ).format( pvid=pvobj.id, rel=sql.SQL(f'{rel:.1f}'), alias=sql.Identifier(alias) )
         q += sql.SQL( textwrap.dedent(
             """\
             )
             """
-        ) ).format( viewname=sql.Identifier( f'objstats_{procver}' ), pvid=pvid )
+        ) ).format( viewname=sql.Identifier( f'objstats_{pvobj.description}' ), pvid=pvobj.id )
 
         dbcon.execute_nofetch( q, explain=True )
 
@@ -1980,18 +1991,18 @@ def create_object_stats_materialized_view( procver ):
                      'nrelgtp50', 'nrelgtp60', 'nrelgtp70', 'nrelgtp80', 'nrelgtp90', 'nrelgtp95' ]
         for col in indexcols:
             q = sql.SQL( 'CREATE INDEX {idxname} ON {viewname}({col})'
-                        ).format( idxname=sql.Identifier( f'idx_obstats_{procver}_{col}' ),
-                                  viewname=sql.Identifier( f'objstats_{procver}' ),
+                        ).format( idxname=sql.Identifier( f'idx_obstats_{pvobj.description}_{col}' ),
+                                  viewname=sql.Identifier( f'objstats_{pvobj.description}' ),
                                   col=sql.Identifier( col ) )
             dbcon.execute( q, explain=False )
 
         q = sql.SQL( 'CREATE INDEX {idxname} ON {viewname}(band)',
-                    ).format( idxname=sql.Identifier( f'idx_obstats_{procver}_band' ),
-                              viewname=sql.Identifier( f'objstats_{procver}' ) )
+                    ).format( idxname=sql.Identifier( f'idx_obstats_{pvobj.description}_band' ),
+                              viewname=sql.Identifier( f'objstats_{pvobj.description}' ) )
 
         q = sql.SQL( 'CREATE INDEX {idxname} ON {viewname}(q3c_ang2ipix(ra, dec))'
-                    ).format( idxname=sql.Identifier( f'idx_objstats_{procver}_q3c' ),
-                              viewname=sql.Identifier( f'objstats_{procver}' ) )
+                    ).format( idxname=sql.Identifier( f'idx_objstats_{pvobj.description}_q3c' ),
+                              viewname=sql.Identifier( f'objstats_{pvobj.description}' ) )
         dbcon.execute( q, explain=False )
 
         # Now create the view that combines all the bands together
@@ -2052,21 +2063,21 @@ def create_object_stats_materialized_view( procver ):
               ) lf ON s.rootid=lf.rootid
               WHERE fd.mjd IS NOT NULL OR lf.mjd IS NOT NULL
             )
-            """ ) ).format( viewname=sql.Identifier(f'objstats_{procver}'),
-                            combviewname=sql.Identifier(f'objstatscomb_{procver}') )
+            """ ) ).format( viewname=sql.Identifier(f'objstats_{pvobj.description}'),
+                            combviewname=sql.Identifier(f'objstatscomb_{pvobj.description}') )
         dbcon.execute( q, explain=True )
 
         for col in indexcols:
             q = sql.SQL( 'CREATE INDEX {idxname} ON {viewname}({col})'
-                        ).format( idxname=sql.Identifier( f'idx_objstatscomb_{procver}_{col}' ),
-                                  viewname=sql.Identifier( f'objstatscomb_{procver}' ),
+                        ).format( idxname=sql.Identifier( f'idx_objstatscomb_{pvobj.description}_{col}' ),
+                                  viewname=sql.Identifier( f'objstatscomb_{pvobj.description}' ),
                                   col=sql.Identifier( col ) )
             dbcon.execute( q, explain=False )
 
         q = sql.SQL( 'CREATE INDEX {idxname} ON {viewname}(q3c_ang2ipix(ra, dec))'
-                    ).format( idxname=sql.Identifier( f'idx_objstatscomb_{procver}_q3c' ),
-                              viewname=sql.Identifier( f'objstatscomb_{procver}' ) )
+                    ).format( idxname=sql.Identifier( f'idx_objstatscomb_{pvobj.description}_q3c' ),
+                              viewname=sql.Identifier( f'objstatscomb_{pvobj.description}' ) )
         dbcon.execute( q, explain=False )
 
         dbcon.commit()
-        FDBLogger.info( f"Done creating object statistics materialized views for {procver}" )
+        FDBLogger.info( f"Done creating object statistics materialized views for {pvobj.description}" )

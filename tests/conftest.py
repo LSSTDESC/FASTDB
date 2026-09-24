@@ -1519,6 +1519,30 @@ def objstats_realtime_view( procver_collection ):
             con.commit()
 
 
+@pytest.fixture( scope="module" )
+def objstats_pvc_pv2_view( procver_collection, set_of_lightcurves ):
+    try:
+        ltcv.create_object_stats_materialized_view( 'pvc_pv2' )
+        yield True
+    finally:
+        with DBCon() as con:
+            con.execute_nofetch( "DROP MATERIALIZED VIEW IF EXISTS objstatscomb_pvc_pv2" )
+            con.execute_nofetch( "DROP MATERIALIZED VIEW IF EXISTS objstats_pvc_pv2" )
+            con.commit()
+
+
+@pytest.fixture( scope="module" )
+def objstats_pvc_pv3_view( procver_collection, set_of_lightcurves ):
+    try:
+        ltcv.create_object_stats_materialized_view( 'pvc_pv3' )
+        yield True
+    finally:
+        with DBCon() as con:
+            con.execute_nofetch( "DROP MATERIALIZED VIEW IF EXISTS objstatscomb_pvc_pv3" )
+            con.execute_nofetch( "DROP MATERIALIZED VIEW IF EXISTS objstats_pvc_pv3" )
+            con.commit()
+
+
 @pytest.fixture( scope='module' )
 def accumulate_expected_stats( set_of_lightcurves, procver_collection ):
     def do_the_things( procver, band=None ):

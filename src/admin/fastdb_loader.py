@@ -31,6 +31,10 @@ class FastDBLoader:
     """
 
     def __init__( self, processing_version=None ):
+        if ( processing_version is not None ) and ( not re.search( '^[a-z0-9_]+$', processing_version ) ):
+            raise ValueError( f"Invalid processing version name {processing_version}, must only include "
+                              f"lowercase letters, numbers, and _" )
+
         self._all_tables = db.all_table_names.copy()
         self._all_tables.remove( "authuser" )
         self._all_tables.remove( "passwordlink" )

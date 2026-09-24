@@ -153,18 +153,18 @@ class CountThings( BaseView ):
 
         with db.DBCon() as dbcon:
             try:
-                # Just make sure this is a know processing version, even though
-                #   we aren't actually going to use it.
-                # This is a necessary but not sufficient condition; the
-                #   objstatscomb materialized view for this processing
-                #   version must also exist.  TODO: think about whether
-                #   I want to interpret aliases for finding the
-                #   objstatscomb table.  Temptation: yes.
-                _pvid = db.ProcessingVersion.procver_id( procver )
+                # Get the processing version
+                procver = db.ProcessingVersion.get_procver( procver )
+                # Bobby table check.  One that's not valid should never have passed in the first place,
+                #  but be paranoid.
+                if not re.search( '^[a-z0-9_]+$', procver.description ):
+                    raise ValueError( f"Invalid processing version name \"{procver.description}\" for "
+                                      f"processing version {procver.id}; should only include "
+                                      f"a-z, 0-9, and _" )
             except Exception as ex:
                 raise FASTDBWebException( str(ex) )
 
-            table = sql.Identifier( f"objstatscomb_{procver}" )
+            table = sql.Identifier( f"objstatscomb_{procver.description}" )
 
             if thingtocount == 'rootid':
                 rows, _cols = dbcon.execute( sql.SQL("SELECT COUNT(rootid) FROM {table}").format( table=table ) )

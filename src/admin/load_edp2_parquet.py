@@ -4,6 +4,7 @@ import uuid
 import textwrap
 import functools
 import multiprocessing
+import re
 from concurrent.futures import ProcessPoolExecutor
 
 
@@ -19,6 +20,9 @@ from util import FDBLogger, asUUID
 
 class EDP2Loader:
     def __init__( self, processing_version, create_pv=False, test_only=False, slow_test=False, stop_after_n_files=0 ):
+        if not re.search( r'^[a-z0-9_]+$', processing_version ):
+            raise ValueError( "Invalid processing_version, must only include a-z, 0-9, and _" )
+
         self.processing_version_passed = processing_version
         self._test_only = test_only or slow_test
         self._slow_test = slow_test
