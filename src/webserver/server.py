@@ -1,6 +1,6 @@
+import re
 import copy
 import logging
-import textwrap
 
 from psycopg import sql
 import flask
@@ -125,7 +125,7 @@ class CountThings( BaseView ):
     def do_the_things( self, which, procver='default' ):
         global app
 
-        synonyms = { 'rootid': [ 'rootid', 'rootobject', 'rootdiaobject' ],
+        synonyms = { 'rootid': [ 'root', 'rootid', 'rootobject', 'rootdiaobject' ],
                      'diaobject': [ 'object', 'diaobject'],
                      'diasource': [ 'source', 'diasource' ],
                      'diaforcedsource': [ 'forced', 'forcedsource' ,'diaforcedsource' ]
@@ -138,71 +138,43 @@ class CountThings( BaseView ):
                 break
         if thingtocount is None:
             return f"Unknown thing to count: {which}", 422
+        if thingtocount == 'diaobject':
+            return "Counting diaobject not supported, count rootid", 422
+        if not re.search( r'^[A-Za-z0-9_\-]+$', procver ):
+            # Let's really make sure not to bobby tables
+            return f"Invalid processing version {procver}, can only contain A-Z, a-z, 0-9, _, and -", 422
 
         estimate = False
         if flask.request.is_json:
             data = flask.request.json
             estimate = ( 'estimate' in data ) and ( data['estimate'] )
+            if estimate:
+                return "Estimate not supported", 422
 
         with db.DBCon() as dbcon:
             try:
-                pvid = db.ProcessingVersion.procver_id( procver )
+                # Get the processing version
+                procver = db.ProcessingVersion.get_procver( procver )
+                # Bobby table check.  One that's not valid should never have passed in the first place,
+                #  but be paranoid.
+                if not re.search( '^[a-z0-9_]+$', procver.description ):
+                    raise ValueError( f"Invalid processing version name \"{procver.description}\" for "
+                                      f"processing version {procver.id}; should only include "
+                                      f"a-z, 0-9, and _" )
             except Exception as ex:
                 raise FASTDBWebException( str(ex) )
 
-            if thingtocount in ( 'rootid', 'diaobject' ):
-                distinct = 'diaobjectid' if thingtocount=='diaobject' else 'rootid'
-                indexes = [ 'o idx_diaobject_procver' ]
-                baseq = sql.SQL( textwrap.dedent(
-                    """\
-                    SELECT DISTINCT ON({distinct}) {distinct} FROM diaobject o
-                    INNER JOIN base_procver_of_procver pv ON o.base_procver_id=pv.base_procver_id
-                                                         AND pv.procver_id={pvid}
-                    ORDER BY {distinct}, pv.priority DESC
-                    """
-                ) ).format( distinct=sql.Identifier("o", distinct), pvid=pvid )
-            else:
-                indexes = [ f's idx_{thingtocount}_base_procver_id', f'o idx_{thingtocount}_diaobjectid' ]
-                baseq = sql.SQL( textwrap.dedent(
-                    """\
-                    SELECT DISTINCT ON(o.rootid, s.visit) {idfield} FROM {table} s
-                    INNER JOIN base_procver_of_procver pv ON s.base_procver_id=pv.base_procver_id
-                                                         AND pv.procver_id={pvid}
-                    INNER JOIN diaobject o ON o.diaobjectid=s.diaobjectid
-                    ORDER BY o.rootid, s.visit, pv.priority DESC
-                    """
-                ) ).format( table=sql.Identifier(thingtocount),
-                            idfield=sql.Identifier("s", f"{thingtocount}id" ),
-                            pvid=pvid )
+            table = sql.Identifier( f"objstatscomb_{procver.description}" )
 
-            if estimate:
-                # THIS DOES A REALLY TERRIBLE JOB.
-                # cf: https://wiki.postgresql.org/wiki/Count_estimate
-                # TODO : figure out how accurate this count estimate really is.  I have
-                #    a suspicion that it's not very good when there are multiple
-                #    different processing versions.
-                FDBLogger.debug( f"Getting estimate of count of {which} for {pvid}" )
-                q = sql.SQL( "EXPLAIN (FORMAT JSON) {baseq}" ).format( baseq=baseq )
-                rows, _  = dbcon.execute( q, explain=False )
-                FDBLogger.debug( f"rows is {rows}" )
-                count = rows[0][0][0]['Plan']['Plan Rows']
-
+            if thingtocount == 'rootid':
+                rows, _cols = dbcon.execute( sql.SQL("SELECT COUNT(rootid) FROM {table}").format( table=table ) )
+            elif thingtocount == 'diasource':
+                rows, _cols = dbcon.execute( sql.SQL("SELECT SUM(ndets) FROM {table}").format( table=table ) )
+            elif thingtocount == 'diaforcedsource':
+                rows, _cols = dbcon.execute( sql.SQL("SELECT SUM(nfrc) FROM {table}").format( table=table ) )
             else:
-                # Gah.  I'm thrashing about a lot with these query
-                #   optimization thingies that I'm doing.  After bumping
-                #   the memory postgres had for buffers, the queries got
-                #   *slower*, for reasons I don't understand.  One thing
-                #   it did was assign fewer workers; the postgres query
-                #   optimizer is so strange.  So, I'm forcing parallel
-                #   workers, to make it faster.  For this count query,
-                #   this is probably not going to be a problem, but it
-                #   is of course scary.
-                q = sql.SQL( "/*+ " )
-                q += sql.SQL(" ").join( sql.SQL( f"IndexScan({i})" ) for i in indexes )
-                q += sql.SQL( " Parallel(t 4) */\n" )
-                q += sql.SQL( "SELECT COUNT(*) FROM (\n{baseq}\n) subq" ).format( baseq=baseq )
-                rows, _ = dbcon.execute( q )
-                count = rows[0][0]
+                return "This should never happen", 422
+            count = rows[0][0]
 
             return { 'status': 'ok',
                      'table': thingtocount,

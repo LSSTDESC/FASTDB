@@ -1,7 +1,14 @@
 import db
 
 
-def test_load_edp2_parquet( edp2_loaded_module ):
+# **********************************************************************
+# The test_user and edp2_materialized_view fixtures are not needed for
+#   the test, but because, like
+#   services/test_sourceimporter.py::test_full90days_fast, this is a
+#   convenient test for loading up a database for use developing the web
+#   ap.  See the developers documentation for FASTDB.
+#
+def test_load_edp2_parquet( edp2_loaded_module, test_user, edp2_materialized_view ):
     with db.DBCon( dictcursor=True ) as dbcon:
         rows = dbcon.execute( "SELECT rootid, diaobjectid FROM diaobject" )
         assert len(rows) == 100

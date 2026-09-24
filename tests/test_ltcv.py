@@ -18,8 +18,10 @@ def objstats_cols():
              'lastdet_mjd', 'lastdet_flux', 'lastdet_fluxerr',
              'maxdet_mjd', 'maxdet_flux', 'maxdet_fluxerr',
              'lastforced_mjd', 'lastforced_flux', 'lastforced_fluxerr',
-             'ndets', 'ndets24', 'ndets23', 'ndets22', 'ndets21',
-             'nsn10', 'nsn7', 'nsn5' }
+             'ndets', 'nfrc',
+             'ndets24', 'ndets23', 'ndets22', 'ndets21',
+             'nsn10', 'nsn7', 'nsn5',
+             'nrelgtp50', 'nrelgtp60', 'nrelgtp70', 'nrelgtp80', 'nrelgtp90', 'nrelgtp95' }
 
 
 # THIS TEST MUST COME FIRST, because it depends on both the
@@ -285,7 +287,7 @@ def test_get_object_infos( set_of_lightcurves, procver_collection ):
                         for col in [ 'diaobjectid', 'obj_base_procver', 'pos_base_procver',
                                      'diaobject_ra', 'diaobject_dec', 'diaobject_raerr', 'diaobject_decerr',
                                      'diaobject_ra_dec_cov' ] )
-            assert info.loc[rid, 'diaobjectid'] == expobj
+            assert set( info.loc[rid, 'diaobjectid'] ) == set( expobj )
             assert set( info.loc[rid, 'obj_base_procver'] ) == { bpvs['realtime_diaobject'].id,
                                                                  bpvs['bpv2_diaobject'].id }
 

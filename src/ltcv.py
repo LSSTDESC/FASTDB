@@ -4,6 +4,7 @@ import datetime
 import numbers
 import textwrap
 import random
+import re
 import json   # noqa: F401
 
 from psycopg import sql
@@ -1181,7 +1182,8 @@ _object_search_timings = {}
 _object_search_timings_count = {}
 
 
-def object_search( processing_version='default', just_objids=False, searchband=None, dbcon=None, **kwargs ):
+def object_search( processing_version='default', just_objids=False, searchband=None, orderby="rootid",
+                   limit=None, offset=None, dbcon=None, **kwargs ):
     """Search for objects.
 
     This is a relatively fast search that only looks at object stats
@@ -1201,6 +1203,19 @@ def object_search( processing_version='default', just_objids=False, searchband=N
          If None, then all the cuts will be for any band.  If a band or
          list of bands is given, then the cuts will only consider
          photometry with this band or these bands.
+
+      orderby: str or list of str, default rootid
+         Sort the returned objects by these fields.  Fields can include
+         (almost) anything that's in the return.  Prepend "-" to the
+         name to make it a descending sort rather than an ascending
+         sort.
+
+      limit: int or None
+         If given, only return this many rows.
+
+      offset: int or None
+         If given, return limit rows starting at this offset.
+
 
       SEARCH FIELDS:
 
@@ -1278,6 +1293,9 @@ def object_search( processing_version='default', just_objids=False, searchband=N
           ndets: int
              Number of detections
 
+          nfrc: int
+             Number of diaforcedsources
+
           ndets24: int
              Number of detections with mag≤24
 
@@ -1307,26 +1325,36 @@ def object_search( processing_version='default', just_objids=False, searchband=N
       column values.  It should be safe to stuff this directly into
       pandas.DataFrame().  Column names are:
 
-          rootid            : UUID, the rootid of the object
-          ra                : float
-          dec               : float
-          firstdet_mjd      : float, mjd of first detection (diasource)
-          firstdet_flux     : float, flux in nJy (zeropoint 31.4) of first detection
-          firstdet_fluxerr  : float
-          lastdet_mjd       : float, mjd of last detection (diasource)
-          lastdet_flux      : float, flux in nJy (zeropoint 31.4) of last detection
-          lastdet_fluxerr   : float
-          maxdet_mjd        : float, mjd of max (i.e. highest-flux) detection (diasource)
-          maxdet_flux       : float, flux in nJy (zeropoint 31.4) of max detection
-          maxdet_fluxerr    : float
-          ndets             : int, number of detections (diasources for this processing version and rootid)
-          ndets24           : int, number of detections with mag ≤ 24
-          ndets23           : int, number of detections with mag ≤ 23
-          ndets22           : int, number of detections with mag ≤ 22
-          ndets21           : int, number of detections with mag ≤ 21
-          nsn10             : int, number of detections with flux/fluxerr ≥ 10
-          nsn7              : int, number of detections with flux/fluxerr ≥ 7
-          nsn5              : int, number of detections with flux/fluxerr ≥ 5
+          rootid             : UUID, the rootid of the object
+          ra                 : float
+          dec                : float
+          firstdet_mjd       : float, mjd of first detection (diasource)
+          firstdet_flux      : float, flux in nJy (zeropoint 31.4) of first detection
+          firstdet_fluxerr   : float
+          lastdet_mjd        : float, mjd of last detection (diasource)
+          lastdet_flux       : float, flux in nJy (zeropoint 31.4) of last detection
+          lastdet_fluxerr    : float
+          maxdet_mjd         : float, mjd of max (i.e. highest-flux) detection (diasource)
+          maxdet_flux        : float, flux in nJy (zeropoint 31.4) of max detection
+          maxdet_fluxerr     : float
+          lastforced_mjd     : float, mjd of the last forced photometry measurement we have
+          lastforced_flux    : float, flux in nJy (zeropoint 31.4) of last forced photometry point
+          lastforced_fluxerr : float
+          ndets              : int, number of detections (diasources for this processing version and rootid)
+          nfrc               : int, number of forced-photometry points
+          ndets24            : int, number of detections with mag ≤ 24
+          ndets23            : int, number of detections with mag ≤ 23
+          ndets22            : int, number of detections with mag ≤ 22
+          ndets21            : int, number of detections with mag ≤ 21
+          nsn10              : int, number of detections with flux/fluxerr ≥ 10
+          nsn7               : int, number of detections with flux/fluxerr ≥ 7
+          nsn5               : int, number of detections with flux/fluxerr ≥ 5
+          nrelp5             : int, number of detections with reliability > 0.5
+          nrelp6             : int, number of detections with reliability > 0.6
+          nrelp7             : int, number of detections with reliability > 0.7
+          nrelp8             : int, number of detections with reliability > 0.8
+          nrelp9             : int, number of detections with reliability > 0.9
+          nrelp95            : int, number of detections with reliability > 0.95
 
     """
 
@@ -1336,26 +1364,36 @@ def object_search( processing_version='default', just_objids=False, searchband=N
     viewname = f'objstatscomb_{pvobj.description}' if len(searchband) == 0 else f'objstats_{pvobj.description}'
 
     searchspec = {
-        'rootid':           { 'mult': True,   'substr': False, 'minmax': False, 'dtype': np.dtype('O') },
-        'ra':               { 'mult': False,  'sbustr': False, 'minmax': True, 'dtype': np.float64 },
-        'dec':              { 'mult': False,  'sbustr': False, 'minmax': True, 'dtype': np.float64 },
-        'firstdet_mjd':     { 'mult': False,  'sbustr': False, 'minmax': True, 'dtype': np.float64 },
-        'firstdet_flux':    { 'mult': False,  'sbustr': False, 'minmax': True, 'dtype': np.float32 },
-        'firstdet_fluxerr': { 'mult': False,  'sbustr': False, 'minmax': True, 'dtype': np.float32 },
-        'lastdet_mjd':      { 'mult': False,  'sbustr': False, 'minmax': True, 'dtype': np.float64 },
-        'lastdet_flux':     { 'mult': False,  'sbustr': False, 'minmax': True, 'dtype': np.float32 },
-        'lastdet_fluxerr':  { 'mult': False,  'sbustr': False, 'minmax': True, 'dtype': np.float32 },
-        'maxdet_mjd':       { 'mult': False,  'sbustr': False, 'minmax': True, 'dtype': np.float64 },
-        'maxdet_flux':      { 'mult': False,  'sbustr': False, 'minmax': True, 'dtype': np.float32 },
-        'maxdet_fluxerr':   { 'mult': False,  'sbustr': False, 'minmax': True, 'dtype': np.int16 },
-        'ndets':            { 'mult': False,  'sbustr': False, 'minmax': True, 'dtype': np.int16 },
-        'ndets24':          { 'mult': False,  'sbustr': False, 'minmax': True, 'dtype': np.int16 },
-        'ndets23':          { 'mult': False,  'sbustr': False, 'minmax': True, 'dtype': np.int16 },
-        'ndets22':          { 'mult': False,  'sbustr': False, 'minmax': True, 'dtype': np.int16 },
-        'ndets21':          { 'mult': False,  'sbustr': False, 'minmax': True, 'dtype': np.int16 },
-        'nsn10':            { 'mult': False,  'sbustr': False, 'minmax': True, 'dtype': np.int16 },
-        'nsn7':             { 'mult': False,  'sbustr': False, 'minmax': True, 'dtype': np.int16 },
-        'nsn5':             { 'mult': False,  'sbustr': False, 'minmax': True, 'dtype': np.int16 },
+        'rootid':             { 'mult': True,  'substr': False, 'minmax': False, 'dtype': np.dtype('O') },
+        'ra':                 { 'mult': False, 'substr': False, 'minmax': True, 'dtype': np.float64 },
+        'dec':                { 'mult': False, 'substr': False, 'minmax': True, 'dtype': np.float64 },
+        'firstdet_mjd':       { 'mult': False, 'substr': False, 'minmax': True, 'dtype': np.float64 },
+        'firstdet_flux':      { 'mult': False, 'substr': False, 'minmax': True, 'dtype': np.float32 },
+        'firstdet_fluxerr':   { 'mult': False, 'substr': False, 'minmax': True, 'dtype': np.float32 },
+        'lastdet_mjd':        { 'mult': False, 'substr': False, 'minmax': True, 'dtype': np.float64 },
+        'lastdet_flux':       { 'mult': False, 'substr': False, 'minmax': True, 'dtype': np.float32 },
+        'lastdet_fluxerr':    { 'mult': False, 'substr': False, 'minmax': True, 'dtype': np.float32 },
+        'maxdet_mjd':         { 'mult': False, 'substr': False, 'minmax': True, 'dtype': np.float64 },
+        'maxdet_flux':        { 'mult': False, 'substr': False, 'minmax': True, 'dtype': np.float32 },
+        'maxdet_fluxerr':     { 'mult': False, 'substr': False, 'minmax': True, 'dtype': np.float32 },
+        'lastforced_mjd':     { 'mult': False, 'substr': False, 'minmax': True, 'dtype': np.float32 },
+        'lastforced_flux':    { 'mult': False, 'substr': False, 'minmax': True, 'dtype': np.int16 },
+        'lastforced_fluxerr': { 'mult': False, 'substr': False, 'minmax': True, 'dtype': np.int16 },
+        'ndets':              { 'mult': False, 'substr': False, 'minmax': True, 'dtype': np.int16 },
+        'nfrc':               { 'mult': False, 'substr': False, 'minmax': True, 'dtype': np.int16 },
+        'ndets24':            { 'mult': False, 'substr': False, 'minmax': True, 'dtype': np.int16 },
+        'ndets23':            { 'mult': False, 'substr': False, 'minmax': True, 'dtype': np.int16 },
+        'ndets22':            { 'mult': False, 'substr': False, 'minmax': True, 'dtype': np.int16 },
+        'ndets21':            { 'mult': False, 'substr': False, 'minmax': True, 'dtype': np.int16 },
+        'nsn10':              { 'mult': False, 'substr': False, 'minmax': True, 'dtype': np.int16 },
+        'nsn7':               { 'mult': False, 'substr': False, 'minmax': True, 'dtype': np.int16 },
+        'nsn5':               { 'mult': False, 'substr': False, 'minmax': True, 'dtype': np.int16 },
+        'nrelgtp50':          { 'mult': False, 'substr': False, 'minmax': True, 'dtype': np.int16 },
+        'nrelgtp60':          { 'mult': False, 'substr': False, 'minmax': True, 'dtype': np.int16 },
+        'nrelgtp70':          { 'mult': False, 'substr': False, 'minmax': True, 'dtype': np.int16 },
+        'nrelgtp80':          { 'mult': False, 'substr': False, 'minmax': True, 'dtype': np.int16 },
+        'nrelgtp90':          { 'mult': False, 'substr': False, 'minmax': True, 'dtype': np.int16 },
+        'nrelgtp95':          { 'mult': False, 'substr': False, 'minmax': True, 'dtype': np.int16 },
     }
 
     radius = None
@@ -1375,14 +1413,14 @@ def object_search( processing_version='default', just_objids=False, searchband=N
         if len( rows ) == 0:
             raise RuntimeError( f"Can't do object search, materialized view {viewname} doesn't exist" )
 
-        q = sql.SQL( "SELECT * FROM {viewname} " ).format( viewname=sql.Identifier(viewname) )
+        q = sql.SQL( "SELECT * FROM {viewname}\n" ).format( viewname=sql.Identifier(viewname) )
         where = "WHERE"
         if len(searchband) > 0:
             if len(searchband) == 1:
-                q += sql.SQL( "WHERE band={band}" ).format( searchband )
+                q += sql.SQL( "WHERE band={band}\n" ).format( searchband )
             else:
-                q += sql.SQL( "WHERE band=ANY(ARRAY[{band}])" ).format( sql.SQL(",").join(searchband) )
-            where = " AND"
+                q += sql.SQL( "WHERE band=ANY(ARRAY[{band}])\n" ).format( sql.SQL(",").join(searchband) )
+            where = "  AND"
 
         qwhere, subdict, remainder, where = db.construct_pgsql_where_clause( searchspec, where=where, **kwargs )
         if len(remainder) > 0:
@@ -1391,13 +1429,38 @@ def object_search( processing_version='default', just_objids=False, searchband=N
         q += qwhere
 
         if radius is not None:
-            q += sql.SQL( "{where} q3c_radial_query(ra, dec, {ra}, {dec}, {radius})"
+            q += sql.SQL( "{where} q3c_radial_query(ra, dec, {ra}, {dec}, {radius})\n"
                          ).format( where=sql.SQL(where), ra=float(ra), dec=float(dec), radius=float(radius)/3600. )
+
+        if orderby is not None:
+            orderby = util.listify( orderby )
+            if len( orderby ) > 0:
+                q += sql.SQL( "ORDER BY" )
+                comma = " "
+                for sortcol in orderby:
+                    desc = sql.SQL( "" )
+                    if sortcol[0] == "-":
+                        desc = sql.SQL( " DESC" )
+                        sortcol = sortcol[1:]
+                    if sortcol not in searchspec.keys():
+                        # ... this is bobby tables protection
+                        raise ValueError( f"Unknown column to sort by: {sortcol}" )
+                    q += sql.SQL( "{comma}{field}{desc}" ).format( comma=sql.SQL(comma),
+                                                                   field=sql.Identifier(sortcol), desc=desc )
+                    comma = ", "
+                q += sql.SQL( "\n" )
+
+        if limit is not None:
+            limit = int( limit )
+            q += sql.SQL( "LIMIT {limit}\n" ).format( limit=sql.SQL(str(limit)) )
+        if offset is not None:
+            offset = int( offset )
+            q += sql.SQL( "OFFSET {offset}\n" ).format( offset=sql.SQL(str(offset)) )
 
         FDBLogger.debug( "Starting object search query..." )
         barf = "".join( random.choices( "abcdefghijklmnopqrstuvwxyz", k=6 ) )
         cursor = dbcon.execute_nofetch( q, subdict, cursorname=f'object_search_{barf}' )
-        cursor.itersize = 1000
+        cursor.itersize = 1000 if limit is None else min( 1000, limit )
         FDBLogger.debug( "...fetching results from postgres..." )
         cols = [ desc[0] for desc in cursor.description ]
 
@@ -1659,58 +1722,72 @@ def get_hot_ltcvs( processing_version, position_processing_version=None,
 
 def create_object_stats_materialized_view( procver ):
     with db.DBCon( dictcursor=True ) as dbcon:
+        # Get the processing version; this will raise an exception if it's not found
+        pvobj = db.ProcessingVersion.get_procver( procver, dbcon=dbcon )
+
+        FDBLogger.info( f"Creating or refreshing object statistics materialized "
+                        f"views for processing version {pvobj.description}" )
+
+        # Do a quick bobby tables check
+        if not re.search( r'^[a-z0-9_]+$', pvobj.description ):
+            raise ValueError( f"Name {pvobj.description} for processing version {pvobj.id} is invalid; "
+                              f"Should only include lowercase letters, numbers, and underscore." )
+
         # Check to see if it already exists
-        q = sql.SQL( "SELECT * FROM pg_class WHERE relname={viewname}" ).format( viewname=f'objstats_{procver}' )
-        rows = dbcon.execute( q )
+        rows = dbcon.execute( sql.SQL( "SELECT * FROM pg_class WHERE relname={viewname}" )
+                              .format( viewname=f'objstats_{pvobj.description}' ) )
         if len(rows) > 0:
             row = rows[0]
             if row['relkind'] != 'm':
-                raise RuntimeError( f"postgres class objstats_{procver} exists, but is not a materialized "
+                raise RuntimeError( f"postgres class objstats_{pvobj.description} exists, but is not a materialized "
                                     f"view!  (It is a \"{row['relkind']}\")" )
             q = sql.SQL( "SELECT a.attname FROM pg_catalog.pg_attribute a "
                          "INNER JOIN pg_class c ON c.oid=a.attrelid "
                          "WHERE c.relname={viewname} AND a.attnum>0"
-                        ).format( viewname=f'objstats_{procver}' )
+                        ).format( viewname=f'objstats_{pvobj.description}' )
             rows = dbcon.execute( q )
             expectedcols = { 'rootid', 'ra', 'dec', 'band',
                              'firstdet_mjd', 'firstdet_flux', 'firstdet_fluxerr',
                              'lastdet_mjd', 'lastdet_flux', 'lastdet_fluxerr',
                              'maxdet_mjd', 'maxdet_flux', 'maxdet_fluxerr',
                              'lastforced_mjd', 'lastforced_flux', 'lastforced_fluxerr',
-                             'ndets', 'ndets24', 'ndets23', 'ndets22', 'ndets21', 'nsn10', 'nsn7', 'nsn5' }
+                             'ndets', 'nfrc' ,'ndets24', 'ndets23', 'ndets22', 'ndets21',
+                             'nsn10', 'nsn7', 'nsn5', 'nrelgtp50', 'nrelgtp60',
+                             'nrelgtp70', 'nrelgtp80', 'nrelgtp90', 'nrelgtp95' }
             if set( r['attname'] for r in rows ) != expectedcols:
-                raise RuntimeError( f"postgres view objstats_{procver} has the wrong set of columns" )
+                raise RuntimeError( f"postgres view objstats_{pvobj.description} has the wrong set of columns" )
 
             q = sql.SQL( "SELECT * FROM pg_class WHERE relname={viewname}"
-                        ).format( viewname=f'objstatscomb_{procver}' )
+                        ).format( viewname=f'objstatscomb_{pvobj.description}' )
             rows = dbcon.execute( q )
             if len(rows) == 0:
-                raise RuntimeError( f"view objstats_{procver} exists, but objstatscomb_{procver} does not" )
+                raise RuntimeError( f"view objstats_{pvobj.description} exists, "
+                                    f"but objstatscomb_{pvobj.description} does not" )
             row = rows[0]
             if row['relkind'] != 'm':
-                raise RuntimeError( f"postgres class objstatscomb_{procver} exists, but is not a materialized "
-                                    f"view!  (It is a \"{row['relkind']}\")" )
+                raise RuntimeError( f"postgres class objstatscomb_{pvobj.description} exists, but is not a "
+                                    f"materialized view!  (It is a \"{row['relkind']}\")" )
             q = sql.SQL( "SELECT a.attname FROM pg_catalog.pg_attribute a "
                          "INNER JOIN pg_class c ON c.oid=a.attrelid "
                          "WHERE c.relname={viewname} AND a.attnum>0"
-                        ).format( viewname=f'objstatscomb_{procver}' )
+                        ).format( viewname=f'objstatscomb_{pvobj.description}' )
             rows = dbcon.execute( q )
             if set( r['attname'] for r in rows ) != ( expectedcols.union( { 'firstdet_band', 'lastdet_band',
                                                                             'maxdet_band', 'lastforced_band' } )
                                                       - { 'band' } ):
-                raise RuntimeError( f"postgrew view objstatscomb_{procver} has the wrong set of columns" )
+                raise RuntimeError( f"postgrew view objstatscomb_{pvobj.description} has the wrong set of columns" )
 
 
-            FDBLogger.info( f"Refreshing materizalized view objstats_{procver}" )
+            FDBLogger.info( f"Refreshing materizalized view objstats_{pvobj.description}" )
             q = sql.SQL( "REFRESH MATERIALIZED VIEW {viewname}"
-                        ).format( viewname=sql.Identifier( f'objstats_{procver}' ) )
+                        ).format( viewname=sql.Identifier( f'objstats_{pvobj.description}' ) )
             dbcon.execute( q )
-            FDBLogger.info( f"Refreshing materizalized view objstatscomb_{procver}" )
+            FDBLogger.info( f"Refreshing materizalized view objstatscomb_{pvobj.description}" )
             q = sql.SQL( "REFRESH MATERIALIZED VIEW {viewname}"
-                        ).format( viewname=sql.Identifier( f'objstatscomb_{procver}' ) )
+                        ).format( viewname=sql.Identifier( f'objstatscomb_{pvobj.description}' ) )
             dbcon.execute( q )
             dbcon.commit()
-            FDBLogger.info( f"Done refreshing materialized views for {procver}" )
+            FDBLogger.info( f"Done refreshing object statistics materialized views for {pvobj.description}" )
             return
 
         # If we get here, the materialized view does not exist
@@ -1722,11 +1799,10 @@ def create_object_stats_materialized_view( procver ):
         #     m = 22 : f =  5754
         #     m = 21 : f = 14454
 
-        FDBLogger.info( f"Creating materialized view objstats_{procver}" )
-        pvid = db.ProcessingVersion.procver_id( procver, dbcon=dbcon )
+        FDBLogger.info( f"Creating materialized view objstats_{pvobj.description}" )
 
         q = sql.SQL( textwrap.dedent(
-            """
+            """\
             CREATE MATERIALIZED VIEW {viewname} AS (
                SELECT r.rootid, r.ra, r.dec, r.band,
                    d0.midpointmjdtai AS firstdet_mjd, d0.psfflux AS firstdet_flux, d0.psffluxerr AS firstdet_fluxerr,
@@ -1734,14 +1810,20 @@ def create_object_stats_materialized_view( procver ):
                    dx.midpointmjdtai AS maxdet_mjd, dx.psfflux AS maxdet_flux, dx.psffluxerr AS maxdet_fluxerr,
                    fn.midpointmjdtai AS lastforced_mjd, fn.psfflux AS lastforced_flux,
                      fn.psffluxerr AS lastforced_fluxerr,
-                   n.ndets,
+                   n.ndets, nf.nfrc,
                    CASE WHEN n24.ndets IS NULL THEN 0 ELSE n24.ndets END as ndets24,
                    CASE WHEN n23.ndets IS NULL THEN 0 ELSE n23.ndets END AS ndets23,
                    CASE WHEN n22.ndets IS NULL THEN 0 ELSE n22.ndets END AS ndets22,
                    CASE WHEN n21.ndets IS NULL THEN 0 ELSE n21.ndets END AS ndets21,
                    CASE WHEN sn10.ndets IS NULL THEN 0 ELSE sn10.ndets END AS nsn10,
                    CASE WHEN sn7.ndets IS NULL THEN 0 ELSE sn7.ndets END AS nsn7,
-                   CASE WHEN sn5.ndets IS NULL THEN 0 ELSE sn5.ndets END AS nsn5
+                   CASE WHEN sn5.ndets IS NULL THEN 0 ELSE sn5.ndets END AS nsn5,
+                   CASE WHEN relp5.ngood IS NULL THEN 0 ELSE relp5.ngood END AS nrelgtp50,
+                   CASE WHEN relp6.ngood IS NULL THEN 0 ELSE relp6.ngood END AS nrelgtp60,
+                   CASE WHEN relp7.ngood IS NULL THEN 0 ELSE relp7.ngood END AS nrelgtp70,
+                   CASE WHEN relp8.ngood IS NULL THEN 0 ELSE relp8.ngood END AS nrelgtp80,
+                   CASE WHEN relp9.ngood IS NULL THEN 0 ELSE relp9.ngood END AS nrelgtp90,
+                   CASE WHEN relp95.ngood IS NULL THEN 0 ELSE relp95.ngood END AS nrelgtp95
                FROM (
                  ( SELECT DISTINCT ON(o.rootid, s.band) o.rootid, r.ra, r.dec, s.band
                    FROM root_diaobject r
@@ -1751,11 +1833,11 @@ def create_object_stats_materialized_view( procver ):
                                                        AND j.procver_id={pvid}
                  )
                  UNION
-                 ( SELECT DISTINCT ON(o.rootid, s.band) o.rootid, r.ra, r.dec, s.band
+                 ( SELECT DISTINCT ON(o.rootid, f.band) o.rootid, r.ra, r.dec, f.band
                    FROM root_diaobject r
                    INNER JOIN diaobject o ON o.rootid=r.id
-                   INNER JOIN diaforcedsource s ON s.diaobjectid=o.diaobjectid
-                   INNER JOIN base_procver_of_procver j ON s.base_procver_id=j.base_procver_id
+                   INNER JOIN diaforcedsource f ON f.diaobjectid=o.diaobjectid
+                   INNER JOIN base_procver_of_procver j ON f.base_procver_id=j.base_procver_id
                                                        AND j.procver_id={pvid}
                  )
                ) r
@@ -1767,6 +1849,7 @@ def create_object_stats_materialized_view( procver ):
                     INNER JOIN diaobject o ON s.diaobjectid=o.diaobjectid
                     INNER JOIN base_procver_of_procver j ON s.base_procver_id=j.base_procver_id
                                                         AND j.procver_id={pvid}
+                    WHERE s.psfflux > 0
                     ORDER BY o.rootid, s.visit, j.priority DESC
                  ) subq
                  ORDER BY rootid, band, midpointmjdtai
@@ -1779,6 +1862,7 @@ def create_object_stats_materialized_view( procver ):
                     INNER JOIN diaobject o ON s.diaobjectid=o.diaobjectid
                     INNER JOIN base_procver_of_procver j ON s.base_procver_id=j.base_procver_id
                                                         AND j.procver_id={pvid}
+                    WHERE s.psfflux > 0
                     ORDER BY o.rootid, s.visit, j.priority DESC
                  ) subq
                  ORDER BY rootid, band, midpointmjdtai DESC
@@ -1791,6 +1875,7 @@ def create_object_stats_materialized_view( procver ):
                     INNER JOIN diaobject o ON s.diaobjectid=o.diaobjectid
                     INNER JOIN base_procver_of_procver j ON s.base_procver_id=j.base_procver_id
                                                         AND j.procver_id={pvid}
+                    WHERE s.psfflux > 0
                     ORDER BY o.rootid, s.visit, j.priority DESC
                  ) subq
                  ORDER BY rootid, band, psfflux DESC
@@ -1808,9 +1893,9 @@ def create_object_stats_materialized_view( procver ):
                  ORDER BY rootid, band, midpointmjdtai DESC
                ) fn ON fn.rootid=r.rootid AND fn.band=r.band
                LEFT JOIN (
-                  SELECT rootid, band, COUNT(diasourceid) AS ndets
+                  SELECT rootid, band, COUNT(*) AS ndets
                   FROM (
-                     SELECT DISTINCT ON(o.rootid, s.visit) o.rootid, s.band, s.diasourceid
+                     SELECT DISTINCT ON(o.rootid, s.visit) o.rootid, s.band
                      FROM diasource s
                      INNER JOIN diaobject o ON s.diaobjectid=o.diaobjectid
                      INNER JOIN base_procver_of_procver j ON s.base_procver_id=j.base_procver_id
@@ -1820,124 +1905,109 @@ def create_object_stats_materialized_view( procver ):
                   GROUP BY rootid, band
                ) n ON r.rootid=n.rootid AND r.band=n.band
                LEFT JOIN (
-                  SELECT rootid, band, COUNT(diasourceid) AS ndets
+                  SELECT rootid, band, COUNT(*) AS nfrc
                   FROM (
-                     SELECT DISTINCT ON(o.rootid, s.visit) o.rootid, s.band, s.diasourceid, s.psfflux
-                     FROM diasource s
-                     INNER JOIN diaobject o ON s.diaobjectid=o.diaobjectid
-                     INNER JOIN base_procver_of_procver j ON s.base_procver_id=j.base_procver_id
+                     SELECT DISTINCT ON(o.rootid, f.visit) o.rootid, f.band
+                     FROM diaforcedsource f
+                     INNER JOIN diaobject o ON f.diaobjectid=o.diaobjectid
+                     INNER JOIN base_procver_of_procver j ON f.base_procver_id=j.base_procver_id
                                                          AND j.procver_id={pvid}
-                     ORDER BY o.rootid, s.visit, j.priority DESC
+                     ORDER BY o.rootid, f.visit, j.priority DESC
                   ) subq
-                  WHERE psfflux >= 912
                   GROUP BY rootid, band
-               ) n24 ON r.rootid=n24.rootid AND r.band=n24.band
+               ) nf ON r.rootid=nf.rootid AND r.band=nf.band
+            """
+        ) ).format( viewname=sql.Identifier( f'objstats_{pvobj.description}' ), pvid=pvobj.id )
+        for alias, flux in zip( [ 'n24', 'n23', 'n22', 'n21' ],
+                                [ 912, 2291, 5754, 14454 ] ):
+            q += sql.SQL( textwrap.indent( textwrap.dedent(
+                """\
                LEFT JOIN (
-                  SELECT rootid, band, COUNT(diasourceid) AS ndets
+                  SELECT rootid, band, COUNT(*) AS ndets
                   FROM (
-                     SELECT DISTINCT ON(o.rootid, s.visit) o.rootid, s.band, s.diasourceid, s.psfflux
+                     SELECT DISTINCT ON(o.rootid, s.visit) o.rootid, s.band, s.psfflux
                      FROM diasource s
                      INNER JOIN diaobject o ON s.diaobjectid=o.diaobjectid
                      INNER JOIN base_procver_of_procver j ON s.base_procver_id=j.base_procver_id
                                                          AND j.procver_id={pvid}
                      ORDER BY o.rootid, s.visit, j.priority DESC
                   ) subq
-                  WHERE psfflux >= 2291
+                  WHERE psfflux >= {flux}
                   GROUP BY rootid, band
-               ) n23 ON r.rootid=n23.rootid AND r.band=n23.band
+               ) {alias} ON r.rootid={alias}.rootid AND r.band={alias}.band
+                """
+                ), '   ' ) ).format( pvid=pvobj.id, flux=sql.SQL(str(flux)), alias=sql.Identifier(alias) )
+        for alias, sn in zip( [ 'sn10', 'sn7', 'sn5' ], [ 10, 7, 5 ] ):
+            q += sql.SQL( textwrap.indent( textwrap.dedent(
+                """\
                LEFT JOIN (
-                  SELECT rootid, band, COUNT(diasourceid) AS ndets
+                  SELECT rootid, band, COUNT(*) AS ndets
                   FROM (
-                     SELECT DISTINCT ON(o.rootid, s.visit) o.rootid, s.band, s.diasourceid, s.psfflux
+                     SELECT DISTINCT ON(o.rootid, s.visit) o.rootid, s.band, s.psfflux, s.psffluxerr
                      FROM diasource s
                      INNER JOIN diaobject o ON s.diaobjectid=o.diaobjectid
                      INNER JOIN base_procver_of_procver j ON s.base_procver_id=j.base_procver_id
                                                          AND j.procver_id={pvid}
                      ORDER BY o.rootid, s.visit, j.priority DESC
                   ) subq
-                  WHERE psfflux >= 5754
+                  WHERE psfflux / psffluxerr >= {sn}
                   GROUP BY rootid, band
-               ) n22 ON r.rootid=n22.rootid AND r.band=n22.band
+               ) {alias} ON r.rootid={alias}.rootid AND r.band={alias}.band
+                """
+                ), '   ' ) ).format( pvid=pvobj.id, sn=sql.SQL(str(sn)), alias=sql.Identifier(alias) )
+        for alias, rel in zip( [ 'relp5', 'relp6', 'relp7', 'relp8', 'relp9', 'relp95' ],
+                               [ 0.5, 0.6, 0.7, 0.8, 0.9, 0.95 ] ):
+            q += sql.SQL( textwrap.indent( textwrap.dedent(
+                """\
                LEFT JOIN (
-                  SELECT rootid, band, COUNT(diasourceid) AS ndets
+                  SELECT rootid, band, COUNT(*) as ngood
                   FROM (
-                     SELECT DISTINCT ON(o.rootid, s.visit) o.rootid, s.band, s.diasourceid, s.psfflux
-                     FROM diasource s
-                     INNER JOIN diaobject o ON s.diaobjectid=o.diaobjectid
-                     INNER JOIN base_procver_of_procver j ON s.base_procver_id=j.base_procver_id
-                                                         AND j.procver_id={pvid}
-                     ORDER BY o.rootid, s.visit, j.priority DESC
-                  ) subq
-                  WHERE psfflux >= 14454
-                  GROUP BY rootid, band
-               ) n21 ON r.rootid=n21.rootid AND r.band=n21.band
-               LEFT JOIN (
-                  SELECT rootid, band, COUNT(diasourceid) AS ndets
-                  FROM (
-                     SELECT DISTINCT ON(o.rootid, s.visit) o.rootid, s.band, s.diasourceid, s.psfflux, s.psffluxerr
-                     FROM diasource s
-                     INNER JOIN diaobject o ON s.diaobjectid=o.diaobjectid
-                     INNER JOIN base_procver_of_procver j ON s.base_procver_id=j.base_procver_id
-                                                         AND j.procver_id={pvid}
-                     ORDER BY o.rootid, s.visit, j.priority DESC
-                  ) subq
-                  WHERE psfflux / psffluxerr >= 10
-                  GROUP BY rootid, band
-               ) sn10 ON r.rootid=sn10.rootid AND r.band=sn10.band
-               LEFT JOIN (
-                  SELECT rootid, band, COUNT(diasourceid) AS ndets
-                  FROM (
-                     SELECT DISTINCT ON(o.rootid, s.visit) o.rootid, s.band, s.diasourceid, s.psfflux, s.psffluxerr
-                     FROM diasource s
-                     INNER JOIN diaobject o ON s.diaobjectid=o.diaobjectid
-                     INNER JOIN base_procver_of_procver j ON s.base_procver_id=j.base_procver_id
-                                                         AND j.procver_id={pvid}
-                     ORDER BY o.rootid, s.visit, j.priority DESC
-                  ) subq
-                  WHERE psfflux / psffluxerr >= 7
-                  GROUP BY rootid, band
-               ) sn7 ON r.rootid=sn7.rootid AND r.band=sn7.band
-               LEFT JOIN (
-                  SELECT rootid, band, COUNT(diasourceid) AS ndets
-                  FROM (
-                     SELECT DISTINCT ON(o.rootid, s.visit) o.rootid, s.band, s.diasourceid, s.psfflux, s.psffluxerr
-                     FROM diasource s
-                     INNER JOIN diaobject o ON s.diaobjectid=o.diaobjectid
-                     INNER JOIN base_procver_of_procver j ON s.base_procver_id=j.base_procver_id
-                                                         AND j.procver_id={pvid}
-                     ORDER BY o.rootid, s.visit, j.priority DESC
-                  ) subq
-                  WHERE psfflux / psffluxerr >= 5
-                  GROUP BY rootid, band
-               ) sn5 ON r.rootid=sn5.rootid AND r.band=sn5.band
+                    SELECT DISTINCT ON(o.rootid, s.visit) o.rootid, s.band, se.reliability
+                    FROM diasource s
+                    INNER JOIN diaobject o ON s.diaobjectid=o.diaobjectid
+                    INNER JOIN diasource_extra se ON s.diasourceid=se.diasourceid
+                                                 AND s.base_procver_id=se.base_procver_id
+                    INNER JOIN base_procver_of_procver j ON s.base_procver_id=j.base_procver_id
+                                                     AND j.procver_id={pvid}
+                    ORDER BY o.rootid, s.visit, j.priority DESC
+                 ) subq
+                 WHERE reliability > {rel}
+                 GROUP BY rootid, band
+               ) {alias} ON r.rootid={alias}.rootid AND r.band={alias}.band
+                """
+                ), '   ' ) ).format( pvid=pvobj.id, rel=sql.SQL(f'{rel:.1f}'), alias=sql.Identifier(alias) )
+        q += sql.SQL( textwrap.dedent(
+            """\
             )
             """
-        ) ).format( viewname=sql.Identifier( f'objstats_{procver}' ), pvid=pvid )
+        ) ).format( viewname=sql.Identifier( f'objstats_{pvobj.description}' ), pvid=pvobj.id )
 
-        dbcon.execute_nofetch( q, explain=False )
+        dbcon.execute_nofetch( q, explain=True )
 
         indexcols = [ 'rootid', 'firstdet_mjd', 'lastdet_mjd', 'maxdet_mjd',
                      'firstdet_flux', 'lastdet_flux', 'maxdet_flux',
-                     'ndets', 'ndets24', 'ndets23', 'ndets22', 'ndets21', 'nsn10', 'nsn7', 'nsn5' ]
+                     'ndets', 'nfrc',
+                     'ndets24', 'ndets23', 'ndets22', 'ndets21', 'nsn10', 'nsn7', 'nsn5',
+                     'nrelgtp50', 'nrelgtp60', 'nrelgtp70', 'nrelgtp80', 'nrelgtp90', 'nrelgtp95' ]
         for col in indexcols:
             q = sql.SQL( 'CREATE INDEX {idxname} ON {viewname}({col})'
-                        ).format( idxname=sql.Identifier( f'idx_obstats_{procver}_{col}' ),
-                                  viewname=sql.Identifier( f'objstats_{procver}' ),
+                        ).format( idxname=sql.Identifier( f'idx_obstats_{pvobj.description}_{col}' ),
+                                  viewname=sql.Identifier( f'objstats_{pvobj.description}' ),
                                   col=sql.Identifier( col ) )
             dbcon.execute( q, explain=False )
 
         q = sql.SQL( 'CREATE INDEX {idxname} ON {viewname}(band)',
-                    ).format( idxname=sql.Identifier( f'idx_obstats_{procver}_band' ),
-                              viewname=sql.Identifier( f'objstats_{procver}' ) )
+                    ).format( idxname=sql.Identifier( f'idx_obstats_{pvobj.description}_band' ),
+                              viewname=sql.Identifier( f'objstats_{pvobj.description}' ) )
 
         q = sql.SQL( 'CREATE INDEX {idxname} ON {viewname}(q3c_ang2ipix(ra, dec))'
-                    ).format( idxname=sql.Identifier( f'idx_objstats_{procver}_q3c' ),
-                              viewname=sql.Identifier( f'objstats_{procver}' ) )
+                    ).format( idxname=sql.Identifier( f'idx_objstats_{pvobj.description}_q3c' ),
+                              viewname=sql.Identifier( f'objstats_{pvobj.description}' ) )
         dbcon.execute( q, explain=False )
 
         # Now create the view that combines all the bands together
         q = sql.SQL( textwrap.dedent(
-            """
+            """\
             CREATE MATERIALIZED VIEW {combviewname} AS (
               SELECT s.rootid, s.ra, s.dec,
                      fd.mjd AS firstdet_mjd, fd.band AS firstdet_band,
@@ -1948,13 +2018,18 @@ def create_object_stats_materialized_view( procver ):
                        xd.flux AS maxdet_flux, xd.fluxerr AS maxdet_fluxerr,
                      lf.mjd AS lastforced_mjd, lf.band AS lastforced_band,
                        lf.flux AS lastforced_flux, lf.fluxerr AS lastforced_fluxerr,
-                     s.ndets AS ndets, s.ndets24 AS ndets24, s.ndets23 AS ndets23,
-                       s.ndets22 AS ndets22, s.ndets21 AS ndets21,
-                     s.nsn10 AS nsn10, s.nsn7 AS nsn7, s.nsn5 AS nsn5
+                     s.ndets AS ndets, s.nfrc AS nfrc, s.ndets24 AS ndets24,
+                       s.ndets23 AS ndets23, s.ndets22 AS ndets22, s.ndets21 AS ndets21,
+                     s.nsn10 AS nsn10, s.nsn7 AS nsn7, s.nsn5 AS nsn5,
+                     s.nrelgtp50 AS nrelgtp50, s.nrelgtp60 AS nrelgtp60, s.nrelgtp70 AS nrelgtp70,
+                       s.nrelgtp80 AS nrelgtp80, s.nrelgtp90 AS nrelgtp90, s.nrelgtp95 AS nrelgtp95
               FROM (
-                SELECT rootid, ra, dec, SUM(ndets) AS ndets, SUM(ndets24) AS ndets24, SUM(ndets23) AS ndets23,
-                       SUM(ndets22) AS ndets22, SUM(ndets21) AS ndets21, SUM(nsn10) AS nsn10,
-                       SUM(nsn7) AS nsn7, SUM(nsn5) AS nsn5
+                SELECT rootid, ra, dec, SUM(ndets) AS ndets, SUM(nfrc) AS nfrc,
+                       SUM(ndets24) AS ndets24, SUM(ndets23) AS ndets23,
+                       SUM(ndets22) AS ndets22, SUM(ndets21) AS ndets21,
+                       SUM(nsn10) AS nsn10, SUM(nsn7) AS nsn7, SUM(nsn5) AS nsn5,
+                       SUM(nrelgtp50) as nrelgtp50, SUM(nrelgtp60) AS nrelgtp60, SUM(nrelgtp70) AS nrelgtp70,
+                       SUM(nrelgtp80) as nrelgtp80, SUM(nrelgtp90) AS nrelgtp90, SUM(nrelgtp95) AS nrelgtp95
                 FROM {viewname}
                 GROUP BY rootid, ra, dec
               ) s
@@ -1988,21 +2063,21 @@ def create_object_stats_materialized_view( procver ):
               ) lf ON s.rootid=lf.rootid
               WHERE fd.mjd IS NOT NULL OR lf.mjd IS NOT NULL
             )
-            """ ) ).format( viewname=sql.Identifier(f'objstats_{procver}'),
-                            combviewname=sql.Identifier(f'objstatscomb_{procver}') )
-        dbcon.execute( q, explain=False )
+            """ ) ).format( viewname=sql.Identifier(f'objstats_{pvobj.description}'),
+                            combviewname=sql.Identifier(f'objstatscomb_{pvobj.description}') )
+        dbcon.execute( q, explain=True )
 
         for col in indexcols:
             q = sql.SQL( 'CREATE INDEX {idxname} ON {viewname}({col})'
-                        ).format( idxname=sql.Identifier( f'idx_objstatscomb_{procver}_{col}' ),
-                                  viewname=sql.Identifier( f'objstatscomb_{procver}' ),
+                        ).format( idxname=sql.Identifier( f'idx_objstatscomb_{pvobj.description}_{col}' ),
+                                  viewname=sql.Identifier( f'objstatscomb_{pvobj.description}' ),
                                   col=sql.Identifier( col ) )
             dbcon.execute( q, explain=False )
 
         q = sql.SQL( 'CREATE INDEX {idxname} ON {viewname}(q3c_ang2ipix(ra, dec))'
-                    ).format( idxname=sql.Identifier( f'idx_objstatscomb_{procver}_q3c' ),
-                              viewname=sql.Identifier( f'objstatscomb_{procver}' ) )
+                    ).format( idxname=sql.Identifier( f'idx_objstatscomb_{pvobj.description}_q3c' ),
+                              viewname=sql.Identifier( f'objstatscomb_{pvobj.description}' ) )
         dbcon.execute( q, explain=False )
 
         dbcon.commit()
-        FDBLogger.info( f"Done creating materialized view objstats_{procver}" )
+        FDBLogger.info( f"Done creating object statistics materialized views for {pvobj.description}" )

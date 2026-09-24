@@ -106,69 +106,6 @@ def test_base_procver( procver_collection, test_user, fastdb_client ):
                 assert res['procvers'] == [ pv ]
 
 
-def test_countthings( set_of_lightcurves, test_user, fastdb_client ):
-    for pv in ( '', 'pvc_pv2', 'pvc_pv3', 'default' ):
-        for table in ( 'rootobject', 'rootdiaobject', 'rootid' ):
-            suffix = table if pv == '' else f'{table}/{pv}'
-            res = fastdb_client.post( f'/count/{suffix}' )
-            assert res['status'] == 'ok'
-            assert res['table'] == 'rootid'
-            assert res['count'] == ( 0 if pv == 'pvc_pv3' else 4 )
-
-        for table in ( 'diaobject', 'object' ):
-            suffix = table if pv == '' else f'{table}/{pv}'
-            res = fastdb_client.post( f'/count/{suffix}' )
-            assert res['status'] == 'ok'
-            assert res['table'] == 'diaobject'
-            assert res['count'] == ( 0 if pv == 'pvc_pv3' else 5 )
-
-        for table in ( 'diasource', 'source' ):
-            suffix = table if pv == '' else f'{table}/{pv}'
-            res = fastdb_client.post( f'/count/{suffix}' )
-            assert res['status'] == 'ok'
-            assert res['table'] == 'diasource'
-            assert res['count'] == 52
-
-        for table in ( 'diaforcedsource', 'forced' ):
-            suffix = table if pv == '' else f'{table}/{pv}'
-            res = fastdb_client.post( f'/count/{suffix}' )
-            assert res['status'] == 'ok'
-            assert res['table'] == 'diaforcedsource'
-            assert res['count'] == 100
-
-
-    for table in ( 'diaobject', 'object', 'rootobject', 'rootdiaobject', 'rootid' ):
-        res = fastdb_client.post( f'/count/{table}/realtime' )
-        assert res['status'] == 'ok'
-        assert res['table'] == ( 'diaobject' if table in ( 'diaobject', 'object' ) else 'rootid' )
-        assert res['count'] == 3
-
-    for table in ( 'diasource', 'source' ):
-        res = fastdb_client.post( f'/count/{table}/realtime' )
-        assert res['status'] == 'ok'
-        assert res['table'] == 'diasource'
-        assert res['count'] == 39
-
-    for table in ( 'diaforcedsource', 'forced' ):
-        res = fastdb_client.post( f'/count/{table}/realtime' )
-        assert res['status'] == 'ok'
-        assert res['table'] == 'diaforcedsource'
-        assert res['count'] == 55
-
-    # Temporarily reduce retries to 0 so these will fail fast
-    orig_retries = fastdb_client.retries
-    try:
-        fastdb_client.retries = 0
-        with pytest.raises( RuntimeError, match=( 'Error response from server, status 422: Unknown '
-                                                  'processing version this_processing_version_does_not_exist' ) ):
-            res = fastdb_client.post( '/count/diaobject/this_processing_version_does_not_exist' )
-        with pytest.raises( RuntimeError, match=( 'Error response from server, status 422: '
-                                                  'Unknown thing to count: this_table_does_not_exist' ) ):
-            res = fastdb_client.post( '/count/this_table_does_not_exist' )
-    finally:
-        fastdb_client.retries = orig_retries
-
-
 def test_getdiaobjectinfo( fastdb_client, procver_collection, set_of_lightcurves ):
     roots = set_of_lightcurves
 
@@ -320,6 +257,75 @@ def test_objectsearch( fastdb_client, procver_collection, objstats_realtime_view
                                      .format( view=sql.Identifier( f'objstats_{procver}' ) ) )
 
             con.commit()
+
+
+# THIS TEST MUST GO AFTER test_objectsearch BECASUE THAT TEST DEPENDS ON
+#   THE objstats_pvc_pv2_view AND objstats_pvc_pv3_view MODULE SCOPE FIXTURES
+#   NOT HAVING BEEN RUN YET.
+def test_countthings( set_of_lightcurves, objstats_realtime_view, objstats_pvc_pv2_view,
+                      objstats_pvc_pv3_view, test_user, fastdb_client ):
+    for pv in ( '', 'pvc_pv2', 'pvc_pv3', 'default' ):
+        for table in ( 'rootobject', 'rootdiaobject', 'rootid' ):
+            suffix = table if pv == '' else f'{table}/{pv}'
+            res = fastdb_client.post( f'/count/{suffix}' )
+            assert res['status'] == 'ok'
+            assert res['table'] == 'rootid'
+            # Even though there are no diaobjectids in pv3, the rootids are there
+            assert res['count'] == 4
+
+        # Counting diabobject isn't understood
+        # for table in ( 'diaobject', 'object' ):
+        #     suffix = table if pv == '' else f'{table}/{pv}'
+        #     res = fastdb_client.post( f'/count/{suffix}' )
+        #     assert res['status'] == 'ok'
+        #     assert res['table'] == 'diaobject'
+        #     assert res['count'] == ( 0 if pv == 'pvc_pv3' else 5 )
+
+        for table in ( 'diasource', 'source' ):
+            suffix = table if pv == '' else f'{table}/{pv}'
+            res = fastdb_client.post( f'/count/{suffix}' )
+            assert res['status'] == 'ok'
+            assert res['table'] == 'diasource'
+            assert res['count'] == 52
+
+        for table in ( 'diaforcedsource', 'forced' ):
+            suffix = table if pv == '' else f'{table}/{pv}'
+            res = fastdb_client.post( f'/count/{suffix}' )
+            assert res['status'] == 'ok'
+            assert res['table'] == 'diaforcedsource'
+            assert res['count'] == 100
+
+
+    for table in ( 'rootobject', 'rootdiaobject', 'rootid' ):
+        res = fastdb_client.post( f'/count/{table}/realtime' )
+        assert res['status'] == 'ok'
+        assert res['table'] == ( 'diaobject' if table in ( 'diaobject', 'object' ) else 'rootid' )
+        assert res['count'] == 3
+
+    for table in ( 'diasource', 'source' ):
+        res = fastdb_client.post( f'/count/{table}/realtime' )
+        assert res['status'] == 'ok'
+        assert res['table'] == 'diasource'
+        assert res['count'] == 39
+
+    for table in ( 'diaforcedsource', 'forced' ):
+        res = fastdb_client.post( f'/count/{table}/realtime' )
+        assert res['status'] == 'ok'
+        assert res['table'] == 'diaforcedsource'
+        assert res['count'] == 55
+
+    # Temporarily reduce retries to 0 so these will fail fast
+    orig_retries = fastdb_client.retries
+    try:
+        fastdb_client.retries = 0
+        with pytest.raises( RuntimeError, match=( 'Error response from server, status 422: Unknown '
+                                                  'processing version this_processing_version_does_not_exist' ) ):
+            res = fastdb_client.post( '/count/root/this_processing_version_does_not_exist' )
+        with pytest.raises( RuntimeError, match=( 'Error response from server, status 422: '
+                                                  'Unknown thing to count: this_table_does_not_exist' ) ):
+            res = fastdb_client.post( '/count/this_table_does_not_exist' )
+    finally:
+        fastdb_client.retries = orig_retries
 
 
 # ======================================================================

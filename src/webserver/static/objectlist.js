@@ -90,7 +90,7 @@ fastdbap.ObjectList = class
                        'magforcedlast',
                        'magforcedlasterr' ]
         let hdrs = { 'lastdet_mjd': 'mjd',
-                     'lastdet_fluxband': 'band',
+                     'lastdet_band': 'band',
                      'ndets': 'ndets',
                      'firstdet_mjd': 'mjd',
                      'firstdet_band': 'mjd',
@@ -121,29 +121,29 @@ fastdbap.ObjectList = class
                                                  self.show_object_info( data.rootid[i] );
                                                   }
                                                 } ],
-                'ra':               [ "td", tr, { "text": data.ra[i].toFixed(5) } ],
-                'dec':              [ "td", tr, { "text": data.dec[i].toFixed(5) } ],
+                'ra':               [ "td", tr, { "text": rkWebUtil.fixedOrEmpty(data.ra[i], 5) } ],
+                'dec':              [ "td", tr, { "text": rkWebUtil.fixedOrEmpty(data.dec[i], 5) } ],
                 'ndets':            [ "td", tr, { "text": data.ndets[i].toString() } ],
-                'firstdet_mjd':     [ "td", tr, { "text": data.firstdet_mjd[i].toFixed(2),
+                'firstdet_mjd':     [ "td", tr, { "text": rkWebUtil.fixedOrEmpty(data.firstdet_mjd[i], 2),
                                                   "classes": [ "borderleft" ] } ],
                 'firstdet_band':    [ "td", tr, { "text": data.lastdet_band[i] } ],
-                'magfirst':         [ "td", tr, { "text": data.maglast[i].toFixed(2) } ],
-                'magfirsterr':      [ "td", tr, { "text": data.maglasterr[i].toFixed(2) } ],
-                'lastdet_mjd':      [ "td", tr, { "text": data.lastdet_mjd[i].toFixed(2),
+                'magfirst':         [ "td", tr, { "text": rkWebUtil.fixedOrEmpty(data.maglast[i], 2) } ],
+                'magfirsterr':      [ "td", tr, { "text": rkWebUtil.fixedOrEmpty(data.maglasterr[i], 2) } ],
+                'lastdet_mjd':      [ "td", tr, { "text": rkWebUtil.fixedOrEmpty(data.lastdet_mjd[i], 2),
                                                   "classes": [ "borderleft" ] } ],
                 'lastdet_band':     [ "td", tr, { "text": data.lastdet_band[i] } ],
-                'maglast':          [ "td", tr, { "text": data.maglast[i].toFixed(2) } ],
-                'maglasterr':       [ "td", tr, { "text": data.maglasterr[i].toFixed(2) } ],
-                'maxdet_mjd':       [ "td", tr, { "text": data.maxdet_mjd[i].toFixed(2),
+                'maglast':          [ "td", tr, { "text": rkWebUtil.fixedOrEmpty(data.maglast[i], 2) } ],
+                'maglasterr':       [ "td", tr, { "text": rkWebUtil.fixedOrEmpty(data.maglasterr[i], 2) } ],
+                'maxdet_mjd':       [ "td", tr, { "text": rkWebUtil.fixedOrEmpty(data.maxdet_mjd[i], 2),
                                                   "classes": [ "borderleft" ] } ],
                 'maxdet_band':      [ "td", tr, { "text": data.maxdet_band[i] } ],
-                'magmax':           [ "td", tr, { "text": data.magmax[i].toFixed(2) } ],
-                'magmaxerr':        [ "td", tr, { "text": data.magmaxerr[i].toFixed(2) } ],
-                'lastforced_mjd':   [ "td", tr, { "text": data.lastforced_mjd[i].toFixed(2),
+                'magmax':           [ "td", tr, { "text": rkWebUtil.fixedOrEmpty(data.magmax[i], 2) } ],
+                'magmaxerr':        [ "td", tr, { "text": rkWebUtil.fixedOrEmpty(data.magmaxerr[i], 2) } ],
+                'lastforced_mjd':   [ "td", tr, { "text": rkWebUtil.fixedOrEmpty(data.lastforced_mjd[i], 2),
                                                   "classes": [ "borderleft" ] } ],
                 'lastforced_band':  [ "td", tr, { "text": data.lastforced_band[i] } ],
-                'magforcedlast':    [ "td", tr, { "text": data.magforcedlast[i].toFixed(2) } ],
-                'magforcedlasterr': [ "td", tr, { "text": data.magforcedlasterr[i].toFixed(2) } ]
+                'magforcedlast':    [ "td", tr, { "text": rkWebUtil.fixedOrEmpty(data.magforcedlast[i], 2) } ],
+                'magforcedlasterr': [ "td", tr, { "text": rkWebUtil.fixedOrEmpty(data.magforcedlasterr[i], 2) } ]
             }
             for ( let f of fields ) {
                 if ( ! args.hasOwnProperty( f ) ) {

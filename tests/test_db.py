@@ -13,64 +13,64 @@ def test_construct_sql_where_clause():
 
     q, subdict, missing, _where = construct_pgsql_where_clause( searchspec, just="A" )
     assert missing == set()
-    assert q.as_string() == 'WHERE "just"=%(just)s'
+    assert q.as_string() == 'WHERE "just"=%(just)s\n'
     assert subdict == { 'just': 'A' }
 
     q, subdict, missing, _where = construct_pgsql_where_clause( searchspec, just="A", mult="B", does_not_exist=42 )
     assert missing == set( [ 'does_not_exist' ] )
-    assert q.as_string() == 'WHERE "just"=%(just)s AND "mult"=%(mult)s'
+    assert q.as_string() == 'WHERE "just"=%(just)s\n  AND "mult"=%(mult)s\n'
     assert subdict == { 'just': 'A', 'mult': 'B' }
 
     q, subdict, missing, _where = construct_pgsql_where_clause( searchspec, just="A", mult=[ "B", "C" ] )
     assert missing == set()
-    assert q.as_string() == 'WHERE "just"=%(just)s AND "mult"=ANY(%(mult)s)'
+    assert q.as_string() == 'WHERE "just"=%(just)s\n  AND "mult"=ANY(%(mult)s)\n'
     assert subdict == { 'just': 'A', 'mult': [ 'B', 'C' ] }
 
     q, subdict, missing, _where = construct_pgsql_where_clause( searchspec, just="A", mult=( "B", "C" ) )
     assert missing == set()
-    assert q.as_string() == 'WHERE "just"=%(just)s AND "mult"=ANY(%(mult)s)'
+    assert q.as_string() == 'WHERE "just"=%(just)s\n  AND "mult"=ANY(%(mult)s)\n'
     assert subdict == { 'just': 'A', 'mult': [ 'B', 'C' ] }
 
     q, subdict, missing, _where = construct_pgsql_where_clause( searchspec, substr="B", substr_contains="C" )
     assert missing == set()
-    assert q.as_string() == 'WHERE "substr"=%(substr)s AND "substr" LIKE %(substr_contains)s'
+    assert q.as_string() == 'WHERE "substr"=%(substr)s\n  AND "substr" LIKE %(substr_contains)s\n'
     assert subdict == { 'substr': 'B', 'substr_contains': '%C%' }
 
     q, subdict, missing, _where = construct_pgsql_where_clause( searchspec, multsubstr="C", multsubstr_contains="D" )
     assert missing == set()
-    assert q.as_string() == 'WHERE "multsubstr"=%(multsubstr)s AND "multsubstr" LIKE %(multsubstr_contains)s'
+    assert q.as_string() == 'WHERE "multsubstr"=%(multsubstr)s\n  AND "multsubstr" LIKE %(multsubstr_contains)s\n'
     assert subdict == { 'multsubstr': "C", 'multsubstr_contains': '%D%' }
 
     q, subdict, missing, _where = construct_pgsql_where_clause( searchspec, multsubstr="C",
                                                                 multsubstr_contains=[ "D", "E" ] )
     assert missing == set()
-    assert q.as_string() == ( 'WHERE "multsubstr"=%(multsubstr)s AND '
+    assert q.as_string() == ( 'WHERE "multsubstr"=%(multsubstr)s\n  AND '
                               '("multsubstr" LIKE %(multsubstr_contains_0)s OR '
-                              '"multsubstr" LIKE %(multsubstr_contains_1)s)' )
+                              '"multsubstr" LIKE %(multsubstr_contains_1)s)\n' )
     assert subdict == { 'multsubstr': "C", 'multsubstr_contains_0': '%D%', 'multsubstr_contains_1': "%E%" }
 
 
     q, subdict, missing, _where = construct_pgsql_where_clause( searchspec, minmax_min=5 )
     assert missing == set()
-    assert q.as_string() == 'WHERE "minmax">=%(minmax_min)s'
+    assert q.as_string() == 'WHERE "minmax">=%(minmax_min)s\n'
     assert subdict == { 'minmax_min': 5 }
 
     q, subdict, missing, _where = construct_pgsql_where_clause( searchspec, minmax_min=5, minmax_max=10 )
     assert missing == set()
-    assert q.as_string() == 'WHERE "minmax">=%(minmax_min)s AND "minmax"<=%(minmax_max)s'
+    assert q.as_string() == 'WHERE "minmax">=%(minmax_min)s\n  AND "minmax"<=%(minmax_max)s\n'
     assert subdict == { 'minmax_min': 5, 'minmax_max': 10 }
 
 
     q, subdict, missing, _where = construct_pgsql_where_clause( searchspec, minmax_minus_minmax2_min=1 )
     assert missing == set()
-    assert q.as_string() == 'WHERE "minmax"-"minmax2">=%(minmax_minus_minmax2_min)s'
+    assert q.as_string() == 'WHERE "minmax"-"minmax2">=%(minmax_minus_minmax2_min)s\n'
     assert subdict == { 'minmax_minus_minmax2_min': 1 }
 
     q, subdict, missing, _where = construct_pgsql_where_clause( searchspec, minmax_minus_minmax2_min=1,
                                                                 minmax_minus_minmax2_max=2 )
     assert missing == set()
-    assert q.as_string() == ( 'WHERE "minmax"-"minmax2">=%(minmax_minus_minmax2_min)s '
-                              'AND "minmax"-"minmax2"<=%(minmax_minus_minmax2_max)s' )
+    assert q.as_string() == ( 'WHERE "minmax"-"minmax2">=%(minmax_minus_minmax2_min)s\n  '
+                              'AND "minmax"-"minmax2"<=%(minmax_minus_minmax2_max)s\n' )
     assert subdict == { 'minmax_minus_minmax2_min': 1, 'minmax_minus_minmax2_max': 2 }
 
 

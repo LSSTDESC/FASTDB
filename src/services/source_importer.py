@@ -459,7 +459,7 @@ class SourceImporter:
                 #   root_diaobject forieng key in diaobject implicitly
                 #   grabs a ROW SHARE lock on root_diaobject.
                 FDBLogger.debug( "  ...starting root diaobject matching..." )
-                dbcon.execute( "LOCK TABLE root_diaobject IN SHARE ROW EXCLUSIVE MODE" )
+                dbcon.execute( "LOCK TABLE root_diaobject IN SHARE ROW EXCLUSIVE MODE", explain=False )
 
                 # Link new objects to existing root objects
                 # TODO : test this with multiple processing versions and multiple
