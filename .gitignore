@@ -37,7 +37,7 @@ tests/load_snana_fits_reconstruct_indexes_constraints.sql
 
 # Env file
 /.env
-/helm/fastdb/values-arbutus-secrets.yaml
+/helm/fastdb/*secrets*.yaml
 
 # Emacs backup files
 **~
