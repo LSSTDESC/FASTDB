@@ -47,6 +47,9 @@ volumes:
   # Enable hostPath for code directories (for local Kind deployment)
   # When true, mounts /fastdb-install and /fastdb-db from Kind extraMounts
   codeHostPath: false
+  hostPaths:
+    install: /fastdb-install
+    db: /fastdb-db
 
   # Code PVC - for loading code via git clone (for vcluster/cloud deployments)
   codePvc:
@@ -80,6 +83,11 @@ postgres:
     repository: fastdb-postgres
     tag: ""  # Falls back to global.imageTag
   replicas: 1
+
+  # Stop the existing PostgreSQL pod before starting its replacement so that
+  # both pods never try to use the same database files simultaneously.
+  updateStrategy:
+    type: Recreate
 
   persistence:
     size: 10Gi
@@ -136,6 +144,11 @@ mongodb:
     repository: fastdb-mongodb
     tag: ""
   replicas: 1
+
+  # Stop the existing MongoDB pod before starting its replacement so that
+  # both pods never try to use the same database files simultaneously.
+  updateStrategy:
+    type: Recreate
 
   persistence:
     size: 5Gi

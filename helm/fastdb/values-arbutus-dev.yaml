@@ -1,0 +1,89 @@
+# FASTDB development deployment on a single-node Arbutus K3s VM.
+# Images should be pre-built with build-local-images.sh and imported into k3s
+
+global:
+  namespace: fastdb-arbutus-dev
+  environment: dev
+  # This is a local image name, not a remote registry used for pulling images.
+  imageRegistry: fastdb.local
+  imageTag: test20260428
+  imagePullPolicy: Never
+  imagePullSecrets: []
+
+volumes:
+  type: pvc
+  storageClass: local-path
+  codeHostPath: true
+
+postgres:
+  enabled: true
+  persistence:
+    size: 8Gi
+    accessMode: ReadWriteOnce
+  externalAccess:
+    enabled: false
+
+# We will not start the postgres-standby because a standby on the same VM would consume resources without protecting against failure of that VM.
+postgresStandby:
+  enabled: false
+
+mongodb:
+  enabled: true
+  persistence:
+    size: 8Gi
+    accessMode: ReadWriteOnce
+
+webap:
+  enabled: true
+  externalAccess:
+    enabled: true
+    type: NodePort
+    nodePort: 30080
+  volumes:
+    sessions:
+      size: 1Gi
+      accessMode: ReadWriteOnce
+    queryResults:
+      size: 1Gi
+      accessMode: ReadWriteOnce
+    logs:
+      size: 1Gi
+      accessMode: ReadWriteOnce
+
+shell:
+  enabled: true
+
+queryrunner:
+  enabled: true
+
+mailhog:
+  enabled: true
+  externalAccess:
+    enabled: true
+    type: NodePort
+    nodePort: 30025
+
+createdb:
+  enabled: true
+
+ingestion:
+  enabled: true
+  brokerConsumer:
+    name: lass
+    loggerName: LASS
+    server: host.docker.internal:19092
+    groupId: fastdb-arbutus-lass
+    topic: lass-topic
+    schemaFile: /fastdb/share/avsc/lsst.v10_0.alert.avsc
+    collectionBase: lass
+    brokerName: lass
+    # install-singlenode-fastdb.sh discovers the Kubernetes node IP and
+    # supplies it to Helm, so this file is reusable on different Arbutus VMs.
+    dockerHostIp: ""
+    # LASS advertises localhost:19092. This proxy forwards that pod-local
+    # address to the Docker-published Kafka port on the VM.
+    localhostProxy: true
+  processingVersion:
+    name: lass
+  sourceImporter:
+    schedule: "* * * * *"

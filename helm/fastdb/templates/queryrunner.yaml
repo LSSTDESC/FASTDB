@@ -47,7 +47,7 @@ spec:
       {{- if .Values.volumes.codeHostPath }}
       - name: fastdb-install
         hostPath:
-          path: /fastdb-install
+          path: {{ .Values.volumes.hostPaths.install | quote }}
           type: Directory
       {{- else if .Values.volumes.codePvc.enabled }}
       - name: code

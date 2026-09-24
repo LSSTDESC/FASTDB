@@ -2,6 +2,64 @@
 
 This guide explains how to deploy FASTDB to Kubernetes clusters using Helm.
 
+## Quickstart
+
+### Option 1: Install scripts
+
+Some site-specific installation scripts are available in [`helm/scripts/`](./scripts/). For example you can install fastdb on a single node kubernetes cluster with:
+
+```bash
+./helm/scripts/install-singlenode-fastdb.sh <values-file>
+```
+
+where the values file describes the specifics of the installation e.g. broker info, storage allocated to the data base, version numbers of images. Example values files are in [`helm/fastdb/`](./fastdb/), including [values-arbutus-dev.yaml](./fastdb/values-arbutus-dev.yaml) which contains the config for a small developement install simulated alerts from [LASS](https://github.com/CanDIAPL/lass).
+
+### Option 2: Direct install with helm scripts
+
+A FASTDB Helm deployment has two main stages: generate the runnable FASTDB
+files with the `makeinstall` container, then deploy the Kubernetes resources
+with Helm.
+
+#### 1. Generate `install/` with the `makeinstall` container
+
+The `makeinstall` Docker Compose service uses the FASTDB shell image.
+
+Obtain the shell image by either pulling a prebuilt image:
+
+```bash
+docker pull "<path-to-shell-image-on-registry>"
+```
+
+or building it from the current checkout:
+
+```bash
+docker compose build shell
+```
+
+Then run the container that configures FASTDB and writes the runnable files to
+`install/`:
+
+```bash
+USERID="$(id -u)" GROUPID="$(id -g)" \
+  docker compose run --rm makeinstall
+```
+
+#### 2. Install FASTDB with Helm
+
+Choose an environment-specific values file and run Helm:
+
+```bash
+helm upgrade --install fastdb ./helm/fastdb \
+  --namespace <namespace> \
+  --create-namespace \
+  --values ./helm/fastdb/<values-file>.yaml
+```
+
+Example values files are in [`helm/fastdb/`](./fastdb/), including local Kind
+and single-node Arbutus configurations. Some environments also require a secrets
+values file, registry credentials, storage settings, or host-path overrides;
+the environment-specific sections below describe those additions.
+
 ## Conceptual Overview
 
 ### What is Helm?
@@ -17,7 +75,7 @@ helm/
     ├── Chart.yaml           # Chart metadata (name, version)
     ├── values.yaml          # Default configuration values
     ├── values-local.yaml    # Local Kind cluster overrides
-    ├── values-slac.yaml     # SLAC S3DF overrides
+    ├── values-arbutus.yaml  # Single-node VM overrides
     └── templates/           # Kubernetes manifest templates
         ├── _helpers.tpl     # Reusable template functions
         ├── secrets.yaml
@@ -46,21 +104,17 @@ helm/
 └─────────────┘     └─────────────┘     └──────────────────┘
 ```
 
-## Quick Start
+## Details
 
 ### Prerequisites
 
-- Kubernetes cluster (Kind, SLAC S3DF, NERSC SPIN, etc.)
+- Single-node Kubernetes cluster, or a local Kind cluster
 - `helm` CLI installed
 - `kubectl` configured to access your cluster
-- Docker Desktop for the recommended local Kind workflow. The general
-  `helm-deploy.sh` script can also use Podman for other deployments.
 - Docker images built and accessible
-- For private registries (GHCR, NERSC, etc.): a GitHub PAT with `read:packages` scope (see [Registry Credentials](#registry-credentials))
+- Credentials for any private image registry (see [Registry Credentials](#registry-credentials))
 
 The local helper scripts use Docker Compose and Docker image loading for Kind.
-The general `scripts/helm-deploy.sh` supports Podman where the target
-environment and Kind setup support it.
 
 ### Recommended Local Kind Workflow
 
@@ -112,45 +166,89 @@ page and MailHog message, run:
 
 Enter the desired password manually on the opened reset page.
 
-The old combined workflow is temporarily retained as
-`helm/scripts/deprecated-start-local.sh`. It is deprecated and should only be
-used when reproducing the previous installation behavior.
+### Arbutus development VM workflow
+
+On an Ubuntu VM, set up the single-node K3s cluster once:
+
+```bash
+./helm/scripts/setup-arbutus-k3s.sh
+```
+
+To use prebuilt images from a private registry, log in once and install with a
+values file that identifies the registry, tag, and `fastdb-registry` pull
+secret. The included example uses the CanDIAPL project in CANFAR Harbor:
+
+```bash
+docker login images.canfar.net
+./helm/scripts/install-singlenode-fastdb.sh \
+  ./helm/fastdb/values-arbutus.yaml
+```
+
+To build images from the current checkout instead, prepare the local Docker
+and K3s images first, then install with the local values file:
+
+```bash
+./helm/scripts/build-local-images.sh \
+  fastdb.local test20260428
+./helm/scripts/install-singlenode-fastdb.sh \
+  ./helm/fastdb/values-arbutus-dev.yaml
+```
+
+Create the initial FASTDB user without requiring browser access to MailHog:
+
+```bash
+./helm/scripts/create-user-singlenode.sh
+```
+
+The user script creates the server-side account only. It does not create a
+`.fastdb.ini` file or a Kubernetes client Secret. Each application that uses
+the FASTDB Python client is responsible for supplying its own credentials; a
+Kubernetes application will typically create and mount a Secret containing its
+`.fastdb.ini` file in that application's namespace.
+
+The installer takes all Helm image settings from the selected values file. It
+uses the configured shell image to prepare the host-mounted `install/` tree,
+but it does not build deployment images. Kubernetes pulls remote registry
+images when needed; locally built images must first be loaded with
+`build-local-images.sh`.
+
+The installer generates development passwords on its first run in the ignored,
+mode-600 file `helm/fastdb/values-arbutus-secrets.yaml`; keep that file for
+later upgrades. PostgreSQL standby is disabled. Alert ingestion expects a LASS
+Kafka broker published on port 19092 of the same VM. The installer discovers
+the K3s node's internal address and uses it to connect the FASTDB broker
+consumer to LASS, so the values files do not contain a VM-specific IP address.
+
+The K3s `local-path` provisioner stores the database PVCs on the VM's root
+filesystem. The Arbutus flavour's ephemeral disk is deliberately unused. Check
+space periodically with:
+
+```bash
+df -h /
+sudo du -sh /var/lib/docker /var/lib/rancher/k3s
+```
+
+From inside the VM, FASTDB and MailHog are available at:
+
+```text
+http://localhost:30080
+http://localhost:30025
+```
+
+**TODO: Configure access from outside the VM.** These addresses are currently
+only reachable from within the VM. External access will require a floating IP
+or another route to the VM.
 
 `values-local.yaml` is specifically for the local/laptop setup.  In particular, it
 contains host-network settings for a local Kafka broker (using the [LASS](https://github.com/CanDIAPL/lass) tool) and an ingestion configuration for the `lass-topic`; do not use it as the starting point for a
 remote deployment.  Create a separate values file for each remote environment.
 
-### Manual Local Kind Deployment
-
-The deploy script can create a Kind cluster for you via `--create-cluster`. The Kind config template (`admin/local/kind-config.yaml`) uses `${PWD}` in `hostPath` entries, which the script replaces with the current directory at runtime. The cluster is named after the namespace, and `--context` is set to `kind-<namespace>` automatically.
-
-```bash
-# Create the Kind cluster, build the install artifact and images, load the
-# images into Kind, and deploy. This can take several minutes on first run.
-./scripts/helm-deploy.sh fastdb-local ./helm/fastdb/values-local.yaml \
-  --create-cluster admin/local/kind-config.yaml \
-  --external-url http://localhost:8080/
-
-# Verify
-kubectl --context kind-fastdb-local get pods -n fastdb-local
-curl http://localhost:8080
-```
-
-On subsequent deploys, `--create-cluster` will skip creation if the cluster already exists. Or omit it and use `--context kind-fastdb-local` directly.
-
-If you run the image-loading commands manually, create the Kind cluster
-*before* invoking `kind load docker-image`; there is no node to receive images
-until then.
-
-To tear down the cluster:
-
-```bash
-kind delete cluster --name fastdb-local
-```
-
 ### Registry Credentials
 
-Deployments that pull from private registries (e.g., GHCR) need a `dockerconfigjson` secret. The Helm chart creates this automatically when `global.registryCredentials.enabled` is `true` in your values file. Pass the password at deploy time via `--registry-password` (or `--set`) so it never gets committed to git.
+Deployments that pull from private registries (e.g., GHCR) need a
+`dockerconfigjson` secret. The Helm chart creates this automatically when
+`global.registryCredentials.enabled` is `true` in your values file. Pass the
+password with `--set` so it is not committed to git.
 
 > **Note:** You can generate a GitHub Personal Access Token (PAT) with `read:packages` scope at https://github.com/settings/tokens.
 
@@ -169,14 +267,9 @@ global:
     password: ""  # NEVER commit - pass via --registry-password or --set
 ```
 
-Then pass the password at deploy time:
+Then pass the password to Helm:
 
 ```bash
-# Via the deploy script
-./scripts/helm-deploy.sh my-namespace ./helm/fastdb/values-my-env.yaml \
-  --registry-password <your-github-pat>
-
-# Or via helm directly
 helm upgrade --install fastdb ./helm/fastdb \
   -f ./helm/fastdb/values-my-env.yaml -n my-namespace --create-namespace \
   --set global.registryCredentials.password=<your-github-pat>
@@ -195,125 +288,49 @@ This creates/updates the `install/` directory at the repo root. The `db/` direct
 
 #### External URL and Subdirectory Deployments
 
-When FASTDB is served from a subdirectory (e.g., `https://host/fastdb-ccosta-dev/` instead of `https://host/`), the frontend JavaScript and HTML templates must be built with the correct base path. The Automake build system uses `@external_url@` placeholders in `.js.in` and `.html.in` files that get substituted during `./configure`:
+When FASTDB is served from a subdirectory (e.g., `https://host/fastdb-app/`
+instead of `https://host/`), the frontend JavaScript and HTML templates must
+be built with the correct base path. The Automake build system uses
+`@external_url@` placeholders in `.js.in` and `.html.in` files that get
+substituted during `./configure`:
 
 ```
 # Template (fastdb.js.in):
 import { rkWebUtil } from "@external_url@static/rkwebutil.js";
 
-# Built with --with-external-url=/fastdb-ccosta-dev/ → (fastdb.js):
-import { rkWebUtil } from "/fastdb-ccosta-dev/static/rkwebutil.js";
+# Built with --with-external-url=/fastdb-app/ → (fastdb.js):
+import { rkWebUtil } from "/fastdb-app/static/rkwebutil.js";
 
 # Built without (default) → (fastdb.js):
 import { rkWebUtil } from "static/rkwebutil.js";
 ```
 
-The deploy script handles this via `--external-url`:
+The single-node installer accepts the public URL through
+`FASTDB_EXTERNAL_URL`:
 
 ```bash
-# Build with subdirectory path baked into frontend
-./scripts/helm-deploy.sh ccosta-dev ./helm/fastdb/values-ccosta-dev.yaml \
-  --external-url /fastdb-ccosta-dev/ --registry-password ghp_xxxxx
+FASTDB_EXTERNAL_URL=https://fastdb.example.org/ \
+  ./helm/scripts/install-singlenode-fastdb.sh \
+  ./helm/fastdb/values-arbutus.yaml
 ```
 
 The `--external-url` value must end in a trailing slash.  It can be either a
-path (such as `/fastdb-ccosta-dev/`) or a complete public URL (such as
-`https://fastdb.example.org/fastdb-ccosta-dev/`).  Use the complete URL when
+path (such as `/fastdb-app/`) or a complete public URL (such as
+`https://fastdb.example.org/fastdb-app/`). Use the complete URL when
 FASTDB needs to send an absolute link in email, including password-reset links.
 For the local Kind helper, this is `http://localhost:8080/`.
 
 Two settings work together:
-- `--external-url /path/` or `https://host/path/` → bakes the URL/path into
+- `FASTDB_EXTERNAL_URL=/path/` or `https://host/path/` → bakes the URL/path into
   static JS/HTML at build time and into links generated by the server
 - `webap.basePath: /path` → sets `SCRIPT_NAME` env var for Flask routing at runtime
 
-For a root-path deployment, omit `webap.basePath`.  Pass the public root URL to
-`--external-url` when generated emails must point to that public address.
-
-### Deploy Script
-
-`scripts/helm-deploy.sh` is a convenience script that wraps the manual steps (build, helm install, code copy, pod restart) into a single command. It is not required — everything it does can be run by hand (see [Common Operations](#common-operations)) — but it saves repetitive typing during development when you're deploying over and over.
-
-```bash
-./scripts/helm-deploy.sh [NAMESPACE] [VALUES_FILE] [OPTIONS]
-```
-
-**Arguments:**
-
-| Argument | Default | Description |
-|----------|---------|-------------|
-| `NAMESPACE` | `local` | Kubernetes namespace |
-| `VALUES_FILE` | `./helm/fastdb/values-local.yaml` | Helm values file |
-
-**Options:**
-
-| Option | Description |
-|--------|-------------|
-| `--create-cluster FILE` | Create a Kind cluster before deploying. `${PWD}` in the config is replaced with the current directory. Cluster name is set to `NAMESPACE`, context to `kind-NAMESPACE`. Skips creation if the cluster already exists. |
-| `--context NAME` | Kubernetes context to use (default: current kubeconfig context). Set automatically by `--create-cluster`. |
-| `--registry-password PAT` | Registry password/token (passed to Helm as `registryCredentials.password`) |
-| `--external-url URL_OR_PATH` | Public URL or base path baked into generated frontend assets and links. It must end in `/`; its path component must match `webap.basePath` when one is configured. See [External URL and Subdirectory Deployments](#external-url-and-subdirectory-deployments). |
-| `--skip-build` | Skip the `docker-compose makeinstall` step |
-| `--skip-helm` | Skip `helm upgrade --install` (just copy code + restart) |
-| `--release NAME` | Helm release name (default: `fastdb`) |
-| `-h, --help` | Show help |
-
-**Examples:**
-
-```bash
-# Full deploy from scratch (build + install + copy + restart)
-./scripts/helm-deploy.sh ccosta-dev ./helm/fastdb/values-ccosta-dev.yaml \
-  --external-url /fastdb-ccosta-dev/ --registry-password ghp_xxxxx
-
-# Skip build (install/ already up to date)
-./scripts/helm-deploy.sh ccosta-dev ./helm/fastdb/values-ccosta-dev.yaml \
-  --skip-build --registry-password ghp_xxxxx
-
-# Code-only update (no build, no helm, just copy code and restart pods)
-./scripts/helm-deploy.sh ccosta-dev ./helm/fastdb/values-ccosta-dev.yaml \
-  --skip-build --skip-helm
-
-# Config-only update (no build, re-run helm upgrade, copy code, restart)
-./scripts/helm-deploy.sh ccosta-dev ./helm/fastdb/values-ccosta-dev.yaml \
-  --skip-build --registry-password ghp_xxxxx
-
-# Root-path deploy (no subdirectory, no --external-url needed)
-./scripts/helm-deploy.sh my-namespace ./helm/fastdb/values-my-env.yaml \
-  --registry-password ghp_xxxxx
-```
-
-**What the script does:**
-
-1. Builds `install/` via `docker-compose run makeinstall`
-2. Runs `helm upgrade --install` with `--create-namespace` (works for fresh installs and upgrades; creates the namespace if it doesn't exist)
-3. Waits for the shell pod to be ready
-4. Copies `install/` contents to `/fastdb/` on the code PVC via tar pipe through the shell pod
-5. Copies `db/` contents to `/fastdb/db/` on the code PVC
-6. Restarts webap and queryrunner deployments so they pick up the new code
-7. Prints pod status
-
-The Helm release is stored in the target namespace (not `default`). The createdb Job retries automatically (`restartPolicy: OnFailure`) until postgres and code are both ready.
-
-> **Note:** `--registry-password` is only needed when running the helm step. If you use `--skip-helm`, the secret already exists in the cluster and no password is required.
-
-### Deploy to SLAC S3DF
-
-```bash
-# Ensure kubectl context points to SLAC cluster
-kubectl config use-context your-slac-context
-
-# Deploy with subdirectory path (if using basePath in values)
-./scripts/helm-deploy.sh your-namespace ./helm/fastdb/values-slac.yaml \
-  --external-url /your-base-path/ --registry-password <your-github-pat>
-```
-
-The script handles namespace creation, registry credentials, frontend path configuration, code copying, and pod restarts.
+For a root-path deployment, omit `webap.basePath`. Pass the public root URL
+through `FASTDB_EXTERNAL_URL` when generated emails must point to that address.
 
 ## Common Operations
 
 ### Install a New Release
-
-You can use the [deploy script](#deploy-script) to run all the steps in one command, or run helm directly:
 
 ```bash
 helm upgrade --install <release-name> ./helm/fastdb \
@@ -321,8 +338,6 @@ helm upgrade --install <release-name> ./helm/fastdb \
 ```
 
 > **Important:** Always pass `-n <namespace>` so the Helm release is stored in the correct namespace (not `default`). Use `--create-namespace` if the namespace may not exist yet.
-
-After `helm install`, the code PVC will be empty. You still need to copy `install/` and `db/` to the PVC via the shell pod (the deploy script does this automatically, or see [What the script does](#deploy-script) for the manual commands).
 
 ### Upgrade an Existing Release
 
@@ -332,8 +347,6 @@ After modifying values or templates:
 helm upgrade <release-name> ./helm/fastdb \
   -f ./helm/fastdb/values-<env>.yaml -n <namespace>
 ```
-
-Or with the deploy script: `--skip-build` to skip the build step when only values/templates changed.
 
 ### View Current Values
 
@@ -362,7 +375,8 @@ helm upgrade <release-name> ./helm/fastdb \
 helm uninstall <release-name> -n <namespace>
 ```
 
-> **Warning:** This deletes the namespace and everything in it (including the registry secret and PVCs). A fresh `helm-deploy.sh` with `--registry-password` will recreate everything, but data in PVCs will be lost.
+> **Warning:** Deleting the namespace as well as the release can delete its
+> registry secret and PVCs. Data stored in deleted PVCs may be lost.
 
 ### List Releases
 
@@ -457,7 +471,7 @@ secrets:
 
 ```bash
 helm install fastdb ./helm/fastdb \
-  -f ./helm/fastdb/values-slac.yaml \
+  -f ./helm/fastdb/values-myenv.yaml \
   --set secrets.postgres.password="real-password" \
   --set secrets.secretKey="real-secret"
 ```
@@ -516,13 +530,6 @@ shell:
 ### 3. Deploy
 
 ```bash
-./scripts/helm-deploy.sh myenv ./helm/fastdb/values-myenv.yaml \
-  --registry-password <your-pat>
-```
-
-Or if using raw helm (you'll need to copy code to the PVC separately):
-
-```bash
 helm upgrade --install fastdb ./helm/fastdb \
   -f ./helm/fastdb/values-myenv.yaml -n myenv --create-namespace
 ```
@@ -559,54 +566,6 @@ extraMounts:
 extraPortMappings:
   - containerPort: 30080
     hostPort: 8080
-```
-
-### SLAC S3DF
-
-```yaml
-# values-slac.yaml highlights
-global:
-  imageRegistry: "ghcr.io/fifteen3"
-  imageTag: "latest"
-  imagePullSecrets:
-    - name: ghcr-secret
-
-postgres:
-  externalAccess:
-    enabled: true
-    type: LoadBalancer
-    annotations:
-      metallb.io/address-pool: sdf-services
-
-  walArchive:
-    enabled: true                  # For replication
-    size: 20Gi
-
-walWebserver:
-  enabled: true                    # Serve WAL files
-  ingress:
-    enabled: true
-    host: desc-fastdb.slac.stanford.edu
-```
-
-### NERSC SPIN (Production)
-
-```yaml
-# values-spin-prod.yaml (example)
-global:
-  imageRegistry: "registry.nersc.gov/m1727/raknop"
-  imageTag: "dp1"
-  imagePullSecrets:
-    - name: registry-nersc
-
-volumes:
-  type: pvc
-  storageClass: nfs-client
-
-postgres:
-  persistence:
-    size: 2048Gi                   # Large production storage
-  sharedMemory: 128Gi
 ```
 
 ## Troubleshooting
@@ -691,8 +650,8 @@ kubectl exec -it deploy/shell -n <namespace> -- \
 | `Chart.yaml` | Chart metadata |
 | `values.yaml` | Default values (don't modify for deployment) |
 | `values-local.yaml` | Local Kind deployment |
-| `values-ccosta-dev.yaml` | SLAC ccosta-dev deployment |
-| `values-slac.yaml` | SLAC S3DF deployment |
+| `values-arbutus.yaml` | Single-node VM using registry images |
+| `values-arbutus-dev.yaml` | Single-node VM using locally built images |
 | `templates/_helpers.tpl` | Reusable template functions |
 | `templates/namespace.yaml` | Namespace resource |
 | `templates/secrets.yaml` | Secrets and ConfigMaps |
@@ -705,4 +664,4 @@ kubectl exec -it deploy/shell -n <namespace> -- \
 | `templates/queryrunner.yaml` | Query runner service |
 | `templates/mailhog.yaml` | Email testing (dev) |
 | `templates/createdb-job.yaml` | Database migration job |
-| `templates/wal-webserver.yaml` | WAL archive webserver (SLAC) |
+| `templates/wal-webserver.yaml` | Optional WAL archive webserver |
