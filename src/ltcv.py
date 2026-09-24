@@ -1955,6 +1955,7 @@ def create_object_stats_materialized_view( procver ):
                     FROM diasource s
                     INNER JOIN diaobject o ON s.diaobjectid=o.diaobjectid
                     INNER JOIN diasource_extra se ON s.diasourceid=se.diasourceid
+                                                 AND s.base_procver_id=se.base_procver_id
                     INNER JOIN base_procver_of_procver j ON s.base_procver_id=j.base_procver_id
                                                      AND j.procver_id={pvid}
                     ORDER BY o.rootid, s.visit, j.priority DESC
