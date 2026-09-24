@@ -95,12 +95,7 @@ DIST_COMMON = $(srcdir)/Makefile.am $(top_srcdir)/configure \
 am__CONFIG_DISTCLEAN_FILES = config.status config.cache config.log \
  configure.lineno config.status.lineno
 mkinstalldirs = $(install_sh) -d
-CONFIG_CLEAN_FILES = src/webserver/static/fastdb.js \
-	src/webserver/static/fastdb_start.js \
-	src/webserver/static/objectinfo.js \
-	src/webserver/static/objectlist.js \
-	src/webserver/static/objectsearch.js \
-	src/webserver/static/resetpasswd_start.js \
+CONFIG_CLEAN_FILES = src/webserver/static/resetpasswd_start.js \
 	src/webserver/templates/fastdb_webap.html
 CONFIG_CLEAN_VPATH_FILES =
 AM_V_P = $(am__v_P_@AM_V@)
@@ -160,11 +155,6 @@ CTAGS = ctags
 CSCOPE = cscope
 DIST_SUBDIRS = $(SUBDIRS)
 am__DIST_COMMON = $(srcdir)/Makefile.in \
-	$(top_srcdir)/src/webserver/static/fastdb.js.in \
-	$(top_srcdir)/src/webserver/static/fastdb_start.js.in \
-	$(top_srcdir)/src/webserver/static/objectinfo.js.in \
-	$(top_srcdir)/src/webserver/static/objectlist.js.in \
-	$(top_srcdir)/src/webserver/static/objectsearch.js.in \
 	$(top_srcdir)/src/webserver/static/resetpasswd_start.js.in \
 	$(top_srcdir)/src/webserver/templates/fastdb_webap.html.in \
 	install-sh missing
@@ -334,16 +324,6 @@ $(top_srcdir)/configure:  $(am__configure_deps)
 $(ACLOCAL_M4):  $(am__aclocal_m4_deps)
 	$(am__cd) $(srcdir) && $(ACLOCAL) $(ACLOCAL_AMFLAGS)
 $(am__aclocal_m4_deps):
-src/webserver/static/fastdb.js: $(top_builddir)/config.status $(top_srcdir)/src/webserver/static/fastdb.js.in
-	cd $(top_builddir) && $(SHELL) ./config.status $@
-src/webserver/static/fastdb_start.js: $(top_builddir)/config.status $(top_srcdir)/src/webserver/static/fastdb_start.js.in
-	cd $(top_builddir) && $(SHELL) ./config.status $@
-src/webserver/static/objectinfo.js: $(top_builddir)/config.status $(top_srcdir)/src/webserver/static/objectinfo.js.in
-	cd $(top_builddir) && $(SHELL) ./config.status $@
-src/webserver/static/objectlist.js: $(top_builddir)/config.status $(top_srcdir)/src/webserver/static/objectlist.js.in
-	cd $(top_builddir) && $(SHELL) ./config.status $@
-src/webserver/static/objectsearch.js: $(top_builddir)/config.status $(top_srcdir)/src/webserver/static/objectsearch.js.in
-	cd $(top_builddir) && $(SHELL) ./config.status $@
 src/webserver/static/resetpasswd_start.js: $(top_builddir)/config.status $(top_srcdir)/src/webserver/static/resetpasswd_start.js.in
 	cd $(top_builddir) && $(SHELL) ./config.status $@
 src/webserver/templates/fastdb_webap.html: $(top_builddir)/config.status $(top_srcdir)/src/webserver/templates/fastdb_webap.html.in

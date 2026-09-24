@@ -23,7 +23,7 @@ class TestDiaForcedSource( BaseTestDB ):
             'ra',
             'dec',
             'psfflux',
-            'psffluxerr',
+            'psffluxerr'
         }
         self.safe_to_modify = [
             'midpointmjdtai',
@@ -31,7 +31,7 @@ class TestDiaForcedSource( BaseTestDB ):
             'psfflux',
             'psffluxerr',
             'ra',
-            'dec',
+            'dec'
         ]
         self.uniques = []
 
@@ -80,11 +80,15 @@ class TestDiaForcedSourceExtra( BaseTestDB ):
         self.columns = {
             'diaforcedsourceid',
             'base_procver_id',
+            'diaobjectid',
+            'visit',
             'detector',
             'scienceflux',
             'sciencefluxerr',
             'timeprocessedmjdtai',
             'timewithdrawnmjdtai',
+            'flags',
+            'pixelflags'
         }
         self.safe_to_modify = [
             'detector',
@@ -92,6 +96,8 @@ class TestDiaForcedSourceExtra( BaseTestDB ):
             'sciencefluxerr',
             'timeprocessedmjdtai',
             'timewithdrawnmjdtai',
+            'flags',
+            'pixelflags'
         ]
         self.uniques = []
 
@@ -106,6 +112,8 @@ class TestDiaForcedSourceExtra( BaseTestDB ):
         t3 = util.mjd_from_mjd_or_datetime_or_timestring( t3 )
         t4 = util.mjd_from_mjd_or_datetime_or_timestring( t4 )
         self.obj1 = DiaForcedSourceExtra( diaforcedsourceid=obj1_frced1.diaforcedsourceid,
+                                          diaobjectid=obj1_frced1.diaobjectid,
+                                          visit=obj1_frced1.visit,
                                           base_procver_id=obj1_frced1.base_procver_id,
                                           detector=1,
                                           scienceflux=234.5,
@@ -115,6 +123,8 @@ class TestDiaForcedSourceExtra( BaseTestDB ):
                                          )
         self.dict1 = { k: getattr( self.obj1, k ) for k in self.columns }
         self.obj2 = DiaForcedSourceExtra( diaforcedsourceid=obj1_frced2.diaforcedsourceid,
+                                          diaobjectid=obj1_frced2.diaobjectid,
+                                          visit=obj1_frced2.visit,
                                           base_procver_id=obj1_frced2.base_procver_id,
                                           detector=2,
                                           scienceflux=235.5,
@@ -124,6 +134,8 @@ class TestDiaForcedSourceExtra( BaseTestDB ):
                                          )
         self.dict2 = { k: getattr( self.obj2, k ) for k in self.columns }
         self.dict3 = { 'diaforcedsourceid': obj1_frced3.diaforcedsourceid,
+                       'diaobjectid': obj1_frced3.diaobjectid,
+                       'visit': obj1_frced3.visit,
                        'base_procver_id': obj1_frced3.base_procver_id,
                        'detector': 3,
                        'scienceflux': 233.4,

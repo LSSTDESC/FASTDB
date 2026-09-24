@@ -254,7 +254,8 @@ admin_DATA = admin/csv_to_avsc.py \
 	admin/fastdb_loader.py \
 	admin/load_dp1_parquet.py \
 	admin/load_snana_fits.py \
-	admin/load_snana_fits_ppdb.py
+	admin/load_snana_fits_ppdb.py \
+	admin/load_edp2_parquet.py
 
 all: all-am
 
