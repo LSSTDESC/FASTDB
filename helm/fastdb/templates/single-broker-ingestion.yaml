@@ -125,6 +125,7 @@ spec:
     spec:
       {{- include "fastdb.imagePullSecrets" . | nindent 6 }}
       restartPolicy: OnFailure
+      serviceAccountName: ingestion-job-waiter
       containers:
       - name: setup-processing-version
         image: {{ $image }}
@@ -133,6 +134,9 @@ spec:
         - /bin/bash
         - -ec
         - |
+          {{- if .Values.createdb.enabled }}
+          {{- include "fastdb.waitForJob" "createdb" | nindent 10 }}
+          {{- end }}
           until /venv/bin/python -c 'import db; db.get_dbcon().close()'; do sleep 5; done
           /venv/bin/python -c 'from admin.fastdb_loader import FastDBLoader; loader = FastDBLoader({{ .Values.ingestion.processingVersion.name | quote }}); loader.make_procver()'
         volumeMounts:
@@ -181,6 +185,7 @@ spec:
         spec:
           {{- include "fastdb.imagePullSecrets" . | nindent 10 }}
           restartPolicy: OnFailure
+          serviceAccountName: ingestion-job-waiter
           containers:
           - name: source-importer
             image: {{ $image }}
@@ -189,6 +194,7 @@ spec:
             - /bin/bash
             - -ec
             - |
+              {{- include "fastdb.waitForJob" "ingestion-processing-version" | nindent 14 }}
               /venv/bin/python /fastdb/services/source_importer.py \
                 -c {{ .Values.ingestion.brokerConsumer.collectionBase | quote }} \
                 -o {{ .Values.ingestion.processingVersion.name | quote }} \

@@ -92,3 +92,40 @@ Usage: {{ include "fastdb.pvcName" (dict "namespace" .Values.global.namespace "c
 {{- define "fastdb.pvcName" -}}
 {{- printf "%s-%s-pvc" .namespace .component -}}
 {{- end }}
+
+{{/* Wait for a prerequisite Job using Python's standard library and the pod's
+service account. A failed Job stops the dependent workload with a clear error. */}}
+{{- define "fastdb.waitForJob" -}}
+/venv/bin/python -u - <<'PY'
+import json
+import pathlib
+import ssl
+import time
+import urllib.error
+import urllib.request
+
+account = pathlib.Path('/var/run/secrets/kubernetes.io/serviceaccount')
+namespace = (account / 'namespace').read_text().strip()
+token = (account / 'token').read_text().strip()
+context = ssl.create_default_context(cafile=str(account / 'ca.crt'))
+job = {{ . | quote }}
+url = f'https://kubernetes.default.svc/apis/batch/v1/namespaces/{namespace}/jobs/{job}'
+print(f'Waiting for Job {job} to complete...')
+while True:
+    request = urllib.request.Request(url, headers={'Authorization': f'Bearer {token}'})
+    try:
+        with urllib.request.urlopen(request, context=context, timeout=30) as response:
+            status = json.load(response).get('status', {})
+    except urllib.error.HTTPError as error:
+        if error.code != 404:
+            raise
+    else:
+        conditions = {item['type']: item['status'] for item in status.get('conditions', [])}
+        if conditions.get('Complete') == 'True':
+            print(f'Job {job} completed.')
+            break
+        if conditions.get('Failed') == 'True':
+            raise SystemExit(f'Prerequisite Job {job} failed; inspect its logs.')
+    time.sleep(5)
+PY
+{{- end }}

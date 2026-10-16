@@ -9,7 +9,11 @@ metadata:
   labels:
     {{- include "fastdb.labels" . | nindent 4 }}
 spec:
+  # Ingestion checks this Job's completion status. Keep it until the installer
+  # recreates it on the next upgrade, rather than deleting it after five minutes.
+  {{- if not .Values.ingestion.enabled }}
   ttlSecondsAfterFinished: {{ .Values.createdb.ttlSecondsAfterFinished }}
+  {{- end }}
   template:
     spec:
       {{- include "fastdb.imagePullSecrets" . | nindent 6 }}
