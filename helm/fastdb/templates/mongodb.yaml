@@ -34,6 +34,15 @@ spec:
         volumeMounts:
         - name: mongodb-data
           mountPath: /data/db
+        # Initialization uses a temporary localhost-only server. Wait for the
+        # final server to listen on the pod IP before enabling health checks.
+        # Allow up to ten minutes for initialization on a slow VM.
+        startupProbe:
+          tcpSocket:
+            port: 27017
+          periodSeconds: 5
+          timeoutSeconds: 5
+          failureThreshold: 120
         readinessProbe:
           exec:
             command:
@@ -41,7 +50,8 @@ spec:
             - --eval
             - "db.adminCommand('ping')"
           initialDelaySeconds: 10
-          periodSeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 10
         livenessProbe:
           exec:
             command:
@@ -50,6 +60,7 @@ spec:
             - "db.adminCommand('ping')"
           initialDelaySeconds: 30
           periodSeconds: 10
+          timeoutSeconds: 10
       volumes:
       - name: mongodb-data
         persistentVolumeClaim:
