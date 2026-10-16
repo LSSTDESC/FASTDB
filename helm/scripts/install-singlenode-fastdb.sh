@@ -255,7 +255,7 @@ if ! helm upgrade --install "$RELEASE_NAME" "$REPO_ROOT/helm/fastdb" \
   --set-string "ingestion.brokerConsumer.dockerHostIp=$NODE_IP" \
   --wait \
   --wait-for-jobs \
-  --timeout 10m; then
+  --timeout 30m; then
   echo "Helm installation failed. Current status:" >&2
   kubectl get pods --namespace "$NAMESPACE" >&2 || true
   kubectl logs --namespace "$NAMESPACE" job/createdb >&2 || true
