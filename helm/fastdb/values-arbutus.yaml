@@ -2,17 +2,17 @@
 # This example uses prebuilt images from the CanDIAPL registry namespace.
 
 global:
-  namespace: fastdb-arbutus-dev
+  namespace: fastdb-arbutus
   environment: dev
   imageRegistry: images.canfar.net/candiapl
   imageTag: manual-20260918
   imagePullPolicy: IfNotPresent
-  imagePullSecrets:
-    - name: fastdb-registry
+  # imagePullSecrets:
+    # - name: fastdb-registry
 
 volumes:
   type: pvc
-  storageClass: local-path
+  storageClass: local-path # This uses the k3s local path provisioner and is not part of k8s
   codeHostPath: true
 
 postgres:

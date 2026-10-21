@@ -6,6 +6,9 @@ K3S_VERSION="v1.36.4+k3s1"
 KUBECTL_VERSION="v1.36.4"
 HELM_VERSION="v4.2.4"
 
+# This assumes the cephfs share is mounted on the VM
+DEFAULT_LOCAL_STORAGE_PATH=/fastdb/single-staging # https://docs.k3s.io/add-ons/storage
+
 if [[ $EUID -eq 0 ]]; then
   echo "Error: run this script as your normal user, not with sudo." >&2
   exit 1
@@ -75,11 +78,13 @@ if command -v k3s >/dev/null 2>&1; then
   fi
   echo "K3s $K3S_VERSION is already installed."
 else
+  # We are using k3s's local path provisioner, which by default goes to /var/lib/rancher/k3s/storage
+  # The --default-local-storage-path changes it to use the cephfs share, assuming it is already mounted at /fastdb/
   echo "Installing K3s $K3S_VERSION..."
   curl -fsSL https://get.k3s.io -o "$SETUP_TMPDIR/install-k3s.sh"
   sudo env \
     INSTALL_K3S_VERSION="$K3S_VERSION" \
-    INSTALL_K3S_EXEC="server --disable traefik --disable servicelb" \
+    INSTALL_K3S_EXEC="server --disable traefik --disable servicelb --default-local-storage-path $DEFAULT_LOCAL_STORAGE_PATH" \
     INSTALL_K3S_SYMLINK="skip" \
     sh "$SETUP_TMPDIR/install-k3s.sh"
 fi
