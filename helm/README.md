@@ -1,667 +1,415 @@
-# FASTDB Helm Chart Guide
+# Deploy FASTDB on a single VM
 
-This guide explains how to deploy FASTDB to Kubernetes clusters using Helm.
+This guide is for a maintainer setting up a reproducible FASTDB development or
+benchmark installation on one Linux VM. It covers cluster prerequisites,
+installation, a test user, simulated LASS alerts, and verification through the
+FASTDB Python client on the VM. It is not a full production operations guide.
 
-## Quickstart
+Run the commands on the VM as a normal user with Docker and Kubernetes access.
+Commands assume the FASTDB repository is your current directory unless stated
+otherwise. External access and browser access are outside this guide's scope.
 
-### Option 1: Install scripts
+## Contents
 
-Some site-specific installation scripts are available in [`helm/scripts/`](./scripts/). For example you can install fastdb on a single node kubernetes cluster with:
+- [Prepare the VM](#1-prepare-the-vm)
+- [Choose deployment settings](#2-choose-deployment-settings)
+- [Install FASTDB](#3-install-fastdb)
+- [Verify the deployment](#4-verify-the-deployment)
+- [Create a user and query FASTDB](#5-create-a-user-and-query-fastdb)
+- [Ingest simulated LASS alerts](#6-ingest-simulated-lass-alerts)
+- [Update an installation](#update-an-installation)
+- [Troubleshooting](#troubleshooting)
+- [Reference and other workflows](#reference-and-other-workflows)
 
-```bash
-./helm/scripts/install-singlenode-fastdb.sh <values-file>
-```
+## 1. Prepare the VM
 
-where the values file describes the specifics of the installation e.g. broker info, storage allocated to the data base, version numbers of images. Example values files are in [`helm/fastdb/`](./fastdb/), including [values-arbutus-dev.yaml](./fastdb/values-arbutus-dev.yaml) which contains the config for a small developement install simulated alerts from [LASS](https://github.com/CanDIAPL/lass).
+Install a single-node Kubernetes distribution, such as K3s, and configure its
+default storage provisioner to put database files on your chosen disk or mounted
+filesystem. Prepare and mount that storage before deploying FASTDB. A PVC requests
+storage from the cluster; it does not create a separate cloud disk or a backup.
 
-### Option 2: Direct install with helm scripts
-
-A FASTDB Helm deployment has two main stages: generate the runnable FASTDB
-files with the `makeinstall` container, then deploy the Kubernetes resources
-with Helm.
-
-#### 1. Generate `install/` with the `makeinstall` container
-
-The `makeinstall` Docker Compose service uses the FASTDB shell image.
-
-Obtain the shell image by either pulling a prebuilt image:
-
-```bash
-docker pull "<path-to-shell-image-on-registry>"
-```
-
-or building it from the current checkout:
-
-```bash
-docker compose build shell
-```
-
-Then run the container that configures FASTDB and writes the runnable files to
-`install/`:
+Install Git, Docker Engine with Docker Compose, Helm, and kubectl. Confirm that
+your normal user can run:
 
 ```bash
-USERID="$(id -u)" GROUPID="$(id -g)" \
-  docker compose run --rm makeinstall
+docker info
+docker compose version
+kubectl get nodes
+kubectl get storageclass
+helm version
+df -h /
 ```
 
-#### 2. Install FASTDB with Helm
+`kubectl get nodes` should show `Ready`, and a usable storage class should be available.
+Allow space for Docker images, Kubernetes images, database data, logs, and LASS's
+Kafka data. The example PVC sizes are requests, not preallocated spare disk space;
+monitor the underlying filesystem as data grows.
 
-Choose an environment-specific values file and run Helm:
+For a worked Ubuntu/K3s setup, review
+[scripts/setup-arbutus-k3s.sh](scripts/setup-arbutus-k3s.sh). It installs the tools
+and configures the user's Kubernetes access. It is an infrastructure-specific
+example designed for the DRAC arbutus-cloud: inspect its version pins and `DEFAULT_LOCAL_STORAGE_PATH` before using
+it. The current path is `/fastdb/single-staging`, assuming CephFS is already
+mounted at `/fastdb`. It does not mount CephFS or change an existing K3s
+installation's storage path.
+
+For cluster setup details, use the official
+[K3s installation guide](https://docs.k3s.io/quick-start),
+[K3s storage guide](https://docs.k3s.io/add-ons/storage), and
+[Kubernetes storage documentation](https://kubernetes.io/docs/concepts/storage/persistent-volumes/).
+
+Clone FASTDB and select the branch or release you intend to test:
 
 ```bash
-helm upgrade --install fastdb ./helm/fastdb \
-  --namespace <namespace> \
-  --create-namespace \
-  --values ./helm/fastdb/<values-file>.yaml
+git clone --recurse-submodules https://github.com/CanDIAPL/FASTDB.git
+cd FASTDB
+git checkout <deployment-branch-or-release>
+git submodule update --init --recursive
 ```
 
-Example values files are in [`helm/fastdb/`](./fastdb/), including local Kind
-and single-node Arbutus configurations. Some environments also require a secrets
-values file, registry credentials, storage settings, or host-path overrides;
-the environment-specific sections below describe those additions.
+Optional: You can record the commit used for a benchmark with `git rev-parse HEAD`.
 
-## Conceptual Overview
+## 2. Choose deployment settings
 
-### What is Helm?
-
-Helm is a package manager for Kubernetes. It uses **charts** (packages of pre-configured Kubernetes resources) to deploy applications. Think of it like `apt` or `brew` but for Kubernetes.
-
-### How FASTDB Helm Chart Works
-
-```
-helm/
-├── scripts/                 # Local-development helper scripts
-└── fastdb/
-    ├── Chart.yaml           # Chart metadata (name, version)
-    ├── values.yaml          # Default configuration values
-    ├── values-local.yaml    # Local Kind cluster overrides
-    ├── values-arbutus.yaml  # Single-node VM overrides
-    └── templates/           # Kubernetes manifest templates
-        ├── _helpers.tpl     # Reusable template functions
-        ├── secrets.yaml
-        ├── pvcs.yaml
-        ├── postgres.yaml
-        ├── mongodb.yaml
-        ├── webap.yaml
-        ├── single-broker-ingestion.yaml
-        └── ...
-```
-
-**Key Concepts:**
-
-1. **Templates** (`templates/*.yaml`) - Kubernetes manifests with placeholders like `{{ .Values.global.namespace }}`
-
-2. **Values** (`values.yaml`) - Default configuration that fills in the template placeholders
-
-3. **Value Overrides** (`values-*.yaml`) - Environment-specific settings that override defaults
-
-4. **Rendering** - Helm combines templates + values to produce final Kubernetes manifests
-
-```
-┌─────────────┐     ┌─────────────┐     ┌──────────────────┐
-│  Templates  │  +  │   Values    │  =  │ K8s Manifests    │
-│  (*.yaml)   │     │ (values.yaml│     │ (ready to deploy)│
-└─────────────┘     └─────────────┘     └──────────────────┘
-```
-
-## Details
-
-### Prerequisites
-
-- Single-node Kubernetes cluster, or a local Kind cluster
-- `helm` CLI installed
-- `kubectl` configured to access your cluster
-- Docker images built and accessible
-- Credentials for any private image registry (see [Registry Credentials](#registry-credentials))
-
-The local helper scripts use Docker Compose and Docker image loading for Kind.
-
-### Recommended Local Kind Workflow
-
-For a laptop development environment, use the provided helpers from the
-repository root:
+Either use one of the existing values files or copy the registry-based single-VM example into your own values file:
 
 ```bash
-./helm/scripts/create-local-cluster.sh
-./helm/scripts/install-local-fastdb.sh
+cp helm/fastdb/values-arbutus.yaml helm/fastdb/values-my-vm.yaml
 ```
 
-The first script only creates and checks the `fastdb-local` Kind cluster. The
-second script builds FASTDB with `http://localhost:8080/` as its external URL,
-builds and loads every required image, and installs the local Helm release.
-Keeping these steps separate makes it possible to update FASTDB without
-recreating the cluster or deleting its database volumes.
+This example describes a single-VM deployment. Review these
+settings before installing:
 
-Re-run `install-local-fastdb.sh` after changing FASTDB Python code, database
-migrations, container images, Helm templates, or local values. It recreates the
-`createdb` migration Job on every run, but preserves the database itself.
+```yaml
+global:
+  namespace: fastdb-arbutus
+  imageRegistry: images.canfar.net/candiapl
+  imageTag: manual-20260918
+  imagePullPolicy: IfNotPresent
 
-After it finishes, check the deployment and open:
+volumes:
+  type: pvc
+  storageClass: local-path
+  codeHostPath: true
+```
+
+The installer reads the registry and tag from this file. Change `imageTag` to
+use another published image release; keep the FASTDB images on a compatible tag.
+The example images were built for AMD64, so use an AMD64 VM for this workflow.
+
+Set `storageClass` to the class configured in step 1, or use `storageClass: ""`
+to request the cluster's default class. Review PostgreSQL, MongoDB, logs, sessions,
+and query-result sizes in the example. PostgreSQL standby is disabled.
+
+Keep the example's LASS ingestion settings for the walkthrough below: topic
+`lass-topic`, schema v10.0, collection base `lass`, and processing version
+`lass`. The installer discovers the node's internal IP for the consumer's
+connection to a LASS broker on the same VM. Other broker configurations are possible but 
+not described in this walkthrough.
+
+For subsequent commands, set the namespace to match your values file:
 
 ```bash
-kubectl --context kind-fastdb-local get pods -n fastdb-local
-
-# FASTDB web application
-open http://localhost:8080
-
-# MailHog inbox (password-reset emails)
-open http://localhost:8025
+export FASTDB_NAMESPACE=fastdb-arbutus
 ```
 
-To delete the local cluster and all of its local FASTDB data:
+The installer reads its namespace from the values file, whereas the user helper
+reads `FASTDB_NAMESPACE`. Keep them consistent.
 
-```bash
-./helm/scripts/stop-local.sh
-```
-
-This is deliberately a reset, not a pause: the next
-`create-local-cluster.sh` creates a fresh cluster and database environment.
-
-To create the fixed local test account (`test_user`) and open its password-reset
-page and MailHog message, run:
-
-```bash
-./helm/scripts/create-user-local.sh
-```
-
-Enter the desired password manually on the opened reset page.
-
-### Arbutus development VM workflow
-
-On an Ubuntu VM, set up the single-node K3s cluster once:
-
-```bash
-./helm/scripts/setup-arbutus-k3s.sh
-```
-
-To use prebuilt images from a private registry, log in once and install with a
-values file that identifies the registry, tag, and `fastdb-registry` pull
-secret. The included example uses the CanDIAPL project in CANFAR Harbor:
+If registry authentication is needed, run:
 
 ```bash
 docker login images.canfar.net
-./helm/scripts/install-singlenode-fastdb.sh \
-  ./helm/fastdb/values-arbutus.yaml
 ```
 
-To build images from the current checkout instead, prepare the local Docker
-and K3s images first, then install with the local values file:
-
-```bash
-./helm/scripts/build-local-images.sh \
-  fastdb.local test20260428
-./helm/scripts/install-singlenode-fastdb.sh \
-  ./helm/fastdb/values-arbutus-dev.yaml
-```
-
-Create the initial FASTDB user without requiring browser access to MailHog:
-
-```bash
-./helm/scripts/create-user-singlenode.sh
-```
-
-The user script creates the server-side account only. It does not create a
-`.fastdb.ini` file or a Kubernetes client Secret. Each application that uses
-the FASTDB Python client is responsible for supplying its own credentials; a
-Kubernetes application will typically create and mount a Secret containing its
-`.fastdb.ini` file in that application's namespace.
-
-The installer takes all Helm image settings from the selected values file. It
-uses the configured shell image to prepare the host-mounted `install/` tree,
-but it does not build deployment images. Kubernetes pulls remote registry
-images when needed; locally built images must first be loaded with
-`build-local-images.sh`.
-
-The installer generates development passwords on its first run in the ignored,
-mode-600 file `helm/fastdb/values-arbutus-secrets.yaml`; keep that file for
-later upgrades. PostgreSQL standby is disabled. Alert ingestion expects a LASS
-Kafka broker published on port 19092 of the same VM. The installer discovers
-the K3s node's internal address and uses it to connect the FASTDB broker
-consumer to LASS, so the values files do not contain a VM-specific IP address.
-
-The K3s `local-path` provisioner stores the database PVCs on the VM's root
-filesystem. The Arbutus flavour's ephemeral disk is deliberately unused. Check
-space periodically with:
-
-```bash
-df -h /
-sudo du -sh /var/lib/docker /var/lib/rancher/k3s
-```
-
-From inside the VM, FASTDB and MailHog are available at:
-
-```text
-http://localhost:30080
-http://localhost:30025
-```
-
-**TODO: Configure access from outside the VM.** These addresses are currently
-only reachable from within the VM. External access will require a floating IP
-or another route to the VM.
-
-`values-local.yaml` is specifically for the local/laptop setup.  In particular, it
-contains host-network settings for a local Kafka broker (using the [LASS](https://github.com/CanDIAPL/lass) tool) and an ingestion configuration for the `lass-topic`; do not use it as the starting point for a
-remote deployment.  Create a separate values file for each remote environment.
-
-### Registry Credentials
-
-Deployments that pull from private registries (e.g., GHCR) need a
-`dockerconfigjson` secret. The Helm chart creates this automatically when
-`global.registryCredentials.enabled` is `true` in your values file. Pass the
-password with `--set` so it is not committed to git.
-
-> **Note:** You can generate a GitHub Personal Access Token (PAT) with `read:packages` scope at https://github.com/settings/tokens.
-
-Configure your values file with registry info (no password):
+For Kubernetes to use that login as well, enable the following in your values
+file (uncomment it in the supplied example):
 
 ```yaml
 global:
   imagePullSecrets:
-    - name: ghcr-secret
-
-  registryCredentials:
-    enabled: true
-    secretName: ghcr-secret
-    server: ghcr.io
-    username: your-github-username
-    password: ""  # NEVER commit - pass via --registry-password or --set
+    - name: fastdb-registry
 ```
 
-Then pass the password to Helm:
+Add this under the existing `global:` section. The installer copies the Docker
+login file into a Kubernetes pull Secret named `fastdb-registry`. Docker and
+Kubernetes have separate image stores and authentication settings; a successful
+Docker pull alone does not configure Kubernetes.
+
+## 3. Install FASTDB
+
+From the repository root:
 
 ```bash
-helm upgrade --install fastdb ./helm/fastdb \
-  -f ./helm/fastdb/values-my-env.yaml -n my-namespace --create-namespace \
-  --set global.registryCredentials.password=<your-github-pat>
+./helm/scripts/install-singlenode-fastdb.sh helm/fastdb/values-my-vm.yaml
 ```
 
-### Build the Install Directory
+If the shell image is missing from Docker, the script explains why it is needed
+and asks before pulling it. The script then:
 
-The `install/` directory is a build artifact produced by Automake. It contains the Python code, config files, and static assets that get mounted into pods at `/fastdb`. This directory is **not** in git — it must be built before deploying.
+1. Generates database passwords and an application secret key on the first run.
+2. Runs the temporary Compose `makeinstall` service to configure and copy the
+   current checkout into `install/`.
+3. Runs Helm to create the database storage, services, migration Job, and
+   ingestion workloads. Kubernetes obtains the deployment images.
+4. Restarts webap, queryrunner, and shell to load the generated code, and checks
+   the local web service.
+
+Keep the generated `helm/fastdb/values-arbutus-secrets.yaml` file for upgrades.
+It contains plaintext deployment secrets, is ignored by Git, and is created with
+permissions restricted to the owner. It is distinct from a FASTDB user's password.
+Do not commit it or replace it while reusing existing databases.
+
+The current application code comes from your checkout, even when using older
+registry images. The images supply the runtime dependencies. Changes requiring
+new dependencies may require a newer image tag.
+
+A successful run ends with Helm reporting `STATUS: deployed`, completed
+rollouts, and the final workload/storage listing. Startup can take several
+minutes on a small VM. Kubernetes continues working if Helm times out; inspect
+its state before starting another installation.
+
+## 4. Verify the deployment
 
 ```bash
-# Build install/ using Compose (runs ./configure && make install inside a container)
-docker compose run --rm makeinstall
+helm status fastdb -n "$FASTDB_NAMESPACE"
+kubectl get pods,pvc -n "$FASTDB_NAMESPACE"
+kubectl get jobs -n "$FASTDB_NAMESPACE"
 ```
 
-This creates/updates the `install/` directory at the repo root. The `db/` directory (SQL migrations) is already in git and doesn't need building.
+Expect:
 
-#### External URL and Subdirectory Deployments
+- All PVCs `Bound`.
+- PostgreSQL, MongoDB, webap, queryrunner, shell, MailHog and brokerconsumer ready.
+- `createdb` and `ingestion-processing-version` Jobs completed.
+- Periodic source-importer Jobs; a successful finished pod shows `Completed`.
 
-When FASTDB is served from a subdirectory (e.g., `https://host/fastdb-app/`
-instead of `https://host/`), the frontend JavaScript and HTML templates must
-be built with the correct base path. The Automake build system uses
-`@external_url@` placeholders in `.js.in` and `.html.in` files that get
-substituted during `./configure`:
+Brokerconsumer normally shows `2/2`: one consumer container and one Kafka
+connection proxy. It is one pod with two containers.
 
-```
-# Template (fastdb.js.in):
-import { rkWebUtil } from "@external_url@static/rkwebutil.js";
-
-# Built with --with-external-url=/fastdb-app/ → (fastdb.js):
-import { rkWebUtil } from "/fastdb-app/static/rkwebutil.js";
-
-# Built without (default) → (fastdb.js):
-import { rkWebUtil } from "static/rkwebutil.js";
-```
-
-The single-node installer accepts the public URL through
-`FASTDB_EXTERNAL_URL`:
+Inspect the consumer and scheduled importer:
 
 ```bash
-FASTDB_EXTERNAL_URL=https://fastdb.example.org/ \
-  ./helm/scripts/install-singlenode-fastdb.sh \
-  ./helm/fastdb/values-arbutus.yaml
+kubectl logs deployment/brokerconsumer -c brokerconsumer \
+  -n "$FASTDB_NAMESPACE" --tail=100
+kubectl get cronjob source-importer -n "$FASTDB_NAMESPACE"
+kubectl get pods -n "$FASTDB_NAMESPACE" --sort-by=.metadata.creationTimestamp
 ```
 
-The `--external-url` value must end in a trailing slash.  It can be either a
-path (such as `/fastdb-app/`) or a complete public URL (such as
-`https://fastdb.example.org/fastdb-app/`). Use the complete URL when
-FASTDB needs to send an absolute link in email, including password-reset links.
-For the local Kind helper, this is `http://localhost:8080/`.
-
-Two settings work together:
-- `FASTDB_EXTERNAL_URL=/path/` or `https://host/path/` → bakes the URL/path into
-  static JS/HTML at build time and into links generated by the server
-- `webap.basePath: /path` → sets `SCRIPT_NAME` env var for Flask routing at runtime
-
-For a root-path deployment, omit `webap.basePath`. Pass the public root URL
-through `FASTDB_EXTERNAL_URL` when generated emails must point to that address.
-
-## Common Operations
-
-### Install a New Release
+Use the latest source-importer pod name from that list:
 
 ```bash
-helm upgrade --install <release-name> ./helm/fastdb \
-  -f ./helm/fastdb/values-<env>.yaml -n <namespace> --create-namespace
+kubectl logs <source-importer-pod-name> \
+  -n "$FASTDB_NAMESPACE" --timestamps --tail=100
 ```
 
-> **Important:** Always pass `-n <namespace>` so the Helm release is stored in the correct namespace (not `default`). Use `--create-namespace` if the namespace may not exist yet.
+Before LASS starts, Kafka connection/topic warnings are expected. An
+empty-collection `NoneType` error in source importer is a known application
+issue on checkouts lacking the empty-collection fix; it does not by itself mean
+database installation failed.
 
-### Upgrade an Existing Release
+## 5. Create a user and query FASTDB
 
-After modifying values or templates:
+Create a test account from the VM:
 
 ```bash
-helm upgrade <release-name> ./helm/fastdb \
-  -f ./helm/fastdb/values-<env>.yaml -n <namespace>
+FASTDB_NAMESPACE="$FASTDB_NAMESPACE" ./helm/scripts/create-user-singlenode.sh
 ```
 
-### View Current Values
+The helper prompts for account details and a password, generates authentication
+keys, and inserts the account into PostgreSQL. It does not require MailHog or
+create a client configuration file. See [user creation details](../HOWTO_LOGIN.md).
+
+You can test your login using the web app or the python client (NOTE: documentation on how to do this to come soon)
+
+## 6. Ingest simulated LASS alerts
+
+Run LASS on the same VM as FASTDB. Use a separate virtual environment with a
+Python version supported by the selected LASS release:
 
 ```bash
-helm get values <release-name> -n <namespace>
+python3.13 -m venv "$HOME/lass-venv"
+source "$HOME/lass-venv/bin/activate"
+python -m pip install lass
+lass --help
+lass -n 100 --avro
 ```
 
-### Preview Changes (Dry Run)
+Optional: Record the LASS version with `python -m pip show lass` when benchmarking.
 
-See what would be deployed without actually deploying:
+The current [LASS CLI](https://github.com/CanDIAPL/lass#usage) starts Docker
+container `lassbroker`, publishes Kafka on VM port 19092, and sends to
+`lass-topic`. Use schema 10 and `--avro` to match the chart's v10.0 schemaless
+Avro consumer. LASS defaults to pickle, which does not match that consumer.
+
+Verify the broker and follow the consumer:
 
 ```bash
-helm template <release-name> ./helm/fastdb -f ./helm/fastdb/values-<env>.yaml
+docker ps --filter name=lassbroker
+kubectl logs -f deployment/brokerconsumer -c brokerconsumer \
+  -n "$FASTDB_NAMESPACE" --tail=50
 ```
 
-Or with diff against current deployment:
+Stop following logs with Ctrl-C. The consumer writes alerts to MongoDB; the
+source-importer CronJob transfers them to PostgreSQL, on a schedule configured in the 
+values file. Default in the dev values files is once per minute, production is expected 
+to be closer to once per hour. 
+Check the latest importer logs as in step 4 for imported object/source counts.
+
+## 7. Check everthing worked with the python client
+
+To check everything worked correctly, open the FASTDB shell and use the Python client to query the db.
+
+Enter the FASTDB shell pod from the VM:
 
 ```bash
-helm upgrade <release-name> ./helm/fastdb \
-  -f ./helm/fastdb/values-<env>.yaml -n <namespace> --dry-run
+kubectl exec -it deployment/shell -n "$FASTDB_NAMESPACE" -- /bin/bash
 ```
 
-### Uninstall a Release
+Inside that shell, start Python:
 
 ```bash
-helm uninstall <release-name> -n <namespace>
+python
 ```
 
-> **Warning:** Deleting the namespace as well as the release can delete its
-> registry secret and PVCs. Data stored in deleted PVCs may be lost.
+Use the Python client to authenticate and run a query through the web API:
 
-### List Releases
+```python
+from getpass import getpass
+from fastdb.fastdb_client import FASTDBClient
+
+fdb = FASTDBClient(
+    "http://webap:8080/",
+    username=input("FASTDB username: "),
+    password=getpass("FASTDB password: "),
+)
+
+#check if you are connected to the DB
+print(fdb.submit_short_sql_query("SELECT 1 AS connected"))
+
+#count the number of entries in the diasource table
+print(fdb.submit_short_sql_query("SELECT COUNT(*) AS sources FROM diasource"))
+
+#print the IDs and times for the first new diasources 
+print(fdb.submit_short_sql_query(
+    "SELECT diasourceid, diaobjectid, midpointmjdtai FROM diasource LIMIT 5"
+))
+```
+
+Use `exit()` to leave Python, then `exit` to leave the pod shell.
+
+After import succeeds, expect a nonzero source count and example rows. Do not
+assume the total equals the number just sent if the database already contains data.
+Start with this small run before increasing alert counts, and monitor free space
+on both the database filesystem and the filesystem holding Docker/Kafka data.
+
+This completes the basic check: LASS → Kafka → brokerconsumer → MongoDB →
+source importer → PostgreSQL → authenticated FASTDB client.
+
+## Update an installation
+
+Keep the same namespace, values file, checkout location, and generated secrets.
+After selecting the next code revision, rerun:
 
 ```bash
-helm list -n <namespace>
-helm list -A  # All namespaces
+./helm/scripts/install-singlenode-fastdb.sh helm/fastdb/values-my-vm.yaml
 ```
 
-### Rollback to Previous Version
-
-```bash
-helm rollback <release-name> <revision-number> -n <namespace>
-helm history <release-name> -n <namespace>  # View revision history
-```
-
-## Configuration Reference
-
-### Global Settings
-
-```yaml
-global:
-  namespace: fastdb-local          # Kubernetes namespace
-  environment: dev                 # Environment label
-
-  imageRegistry: "localhost"       # Image registry prefix
-  imageTag: "local"                # Default image tag
-  imagePullPolicy: Never           # Never, Always, IfNotPresent
-  imagePullSecrets: []             # Registry credentials
-  # - name: ghcr-secret
-
-  # Helm-managed registry credentials (creates imagePullSecret automatically)
-  registryCredentials:
-    enabled: false                 # Set true to create the secret via Helm
-    secretName: ghcr-secret        # Must match imagePullSecrets[].name
-    server: ""                     # e.g., ghcr.io
-    username: ""                   # Registry username
-    password: ""                   # NEVER commit - pass via --registry-password
-
-  namespaceLabels: {}              # Additional namespace labels
-  # owner: username
-```
-
-### Volume Configuration
-
-```yaml
-volumes:
-  type: pvc                        # Always "pvc" for database storage
-  storageClass: ""                 # Storage class (empty = default)
-  codeHostPath: false              # Mount code from host (Kind only)
-```
-
-### Component Configuration
-
-Each component (postgres, mongodb, webap, etc.) follows this pattern:
-
-```yaml
-postgres:
-  enabled: true                    # Enable/disable component
-  image:
-    repository: fastdb-postgres    # Image name
-    tag: ""                        # Tag override (uses global.imageTag if empty)
-  replicas: 1
-
-  persistence:
-    size: 10Gi
-    accessMode: ReadWriteOnce
-
-  externalAccess:
-    enabled: false
-    type: NodePort                 # NodePort or LoadBalancer
-    nodePort: 30432                # For NodePort type
-    annotations: {}                # For LoadBalancer (e.g., metallb)
-```
-
-### Secrets
-
-```yaml
-secrets:
-  postgres:
-    password: "changeme"
-    roPassword: "changeme"
-    replicatorPassword: "changeme"
-  secretKey: "changeme"
-
-  mongodb:
-    adminUser: "admin"
-    adminPassword: "changeme"
-    # ... etc
-```
-
-**Important:** Never commit real passwords to git. Use `--set` flags or external secret management:
-
-```bash
-helm install fastdb ./helm/fastdb \
-  -f ./helm/fastdb/values-myenv.yaml \
-  --set secrets.postgres.password="real-password" \
-  --set secrets.secretKey="real-secret"
-```
-
-## Creating a New Environment
-
-### 1. Create Values File
-
-Copy an existing values file as a starting point:
-
-```bash
-cp helm/fastdb/values-local.yaml helm/fastdb/values-myenv.yaml
-```
-
-### 2. Customize Settings
-
-Edit the new file. Key sections to modify:
-
-```yaml
-# values-myenv.yaml
-
-global:
-  namespace: fastdb-myenv          # Unique namespace
-  environment: myenv
-
-  # Image source
-  imageRegistry: "ghcr.io/myorg"   # Your registry
-  imageTag: "v1.0.0"               # Your tag
-  imagePullPolicy: Always
-  imagePullSecrets:
-    - name: my-registry-secret    # If private registry
-
-# Enable/disable components as needed
-postgres:
-  enabled: true
-  persistence:
-    size: 50Gi                     # Adjust storage
-
-mongodb:
-  enabled: true                    # Or false if not needed
-
-webap:
-  enabled: true
-  externalAccess:
-    enabled: true
-    type: LoadBalancer             # Or NodePort
-
-# Disable dev-only components for production
-mailhog:
-  enabled: false
-
-shell:
-  enabled: false
-```
-
-### 3. Deploy
-
-```bash
-helm upgrade --install fastdb ./helm/fastdb \
-  -f ./helm/fastdb/values-myenv.yaml -n myenv --create-namespace
-```
-
-## Environment Examples
-
-### Local Development (Kind)
-
-```yaml
-# values-local.yaml highlights
-global:
-  imageRegistry: "localhost"
-  imageTag: "local"
-  imagePullPolicy: Never           # Images loaded into Kind
-
-volumes:
-  codeHostPath: true               # Mount code from host
-
-postgres:
-  externalAccess:
-    enabled: true
-    type: NodePort
-    nodePort: 30432
-```
-
-Kind config (`admin/local/kind-config.yaml`) must include:
-
-```yaml
-extraMounts:
-  - hostPath: /path/to/FASTDB/install
-    containerPath: /fastdb-install
-  - hostPath: /path/to/FASTDB/db
-    containerPath: /fastdb-db
-extraPortMappings:
-  - containerPort: 30080
-    hostPort: 8080
-```
+The installer regenerates `install/`, recreates the one-shot setup Jobs, applies
+migrations and Helm changes, and restarts services. It should preserve existing
+database PVCs, it is not a database reset. Review migrations and back up useful
+data before an update. Changing the namespace creates a different deployment.
+An image-tag change and a source-code change are separate choices.
 
 ## Troubleshooting
 
-### Pods Not Starting
+AI-generated tips on troubleshooting issues with the fastdb deployment:
+
+Collect evidence before deleting resources:
 
 ```bash
-# Check pod status
-kubectl get pods -n <namespace>
-
-# Describe pod for events
-kubectl describe pod <pod-name> -n <namespace>
-
-# Check logs
-kubectl logs <pod-name> -n <namespace>
+helm status fastdb -n "$FASTDB_NAMESPACE"
+kubectl get pods,pvc,jobs -n "$FASTDB_NAMESPACE"
+kubectl get events -n "$FASTDB_NAMESPACE" --sort-by=.metadata.creationTimestamp
+kubectl logs job/createdb -n "$FASTDB_NAMESPACE" --all-containers=true
+kubectl logs job/ingestion-processing-version -n "$FASTDB_NAMESPACE"
 ```
 
-### PVC Issues
+For a particular failing pod:
 
 ```bash
-# Check PVC status
-kubectl get pvc -n <namespace>
-
-# Describe for events
-kubectl describe pvc <pvc-name> -n <namespace>
+kubectl describe pod <pod-name> -n "$FASTDB_NAMESPACE"
+kubectl logs <pod-name> -n "$FASTDB_NAMESPACE" --all-containers=true --tail=100
+kubectl logs <pod-name> -n "$FASTDB_NAMESPACE" --previous --tail=100
 ```
 
-### Image Pull Errors
+`--previous` reads the previous container attempt and only works if one exists.
+Use `-c <container-name>` for a pod with multiple containers. Completed Jobs and
+pods can be cleaned up, so collect their logs promptly.
+
+| Symptom | What to inspect |
+| --- | --- |
+| PVC stays `Pending` | `kubectl describe pvc <claim> -n "$FASTDB_NAMESPACE"`; confirm the storage class, mount and free space. For K3s, inspect `kubectl logs -n kube-system deployment/local-path-provisioner`. |
+| Helm times out | Check PVCs, pod events and setup Job logs. A failed Helm status can remain even if workloads later recover. |
+| MongoDB repeatedly restarts | Inspect pod events for failed liveness checks and previous logs. Use a chart revision with the startup-probe fix. |
+| Ingestion reports missing tables/columns | Confirm migrations completed before processing-version setup and importer execution. Do not repeatedly start ingestion against an incomplete schema. |
+| Image pull fails | Verify registry, tag, architecture, credentials and Kubernetes pull Secret. |
+| Cannot write `install/` | Check ownership of the checkout's `install/` and `db/` directories; use the maintainer account rather than running the installer as root. |
+
+For VM resource diagnostics, use `df -h`, `free -h`, `uptime`,
+`docker system df`, and `kubectl top nodes` (if metrics are available).
+A PVC's requested capacity is not a measurement of disk consumption.
+
+## Reference and other workflows
+
+### What the installation uses
+
+- [Chart defaults](fastdb/values.yaml) supply settings not overridden in your file.
+- [Registry-image VM example](fastdb/values-arbutus.yaml) is the walkthrough's base.
+- [Locally built image example](fastdb/values-arbutus-dev.yaml) uses `fastdb.local`.
+- [Templates](fastdb/templates/) define Deployments, Jobs, Services, Secrets and PVCs.
+- `install/` contains generated runtime files. Pods mount it at `/fastdb` using
+  `hostPath`; migrations are mounted separately from `db/`. Keep the checkout
+  in place. This is a single-node workflow.
+- Database credentials are supplied through Kubernetes Secrets; user accounts
+  are separate from those infrastructure credentials.
+
+For tool details, see [Helm's usage guide](https://helm.sh/docs/intro/using_helm/)
+and [Kubernetes workload documentation](https://kubernetes.io/docs/concepts/workloads/).
+
+### Build images locally
+
+For K3s, this helper builds images from the checkout and loads them into K3s:
 
 ```bash
-# Verify image exists
-docker images | grep fastdb
-
-# For Kind, ensure images are loaded
-kind load docker-image <image> --name <cluster>
-
-# For private registries, check secret
-kubectl get secret <pull-secret> -n <namespace>
+./helm/scripts/build-local-images.sh fastdb.local test20260428
+./helm/scripts/install-singlenode-fastdb.sh helm/fastdb/values-arbutus-dev.yaml
 ```
 
-### Template Errors
+If you choose another registry/tag for the build, update the values file to match.
+The image-loading helper specifically uses K3s; other distributions need their
+own image import method or a reachable registry.
 
-```bash
-# Lint chart
-helm lint ./helm/fastdb -f ./helm/fastdb/values-<env>.yaml
+### Run the preparation and Helm steps manually
 
-# Render and inspect
-helm template fastdb ./helm/fastdb -f ./helm/fastdb/values-<env>.yaml > /tmp/rendered.yaml
-```
+The installer is the recommended walkthrough because it also prepares secrets,
+registry access, host paths and service restarts. Its two principal operations are
+Compose `makeinstall` and `helm upgrade --install`. See
+[scripts/install-singlenode-fastdb.sh](scripts/install-singlenode-fastdb.sh)
+for the complete commands and overrides. Running bare `helm install` against
+the example values does not generate the host's `install/` tree.
 
-### Database Connection Issues
+### Local laptop development
 
-```bash
-# Check postgres is running
-kubectl get pods -n <namespace> -l app=postgres
+Use the separate [Kind guide](LOCAL_KIND.md).
 
-# Test connection from shell pod
-kubectl exec -it deploy/shell -n <namespace> -- \
-  psql -h postgres -U postgres -c "SELECT 1"
-```
+### Removing a benchmark installation
 
-## Best Practices
+Removing a Helm release and deleting its data are different operations.
+Inspect the namespace's PVCs and the volumes' reclaim policies before uninstalling.
+Deleting PVCs or the namespace can permanently delete the benchmark databases.
+Do not use namespace deletion as an upgrade step. LASS's `lass --quit` removes
+its Kafka container and simulated broker data independently of FASTDB.
 
-1. **Never commit secrets** - Use `--set` flags or external secret management
-
-2. **Use specific image tags** - Avoid `latest` in production
-
-3. **Test with dry-run** - Preview changes before applying
-
-4. **Version your values files** - Keep environment configs in git
-
-5. **Use namespaces** - Isolate environments with separate namespaces
-
-6. **Monitor resources** - Set appropriate resource requests/limits
-
-7. **Backup PVCs** - Database PVCs contain critical data
-
-## File Reference
-
-| File | Purpose |
-|------|---------|
-| `Chart.yaml` | Chart metadata |
-| `values.yaml` | Default values (don't modify for deployment) |
-| `values-local.yaml` | Local Kind deployment |
-| `values-arbutus.yaml` | Single-node VM using registry images |
-| `values-arbutus-dev.yaml` | Single-node VM using locally built images |
-| `templates/_helpers.tpl` | Reusable template functions |
-| `templates/namespace.yaml` | Namespace resource |
-| `templates/secrets.yaml` | Secrets and ConfigMaps |
-| `templates/pvcs.yaml` | Persistent Volume Claims |
-| `templates/postgres.yaml` | PostgreSQL deployment + services |
-| `templates/postgres-standby.yaml` | PostgreSQL read replica |
-| `templates/mongodb.yaml` | MongoDB deployment + service |
-| `templates/webap.yaml` | Web application |
-| `templates/shell.yaml` | Debug shell pod |
-| `templates/queryrunner.yaml` | Query runner service |
-| `templates/mailhog.yaml` | Email testing (dev) |
-| `templates/createdb-job.yaml` | Database migration job |
-| `templates/wal-webserver.yaml` | Optional WAL archive webserver |
+After verification, keep a record of the FASTDB commit, image tag, values,
+Kubernetes version and LASS version alongside benchmark results.
