@@ -10,15 +10,34 @@ import io
 import pathlib
 import time
 import uuid
+import numbers
 import requests
 import binascii
 import logging
 import configparser
+import simplejson
+
+import numpy as np
 
 from Crypto.Protocol.KDF import PBKDF2
 from Crypto.Hash import SHA256
 from Crypto.Cipher import AES, PKCS1_OAEP
 from Crypto.PublicKey import RSA
+
+
+# This is (mostly) copied from util.py, but we want fastdb_client
+#   not to depend on the rest of fastdb
+def fastdb_json_default( obj ):
+    if isinstance( obj, uuid.UUID ):
+        return str(obj)
+    elif isinstance( obj, numbers.Integral ):
+        return int(obj)
+    elif isinstance( obj, numbers.Real ):
+        return float(obj)
+    elif isinstance( obj, np.ndarray ):
+        return obj.tolist()
+    else:
+        raise TypeError( f"Don't know how to handle {obj} (type {type(obj)}" )
 
 
 class FASTDBClient:
@@ -196,16 +215,23 @@ class FASTDBClient:
 
         """
 
+        if ( json is not None ) and ( data is not None ):
+            raise ValueError( "Can't pass both json and data, just pass one." )
+
         sleeptime = self.retrysleep
         previous_fail = False
         t0 = time.perf_counter()
         for tries in range( self.retries + 1 ):
             res = None
             try:
+                headers = None
+                if json is not None:
+                    data = simplejson.dumps( json, default=fastdb_json_default )
+                    headers = {'Content-Type': 'application/json'}
                 if method == 'post':
-                    res = self.req.post( url, data=data, json=json, verify=self.verify )
+                    res = self.req.post( url, data=data, headers=headers, verify=self.verify )
                 elif method == 'get':
-                    res = self.req.get( url, data=data, json=json, verify=self.verify )
+                    res = self.req.get( url, data=data, headers=headers, verify=self.verify )
                 else:
                     raise ValueError( f"Unknown method {method}, must be get or post" )
                 if res.status_code != 200:

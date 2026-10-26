@@ -86,6 +86,38 @@ class BaseView( flask.views.View ):
                 # Verify that session displayname and database displayname match?  Eh.  Whatevs.
         return self.authenticated
 
+    def check_groups( self, allowed_groups=[], disallowed_groups=[] ):
+        if len(allowed_groups) == 0:
+            raise FASTDBWebException( "No groups are allowed." )
+
+        ok = False
+        for groupid in allowed_groups:
+            if groupid in flask.session['usergroups']:
+                ok = True
+                break
+
+        if not ok:
+            if len( allowed_groups ) == 1:
+                raise FASTDBWebException( f"User must be in group {allowed_groups[0]}" )
+            else:
+                raise FASTDBWebException( f"User must be in one of the groups: {allowed_groups}" )
+
+        if len(disallowed_groups) == 0:
+            return ok
+
+        badgroup = None
+        for groupid in disallowed_groups:
+            if groupid in flask.session['usergroups']:
+                badgroup = groupid
+                ok = False
+                break
+
+        if not ok:
+            raise FASTDBWebException( f"Not allowed: user is in group {badgroup}" )
+
+        return ok
+
+
     def dispatch_request( self, *args, **kwargs ):
         if not self.check_auth():
             return "Not logged in", 500

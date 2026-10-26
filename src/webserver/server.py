@@ -1,6 +1,7 @@
 import re
 import copy
 import logging
+import uuid
 
 from psycopg import sql
 import flask
@@ -249,6 +250,120 @@ class ObjectSearch( BaseView ):
             raise FASTDBWebException( str(ex) )
 
 
+# ======================================================================
+
+class CreateTag( BaseView ):
+    def do_the_things( self, tag, description=None ):
+        self.check_groups( [ 'admin', 'tag_create' ] )
+
+        args = { 'tag': tag, 'description': description }
+        if flask.request.is_json:
+            args.update( flask.request.json )
+        if set( args.keys() ) != { 'tag', 'description' }:
+            return f"Unknown arguments: {set(args.keys()) - {'tag', 'description'}}", 422
+
+        with db.DBCon() as dbcon:
+            rows, _cols = dbcon.execute( sql.SQL( "SELECT id, tag FROM tags WHERE tag={tag}" )
+                                         .format( tag=args['tag'] ) )
+            if len(rows) > 0:
+                return f"Tag {tag} already exists.", 422
+
+            tagid = uuid.uuid4()
+            dbcon.execute( sql.SQL( "INSERT INTO tags(id, tag, description) "
+                                    "VALUES ({tagid}, {tag}, {description})" )
+                           .format( tagid=tagid, tag=args['tag'], description=args['description'] ) )
+            dbcon.commit()
+            return { "status": "ok",
+                     "id": tagid,
+                     "tag": args['tag'],
+                     "description": args['description']
+                    }
+
+
+# ======================================================================
+
+class TagObjects( BaseView ):
+    def do_the_things( self, tag ):
+        self.check_groups( [ 'admin', 'tag_create' ] )
+
+        if not flask.request.is_json:
+            return "Error, must send JSON POST body with objects=list", 422
+        data =flask.request.json
+        if ( 'objects' not in data ) or ( not isinstance( data['objects'], list ) ):
+            return "Error, must send JSON POST body with objects=list", 422
+
+        ids_are_diaobjectid = ( 'ids_are_diaobjectid' in data ) and ( data['ids_are_diaobjectid'] )
+
+        if ids_are_diaobjectid:
+            q = sql.SQL( "SELECT rootid, diaobjectid FROM diaobject WHERE diaobjectid=ANY(ARRAY[{objids}])"
+                        ).format( objids=sql.SQL(",").join( data['objects'] ) )
+        else:
+            q = sql.SQL( "SELECT id FROM root_diaobject WHERE id=ANY(ARRAY[{objids}]::uuid[])"
+                         ).format( objids=sql.SQL(",").join( data['objects'] ) )
+
+        with db.DBCon() as dbcon:
+            tagobj = db.Tag.get( tag )
+            if tagobj is None:
+                return f"Unknown tag {tag}", 422
+
+            rows, _cols = dbcon.execute( q )
+            if len(rows) != len( data['objects'] ):
+                return ( f"You passed {len(data['objects'])} object ids, but I only found "
+                         f"{len(rows)} of those in the database" ), 422
+
+            if ids_are_diaobjectid:
+                rootids = list( set( row[0] for row in rows ) )
+            else:
+                rootids = [ row[0] for row in rows ]
+
+            data = { 'tagid': [ tagobj.id ] * len(rootids), 'rootid': rootids }
+            db.RootDiaObjectTag.bulk_insert_or_upsert( data, dbcon=dbcon )
+            # That will have committed
+
+        return { "status": "ok" }
+
+
+# =====================================================================
+
+class TagsForObject( BaseView ):
+    def do_the_things( self, objid ):
+        with db.DBCon() as dbcon:
+            try:
+                rootobj = db.RootDiaObject.get( objid, dbcon=dbcon )
+            except Exception as ex:
+                raise FASTDBWebException( str(ex) )
+            if rootobj is None:
+                return f"Unknown object {objid}", 422
+
+            q = sql.SQL( "SELECT t.tag FROM tags t "
+                         "INNER JOIN root_diaobject_tag r ON t.id=r.tagid "
+                         "WHERE r.rootid={rootid}" ).format( rootid=rootobj.id )
+            rows, _cols = dbcon.execute( q )
+
+            return { "rootid": rootobj.id,
+                     "tags": [ r[0] for r in rows ]
+                    }
+
+
+# ======================================================================
+
+class ObjectsForTag( BaseView ):
+    def do_the_things( self, tagid ):
+        with db.DBCon() as dbcon:
+            tagobj = db.Tag.get( tagid, dbcon=dbcon )
+            if tagobj is None:
+                return f"Unknown tag {tagid}", 422
+
+            q = sql.SQL( "SELECT rootid FROM root_diaobject_tag WHERE tagid={tagid}" ).format( tagid=tagobj.id )
+            rows, _cols = dbcon.execute( q )
+
+            return { "tagid": tagobj.id,
+                     "tag": tagobj.tag,
+                     "rootids": [ r[0] for r in rows ]
+                    }
+
+
+
 # **********************************************************************
 # **********************************************************************
 # **********************************************************************
@@ -280,6 +395,7 @@ rkauth_flask.RKAuthConfig.setdbparams(
     db_name=db.dbname,
     db_user=db.dbuser,
     db_password=db.dbpasswd,
+    usegroups = True,
     email_from = config.emailfrom,
     email_subject = 'fastdb password reset',
     email_system_name = 'fastdb',
@@ -309,6 +425,11 @@ urls = {
     "/getdiaobjectinfo/<procver>/<objid>": GetDiaObjectInfo,
     "/objectsearch": ObjectSearch,
     "/objectsearch/<processing_version>": ObjectSearch,
+    "/createtag/<tag>": CreateTag,
+    "/createtag/<tag>/<description>": CreateTag,
+    "/tagobjects/<tag>": TagObjects,
+    "/tagsforobject/<objid>": TagsForObject,
+    "/objectsfortag/<tagid>": ObjectsForTag
 }
 
 usedurls = {}
