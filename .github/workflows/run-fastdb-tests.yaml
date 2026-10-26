@@ -57,12 +57,3 @@ jobs:
       - name: run test
         run: |
           docker compose run --rm runtests
-      #     docker compose up -d mongodb
-
-      # - name: TEMP - mongo log
-      #   run: |
-      #     docker compose logs mongodb
-
-      # - name: bring docker down
-      #   run: |
-      #     docker compose down -v
