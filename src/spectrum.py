@@ -260,7 +260,7 @@ def what_spectra_are_wanted( procver='realtime', position_procver=None,
     yanks = [ i for i in srcltcvs.columns if i not in [ 'rootid', 'mjd', 'band', 'flux' ] ]
     srcltcvs = srcltcvs.drop( yanks, axis='columns' )
     yanks = [ i for i in frcltcvs.columns if i not in [ 'rootid', 'mjd', 'band', 'flux' ] ]
-    frcltvcs = frcltcvs.drop( yanks, axis='columns' )
+    frcltcvs = frcltcvs.drop( yanks, axis='columns' )
 
     # Extract latest row for each object in srcltcvs and frcltcvs
     srcltcvs = srcltcvs.loc[ srcltcvs.groupby(["rootid", "band"])["mjd"].idxmax() ]
@@ -329,7 +329,7 @@ def what_spectra_are_wanted( procver='realtime', position_procver=None,
     frcltcvs = frcltcvs.set_index( 'rootid' )
     df = df.join( frcltcvs, how='left' )
     df = df.rename( { 'mjd': 'frced_mjd', 'flux': 'frced_flux', 'band': 'frced_band' }, axis='columns' )
-    
+
     # Join to obinfo to get ra/dec
     df = df.join( objinfo, how='left' )
 

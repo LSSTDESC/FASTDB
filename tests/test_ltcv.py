@@ -432,7 +432,7 @@ def compare_pandas_to_json( pdltcvs, jsltcvs, pdobjinfo, jsobjinfo ):
 
     if jsobjinfo is not None:
         assert pdobjinfo.index.names == ['rootid']
-        pdfobjinfo = pdobjinfo.reset_index()
+        pdobjinfo = pdobjinfo.reset_index()
         for k, v in jsobjinfo.items():
             # ROB THIS NEEDS FIXING
             # Need to check None/NA item by item
