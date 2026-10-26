@@ -58,7 +58,7 @@ jobs:
         run: |
           docker compose run runtests
 
-      - name: TEMP: mongo log
+      - name: TEMP - mongo log
         run: |
           docker compose logs mongodb
 
