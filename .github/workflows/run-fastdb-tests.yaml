@@ -56,8 +56,8 @@ jobs:
 
       - name: run test
         run: |
-          docker compose up -d webap shell
           # docker compose run runtests
+          docker compose up -d mongodb
 
       - name: TEMP - mongo log
         run: |
