@@ -710,7 +710,7 @@ def laboriously_construct_pandas( data, columns=None, int16cols=[], int32cols=[]
             indices = list( indices )
         if keyname is not None:
             indices.insert( 0, keyname )
-        df.set_index( indices, inplace=True )
+        df = df.set_index( indices )
 
     FDBLogger.debug( "...done laboriously constructing a pandas dataframe." )
 

@@ -327,7 +327,7 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None, p
                    else pandas.array(v, dtype='object') )
               for k, v in rval.items() }
         )
-        df.set_index( 'rootid', inplace=True )
+        df = df.set_index( 'rootid' )
         FDBLogger.debug( "get_object_infos done, returning a Pandas dataframe" )
         return df
 
@@ -900,9 +900,9 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                     if list( objinfo.index.values ) != [ x['rootid'] for x in ltcvs ]:
                         raise ValueError( "get_object_info rootids doesn't match manyltcv's!" )
                     if not include_base_procver:
-                        objinfo.drop( 'obj_base_procver', axis='columns', inplace=True )
+                        objinfo = objinfo.drop( 'obj_base_procver', axis='columns' )
                         if return_diaobject_positions:
-                            objinfo.drop( 'pos_base_procver', axis='columns', inplace=True )
+                            objinfo = objinfo.drop( 'pos_base_procver', axis='columns' )
                 elif return_format == 'json':
                     keepers = [ i for i, r in enumerate(objinfo['rootid']) if r in ltcvrootidsset ]
                     objinfo = { k: [ v[k] for k in keepers ] for k, v in objinfo.items() }
@@ -1040,7 +1040,7 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                                          for k, v in row.items() }
                                        for row in ltcvs ] )
         pd_ltcvs = pd_ltcvs.explode( [ c for c in pd_ltcvs.columns if c != 'rootid' ] ).astype( dtypes )
-        pd_ltcvs.set_index( ['rootid', 'mjd'], inplace=True )
+        pd_ltcvs = pd_ltcvs.set_index( ['rootid', 'mjd'] )
         ltcvs = pd_ltcvs
 
     FDBLogger.debug( "...done with many_object_ltcvs" )
