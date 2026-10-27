@@ -15,7 +15,7 @@ import requests
 import binascii
 import logging
 import configparser
-import simplejson
+import json as namespace_pollution_json_library
 
 import numpy as np
 
@@ -226,7 +226,7 @@ class FASTDBClient:
             try:
                 headers = None
                 if json is not None:
-                    data = simplejson.dumps( json, default=fastdb_json_default )
+                    data = namespace_pollution_json_library.dumps( json, default=fastdb_json_default )
                     headers = {'Content-Type': 'application/json'}
                 if method == 'post':
                     res = self.req.post( url, data=data, headers=headers, verify=self.verify )

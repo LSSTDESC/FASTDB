@@ -2,6 +2,7 @@ import re
 import copy
 import logging
 import uuid
+import textwrap
 
 from psycopg import sql
 import flask
@@ -9,7 +10,7 @@ import flask_session
 
 import db
 import ltcv
-from util import FDBLogger
+from util import FDBLogger, asUUID
 import webserver.rkauth_flask as rkauth_flask
 import webserver.dbapp as dbapp
 import webserver.ltcvapp as ltcvapp
@@ -288,7 +289,7 @@ class TagObjects( BaseView ):
 
         if not flask.request.is_json:
             return "Error, must send JSON POST body with objects=list", 422
-        data =flask.request.json
+        data = flask.request.json
         if ( 'objects' not in data ) or ( not isinstance( data['objects'], list ) ):
             return "Error, must send JSON POST body with objects=list", 422
 
@@ -363,6 +364,120 @@ class ObjectsForTag( BaseView ):
                     }
 
 
+# ======================================================================
+class DeleteTag( BaseView ):
+    def do_the_things( self, tag ):
+        self.check_groups( [ 'admin', 'tag_create' ] )
+
+        if ( ( not flask.request.is_json ) or ( not isinstance( flask.request.json, dict ) ) or
+             ( 'I know what I am doing' not in flask.request.json) or
+             ( not flask.request.json['I know what I am doing'] )
+            ):
+            return "Only do this if you know what you are doing", 422
+
+        with db.DBCon() as dbcon:
+            try:
+                tagid = asUUID( tag )
+                q = sql.SQL( "SELECT id, tag FROM tags WHERE id={tag}" ).format( tag=tagid )
+            except Exception:
+                q = sql.SQL( "SELECT id, tag FROM tags WHERE tag={tag}" ).format( tag=tag )
+
+            rows, _cols = dbcon.execute( q )
+            if len(rows) == 0:
+                return f"Unknown tag {tag}", 422
+
+            tagid = rows[0][0]
+            tag = rows[0][1]
+
+            dbcon.execute( sql.SQL( "DELETE FROM tags WHERE id={tagid} " ).format( tagid=tagid ) )
+            dbcon.commit()
+
+            return { "status": "tag deleted",
+                     "tag": tag,
+                     "tagid": tagid
+                    }
+
+
+# ======================================================================
+
+class UntagObjects( BaseView ):
+    def do_the_things( self, tag ):
+        self.check_groups( [ 'admin', 'tag_create' ] )
+
+        if not flask.request.is_json:
+            return "Must POST JSON data with key objects, value list of object ids", 422
+
+        data = flask.request.json
+        if ( ( not isinstance( data, dict ) ) or ( 'objects' not in data ) or
+             ( not isinstance( data['objects'], list ) ) ):
+            return "Must POST JSON data with key objects, value list of object ids", 422
+
+        if ( 'I know what I am doing' not in data ) or ( not data['I know what I am doing'] ):
+            return "Only do this if you know what you are doing.", 422
+
+        ids_are_diaobjectid = ( 'ids_are_diaobjectid' in data ) and ( data['ids_are_diaobjectid'] )
+        ok_missing = ( 'ok_missing' in data ) and ( data['ok_missing'] )
+
+        with db.DBCon() as dbcon:
+            tagobj = db.Tag.get( tag, dbcon=dbcon )
+            if tagobj is None:
+                return f"Unknown tag {tag}", 422
+
+            if ( not ok_missing ) or ids_are_diaobjectid:
+                if ids_are_diaobjectid:
+                    compdex = 1
+                    q = sql.SQL( textwrap.dedent(
+                        """\
+                        SELECT o.rootid, o.diaobjectid FROM root_diaobject_tag rdt
+                        INNER JOIN diaobject o ON o.rootid=rdt.rootid
+                        WHERE o.diaobjectid=ANY(ARRAY[{objids}])
+                          AND rdt.tagid={tagid}
+                        """
+                    ) ).format( tagid=tagobj.id, objids=sql.SQL(",").join( data['objects'] ) )
+                else:
+                    compdex = 0
+                    q = sql.SQL( textwrap.dedent(
+                        """\
+                        SELECT rootid FROM root_diaobject_tag
+                        WHERE tagid={tagid}
+                          AND rootid=ANY(ARRAY[{objids}]::uuid[])
+                        """
+                    ) ).format( tagid=tagobj.id, objids=sql.SQL(",").join( data['objects'] ) )
+
+                try:
+                    rows, _cols = dbcon.execute( q )
+                except Exception as ex:
+                    return f"Database query error: {ex}", 422
+
+                if not ok_missing:
+                    foundobjs = set( row[compdex] for row in rows )
+                    wantedobjs = set( asUUID( data['objects'] ) )
+                    if ( foundobjs != wantedobjs ):
+                        return f"The following objects weren't in tag {tag}: {wantedobjs-foundobjs}", 422
+
+                rootids = [ row[0] for row in rows ]
+
+            else:
+                rootids = asUUID( data['objects'] )
+
+            if len(rootids) == 0:
+                if ( len( data['objects'] ) > 0 ) and not ok_missing:
+                    return "None of the objects you specified for were in tag {tag}", 422
+                else:
+                    return { "status": "ok" }
+
+            dbcon.execute( sql.SQL( textwrap.dedent(
+                """\
+                DELETE FROM root_diaobject_tag
+                WHERE tagid={tagid}
+                  AND rootid=ANY(ARRAY[{rootids}])
+                """
+            ) ).format( tagid=tagobj.id, rootids=sql.SQL(",").join(rootids) ) )
+            dbcon.commit()
+
+            return { "status": "ok" }
+
+
 
 # **********************************************************************
 # **********************************************************************
@@ -429,7 +544,9 @@ urls = {
     "/createtag/<tag>/<description>": CreateTag,
     "/tagobjects/<tag>": TagObjects,
     "/tagsforobject/<objid>": TagsForObject,
-    "/objectsfortag/<tagid>": ObjectsForTag
+    "/objectsfortag/<tagid>": ObjectsForTag,
+    "/deletetag/<tag>": DeleteTag,
+    "/untagobjects/<tag>": UntagObjects
 }
 
 usedurls = {}
