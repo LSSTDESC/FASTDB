@@ -342,8 +342,8 @@ services:
         target: /logs
     post_start:
       - command: /bin/bash -c "
-                   chown -R ${USERID:-0}:${GROUPID:-0} /sessions
-                   && chown -R ${USERID:-0}:${GROUPID:-0} /query_results
+                   chown -R ${USERID:-0}:${GROUPID:-0} /sessions \
+                   && chown -R ${USERID:-0}:${GROUPID:-0} /query_results \
                    && chown -R ${USERID:-0}:${GROUPID:-0} /logs
                    "
         privileged: true
