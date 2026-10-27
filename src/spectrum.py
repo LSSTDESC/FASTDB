@@ -124,8 +124,7 @@ def what_spectra_are_wanted( procver='realtime', position_procver=None,
 
     now = datetime.datetime.now( tz=datetime.UTC )
     if mjdnow is not None:
-        now = datetime.datetime.utcfromtimestamp( astropy.time.Time( mjdnow, format='mjd', scale='tai' ).unix_tai )
-        now = pytz.utc.localize( now )
+        now = datetime.datetime.fromtimestamp( astropy.time.Time( mjdnow, format='mjd', scale='tai' ).unix_tai, datetime.UTC )
 
     with db.DBCon() as con:
         procver = util.procver_id( procver, dbcon=con )
