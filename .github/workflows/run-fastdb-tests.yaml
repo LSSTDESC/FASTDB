@@ -56,4 +56,4 @@ jobs:
 
       - name: run test
         run: |
-          docker compose run --rm runtests
+          docker compose run runtests
