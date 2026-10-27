@@ -308,6 +308,100 @@ You get back a dictionary-encoded table of data.  Each key of the dictionary is 
 The ``...forced...`` columns will not be included if ``noforced`` is passed as True, and if neither ``min_lastmag`` or ``max_lastmag`` are given.  Note that it's possible that the latest detection will be *later* than the last forced-photometry measurement.  (This will often be true in the ``realtime`` processing version, as the most recent detections will not yet have corresponding forced-photometry yet performed.)
 
 
+.. _webap-gettag:
+
+* ``/gettag/<tag>``
+
+where ``<tag>`` is replaced by the tag you're interested in (either the name or the uuid).  It just returns a dictionary with:
+
+.. code-block:: python
+
+   { 'status': 'ok',
+     'id': '<tag uuid>'
+     'tag': '<tag>',
+     'description': '<description of tag>'
+   }
+
+The value of ``description`` might be ``None``.  It will return an error if ``<tag>`` doesn't exist.
+
+
+.. _webap-tagsforobject:
+
+* ``/tagsforobject/<obj>``
+
+Call this with:
+
+.. code-block:: python
+
+   result = fdb.post( "/tagsforobject/<obj>" )
+
+where ``<obj>`` is either the rootid or diaobjectid of the object whose tags you want.  If the object is found, then result will be:
+
+.. code-block:: python
+
+   { 'rootid': <root diaobject uuid>,
+     'tags': <list of tags>
+   }
+
+If the list of tags is empty, it means this object is not associated with any tags.
+
+
+.. _webap-objectsfortag:
+
+* ``/objectsfortag/<tag>``
+
+Replace ``<tag>`` with either the tag name, or the tag uuid.  If the tag exists, you will get back:
+
+.. code-block:: python
+
+   { 'tagid': <tag uuid>,
+     'tag': <tag name>,
+     'rootids': <list of uuids>
+   }
+
+Where the list of uuids are the root diabojects associated with this tag.  An empty list means no objects are associated with this tag.
+
+
+.. _webap-createtag:
+
+* ``/createtag/<tag>``
+
+This creates a new tag with name ``<tag>``.  It will raise an exception if the tag already exists.  **Only people in the create_tag group (which is very few people on the production DESC FASTDB) can run this.**
+
+You can optionally include a description that will be saved with the tag by passing a dictionary with key ``"description"`` as the json payload, e.g.:
+
+.. code-block:: python
+
+   result = fdb.post( "/createtag/important_tag", { 'description': 'This is an important tag.' } )
+
+.. _webap-tagobjects:
+
+* ``/tagobjects/<tag>``
+
+Tags a specified list of diaobjects with tag ``<tag>``.  **Only people in the create_tag group can run this.** Call it with:
+
+.. code-block:: python
+
+   result = fdb.post( "/tagobjects/<tag>", { 'objects': list_of_objects } )
+
+substituting ``<tag>`` with the tag name you want to tag the objects with.  ``list_of_objects`` may be a list of string uuids (actual python ``uuid.UUID`` objects should probably work too?  Try it!), in which case you're specifyting the root ids of the objects (recommended).  Alternatively, it can be a list of integers; in this case, you are specifiying diaboejctids, and you must include a second key in the dictionary, ``"ids_are_diaobjectid"``, with value ``True``.
+
+There is no error if any objects are already tagged with the requested tag; that will just make your call (partially) a null-op.
+
+.. _webap-untagobjects:
+
+* ``/untagobjects/<tag>``
+
+Remove tags from objects.  Calling semantics (and restrictions on who can do it) are the same as for ``/tagobjects``, with one modification.  If any objects you're trying to untag are *not* tagged with the ``<tag>``, you'll get an error return.  If you include a key ``"missing_ok"`` with value ``True`` in the passed dictionary, then there will be no error, and the untagging of all objects that actually have the tag will proceed.
+
+(Oh, and one other thing.  This won't actually work unless you *also* include a key ``"I know what I am doing"`` in the parameter dictionary, with value ``True``.  Think of this as an "are you sure?".)
+
+.. _webap-deletetag:
+
+* ``/deletetag/<tag>``
+
+This removes tag ``<tag>``.  It will also (obviously?) remove all assocations between diaobjects and ``<tag>``.  Only people in the create_tag group can run this, and you must pass as the second argument (or as the ``json=`` argument) a dictionary with key ``"I know what I am doing"`` and value ``True``.
+
 
 Lightcurve Endpoints
 --------------------

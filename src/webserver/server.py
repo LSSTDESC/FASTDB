@@ -263,6 +263,12 @@ class CreateTag( BaseView ):
         if set( args.keys() ) != { 'tag', 'description' }:
             return f"Unknown arguments: {set(args.keys()) - {'tag', 'description'}}", 422
 
+        try:
+            _ = asUUID( tag )
+            return f"Error, {tag} is an invalid tag name, it can't look like a uuid.", 422
+        except Exception:
+            pass
+
         with db.DBCon() as dbcon:
             rows, _cols = dbcon.execute( sql.SQL( "SELECT id, tag FROM tags WHERE tag={tag}" )
                                          .format( tag=args['tag'] ) )
@@ -279,6 +285,31 @@ class CreateTag( BaseView ):
                      "tag": args['tag'],
                      "description": args['description']
                     }
+
+
+
+# ======================================================================
+
+class GetTag( BaseView ):
+    def do_the_things( self, tag ):
+        try:
+            tagid = asUUID( tag )
+            q = sql.SQL( "SELECT id, tag, description FROM tags WHERE id={tagid}" ).format( tagid=tagid )
+        except Exception:
+            q = sql.SQL( "SELECT id, tag, description FROM tags WHERE tag={tag}" ).format( tag=tag )
+
+        with db.DBCon() as dbcon:
+            rows, _cols = dbcon.execute( q )
+            if len(rows) == 0:
+                return f"Tag {tag} is not known.", 422
+            elif len(rows) > 1:
+                return f"Tag {tag} is multiply defined; this should never happen.", 422
+            else:
+                return { 'status': 'ok',
+                         'id': str(rows[0][0]),
+                         'tag': rows[0][1],
+                         'description': rows[0][2]
+                        }
 
 
 # ======================================================================
