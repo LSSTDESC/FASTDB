@@ -1,0 +1,34 @@
+{{- if .Values.ingestion.enabled }}
+{{- $namespace := include "fastdb.namespace" . }}
+# Ingestion only needs permission to read the status of its prerequisite Jobs.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ingestion-job-waiter
+  namespace: {{ $namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ingestion-job-waiter
+  namespace: {{ $namespace }}
+rules:
+- apiGroups: ["batch"]
+  resources: ["jobs"]
+  resourceNames: ["createdb", "ingestion-processing-version"]
+  verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ingestion-job-waiter
+  namespace: {{ $namespace }}
+subjects:
+- kind: ServiceAccount
+  name: ingestion-job-waiter
+  namespace: {{ $namespace }}
+roleRef:
+  kind: Role
+  name: ingestion-job-waiter
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}
