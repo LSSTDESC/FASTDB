@@ -340,17 +340,17 @@ services:
       - type: volume
         source: logs
         target: /logs
-    post_start:
-      - command: /bin/bash -c "
-                   chown -R ${USERID:-0}:${GROUPID:-0} /sessions
-                   && chown -R ${USERID:-0}:${GROUPID:-0} /query_results
-                   && chown -R ${USERID:-0}:${GROUPID:-0} /logs
-                   "
+    pre_start:
+      - user: root
         privileged: true
-        user: root
+        command: |
+          /bin/bash -c "
+            chown -R ${USERID:-0}:${GROUPID:-0} /sessions && \
+            chown -R ${USERID:-0}:${GROUPID:-0} /query_results && \
+            chown -R ${USERID:-0}:${GROUPID:-0} /logs "
     working_dir: /code/tests
     entrypoint: pytest -v
-    
+
 volumes:
   postgres_data:
   mongodb_data:
