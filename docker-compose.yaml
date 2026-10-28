@@ -340,7 +340,7 @@ services:
       - type: volume
         source: logs
         target: /logs
-    post_start:
+    pre_start:
       - command: /bin/bash -c "
                    chown -R ${USERID:-0}:${GROUPID:-0} /sessions \
                    && chown -R ${USERID:-0}:${GROUPID:-0} /query_results \
