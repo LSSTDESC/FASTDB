@@ -157,10 +157,10 @@ class CountThings( BaseView ):
                 procver = db.ProcessingVersion.get_procver( procver )
                 # Bobby table check.  One that's not valid should never have passed in the first place,
                 #  but be paranoid.
-                if not re.search( '^[a-z0-9_]+$', procver.description ):
+                if not re.search( r'^[A-Za-z0-9_\-]+$', procver.description ):
                     raise ValueError( f"Invalid processing version name \"{procver.description}\" for "
                                       f"processing version {procver.id}; should only include "
-                                      f"a-z, 0-9, and _" )
+                                      f"A-Z, a-z, 0-9, _, and -" )
             except Exception as ex:
                 raise FASTDBWebException( str(ex) )
 
