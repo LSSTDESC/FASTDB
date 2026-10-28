@@ -336,8 +336,9 @@ def get_object_infos( objids=None, objids_table=None, processing_version=None, p
 
 
 def many_object_ltcvs( processing_version='default', objids=None, objids_table=None, limit=None, offset=None,
-                       return_format='json', bands=None, which='patch', nonevalue=None,
+                       return_format='json', bands=None, which='patch', nonevalue=None, flags_nonevalue=False,
                        include_base_procver=False, include_obj_base_procver_id=False, include_source_positions=False,
+                       include_reliability=False, include_bitflags=False,
                        return_object_info=False, use_weighted_source_positions=False,
                        return_diaobject_positions=False, position_processing_version=None,
                        mjd_now=None, dbcon=None ):
@@ -395,6 +396,11 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
          "nonevalue=-999", and then all ids that would have been None
          are now -999.
 
+      flags_nonevalue : int or None or False, default False
+         Like nonevalue, but a substitution for flags and bitflags.
+         Ignored if include_bitflags is False.  If flags_nonevalue is
+         False, then it will default to the same as Nonevalue.
+
       include_base_procver : bool, default False
          If True, the returned data will have a two columns,
          base_procver_s and base_procver_f, that are the descriptions
@@ -413,6 +419,12 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
          If True, there will be additional columns (ra, dec, raerr,
          decerr, ra_dec_cov) that have the positions that were found for
          the sources (the detections).
+
+      include_reliability : bool, default False
+         If True, there will be an additional column "reliability".
+
+      include_bitflags : bool, default False
+         If True, there will be two additional columns "flags" and "pixelflags".
 
       return_format : str, default 'json'
          'json' or 'pandas'
@@ -502,6 +514,12 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
             isdet : int ; 1 if there is a diaSource at this mjd, 0 otherwise
             [ ispatch : int; 1 if photomtery is from a diaSource, 0 if it's from a diaForcedSource;
                         only included if which is 'patch' ]
+            [ reliability : float, the reliability (or Nonen if not available) **of the detection**,
+                            only included if include_reliability is True ]
+            [ flags : 32-bit integer, flags from either diasource_extra or diaforcedsource_extra (as
+                      approprite), only included if include_bitflags is true ]
+            [ pixelflags : 32-bit integer, pixelflags from either diasource_extra or diaforcedsource_extra (as
+                      approprite), only included if include_bitflags is true ]
             [ base_procver_s : str uuid, only included if include_base_procver is True ]
             [ base_procver_f : str uuid, only included if include_base_procver is True and which isn't 'detections' ]
             [ det_ra : double or None, only included if include_source_positions is True ]
@@ -560,6 +578,14 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
             nonevalue = int( nonevalue )
         except ValueError:
             raise ValueError( f"Invalid nonevalue {nonevalue}, must be an integer or None" )
+    if flags_nonevalue is not None:
+        if flags_nonevalue == False:
+            flags_nonevalue = nonevalue
+        else:
+            try:
+                flags_nonevalue = int( flags_nonevalue )
+            except ValueError:
+                raise ValueError( f"Invalid flags_nonevalue {flags_nonevalue}, must be integer, None, or False" )
 
     # Parse objids, set objfield
     if objids_table is not None:
@@ -693,11 +719,12 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                 dbcon.execute( q )
 
             # Extract detections
-            pos_fields = sql.SQL( "s.ra AS det_ra, s.dec AS det_dec, s.raerr AS det_raerr, "
-                                  "s.decerr AS det_decerr, s.ra_dec_cov AS det_ra_dec_cov, "
-                                  if must_get_source_positions
-                                  else "" )
-            procver_fields = sql.SQL( "p.description AS base_procver_s, " if include_base_procver else "" )
+            extra_fields = sql.SQL( "s.ra AS det_ra, s.dec AS det_dec, s.raerr AS det_raerr, "
+                                    "s.decerr AS det_decerr, s.ra_dec_cov AS det_ra_dec_cov, "
+                                    if must_get_source_positions else "" )
+            extra_fields += sql.SQL( "p.description AS base_procver_s, " if include_base_procver else "" )
+            extra_fields += sql.SQL( "se.reliability, " if include_reliability else "" )
+            extra_fields += sql.SQL( "se.flags, se.pixelflags, " if include_bitflags else "" )
             dbcon.execute( "DROP TABLE IF EXISTS tmp_sources", explain=False )
             tmpsmade.append( 'tmp_sources' )
             q = sql.SQL( textwrap.dedent(
@@ -708,7 +735,7 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                 SELECT DISTINCT ON (t.rootid, s.visit)
                   t.rootid, s.diasourceid, s.diaobjectid AS source_diaobjectid, s.visit, s.midpointmjdtai AS mjd,
                   s.band, s.psfflux AS flux, s.psffluxerr AS fluxerr, o.base_procver_id AS source_obj_bpv,
-                  {pos_fields} {procver_fields} TRUE as isdet
+                  {extra_fields} TRUE as isdet
                 INTO tmp_sources
                 FROM {objids_table} t
                 INNER JOIN diaobject ot ON t.rootid=ot.rootid
@@ -718,18 +745,20 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                                                      AND pv.procver_id={procver}
                 INNER JOIN diaobject o ON s.diaobjectid=o.diaobjectid
                 """
-            ) ).format( procver=pvid, objids_table=sql.Identifier(objids_table),
-                        pos_fields=pos_fields, procver_fields=procver_fields )
+            ) ).format( procver=pvid, objids_table=sql.Identifier(objids_table), extra_fields=extra_fields )
             if include_base_procver:
                 q += sql.SQL( "INNER JOIN base_processing_version p ON pv.base_procver_id=p.id" )
+            if include_bitflags or include_reliability:
+                q += sql.SQL( "LEFT JOIN diasource_extra se ON s.diasourceid=se.diasourceid\n"
+                              "                            AND s.base_procver_id=se.base_procver_id\n" )
             _and = "WHERE"
             if mjd_now is not None:
-                q += sql.SQL( f"                   {_and} s.midpointmjdtai<={{t0}}" ).format( t0=mjd_now )
+                q += sql.SQL( f"{_and} s.midpointmjdtai<={{t0}}\n" ).format( t0=mjd_now )
                 _and = "  AND"
             if bands is not None:
-                q += sql.SQL( f"                   {_and} s.band=ANY(%(bands)s)" )
+                q += sql.SQL( f"{_and} s.band=ANY(%(bands)s)\n" )
                 _and = "  AND"
-            q += sql.SQL( "   ORDER BY t.rootid, s.visit, pv.priority DESC\n")
+            q += sql.SQL( "ORDER BY t.rootid, s.visit, pv.priority DESC\n")
             FDBLogger.debug( "...querying for detections" )
             dbcon.execute_nofetch( q, { 'bands': bands } )
 
@@ -738,7 +767,8 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
 
             else:
                 # Extract forced photometry if necessary
-                procver_fields = sql.SQL( "p.description as base_procver_f, " if include_base_procver else "" )
+                extra_fields = sql.SQL( "p.description as base_procver_f, " if include_base_procver else "" )
+                extra_fields += sql.SQL( "se.flags, se.pixelflags, " if include_bitflags else "" )
                 dbcon.execute( "DROP TABLE IF EXISTS tmp_forced", explain=False )
                 tmpsmade.append( 'tmp_forced' )
                 q = sql.SQL( textwrap.dedent(
@@ -750,7 +780,7 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                       t.rootid, s.diaforcedsourceid, s.diaobjectid AS forced_diaobjectid,
                       s.visit, s.midpointmjdtai AS mjd,
                       s.band, s.psfflux AS flux, s.psffluxerr AS fluxerr, o.base_procver_id AS forced_obj_bpv,
-                      {procver_fields} FALSE as isdet
+                      {extra_fields} FALSE as isdet
                     INTO tmp_forced
                     FROM {objids_table} t
                     INNER JOIN diaobject ot ON t.rootid=ot.rootid
@@ -760,15 +790,19 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                                                          AND pv.procver_id={procver}
                     INNER JOIN diaobject o ON s.diaobjectid=o.diaobjectid
                     """
-                ) ).format( procver=pvid, procver_fields=procver_fields, objids_table=sql.Identifier(objids_table) )
+                ) ).format( procver=pvid, extra_fields=extra_fields, objids_table=sql.Identifier(objids_table) )
                 if include_base_procver:
-                    q += sql.SQL( "INNER JOIN base_processing_version p ON pv.base_procver_id=p.id" )
+                    q += sql.SQL( "INNER JOIN base_processing_version p ON pv.base_procver_id=p.id\n" )
+                if include_bitflags:
+                    q += sql.SQL( "LEFT JOIN diaforcedsource_extra se ON s.base_procver_id=se.base_procver_id\n"
+                                  "                                  AND s.diaobjectid=se.diaobjectid\n"
+                                  "                                  AND s.visit=se.visit\n" )
                 _and = "WHERE"
                 if mjd_now is not None:
-                    q += sql.SQL( f"                   {_and} s.midpointmjdtai<={{t0}}" ).format( t0=mjd_now )
+                    q += sql.SQL( f"                   {_and} s.midpointmjdtai<={{t0}}\n" ).format( t0=mjd_now )
                     _and = "  AND"
                 if bands is not None:
-                    q += sql.SQL( f"                   {_and} s.band=ANY(%(bands)s)" )
+                    q += sql.SQL( f"                   {_and} s.band=ANY(%(bands)s)\n" )
                     _and = "  AND"
                 q += sql.SQL( "   ORDER BY t.rootid, s.visit, pv.priority DESC\n" )
                 FDBLogger.debug( "...querying for forced photometry" )
@@ -780,6 +814,32 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                                       if must_get_source_positions
                                       else "" )
                 procver_fields = sql.SQL( "f.base_procver_f, s.base_procver_s, " if include_base_procver else "" )
+                reliability_field = sql.SQL( "s.reliability, " if include_reliability else "" )
+                if include_bitflags:
+                    if flags_nonevalue is None:
+                        bitflag_fields = sql.SQL( "CASE WHEN f.rootid IS NULL THEN s.flags "
+                                                  "ELSE f.flags END AS flags,\n"
+                                                  "       CASE WHEN f.rootid IS NULL THEN s.pixelflags "
+                                                  "ELSE f.pixelflags END AS pixelflags," )
+                    else:
+                        # OMG
+                        bitflag_fields = sql.SQL( "CASE WHEN f.rootid IS NULL AND s.flags IS NULL "
+                                                  "THEN {flags_nonevalue}\n"
+                                                  "            WHEN f.rootid IS NULL AND s.flags IS NOT NULL "
+                                                  "THEN s.flags\n"
+                                                  "            WHEN f.rootid IS NOT NULL AND f.flags IS NULL "
+                                                  "THEN {flags_nonevalue}\n"
+                                                  "            ELSE f.flags END AS flags,\n"
+                                                  "       CASE WHEN f.rootid IS NULL AND s.pixelflags IS NULL "
+                                                  "THEN {flags_nonevalue}\n"
+                                                  "            WHEN f.rootid IS NULL AND s.pixelflags IS NOT NULL "
+                                                  "THEN s.pixelflags\n"
+                                                  "            WHEN f.rootid IS NOT NULL AND f.pixelflags IS NULL "
+                                                  "THEN {flags_nonevalue}\n"
+                                                  "            ELSE f.pixelflags AS pixelflags,\n"
+                                                 ).format( flags_nonevalue=flags_nonevalue )
+                else:
+                    bitflag_fields = sql.SQL( "" )
                 nonesubs = {}
                 for tab, field in [ ( 'f', 'diaforcedsourceid' ),
                                     ( 's', 'diasourceid' ),
@@ -804,12 +864,14 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                        f.forced_obj_bpv,
                        s.source_obj_bpv,
                        {procver_fields}
+                       {reliability_field}
                        CASE WHEN f.rootid IS NULL THEN s.visit ELSE f.visit END AS visit,
                        CASE WHEN f.rootid IS NULL THEN s.mjd ELSE f.mjd END AS mjd,
                        CASE WHEN f.rootid IS NULL THEN s.band ELSE f.band END AS band,
                        CASE WHEN f.rootid IS NULL THEN s.flux ELSE f.flux END AS flux,
                        CASE WHEN f.rootid IS NULL THEN s.fluxerr ELSE f.fluxerr END AS fluxerr,
                        {pos_fields}
+                       {bitflag_fields}
                        CASE WHEN s.rootid IS NULL THEN FALSE ELSE TRUE END AS isdet,
                        CASE WHEN f.rootid IS NULL THEN TRUE ELSE FALSE END as ispatch
                 FROM tmp_forced f
@@ -817,6 +879,8 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                 ORDER BY rootid, mjd
                 """ ) ).format( pos_fields=pos_fields,
                                 procver_fields=procver_fields,
+                                reliability_field=reliability_field,
+                                bitflag_fields=bitflag_fields,
                                 diaforcedsourceid=nonesubs['diaforcedsourceid'],
                                 diasourceid=nonesubs['diasourceid'],
                                 forced_diaobjectid=nonesubs['forced_diaobjectid'],
@@ -1051,8 +1115,8 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
 
 
 def object_ltcv( processing_version='default', diaobjectid=None, bands=None, which='patch',
-                 include_base_procver=False, include_source_positions=False,
-                 use_weighted_source_positions=False,
+                 include_base_procver=False, include_source_positions=False, include_reliability=False,
+                 include_bitflags=False, use_weighted_source_positions=False,
                  return_format='json',
                  return_object_info=False, return_diaobject_positions=False, position_processing_version=None,
                  mjd_now=None, dbcon=None ):
@@ -1124,6 +1188,8 @@ def object_ltcv( processing_version='default', diaobjectid=None, bands=None, whi
                               which=which,
                               include_base_procver=include_base_procver,
                               include_source_positions=include_source_positions,
+                              include_reliability=include_reliability,
+                              include_bitflags=include_bitflags,
                               return_object_info=return_object_info,
                               return_diaobject_positions=return_diaobject_positions,
                               position_processing_version=position_processing_version,
