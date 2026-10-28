@@ -48,6 +48,7 @@ RUN  apt-get update \
          python3 \
          rlwrap \
          socat \
+         sudo \
          tmux \
     && apt-get -y autoremove \
     && apt-get clean \
