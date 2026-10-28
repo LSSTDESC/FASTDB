@@ -22,7 +22,7 @@ def main():
     schema = pandas.read_csv( args.csvfile, quoting=csv.QUOTE_ALL )
     # pandas spazzes out with iterrows and ittertuples when
     #  column names have a space in them, so remove the spaces.
-    schema.rename( { 'Data Type': 'Data_Type', 'Column Name': 'Column_Name' }, axis=1, inplace=True )
+    schema = schema.rename( { 'Data Type': 'Data_Type', 'Column Name': 'Column_Name' }, axis=1 )
 
     typeconv = {
         'boolean': 'boolean',

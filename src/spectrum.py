@@ -3,7 +3,6 @@
 import sys
 import io
 import datetime
-import pytz
 import logging
 
 import numpy as np
@@ -124,8 +123,8 @@ def what_spectra_are_wanted( procver='realtime', position_procver=None,
 
     now = datetime.datetime.now( tz=datetime.UTC )
     if mjdnow is not None:
-        now = datetime.datetime.utcfromtimestamp( astropy.time.Time( mjdnow, format='mjd', scale='tai' ).unix_tai )
-        now = pytz.utc.localize( now )
+        now = datetime.datetime.fromtimestamp( astropy.time.Time( mjdnow, format='mjd', scale='tai' ).unix_tai,
+                                               datetime.UTC )
 
     with db.DBCon() as con:
         procver = util.procver_id( procver, dbcon=con )
@@ -238,7 +237,7 @@ def what_spectra_are_wanted( procver='realtime', position_procver=None,
         rows, cols = con.execute( "SELECT * FROM tmp_wanted_no_spec" )
         df = util.laboriously_construct_pandas( rows, columns=cols, doublecols=['ra', 'dec'],
                                                 int16cols=['priority'], ignore_missing_cols=True )
-        df.set_index( 'rootid', inplace=True )
+        df = df.set_index( 'rootid' )
 
         # OK, this is a little profligate.  We could definitely pull less from postgres by doing
         #   the "find latest detection" in SQL (and indeed I used to do it that way).  Not clear
@@ -253,14 +252,14 @@ def what_spectra_are_wanted( procver='realtime', position_procver=None,
                                            objids_table='tmp_wanted_no_spec', return_format='pandas',
                                            return_object_info=False, mjd_now=mjdnow, dbcon=con )
 
-    srcltcvs.reset_index( inplace=True )
-    frcltcvs.reset_index( inplace=True )
+    srcltcvs = srcltcvs.reset_index()
+    frcltcvs = frcltcvs.reset_index()
 
     # Remove unwanted columns
     yanks = [ i for i in srcltcvs.columns if i not in [ 'rootid', 'mjd', 'band', 'flux' ] ]
-    srcltcvs.drop( yanks, axis='columns', inplace=True )
+    srcltcvs = srcltcvs.drop( yanks, axis='columns' )
     yanks = [ i for i in frcltcvs.columns if i not in [ 'rootid', 'mjd', 'band', 'flux' ] ]
-    frcltcvs.drop( yanks, axis='columns', inplace=True )
+    frcltcvs = frcltcvs.drop( yanks, axis='columns' )
 
     # Extract latest row for each object in srcltcvs and frcltcvs
     srcltcvs = srcltcvs.loc[ srcltcvs.groupby(["rootid", "band"])["mjd"].idxmax() ]
@@ -274,9 +273,9 @@ def what_spectra_are_wanted( procver='realtime', position_procver=None,
         photdf['mag'] = 99.
         photdf.loc[ photdf['flux'] > 0, 'mag' ] = (
             -2.5 * np.log10( photdf.loc[ photdf['flux'] > 0, 'flux' ] ) + 31.4 )
-        photdf.drop( [ 'flux' ] , axis='columns', inplace=True )
-    srcltcvs.rename( { 'mjd': 'src_mjd', 'band': 'src_band', 'mag': 'src_mag' }, axis='columns', inplace=True )
-    frcltcvs.rename( { 'mjd': 'frced_mjd', 'band': 'frced_band', 'mag': 'frced_mag' }, axis='columns', inplace=True )
+        photdf = photdf.drop( [ 'flux' ] , axis='columns' )
+    srcltcvs = srcltcvs.rename( { 'mjd': 'src_mjd', 'band': 'src_band', 'mag': 'src_mag' }, axis='columns' )
+    frcltcvs = frcltcvs.rename( { 'mjd': 'frced_mjd', 'band': 'frced_band', 'mag': 'frced_mag' }, axis='columns' )
 
     # Filter by limiting magnitude if necessary
     if lim_mag is not None:
@@ -290,8 +289,8 @@ def what_spectra_are_wanted( procver='realtime', position_procver=None,
             lim_frcltcvs = frcltcvs.loc[ frcltcvs.groupby(["rootid"])["frced_mjd"].idxmax(),
                                         [ "rootid", "frced_mjd", "frced_mag" ] ]
 
-        lim_srcltcvs.set_index( 'rootid', inplace=True )
-        lim_frcltcvs.set_index( 'rootid', inplace=True )
+        lim_srcltcvs = lim_srcltcvs.set_index( 'rootid' )
+        lim_frcltcvs = lim_frcltcvs.set_index( 'rootid' )
         lim_ltcvs = lim_srcltcvs.join( lim_frcltcvs, how='outer' )
         lim_ltcvs.loc[ : , 'mag_for_cut' ] = lim_ltcvs.src_mag
         # WORRY : isnull(), NaN, etc.
@@ -304,7 +303,7 @@ def what_spectra_are_wanted( procver='realtime', position_procver=None,
 
         # This will remove anything from df that doesn't have a rootid in lim_ltcvs
         df = df.join( lim_ltcvs, how='inner' )
-        df.drop( ['mag_for_cut'], axis='columns', inplace=True )
+        df = df.drop( ['mag_for_cut'], axis='columns' )
 
     # Keep only the latest lightcurve point independet of band
     srcltcvs = srcltcvs.loc[ srcltcvs.groupby(["rootid"])["src_mjd"].idxmax() ]
@@ -315,27 +314,27 @@ def what_spectra_are_wanted( procver='realtime', position_procver=None,
         srcltcvs = srcltcvs[ srcltcvs.src_mjd >= detsince ]
 
     # Throw out stuff we don't want from objinfo
-    objinfo.reset_index( inplace=True )
+    objinfo = objinfo.reset_index()
     yanks = [ i for i in objinfo.columns if i not in [ 'rootid', 'diaobjectid', 'ra', 'dec' ] ]
-    objinfo.drop( yanks, axis='columns', inplace=True )
+    objinfo = objinfo.drop( yanks, axis='columns' )
     objinfo = objinfo.groupby( 'rootid' ).agg( 'first' )
-    objinfo.rename( { 'ra': 'diaobj_meanra', 'dec': 'diaobj_meandec' }, axis='columns', inplace=True )
+    objinfo = objinfo.rename( { 'ra': 'diaobj_meanra', 'dec': 'diaobj_meandec' }, axis='columns' )
 
     # Join to latest mags.  We *assume* there are detections, otherwise nobody would want a spectrum.
     # Also, we wouldn't have heard about the object in the first place.
-    srcltcvs.set_index( 'rootid', inplace=True )
+    srcltcvs = srcltcvs.set_index( 'rootid' )
     df = df.join( srcltcvs, how='inner' )
-    df.rename( { 'mjd': 'src_mjd', 'flux': 'src_flux', 'band': 'src_band' }, axis='columns', inplace=True )
-    frcltcvs.set_index( 'rootid', inplace=True )
+    df = df.rename( { 'mjd': 'src_mjd', 'flux': 'src_flux', 'band': 'src_band' }, axis='columns' )
+    frcltcvs = frcltcvs.set_index( 'rootid' )
     df = df.join( frcltcvs, how='left' )
-    df.rename( { 'mjd': 'frced_mjd', 'flux': 'frced_flux', 'band': 'frced_band' }, axis='columns', inplace=True )
+    df = df.rename( { 'mjd': 'frced_mjd', 'flux': 'frced_flux', 'band': 'frced_band' }, axis='columns' )
 
     # Join to obinfo to get ra/dec
     df = df.join( objinfo, how='left' )
 
     # Return
-    df.reset_index( inplace=True )
-    df.rename( { 'rootid': 'root_diaobject_id' }, axis='columns', inplace=True )
+    df = df.reset_index()
+    df = df.rename( { 'rootid': 'root_diaobject_id' }, axis='columns' )
     return df
 
 

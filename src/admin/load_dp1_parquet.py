@@ -33,8 +33,8 @@ class DP1ColumnMapper( ColumnMapper ):
             else:
                 yanks.append( col )
 
-        tab.rename( renames, axis='columns', inplace=True )
-        tab.drop( yanks, axis='columns', inplace=True )
+        tab = tab.rename( renames, axis='columns' )
+        tab = tab.drop( yanks, axis='columns' )
 
 
     @classmethod
@@ -148,12 +148,12 @@ class ParquetFileHandler:
             #   as the index of the parent dataframe?  If so,
             #   that might be a hint to speeding up the
             #   extraction above....  Hurm.  Really not sure.
-            df.reset_index( inplace=True )
-            df.drop( ['index'], axis='columns', inplace=True )
-            sourcedf.reset_index( inplace=True )
-            sourcedf.drop( ['index'], axis='columns', inplace=True )
-            forceddf.reset_index( inplace=True )
-            forceddf.drop( ['index'], axis='columns', inplace=True )
+            df = df.reset_index()
+            df = df.drop( ['index'], axis='columns' )
+            sourcedf = sourcedf.reset_index()
+            sourcedf = sourcedf.drop( ['index'], axis='columns' )
+            forceddf = forceddf.reset_index()
+            forceddf = forceddf.drop( ['index'], axis='columns' )
 
             self.logger.info( f"Going to try to load {len(df)} objects, {len(sourcedf)} sources, "
                               f"{len(forceddf)} forced" )

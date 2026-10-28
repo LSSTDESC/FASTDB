@@ -133,20 +133,23 @@ fastdbap.Context = class
         this.sources_span.innerHTML = "(loading...) sources";
         this.forced_span.innerHTML = "(loading...) forced";
 
-        this.connector.sendHttpRequest( "count/object/" + encodeURIComponent( pv ),
+        this.connector.sendHttpRequest( "count/root/" + encodeURIComponent( pv ),
                                         { 'estimate': false },
                                         (data) => {
-                                            self.objects_span.innerHTML = data.count.toString() + " objects";
+                                            self.objects_span.innerHTML =
+                                                rkWebUtil.commafyInt(data.count) + " objects";
                                         } );
         this.connector.sendHttpRequest( "count/source/" + encodeURIComponent( pv ),
                                         { 'estimate': false },
                                         (data) => {
-                                            self.sources_span.innerHTML = data.count.toString() + " sources";
+                                            self.sources_span.innerHTML =
+                                                rkWebUtil.commafyInt(data.count) + " sources";
                                         } );
         this.connector.sendHttpRequest( "count/forced/" + encodeURIComponent( pv ),
                                         { 'estimate': false },
                                         (data) => {
-                                            self.forced_span.innerHTML = data.count.toString() + " forced";
+                                            self.forced_span.innerHTML =
+                                                rkWebUtil.commafyInt(data.count) + " forced";
                                         } );
     }
 

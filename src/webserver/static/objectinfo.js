@@ -91,10 +91,15 @@ fastdbap.ObjectInfo = class
         this.allbands = this.allbands.concat( unknownbands );
         if ( fastdbap.ObjectInfo.shown_bands_cache == null ) {
             this.shownbands = [...this.allbands];
-            fastdbap.ObjectInfo.shown_bands_cache = [...this.shownbands];
         } else {
-            this.shownbands = [...fastdbap.ObjectInfo.shown_bands_cache];
+            this.shownbands = []
+            for ( let b of fastdbap.ObjectInfo.shown_bands_cache ) {
+                if ( this.allbands.includes( b ) ) {
+                    this.shownbands.push( b );
+                }
+            }
         }
+        fastdbap.ObjectInfo.shown_bands_cache = [...this.shownbands];
 
         this.datasets = {};
         for ( let b of this.allbands ) {
@@ -171,11 +176,11 @@ fastdbap.ObjectInfo = class
         tr = rkWebUtil.elemaker( "tr", table );
         td = rkWebUtil.elemaker( "td", tr, { "text": "RA:",
                                              "classes": [ "right", "xmarginright" ] } );
-        td = rkWebUtil.elemaker( "td", tr, { "text": this.data.objinfo.ra.toFixed(5) } );
+        td = rkWebUtil.elemaker( "td", tr, { "text": rkWebUtil.fixedOrEmpty(this.data.objinfo.ra, 5) } );
         tr = rkWebUtil.elemaker( "tr", table );
         td = rkWebUtil.elemaker( "td", tr, { "text": "Dec:",
                                              "classes": [ "right", "xmarginright" ] } );
-        td = rkWebUtil.elemaker( "td", tr, { "text": this.data.objinfo.dec.toFixed(5) } );
+        td = rkWebUtil.elemaker( "td", tr, { "text": rkWebUtil.fixedOrEmpty(this.data.objinfo.dec, 5) } );
         tr = rkWebUtil.elemaker( "tr", table );
         td = rkWebUtil.elemaker( "td", tr, { "text": "diaobjectid:",
                                              "classes": [ "right", "xmarginright" ] } );
@@ -194,11 +199,11 @@ fastdbap.ObjectInfo = class
             let dettext = "";
             if ( data.isdet[i] ) dettext = "Yes";
             let args = {
-                'mjd':        [ "td", tr, { "text": data.mjd[i].toFixed(4) } ],
+                'mjd':        [ "td", tr, { "text": rkWebUtil.fixedOrEmpty(data.mjd[i], 4) } ],
                 'band':       [ "td", tr, { "text": data.band[i] } ],
-                'flux':    [ "td", tr, { "text": data.flux[i].toExponential(4) } ],
-                'fluxerr': [ "td", tr, { "text": data.fluxerr[i].toExponential(4) } ],
-                's/n':        [ "td", tr, { "text": data['s/n'][i].toFixed(1) } ],
+                'flux':       [ "td", tr, { "text": rkWebUtil.exponentialOrEmpty(data.flux[i], 4) } ],
+                'fluxerr':    [ "td", tr, { "text": rkWebUtil.exponentialOrEmpty(data.fluxerr[i], 4) } ],
+                's/n':        [ "td", tr, { "text": rkWebUtil.fixedOrEmpty(data['s/n'][i], 1) } ],
                 'isdet':      [ "td", tr, { "text": dettext } ],
             };
             for ( let f of fields ) {

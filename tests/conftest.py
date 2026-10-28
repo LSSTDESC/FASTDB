@@ -57,28 +57,62 @@ def procver_bases():
 
 @pytest.fixture( scope='module' )
 def procver_collection( procver_postimes, procver_bases ):
-    # A set of processing versions loaded into the database, including:
-    #
-    #   A set of base procesing versions pvc_bpv1, pvc_bpv1a, pvc_bpv1b, pvc_bpv2, pvc_bpv2a, pvc_bpv3, realtime
-    #   For each of these, there is a base processing version for tables diaobject, diaobject_position,
-    #     diasource, and diaforcedsource.
-    #
-    #   A set of processing versions with priorities (high to low)
-    #     pvc_pv1 : pvc_bpv1b, pvc_bpv1a, pvc_bpv1
-    #     pvc_pv2 : pvc_bpv2a, pvc_bpv2
-    #     pvc_pv3 : pvc_bpv3
-    #     realtime : realtime
-    #   A processing version alias default pointing at pvc_pv2
-    #
-    # (The fallbacks of pvc_pv2 and pvc_pv3 to the earlier bpvs are for Object handing in set_of_lightcurves)
-    #
-    # fixture value is a tuple of two dictionaries of str → BaseProcessingVersion, str → ProcessingVersion
-    #
-    # Keys for the processing versions are pv1, pv2, pv3, and realtime
-    # Keys for the base processing versions are {name} or {name}_{table},
-    #   where {name} is one of bpv1, bpv1a, bpv1b, bpv2, bpv2a, bpv3, realtime
-    #   and {table} is one of diaobject, diasource, diaforcedsource
-    # Base processing versions also have {name}_diaoject_position_{mjd} for diaobject_position
+    """A set of processing versions loaded into the database.
+
+    What gets loaded into the database:
+
+    * set of base procesing versions pvc_bpv1, pvc_bpv1a, pvc_bpv1b,
+      pvc_bpv2, pvc_bpv2a, pvc_bpv3, realtime.
+
+      For each of these, there is a base processing version for tables
+      diaobject, diasource, and diaforcedsource, and there are several
+      base processing versions for diaobject_position.
+
+    * A set of processing versions with priorities (high to low)
+        pvc_pv1 : pvc_bpv1b, pvc_bpv1a, pvc_bpv1
+        pvc_pv2 : pvc_bpv2a, pvc_bpv2
+        pvc_pv3 : pvc_bpv3
+        realtime : realtime
+
+    * A processing version alias default pointing at pvc_pv2
+
+    (The fallbacks of pvc_pv2 and pvc_pv3 to the earlier bpvs are for
+    Object handing in set_of_lightcurves) (...just read this months
+    later and I'm not sure it means.)
+
+    Yields
+    ------
+
+    ( bpvs, pvs, pvinfo )
+
+    * bpvs : dictionary of key : BaseProcessingVersion
+         Keys are {name} or {name}_{table}, where {name} is one of
+         [bpv1, bpv1a, bpv1b, bpv2, bpv2a, bpv3, realtime] (that is the
+         list returned by the procver_bases fiture) and {table} is one
+         of diaobject, diasource, diaforcedsource, or
+         diaobject_position_{mjd} (for a bunch of different mjds).  The
+         description of BaseProcessingVersion is the same as key with
+         "pvc_" prepended, except for realtime, where it's just
+         realtime.  (...yes that's annoying.  At some point in the past
+         I thought that was a good idea, who knows why.)
+
+    * pvs : dictionary of key : ProcessingVersion
+         Keys are (CHECK THIS) pv1, pv2, pv3, and realtime.  The
+         corresponding descriptions in the ProcessingVersion objects are
+         pvc_pv1, pvc_pv2, pvc_pv3, and realtime.
+
+    * pvinfo : list of dictionaries, each element of the list has:
+           { 'procver': ProcessingVersion
+             'diaobject': [ list of ( BaseProcessingVersion, priority, bpvkey ) ],
+             'diaobject_position': [ list of ( BaseProcessingVersion, priority, bpvkey ) ],
+             'diasource': [ list of ( BaseProcessingVersion, priority, bpvkey ) ],
+             'diaforcedsource': [ list of ( BaseProcessingVersion, priority, bpvkey ) ],
+           }
+         where bpvkey is is the key to use in the bpvs dictionary.  Each
+         list is sorted from higher priority to lower priority base
+         processing version.
+
+    """
 
     bpvs = {}
     pvs = {}
@@ -267,62 +301,71 @@ def procver_collection( procver_postimes, procver_bases ):
 
 @pytest.fixture( scope='module' )
 def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
-    # Define four root objects:
-    #   0-1: 2 within 15" of each other
-    #   2: 1 20" away
-    #   3: 1 much further away
-    #
-    # Objects 0 through 2 are in realtime as [ 0, 1, 2 ]
-    # Object 0 is in bpv1 as 100
-    # All objects are in bpv2 as [ 200, 201, 202, 203 ]
-    #   BUT object 1 is also in bpv2 as 2011
-    #
-    # Positions are stored at procver_postimes *if* the object still has a detection by the time
-    #   (diaobjects 203 and 2011 have no positions stored)
-    #
-    # Objects have lightcurves:
-    #     object 0 : first detection mjd 60000, last detection mjd 60030, peak 60010, mag 24
-    #     object 1 : first detection mjd 60020, last detection mjd 60060, peak 60035, mag 22
-    #     object 2 : first detection mjd 60040, last detection mjd 60080, peak 60050, mag 23
-    #     object 3 : first detection mjd 60050, last detection mjd 60060, peak 60055, mag 23.5
-    #
-    # All lightcurves have a candence of 2.5 days.  (I'm counting on
-    #   floats being perfectly representable in these ranges at
-    #   increments of 2.5, which I believe is true.)
-    #
-    # Full lightcurves are in bpv2 and bpv3
-    # Times [ 60020, 60030 ] have forcedsources in bpv2a
-    # Times [ 60020, 60025 ] have sources in bpv2a
-    # FOR OBJECT 1 IN bpv2 ONLY:
-    #    if mjd = floor(mjd), diasource and diaforcedsource are associated with object 201
-    #       otherwise diasource and diaforcedsource are associated with object 2011
-    #
-    # Photometry through 60060 and forced through 60055 is in realtime for objects 0 through 2
-    #
-    # Object 0:
-    #    photometry through 60015 and forced through 60010 in bpv1a
-    #    photometry through 60030 and forced through 60025 in bpv1
-    #
-    # For all diasource and diaforcedsource:
-    #   in bpv0 they point to the object in bpv0
-    #   in bpv1 they point to the object in bpv1
-    #   in bpv2 or bpv3, they point to the object in bpv2
-    #
-    # RETURN STRUCTURE:
-    # [
-    #    { 'root':  RootDiaObject,
-    #      'obj':   { diaobjectid: DiaObject for all relevant object base processing versions },
-    #      'pos':   { (diaobjectid, bpv): DiaObjectPosition for all relevant position base processing versions },
-    #      'src':   { bpv: [ list of DiaSource ] },
-    #      'srcex': { bpv: [ list of DiaSourceExtra ] },
-    #      'frc':   { bpv: [ list of DiaForcedSource ] },
-    #      'frcex'  { bpv: [ list of DiaForcedSourceExtra ] }
-    #    }
-    # ]
-    #
-    # Ordered for object 0, 1, 2, 3
-    #
-    # all bpv keys are keys into the bpvs dictionary of the procver_collection fixture
+    """Load the database with lightcurves for four root objects.
+
+    Define four root objects:
+      0-1: 2 within 15" of each other
+      2: 1 20" away
+      3: 1 much further away
+
+    Objects 0 through 2 are in realtime as [ 0, 1, 2 ]
+    Object 0 is in bpv1 as 100
+    All objects are in bpv2 as [ 200, 201, 202, 203 ]
+      BUT object 1 is also in bpv2 as 2011
+
+    Positions are stored at procver_postimes *if* the object still has a detection by the time
+      (diaobjects 203 and 2011 have no positions stored)
+
+    Objects have lightcurves:
+        object 0 : first detection mjd 60000, last detection mjd 60030, peak 60010, mag 24
+        object 1 : first detection mjd 60020, last detection mjd 60060, peak 60035, mag 22
+        object 2 : first detection mjd 60040, last detection mjd 60080, peak 60050, mag 23
+        object 3 : first detection mjd 60050, last detection mjd 60060, peak 60055, mag 23.5
+
+    All lightcurves have a candence of 2.5 days.  (I'm counting on
+      floats being perfectly representable in these ranges at
+      increments of 2.5, which I believe is true.)
+
+    Full lightcurves are in bpv2 and bpv3
+    Times [ 60020, 60030 ] have forcedsources in bpv2a
+    Times [ 60020, 60025 ] have sources in bpv2a
+    FOR OBJECT 1 IN bpv2 ONLY:
+       if mjd = floor(mjd), diasource and diaforcedsource are associated with object 201
+          otherwise diasource and diaforcedsource are associated with object 2011
+
+    Photometry through 60060 and forced through 60055 is in realtime for objects 0 through 2
+
+    Object 0:
+       photometry through 60015 and forced through 60010 in bpv1a
+       photometry through 60030 and forced through 60025 in bpv1
+
+    For all diasource and diaforcedsource:
+      in bpv0 they point to the object in bpv0
+      in bpv1 they point to the object in bpv1
+      in bpv2 or bpv3, they point to the object in bpv2
+
+    Yields
+    ------
+      [
+         { 'root':  RootDiaObject,
+           'obj':   { diaobjectid: DiaObject for all relevant object base processing versions },
+           'pos':   { (diaobjectid, bpv): DiaObjectPosition for all relevant position base processing versions },
+           'src':   { bpv: [ list of DiaSource ] },
+           'srcex': { bpv: [ list of DiaSourceExtra ] },
+           'frc':   { bpv: [ list of DiaForcedSource ] },
+           'frcex'  { bpv: [ list of DiaForcedSourceExtra ] }
+         }
+      ]
+
+      Ordered for object 0, 1, 2, 3
+
+      all bpv keys are keys into the bpvs dictionary of the procver_collection fixture
+
+      The list of src and srcex for a given root object and bpv should
+      have the same length, BUT some of the srcex entries may be None.
+      Likewise for frc/frcex.
+
+    """
 
     roots = []
     rootobjs = []
@@ -382,6 +425,9 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
         firstmag = [ 26., 25., 25.5, 25.8 ]
         lastmag = [ 25.9, 25.1, 25.6, 26. ]
         zeromag = 32.
+
+        # Also random-but-deterministic reliabilities
+        reliability_rng = np.random.default_rng( 137 )
 
         visit = 0
         for i, rootobj in enumerate(rootobjinfo):
@@ -502,7 +548,9 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
                                                 base_procver_id=src.base_procver_id,
                                                 detector=0,
                                                 x=1,
-                                                y=1 )
+                                                y=1,
+                                                reliability=reliability_rng.random()
+                                               )
                         srcexobjs.append( srcex )
                         rootdict['srcex']['realtime_diasource'].append( srcex )
                     else:
@@ -584,11 +632,12 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
                                                 base_procver_id=src.base_procver_id,
                                                 detector=0,
                                                 x=1,
-                                                y=1 )
+                                                y=1,
+                                                reliability=reliability_rng.random() )
                         srcexobjs.append( srcex )
                         rootdict['srcex'][f'{bpv}_diasource'].append( srcex )
                     else:
-                        rootdict['srcex'][f'{bpv}_diasource'].append( srcex )
+                        rootdict['srcex'][f'{bpv}_diasource'].append( None )
 
                     if ( bpv != 'bpv2a' ) or ( sourcemjd <= 60025 ):
                         frc = DiaForcedSource( diaforcedsourceid=objtouse.diaobjectid * 1000000 + int(sourcemjd),
@@ -657,7 +706,8 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
                                                     base_procver_id=src.base_procver_id,
                                                     detector=0,
                                                     x=1,
-                                                    y=1 )
+                                                    y=1,
+                                                    reliability=reliability_rng.random() )
                             srcexobjs.append( srcex )
                             rootdict['srcex'][f'{bpv}_diasource'].append( srcex )
                         else:
@@ -869,7 +919,7 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
             con.commit()
 
 
-@pytest.fixture( scope='session' )
+@pytest.fixture( scope='module' )
 def test_user():
     # Test user with password 'test_password'
     user = AuthUser( id=asUUID('788e391e-ca63-4057-8788-25cc8647e722'),
@@ -902,7 +952,7 @@ tyOci9saPPfI1bNnKD202zsCAwEAAQ==
     user.delete_from_db()
 
 
-@pytest.fixture( scope='session' )
+@pytest.fixture( scope='module' )
 def fastdb_client( test_user ):
     return FASTDBClient( 'http://webap:8080', username="test", password="test_password", verify=False, debug=True,
                          retrysleep=0.1, retries=2 )
@@ -1469,6 +1519,30 @@ def objstats_realtime_view( procver_collection ):
             con.commit()
 
 
+@pytest.fixture( scope="module" )
+def objstats_pvc_pv2_view( procver_collection, set_of_lightcurves ):
+    try:
+        ltcv.create_object_stats_materialized_view( 'pvc_pv2' )
+        yield True
+    finally:
+        with DBCon() as con:
+            con.execute_nofetch( "DROP MATERIALIZED VIEW IF EXISTS objstatscomb_pvc_pv2" )
+            con.execute_nofetch( "DROP MATERIALIZED VIEW IF EXISTS objstats_pvc_pv2" )
+            con.commit()
+
+
+@pytest.fixture( scope="module" )
+def objstats_pvc_pv3_view( procver_collection, set_of_lightcurves ):
+    try:
+        ltcv.create_object_stats_materialized_view( 'pvc_pv3' )
+        yield True
+    finally:
+        with DBCon() as con:
+            con.execute_nofetch( "DROP MATERIALIZED VIEW IF EXISTS objstatscomb_pvc_pv3" )
+            con.execute_nofetch( "DROP MATERIALIZED VIEW IF EXISTS objstats_pvc_pv3" )
+            con.commit()
+
+
 @pytest.fixture( scope='module' )
 def accumulate_expected_stats( set_of_lightcurves, procver_collection ):
     def do_the_things( procver, band=None ):
@@ -1499,15 +1573,18 @@ def accumulate_expected_stats( set_of_lightcurves, procver_collection ):
                 if band is None:
                     thisexp[ f'{n}_band'] = [ None, None, None ]
             thisexp[ 'ndets' ] = [ 0, None, None ]
+            thisexp[ 'nfrc' ] = [ 0, None, None ]
 
             for mag in [ 21, 22, 23, 24 ]:
                 thisexp[ f'ndets{mag}' ] = [ 0, None, None ]
             for sn in [ 5, 7, 10 ]:
                 thisexp[ f'nsn{sn}' ] = [ 0, None, None ]
+            for rcut in [ 50, 60, 70, 80, 90, 95 ]:
+                thisexp[ f'nrelgtp{rcut}' ] = [ 0, None, None ]
 
             # There are multiple base processing versions that have data.  We need to
             #  extract the highest priority for each.  To do this, rewrangle
-            #  the set_of_lightcurves data so that it's indexed by bsae_procver,
+            #  the set_of_lightcurves data so that it's indexed by base_procver,
             #  in descending priority order
 
             if band is not None:
@@ -1519,13 +1596,19 @@ def accumulate_expected_stats( set_of_lightcurves, procver_collection ):
             frc_bpvkeys = [ p[2] for p in pvrow['diaforcedsource'] ]
             reindexed_srces = { k: { s.visit: s for s in root['src'][k] if cond(s) }
                                 for k in src_bpvkeys if k in root['src'].keys() }
+            reindexed_srcextras = { k: { s.visit: se for s, se in zip(root['src'][k], root['srcex'][k]) if cond(s) }
+                                    for k in src_bpvkeys if k in root['src'].keys() }
             reindexed_frced = { k: { f.visit: f for f in root['frc'][k] if cond(f) }
                                 for k in frc_bpvkeys if k in root['frc'].keys() }
 
             # Extract the expected source values for this root object
             seenvisits = set()
-            for bpv, srces in reindexed_srces.items():
-                for visit, src in srces.items():
+            for bpv in reindexed_srces.keys():
+                srces = reindexed_srces[ bpv ]
+                srcextras = reindexed_srcextras[ bpv ]
+                for visit in srces.keys():
+                    src = srces[ visit ]
+                    srcex = srcextras[ visit ]
                     if visit in seenvisits:
                         # already have a higher prio bpv
                         continue
@@ -1563,6 +1646,9 @@ def accumulate_expected_stats( set_of_lightcurves, procver_collection ):
                     for sn in [ 5, 7, 10 ]:
                         if ( src.psfflux / src.psffluxerr ) >= sn:
                             thisexp[ f'nsn{sn}' ][0] += 1
+                    for rel in [ 50, 60, 70, 80, 90, 95 ]:
+                        if ( srcex is not None ) and ( srcex.reliability > rel / 100. ):
+                            thisexp[ f'nrelgtp{rel}' ][0] += 1
 
             # Extract the expected forced source values for this root object
             seenvisits = set()
@@ -1572,6 +1658,7 @@ def accumulate_expected_stats( set_of_lightcurves, procver_collection ):
                         # already have a higher prio bpv
                         continue
                     seenvisits.add( visit )
+                    thisexp['nfrc'][0] += 1
                     if frc.midpointmjdtai > thisexp['lastforced_mjd'][0]:
                         thisexp['lastforced_mjd'][0] = frc.midpointmjdtai
                         if band is None:

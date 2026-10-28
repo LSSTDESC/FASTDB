@@ -3,7 +3,7 @@
 
 services:
   kafka-server:
-    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-kafka-test:${DOCKER_VERSION-test20260918a}
+    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-kafka-test:${DOCKER_VERSION-test20261028a}
     build:
       context: ./docker/kafka
     environment:
@@ -32,7 +32,7 @@ services:
       retries: 10
 
   postgres:
-    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-postgres:${DOCKER_VERSION:-test20260918a}
+    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-postgres:${DOCKER_VERSION:-test20261028a}
     build:
       context: ./docker/postgres
       target: postgres
@@ -53,7 +53,7 @@ services:
       retries: 10
 
   mongodb:
-    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-mongodb:${DOCKER_VERSION:-test20260918a}
+    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-mongodb:${DOCKER_VERSION:-test20261028a}
     build:
       context: ./docker/mongodb
     environment:
@@ -80,7 +80,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-shell:${DOCKER_VERSION:-test20260918a}
+    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-shell:${DOCKER_VERSION:-test20261028a}
     build:
       context: ./docker/webserver
       target: shell
@@ -101,7 +101,7 @@ services:
     depends_on:
       createdb:
         condition: service_completed_successfully
-    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-query-runner:${DOCKER_VERSION:-test20260918a}
+    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-query-runner:${DOCKER_VERSION:-test20261028a}
     build:
       context: ./docker/query_runner
       target: queryrunner
@@ -132,7 +132,7 @@ services:
         condition: service_started
       queryrunner:
         condition: service_started
-    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-webap:${DOCKER_VERSION:-test20260918a}
+    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-webap:${DOCKER_VERSION:-test20261028a}
     build:
       context: ./docker/webserver
       target: webserver
@@ -188,7 +188,7 @@ services:
         condition: service_healthy
       createdb:
         condition: service_completed_successfully
-    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-shell:${DOCKER_VERSION:-test20260918a}
+    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-shell:${DOCKER_VERSION:-test20261028a}
     environment:
       - MONGODB_HOST=mongodb
       - MONGODB_DBNAME=brokeralert
@@ -236,7 +236,7 @@ services:
         condition: service_healthy
       mongodb:
         condition: service_healthy
-    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-shell:${DOCKER_VERSION:-test20260918a}
+    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-shell:${DOCKER_VERSION:-test20261028a}
     environment:
       - MONGODB_HOST=mongodb
       - MONGODB_DBNAME=brokeralert
@@ -279,7 +279,7 @@ services:
     working_dir: /code
 
   makeinstall:
-    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-shell:${DOCKER_VERSION:-test20260918a}
+    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-shell:${DOCKER_VERSION:-test20261028a}
     user: ${USERID:-0}:${GROUPID:-0}
     volumes:
       - type: bind
@@ -314,7 +314,7 @@ services:
         condition: service_started   # TODO : health test for webap
       makeinstall:
         condition: service_completed_successfully
-    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-shell:${DOCKER_VERSION:-test20260918a}
+    image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-shell:${DOCKER_VERSION:-test20261028a}
     environment:
       - MONGODB_HOST=mongodb
       - MONGODB_DBNAME=brokeralert
@@ -325,7 +325,6 @@ services:
       - MONGODB_ALERT_READER_PASSWD=reader
       - MONGODB_ALERT_WRITER_USER=alertwriter
       - MONGODB_ALERT_WRITER_PASSWD=writer
-    user: ${USERID:-0}:${GROUPID:-0}
     volumes:
       - type: bind
         source: tests/secrets
@@ -340,17 +339,38 @@ services:
       - type: volume
         source: logs
         target: /logs
-    post_start:
-      - command: /bin/bash -c "
-                   chown -R ${USERID:-0}:${GROUPID:-0} /sessions
-                   && chown -R ${USERID:-0}:${GROUPID:-0} /query_results
-                   && chown -R ${USERID:-0}:${GROUPID:-0} /logs
-                   "
-        privileged: true
-        user: root
     working_dir: /code/tests
-    entrypoint: pytest -v
-    
+    # user: ${USERID:-0}:${GROUPID:-0}
+    # This entrypoint is tortured.  It would be way (WAY) more elegant
+    #   to put the chown command in a pre_start that has user root and
+    #   privileged true, and have the user: line above uncommented; then
+    #   we could get rid of all the if and export mess, and just have
+    #   "pytest -v" in the entrypoint... but the docker compose that
+    #   runs on github CI doesn't support pre_start.
+    # (You might ask: why bother at all with user:, just run everything
+    #   as root inside the container the way the gods of Docker
+    #   intended!  That would work, but it's inconvenient, because it
+    #   will create files on bind-mounted directories that are owned by
+    #   root, which is annoying.  All this USERID/GROUPID stuff is here
+    #   so that the user can make a .env file and put their own userid
+    #   and groupid in it so that they will own files created inside the
+    #   container when they run it on their local system.)
+    entrypoint: /bin/bash -c "
+        chown -R ${USERID:-0}:${GROUPID:-0} /logs && \
+        if ! $(grep -q ${USERID:-0} /etc/passwd); then \
+               echo creating user ${USERID:-0} ; \
+               echo 'test_user:x:${USERID:-0}:${GROUPID:-0}:User,,,:/tmp:/bin/bash' >> /etc/passwd &&  \
+               echo 'test_user:*:19929::::::' >> /etc/shadow ; \
+        fi && \
+        if ! $(grep -q ${GROUPID:-0} /etc/group); then \
+               echo creating group ${GROUPID:-0} ; \
+               echo 'test_group:x:${GROUPID:-0}:' >> /etc/group ; \
+        fi && \
+        export username=$(id -un ${USERID:-0}) && \
+        export groupname=$(id -gn ${GROUPID:-0}) && \
+        sudo -E -u $$username -g $$groupname PYTHONPATH=/fastdb /venv/bin/pytest -v
+        "
+
 volumes:
   postgres_data:
   mongodb_data:
