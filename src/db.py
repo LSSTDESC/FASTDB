@@ -1550,7 +1550,7 @@ class DBBase:
                     # conflict = ( f"ON CONFLICT ({','.join(cls._pk)}) DO UPDATE SET "
                     #              + ",".join( f"{c}=EXCLUDED.{c}" for c in columns ) )
             else:
-                conflict = ""
+                conflict = sql.SQL( "" )
 
             q = sql.SQL( "INSERT INTO {tab}({cols}) SELECT {cols} FROM temp_bulk_upsert {conflict}"
                         ).format( tab=sql.Identifier(cls.__tablename__), cols=sql_columns, conflict=conflict )

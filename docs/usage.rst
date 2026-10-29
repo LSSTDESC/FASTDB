@@ -489,7 +489,7 @@ What you get depends on whether you included ``return_object_info``.  If you inc
   * ``flux`` : float, the flux in nJy of this point on the lightcurve
   * ``fluxerr`` : float, the uncertainty on flux
   * ``isdet`` : int: 1 if this was detected (i.e. a diaSource exists), 0 if not
-  * [ ``ispatch`` : see below ; only included you passed ``which`` as``patch`` (the default) ]
+  * [ ``ispatch`` : see below ; only included you passed ``which`` as ``patch`` (the default) ]
   * [ ``reliability`` : the reliability of the source if available, otherwise nonevalue.  Only included if you specified ``include_reliability`` ]
   * [ ``flags`` : the flags if available, otherwise nonevalue.  Only included if you specified ``include_bitflags`` ]
   * [ ``pixelflags`` : the pixelflags if available, otherwise nonevalue.  Only included if you specified ``include_bitflags`` ]
