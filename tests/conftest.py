@@ -1016,7 +1016,7 @@ def dbclient( test_user ):
 #   and have lots of tests that use one, and lots of tests that use the other.
 # Cleaning that up should be its own PR.
 @pytest.fixture( scope='module' )
-def fasdb_client( test_user ):
+def fastdb_client( test_user ):
     return FASTDBClient( 'http://webap:8080', username='test', password='test_password' )
 
 
