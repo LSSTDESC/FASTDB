@@ -138,34 +138,37 @@ class FlagsDefinitions( BaseView ):
         if inverse:
             flags = {}
             for k, v in merged.items():
-                i = int.bit_length( k )
-                flags[v] = { 'bit': i, 'mask': k }
+                i = int.bit_length( v ) - 1
+                flags[k] = { 'bit': i, 'mask': v }
         else:
             did = set()
             flags = []
-            for i in range(32):
+            for i in range(31):
                 mask = 1 << i
                 if mask not in merged:
-                    flags.append( { "mask": None, "definition": None } )
+                    flags.append( { "mask": mask, "definition": None } )
                 else:
                     flags.append( { "mask": mask, "definition": merged[mask] } )
-                did.add( mask )
+                    did.add( mask )
 
             if ( set( merged.keys() ) != did ):
-                raise FASTDBWebException( f"Error merging flags, missing {set(merged.keys())-did}" )
+                raise FASTDBWebException( f"Error merging flags, missing {set(merged.keys())-did}, "
+                                          f"extra {did-set(merged.keys())}" )
 
         return flags
 
 
     def do_the_things( self ):
         flags = self._merge_flags( db.DiaSourceExtra._flags_bits,
-                                   db.DiaForcedSourcExtra._flags_bits )
+                                   db.DiaForcedSourceExtra._flags_bits )
         flagsinv = self._merge_flags( db.DiaSourceExtra._flags_bits_inverse,
-                                      db.DiaForcedSourceExtra._flags_bits_inverse )
+                                      db.DiaForcedSourceExtra._flags_bits_inverse,
+                                      inverse=True )
         pixelflags = self._merge_flags( db.DiaSourceExtra._pixelflags_bits,
                                         db.DiaForcedSourceExtra._pixelflags_bits )
-        pixelflagsinv = self._merge_flats( db.DiaSourceExtra.pixelflags_bits_inverse,
-                                           db.diaSourceExtra.pixelflags_bits_inverse )
+        pixelflagsinv = self._merge_flags( db.DiaSourceExtra._pixelflags_bits_inverse,
+                                           db.DiaForcedSourceExtra._pixelflags_bits_inverse,
+                                           inverse=True )
 
         return { 'flags': flags,
                  'flags_inverse': flagsinv,
@@ -616,6 +619,7 @@ urls = {
     "/procver/<procver>": ProcVer,
     "/baseprocver/<procver>": BaseProcVer,
     "/baseprocver/<procver>/<table>": BaseProcVer,
+    "/flagsdefinitions": FlagsDefinitions,
     "/count/<which>": CountThings,
     "/count/<which>/<procver>": CountThings,
     "/getdiaobjectinfo": GetDiaObjectInfo,
