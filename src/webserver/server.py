@@ -123,6 +123,61 @@ class BaseProcVer( BaseView ):
 
 # ======================================================================
 
+class FlagsDefinitions( BaseView ):
+    @classmethod
+    def _merge_flags( cls, f1, f2, inverse=False ):
+        # Just a sanity check.  By construction this should pass, but
+        #   if I screw up in db.py, an exception will be raised here.
+        for k, v in f1.items():
+            if k in f2 and f2[k] != v:
+                raise FASTDBWebException( f"Inconsistent defintions for {k} in flags: {v} vs. {f2[k]}" )
+
+        merged = f1.copy()
+        merged.update( f2 )
+
+        if inverse:
+            flags = {}
+            for k, v in merged.items():
+                i = int.bit_length( v ) - 1
+                flags[k] = { 'bit': i, 'mask': v }
+        else:
+            did = set()
+            flags = []
+            for i in range(31):
+                mask = 1 << i
+                if mask not in merged:
+                    flags.append( { "mask": mask, "definition": None } )
+                else:
+                    flags.append( { "mask": mask, "definition": merged[mask] } )
+                    did.add( mask )
+
+            if ( set( merged.keys() ) != did ):
+                raise FASTDBWebException( f"Error merging flags, missing {set(merged.keys())-did}, "
+                                          f"extra {did-set(merged.keys())}" )
+
+        return flags
+
+
+    def do_the_things( self ):
+        flags = self._merge_flags( db.DiaSourceExtra._flags_bits,
+                                   db.DiaForcedSourceExtra._flags_bits )
+        flagsinv = self._merge_flags( db.DiaSourceExtra._flags_bits_inverse,
+                                      db.DiaForcedSourceExtra._flags_bits_inverse,
+                                      inverse=True )
+        pixelflags = self._merge_flags( db.DiaSourceExtra._pixelflags_bits,
+                                        db.DiaForcedSourceExtra._pixelflags_bits )
+        pixelflagsinv = self._merge_flags( db.DiaSourceExtra._pixelflags_bits_inverse,
+                                           db.DiaForcedSourceExtra._pixelflags_bits_inverse,
+                                           inverse=True )
+
+        return { 'flags': flags,
+                 'flags_inverse': flagsinv,
+                 'pixelflags': pixelflags,
+                 'pixelflags_inverse': pixelflagsinv }
+
+
+# ======================================================================
+
 class CountThings( BaseView ):
     def do_the_things( self, which, procver='default' ):
         global app
@@ -564,6 +619,7 @@ urls = {
     "/procver/<procver>": ProcVer,
     "/baseprocver/<procver>": BaseProcVer,
     "/baseprocver/<procver>/<table>": BaseProcVer,
+    "/flagsdefinitions": FlagsDefinitions,
     "/count/<which>": CountThings,
     "/count/<which>/<procver>": CountThings,
     "/getdiaobjectinfo": GetDiaObjectInfo,

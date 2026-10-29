@@ -26,7 +26,9 @@ class GetManyLtcvs( BaseView ):
         Reads the following parameters from the POST data, which must be
         a json dictionary; they are all passed on as-is to
         ltcv.py::many_object_ltcvs:
-           'bands', 'which', 'include_base_procver', 'include_source_positions',
+           'bands', 'which', 'offset', 'limit', 'nonevalue',
+           'include_base_procver', 'include_source_positions',
+           'include_reliability', 'include_bitflags', 'flags_nonevalue',
            'use_weighted_source_positions', 'always_use_weighted_source_positions',
            'return_object_info', 'include_object_positions',
            'position_processing_version', 'mjd_now'
@@ -73,6 +75,7 @@ class GetManyLtcvs( BaseView ):
                 raise FASTDBWebException( "POST data must be a dict passed as json" )
             unknown = set( kwargs.keys() ) - { 'bands', 'which', 'offset', 'limit', 'nonevalue',
                                                'include_base_procver', 'include_source_positions',
+                                               'include_reliability', 'include_bitflags', 'flags_nonevalue',
                                                'use_weighted_source_positions', 'return_object_info',
                                                'return_diaobject_positions', 'include_object_positions',
                                                'position_processing_version', 'mjd_now' }

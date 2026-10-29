@@ -41,7 +41,7 @@ To run the FASTDB client on Perlmutter, you need to do the following *once*:
   * Get an account on FASTDB.  Talk to Rob; he will need your name, email address, and the username you want on FASTDB.
 
   * Go to https://desc-fastdb.lbl.gov and click on "Request Password Reset".  Follow the prompts.  Make sure to use a good password, that is not the same as a password you use anywhere else.  If you're still using the same password for more than one account, and indeed if you're not using a password manager, then you are at least a decade behind on what you really need to be doing with your passwords.  (Rob uses and recommend `KeePassXC <https://keepassxc.org/>`_, but there are other good ones.)  (As a bonus, with some pain, you can get KeePassXC to serve up passkeys (this potentially good but in practice cumbersome new development in authentication), if you're anal like Rob and don't want to just rely on whatever is built into your browser.)
-  
+
   * Create a file ``.fastdb.ini`` in your home directory on nersc.  Give it contents::
 
       [production]
@@ -58,7 +58,7 @@ Having done that, thereafter in order to use FASTDB from Perlmutter, each time y
       source /global/cfs/cdirs/lsst/groups/TD/setup_td.sh
 
 This environment includes the path that has the NERSC install of the fastdb client.
-      
+
   * Run python::
 
       python
@@ -151,6 +151,28 @@ Hit this API endpoint with ``/baseprocver/<procver>/<table>``, where ``<procver>
 * ``procvers`` : list of string, names of processing versions that include this base processing version.  (Normally, I'd expect this to be at most a single-element list, but you never know.)
 
 
+.. _webap_flagsdefinitions:
+
+``/flagsdefinitions``
+*********************
+
+This api endpoint returns a dictionary:
+
+.. code-block:: python
+
+   { 'flags': [ list of { 'mask': int, 'definition': str  } ],
+     'flags_inverse': { dict of definition : { 'mask': int, 'bit': int } }
+     'pixelflags': [ list of { 'mask': int, 'definition': str } ],
+     'pixelflags_inverse': { dict of definition : { 'mask': int, 'bit': int } }
+   }
+
+Use this to interpret the ``flags`` and ``pixelflags`` columns from
+:ref:`ltcv-getmanyltcvs` and :ref:`ltcv-getltcv`.  Above, the value of
+mask is always ``2^bit``; for the lists, bit is the index of the list.
+The value of description corresponds to the name of a boolean field on
+LSST schema.
+
+
 .. _webap-count:
 
 ``/count``
@@ -208,8 +230,8 @@ You get back a dictionary.  Each key of the dictionary is a string, the name of 
   * ``ra_dec_cov`` : covariance between ra and dec, as reported by LSST
 
 **If you get empty lists and you really didn't expect to:** Probably the ``diaobject`` you were asking for does not exist in the processing version you specified.  Processing versions are complicated.
-    
-    
+
+
 .. _webap-objectsearch:
 
 ``/objectsearch``
@@ -230,11 +252,11 @@ Search criteria are passed as a JSON-encoded dictionary in the body of the POST.
 * ``fall_back_to_root_position`` : bool, default True; documentation TBD
 
 * ``only_use_rootposition``: bool, default False; documentation TBD
-  
+
 * ``just_objids`` : bool.  If True, you don't get back lightcurves, you just get back object ids.  If this is True, and ``min_lastmag`` and ``max_lastmag`` are not specified, then the object search will be somewhat faster.
 
 * ``noforced`` : bool.  Normally, you will get back the last forced photometry point for each object (see below).  If ``noforced`` is True, then you will not get that back.  This can make the search faster.  Ignored if either ``min_lastmag`` or ``max_lastmag`` are True.
-  
+
 * ``mjd_now`` : float.  Normally, the search will look through all photometry when trying to find objects that match your specified criteria.  If you pass a value here, it will only look at photometry taken at this MJD or earlier.  Use this for tests and simulations when you want to pretend that the current date is different from the real current date.
 
 * ``ra``, ``dec`` : floats.  The RA and Dec, in decimal degrees, for the center of a cone search.  If you pass these, both are required, and ``radius`` is also required.
@@ -270,7 +292,7 @@ Search criteria are passed as a JSON-encoded dictionary in the body of the POST.
 * ``maxmag_maxdetection`` : float.  The brightest detection must be no dimmer than this.  This is often the one you will want to use to throw out too-dim objects.
 
 * ``min_numdetections`` : int.  Objects must have at least many detections.  (I.e. diasources.  They may well, and probably do, have more forced photometry points than this.)
-  
+
 * ``mindt_firstlastdetection`` : float.  The time between the first and last *detections* must be at least this many days.
 
 * ``maxdt_firstlastdetection`` : float.  The time between the first and last *detections* must be at most this many days.  Be careful with this.  If you're trying to find stuff whose lightcurve only lasts a week, and a cosmic ray hit the objects' host galaxy a year later, and somehow that cosmic ray didn't get properly filtered out, then the ``dt`` between the first and last detections will be a year.
@@ -430,15 +452,23 @@ In addition, there are several optional keys that control what's included:
 
 * ``mjd_now`` : float.  Normally, you will get back all relevant photometry.  For normal usage, that means photometry from before the current time, because the future hasn't happened yet.  If you specify this value, you only get back photometry from this MJD or earlier.  Use this during tests and simulations.
 
+* ``nonevalue`` : TBD
+
 * ``return_object_info`` : See below
 
 * ``include_object_positions`` : TBD
 
 * ``position_processing_version`` : TBD
-  
+
 * ``include_base_procver`` : TBD
 
 * ``include_source_positions`` : TBD
+
+* ``include_reliability`` : TBD
+
+* ``include_bitflags`` : TBD
+
+* ``flags_nonevalue`` : TBD
 
 * ``use_weighted_source_positions`` : TBD
 
@@ -460,6 +490,9 @@ What you get depends on whether you included ``return_object_info``.  If you inc
   * ``fluxerr`` : float, the uncertainty on flux
   * ``isdet`` : int: 1 if this was detected (i.e. a diaSource exists), 0 if not
   * [ ``ispatch`` : see below ; only included you passed ``which`` as ``patch`` (the default) ]
+  * [ ``reliability`` : the reliability of the source if available, otherwise nonevalue.  Only included if you specified ``include_reliability`` ]
+  * [ ``flags`` : the flags if available, otherwise nonevalue.  Only included if you specified ``include_bitflags`` ]
+  * [ ``pixelflags`` : the pixelflags if available, otherwise nonevalue.  Only included if you specified ``include_bitflags`` ]
   * [ ``base_procver_s`` : TBD; only included if you set ``include_base_procver`` ]
   * [ ``base_procver_f`` : TBD; only included if you set ``includebase_procver`` and ``which`` wasn't ``detections`` ]
   * [ ``det_ra`` : the RA where this source was detected by LSST on the difference image.  Only included if you specified ``include_source_positions`` ]
@@ -513,7 +546,7 @@ What you get back is the same as what you get back from :ref:`ltcv-getmanyltcvs`
 * ``/ltcv/getrandomltcv/<procver>``
 
 **WARNING**: This one is scary and ill-defined and probably doesn't even work right now.
-  
+
 Randomly choose an object from the given processing version (using "default" if one is not specified) and return its lightcurve.  Format of the return is the same as for ``ltcv/getltcv``.  You can optionally pass a JSON dictionary in the POST body with parameters from ``bands``, ``which``, and ``mjd_now``, just as in ``ltcv/getltcv``.
 
 
@@ -610,11 +643,11 @@ POST to the endpoint with dictionary in a JSON payload.  This may be an empty di
 * ``requested_since`` : string in the format ``YYYY-MM-DD`` or ``YYYY-MM-DD hh:mm:ss``; only find spectra that were requested since this time.  (This is so you can filter out old requests.)  You will usually want to specify this.  If you don't, it will give you anything that anybody has asked for ever.
 
 * ``requester`` : string; if given, only get spectra requested by a specific requester.  If not given, get all spectra requested by everybody.
-  
+
 * ``not_claimed_in_last_days`` : int; only return spectra where nobody else has indicated a intention to take this spectrum.  Use this to coordinate between facilities, so that multiple facilities don't all get the same spectra.  This defaults to 7 if not specified.  If you don't want to consider whether anybody else has said they're going to take a spectrum, explicitly pass ``None`` for this value.
 
 * ``no_spectra_in_last_days``: int; only return objects that have not had spectrum information reported in this many days.  This is also for coordination.  If you don't want to consider just what is planned, but what somebody actually claims to have observed, then use this.  If not given, it defaults to 7.  (This may be combined with ``not_claimed_in_last_days``.  It's entirely possible that people will report spectra that they have not claimed.)  To disable consideration of existing spectra, as with ``not_claimed_in_last_days`` set this parameter to ``None``.
-  
+
 * ``detected_since_mjd`` : float.  Only return objects that have been *detected* (i.e. found as a source in DIA scanning) by Rubin since this MJD.  Be aware that an object may not have been detected in the last few days simply because it's field hasn't been observed!  If not passed, then the server will use ``detected_in_last_days`` (below) instead.  Pass ``None`` to explicitly disable consideration of recent detections.
 
 * ``detected_in_last_days``: float.  Only return objects that have been *detected* within this may previous days by LSST DIA.  Ignored if ``detected_since_mjd`` is specified.  If neither this nor ``detected_since_mjd`` is given, defaults to 14.
@@ -622,9 +655,9 @@ POST to the endpoint with dictionary in a JSON payload.  This may be an empty di
 * ``lim_mag`` : float; a limiting magnitude; make sure that the last measurement or detection was at most this magnitude.
 
 * ``lim_mag_band`` : str; one of u, g, r, i, z, or Y.  The band of ``lim_mag``.  If not given, will just look at the latest observation without regard to band.
-  
+
 * ``mjd_now`` : float; pretend that the current MJD is this date.  Normally, the server will use the current time, and normally this is what you want.  This parameter is here for testing purposes.  All database queries will cut off things that are later in time than this time.
-  
+
 You will get back a JSON-encoded list.  Each element of the list is a dictionary with keys:
 
 * ``root_diaobject_id``: a (string) UUID, the root diaobject id of the object whose spectrum is wanted.
@@ -694,7 +727,7 @@ POST to the api endpoint with a JSON payload that is a dict, with keys:
 * ``z``: float;  the redshift of the supernova from the spectrum. Leave this blank ("" or None) if it cannot be determined.
 
 * ``classid``: int — the type from the spectrum. Use the `ELAsTiCC/DESC taxonomy <https://github.com/LSSTDESC/elasticc/blob/main/taxonomy/taxonomy.ipynb>`_.
-  
+
 
 ``spectrum/getknownspectruminfo``
 **********************************
@@ -730,7 +763,7 @@ If all is well, the response you get back is a JSON-encoded list (which might be
 * ``facility``: string; the facility that reported the spectrum
 
 * ``inserted_at``: datetime; the time at which the spectrum was reported to the database
-  
+
 * ``mjd``: float, the MJD the spectrum was taken
 
 * ``z``: float or None, the redshift from the spectrum.  If None, it means that the redshift wasn't able to be determined from the spectrum.
@@ -775,7 +808,7 @@ Removes objects unlikely to be transients of interest
 The goal of this filter is to remove alerts unlikely to be transients of interest to the LSST DESC community, filtering only on LSST-provided parameters. Essentially, this filter aims to balance the goals of reducing the alert stream to something manageable by FASTDB and ensuring that all all alerts of interest are also passed on to FASTDB. As of May 2026, it returns ~20% of the incoming alerts. It does the following:
 
 - uses Fink's ``b_good_quality`` `function <https://github.com/astrolabsoftware/fink-filters/blob/e48a6cdba44645d294aa50409d7431bc9e7575b3/fink_filters/rubin/blocks.py#L372>`_, which filters out alerts with certain flags, those with negative flux, and those with SNR <= 6. As of June 2026, it filters out alerts with the following flags:
-  
+
   - ``isDipole``
   - ``pixelFlags``
   - ``pixelFlags_bad``
