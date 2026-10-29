@@ -47,7 +47,7 @@ from util import FDBLogger, asUUID
 # explaining can slow down queries as sometimes it seems that
 # postgres really wants to think about what it's doing before giving you
 # a query plan (I don't know why; is it a pg_hint_plan thing?)
-_echoqueries = False
+_echoqueries = True
 _alwaysexplain = False
 _alwaysanalyze = False
 
@@ -1529,23 +1529,31 @@ class DBBase:
             raise TypeError( f"Invalid type for data: {type(data)}" )
 
         with DBCon( dbcon ) as con:
+            sql_columns = sql.SQL( "," ).join( sql.Identifier(c) for c in columns )
             con.execute_nofetch( "DROP TABLE IF EXISTS temp_bulk_upsert", explain=False, analyze=False )
             con.execute_nofetch( f"CREATE TEMP TABLE temp_bulk_upsert (LIKE {cls.__tablename__} INCLUDING DEFAULTS)",
                                  explain=False, analyze=False )
-            with con.cursor.copy( f"COPY temp_bulk_upsert({','.join(columns)}) FROM STDIN" ) as copier:
+            with con.cursor.copy( sql.SQL( "COPY temp_bulk_upsert({cols}) FROM STDIN" )
+                                  .format( cols=sql_columns ) ) as copier:
                 for v in values:
                     copier.write_row( v )
 
             if not assume_no_conflict:
                 if not upsert:
-                    conflict = "ON CONFLICT DO NOTHING"
+                    conflict = sql.SQL( "ON CONFLICT DO NOTHING" )
                 else:
-                    conflict = ( f"ON CONFLICT ({','.join(cls._pk)}) DO UPDATE SET "
-                                 + ",".join( f"{c}=EXCLUDED.{c}" for c in columns ) )
+                    conflict = sql.SQL( "ON CONFLICT({pks}) DO UPDATE SET {colclause}"
+                                       ).format( pks=sql.SQL(",".join( sql.Identifier(k) for k in cls._pk ) ),
+                                                 colclause=sql.SQL(" ").join(
+                                                     sql.SQL( "{c}=EXCLUDED.{c}" ).format( c=sql.Identifier(c) )
+                                                     for c in columns ) )
+                    # conflict = ( f"ON CONFLICT ({','.join(cls._pk)}) DO UPDATE SET "
+                    #              + ",".join( f"{c}=EXCLUDED.{c}" for c in columns ) )
             else:
                 conflict = ""
 
-            q = f"INSERT INTO {cls.__tablename__} SELECT * FROM temp_bulk_upsert {conflict}"
+            q = sql.SQL( "INSERT INTO {tab}({cols}) SELECT {cols} FROM temp_bulk_upsert {conflict}"
+                        ).format( tab=sql.Identifier(cls.__tablename__), cols=sql_columns, conflict=conflict )
 
             if ( not nocommit ) or ( execute_even_if_nocommit ):
                 con.execute_nofetch( q, explain=False, analyze=False )

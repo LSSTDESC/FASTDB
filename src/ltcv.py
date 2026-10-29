@@ -723,8 +723,22 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                                     "s.decerr AS det_decerr, s.ra_dec_cov AS det_ra_dec_cov, "
                                     if must_get_source_positions else "" )
             extra_fields += sql.SQL( "p.description AS base_procver_s, " if include_base_procver else "" )
-            extra_fields += sql.SQL( "se.reliability, " if include_reliability else "" )
-            extra_fields += sql.SQL( "se.flags, se.pixelflags, " if include_bitflags else "" )
+            if include_reliability:
+                if nonevalue is None:
+                    extra_fields += sql.SQL( "se.reliability, " )
+                else:
+                    extra_fields += sql.SQL( "\n  CASE WHEN se.reliability IS NULL THEN {nonevalue} ELSE "
+                                             "se.reliability END AS reliability,\n"
+                                            ).format( nonevalue=nonevalue )
+            if include_bitflags:
+                if flags_nonevalue is None:
+                    extra_fields += sql.SQL( "se.flags, se.pixelflags, " )
+                else:
+                    extra_fields += sql.SQL( "\n  CASE WHEN se.flags IS NULL THEN {nonevalue} ELSE "
+                                             "se.flags END AS flags,"
+                                             "\n  CASE WHEN se.pixelflags IS NULL THEN {nonevalue} ELSE "
+                                             "se.pixelflags END AS pixelflags,\n"
+                                            ).format( nonevalue=flags_nonevalue )
             dbcon.execute( "DROP TABLE IF EXISTS tmp_sources", explain=False )
             tmpsmade.append( 'tmp_sources' )
             q = sql.SQL( textwrap.dedent(
@@ -747,7 +761,7 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                 """
             ) ).format( procver=pvid, objids_table=sql.Identifier(objids_table), extra_fields=extra_fields )
             if include_base_procver:
-                q += sql.SQL( "INNER JOIN base_processing_version p ON pv.base_procver_id=p.id" )
+                q += sql.SQL( "INNER JOIN base_processing_version p ON pv.base_procver_id=p.id\n" )
             if include_bitflags or include_reliability:
                 q += sql.SQL( "LEFT JOIN diasource_extra se ON s.diasourceid=se.diasourceid\n"
                               "                            AND s.base_procver_id=se.base_procver_id\n" )
@@ -768,7 +782,14 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
             else:
                 # Extract forced photometry if necessary
                 extra_fields = sql.SQL( "p.description as base_procver_f, " if include_base_procver else "" )
-                extra_fields += sql.SQL( "se.flags, se.pixelflags, " if include_bitflags else "" )
+                extra_fields += sql.SQL( ( "se.flags, se.pixelflags, "
+                                           if flags_nonevalue is None else
+                                           "\n  CASE WHEN se.flags IS NULL THEN {nonevalue} ELSE se.flags END AS flags,"
+                                           "\n  CASE WHEN se.pixelflags IS NULL THEN {nonevalue} "
+                                           "ELSE se.pixelflags END AS pixelflags,\n"
+                                         ) if include_bitflags else ""
+                                        ).format( nonevalue=flags_nonevalue )
+
                 dbcon.execute( "DROP TABLE IF EXISTS tmp_forced", explain=False )
                 tmpsmade.append( 'tmp_forced' )
                 q = sql.SQL( textwrap.dedent(
@@ -814,32 +835,23 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
                                       if must_get_source_positions
                                       else "" )
                 procver_fields = sql.SQL( "f.base_procver_f, s.base_procver_s, " if include_base_procver else "" )
-                reliability_field = sql.SQL( "s.reliability, " if include_reliability else "" )
-                if include_bitflags:
-                    if flags_nonevalue is None:
-                        bitflag_fields = sql.SQL( "CASE WHEN f.rootid IS NULL THEN s.flags "
-                                                  "ELSE f.flags END AS flags,\n"
-                                                  "       CASE WHEN f.rootid IS NULL THEN s.pixelflags "
-                                                  "ELSE f.pixelflags END AS pixelflags," )
-                    else:
-                        # OMG
-                        bitflag_fields = sql.SQL( "CASE WHEN f.rootid IS NULL AND s.flags IS NULL "
-                                                  "THEN {flags_nonevalue}\n"
-                                                  "            WHEN f.rootid IS NULL AND s.flags IS NOT NULL "
-                                                  "THEN s.flags\n"
-                                                  "            WHEN f.rootid IS NOT NULL AND f.flags IS NULL "
-                                                  "THEN {flags_nonevalue}\n"
-                                                  "            ELSE f.flags END AS flags,\n"
-                                                  "       CASE WHEN f.rootid IS NULL AND s.pixelflags IS NULL "
-                                                  "THEN {flags_nonevalue}\n"
-                                                  "            WHEN f.rootid IS NULL AND s.pixelflags IS NOT NULL "
-                                                  "THEN s.pixelflags\n"
-                                                  "            WHEN f.rootid IS NOT NULL AND f.pixelflags IS NULL "
-                                                  "THEN {flags_nonevalue}\n"
-                                                  "            ELSE f.pixelflags AS pixelflags,\n"
-                                                 ).format( flags_nonevalue=flags_nonevalue )
-                else:
-                    bitflag_fields = sql.SQL( "" )
+
+                # Even though we did the null substitution above, we have to do it AGAIN for
+                #   reliability because of the case where there was no diasource at all, never mind
+                #   no diasourceextra.
+                # We don't have to for the bitflag fields because both sources and fourced sources
+                #   have those fields in their respective extras tables.
+                reliability_field = sql.SQL( ( "s.reliability, " if include_reliability else "" )
+                                             if nonevalue is None else
+                                             ( "CASE WHEN s.reliability IS NULL THEN {nonevalue} "
+                                               "ELSE s.reliability END AS reliability, " )
+                                            ).format( nonevalue = nonevalue )
+                bitflag_fields = sql.SQL( "CASE WHEN f.rootid IS NULL THEN s.flags "
+                                          "ELSE f.flags END AS flags,\n"
+                                          "       CASE WHEN f.rootid IS NULL THEN s.pixelflags "
+                                          "ELSE f.pixelflags END AS pixelflags,"
+                                          if include_bitflags else "" )
+
                 nonesubs = {}
                 for tab, field in [ ( 'f', 'diaforcedsourceid' ),
                                     ( 's', 'diasourceid' ),
@@ -1114,9 +1126,9 @@ def many_object_ltcvs( processing_version='default', objids=None, objids_table=N
         return ltcvs
 
 
-def object_ltcv( processing_version='default', diaobjectid=None, bands=None, which='patch',
+def object_ltcv( processing_version='default', diaobjectid=None, bands=None, which='patch', nonevalue=None,
                  include_base_procver=False, include_source_positions=False, include_reliability=False,
-                 include_bitflags=False, use_weighted_source_positions=False,
+                 include_bitflags=False, flags_nonevalue=False, use_weighted_source_positions=False,
                  return_format='json',
                  return_object_info=False, return_diaobject_positions=False, position_processing_version=None,
                  mjd_now=None, dbcon=None ):
@@ -1186,10 +1198,12 @@ def object_ltcv( processing_version='default', diaobjectid=None, bands=None, whi
                               objids=[ diaobjectid ],
                               bands=bands,
                               which=which,
+                              nonevalue=nonevalue,
                               include_base_procver=include_base_procver,
                               include_source_positions=include_source_positions,
                               include_reliability=include_reliability,
                               include_bitflags=include_bitflags,
+                              flags_nonevalue=flags_nonevalue,
                               return_object_info=return_object_info,
                               return_diaobject_positions=return_diaobject_positions,
                               position_processing_version=position_processing_version,

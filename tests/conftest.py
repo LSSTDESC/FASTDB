@@ -553,10 +553,8 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
                                                 x=1,
                                                 y=1,
                                                 reliability=reliability_rng.random(),
-                                                flags=( None if reliability_rng.random() < 0.5
-                                                        else flags_rng.integers( 2147483647, dtype=np.int32 ) ),
-                                                pixelflags=( None if reliability_rng.random() < 0.5
-                                                             else flags_rng.integers( 2147483647, dtype=np.int32 ) )
+                                                flags=flags_rng.integers( 2147483647, dtype=np.int32 ),
+                                                pixelflags=flags_rng.integers( 2147483647, dtype=np.int32 ),
                                                )
                         srcexobjs.append( srcex )
                         rootdict['srcex']['realtime_diasource'].append( srcex )
@@ -598,12 +596,8 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
                                                       detector=0,
                                                       scienceflux=1.1*psfflux,
                                                       sciencefluxerr=psffluxerr,
-                                                      flags=( None if reliability_rng.random() < 0.5
-                                                              else flags_rng.integers( 2147483647,
-                                                                                      dtype=np.int32 ) ),
-                                                      pixelflags=( None if reliability_rng.random() < 0.5
-                                                                   else flags_rng.integers( 214748364,
-                                                                                            dtype=np.int32 ) ),
+                                                      flags=flags_rng.integers( 2147483647, dtype=np.int32 ),
+                                                      pixelflags=flags_rng.integers( 214748364, dtype=np.int32 ),
                                                       timeprocessedmjdtai=60365.,
                                                       timewithdrawnmjdtai=None )
                         frcexobjs.append( frcex )
@@ -646,7 +640,10 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
                                                 detector=0,
                                                 x=1,
                                                 y=1,
-                                                reliability=reliability_rng.random() )
+                                                reliability=reliability_rng.random(),
+                                                flags=flags_rng.integers( 2147483647, dtype=np.int32 ),
+                                                pixelflags=flags_rng.integers( 2147483647, dtype=np.int32 )
+                                               )
                         srcexobjs.append( srcex )
                         rootdict['srcex'][f'{bpv}_diasource'].append( srcex )
                     else:
@@ -674,6 +671,8 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
                                                           detector=0,
                                                           scienceflux=1.1*psfflux,
                                                           sciencefluxerr=psffluxerr,
+                                                          flags=flags_rng.integers( 2147483647, dtype=np.int32 ),
+                                                          pixelflags=flags_rng.integers( 214748364, dtype=np.int32 ),
                                                           timeprocessedmjdtai=60365.,
                                                           timewithdrawnmjdtai=None )
                             frcexobjs.append( frcex )
@@ -720,7 +719,10 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
                                                     detector=0,
                                                     x=1,
                                                     y=1,
-                                                    reliability=reliability_rng.random() )
+                                                    reliability=reliability_rng.random(),
+                                                    flags=flags_rng.integers( 2147483647, dtype=np.int32 ),
+                                                    pixelflags=flags_rng.integers( 2147483647, dtype=np.int32 )
+                                                   )
                             srcexobjs.append( srcex )
                             rootdict['srcex'][f'{bpv}_diasource'].append( srcex )
                         else:
@@ -750,6 +752,8 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
                                                           detector=0,
                                                           scienceflux=1.1*psfflux,
                                                           sciencefluxerr=psffluxerr,
+                                                          flags=flags_rng.integers( 2147483647, dtype=np.int32 ),
+                                                          pixelflags=flags_rng.integers( 214748364, dtype=np.int32 ),
                                                           timeprocessedmjdtai=60365.,
                                                           timewithdrawnmjdtai=None )
                             frcexobjs.append( frcex )
@@ -806,6 +810,8 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
                                                       detector=0,
                                                       scienceflux=1.1*psfflux,
                                                       sciencefluxerr=psffluxerr,
+                                                      flags=flags_rng.integers( 2147483647, dtype=np.int32 ),
+                                                      pixelflags=flags_rng.integers( 214748364, dtype=np.int32 ),
                                                       timeprocessedmjdtai=60365.,
                                                       timewithdrawnmjdtai=None )
                         frcexobjs.append( frcex )
@@ -846,6 +852,8 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
                                                       detector=0,
                                                       scienceflux=1.1*psfflux,
                                                       sciencefluxerr=psffluxerr,
+                                                      flags=flags_rng.integers( 2147483647, dtype=np.int32 ),
+                                                      pixelflags=flags_rng.integers( 214748364, dtype=np.int32 ),
                                                       timeprocessedmjdtai=60365.,
                                                       timewithdrawnmjdtai=None )
                         frcexobjs.append( frcex )
@@ -879,6 +887,8 @@ def set_of_lightcurves( procver_bases, procver_postimes, procver_collection ):
                                                           detector=0,
                                                           scienceflux=1.1*psfflux,
                                                           sciencefluxerr=psffluxerr,
+                                                          flags=flags_rng.integers( 2147483647, dtype=np.int32 ),
+                                                          pixelflags=flags_rng.integers( 214748364, dtype=np.int32 ),
                                                           timeprocessedmjdtai=60365.,
                                                           timewithdrawnmjdtai=None )
                             frcexobjs.append( frcex )
@@ -1023,6 +1033,14 @@ def dbclient( test_user ):
     return FASTDBClient( 'http://webap:8080', username='test', password='test_password' )
 
 
+# ...this fixture is redundant with the previous one, but somehow I managed to make a mess
+#   and have lots of tests that use one, and lots of tests that use the other.
+# Cleaning that up should be its own PR.
+@pytest.fixture( scope='module' )
+def fastdb_client( test_user ):
+    return FASTDBClient( 'http://webap:8080', username='test', password='test_password' )
+
+
 @pytest.fixture( scope='module' )
 def admin_dbclient( admin_user ):
     return FASTDBClient( 'http://webap:8080', username='admin', password='admin' )
@@ -1132,7 +1150,7 @@ def lightcurve_checker( set_of_lightcurves, procver_collection ):
     def check_ltcv_res( procver, expected_roots, expected_diaobjectids, res, single=False, rootid_is_uuid=True,
                         mjd_now=None, bands=None, which='patch', return_object_info=False,
                         return_diaobject_positions=False, nonevalue=None,
-                        include_reliability=False, include_bitflags=False, bitflag_nonevalue=False,
+                        include_reliability=False, include_bitflags=False, flags_nonevalue=False,
                         include_base_procver=False, include_source_ids=False, include_source_positions=False,
                         use_weighted_source_positions=False, expect_all_roots=True ):
         # This has a lot of redundancy with test_ltcv.py::compare_ltcv_to_expected
@@ -1341,7 +1359,7 @@ def lightcurve_checker( set_of_lightcurves, procver_collection ):
                 data = [ d for d in data if d['frc'] is not None ]
 
             # OK, now we have wrangled things to the point where they can be compared
-            bitflag_nonevalue = nonevalue if bitflag_nonevalue == False else bitflag_nonevalue
+            flags_nonevalue = nonevalue if flags_nonevalue == False else flags_nonevalue
 
             assert len( data ) == len( thisltcv['mjd'] )
             if which == 'detections':
@@ -1411,53 +1429,52 @@ def lightcurve_checker( set_of_lightcurves, procver_collection ):
                                                   ( d['srcex'].reliability is None ) )
                                    else pytest.approx( d['srcex'].reliability, abs=0.0001 ) )
                             for v, d in zip( thisltcv['reliability'], data ) )
+
             if include_bitflags:
                 if which == 'detections':
-                    assert all( v == ( bitflag_nonevalue if ( ( 'srcex' not in d ) or
-                                                              ( d['srcex'] is None ) or
-                                                              ( d['srcex'].flags is None ) )
+                    assert all( v == ( flags_nonevalue if ( ( 'srcex' not in d ) or
+                                                            ( d['srcex'] is None ) or
+                                                            ( d['srcex'].flags is None ) )
                                        else d['srcex'].flags )
                                 for v, d in zip( thisltcv['flags'], data ) )
-                    assert all( v == ( bitflag_nonevalue if ( ('srcex' not in d ) or
-                                                              ( d['srcex'] is None ) or
-                                                              ( d['srcex'].pixelflags is None )  )
+                    assert all( v == ( flags_nonevalue if ( ('srcex' not in d ) or
+                                                            ( d['srcex'] is None ) or
+                                                            ( d['srcex'].pixelflags is None )  )
                                        else d['srcex'].pixelflags )
                                 for v, d in zip( thisltcv['pixelflags'], data ) )
                 elif which == 'forced':
-                    assert all( v == ( bitflag_nonevalue if ( ( 'frcex' not in d ) or
-                                                              ( d['frcex'] is None ) or
-                                                              ( d['frcex'].flags is None ) )
+                    assert all( v == ( flags_nonevalue if ( ( 'frcex' not in d ) or
+                                                            ( d['frcex'] is None ) or
+                                                            ( d['frcex'].flags is None ) )
                                        else d['frcex'].flags )
                                 for v, d in zip( thisltcv['flags'], data ) )
-                    assert all( v == ( bitflag_nonevalue if ( ('frcex' not in d ) or
-                                                              ( d['frcex'] is None ) or
-                                                              ( d['frcex'].pixelflags is None )  )
+                    assert all( v == ( flags_nonevalue if ( ('frcex' not in d ) or
+                                                            ( d['frcex'] is None ) or
+                                                            ( d['frcex'].pixelflags is None )  )
                                        else d['frcex'].pixelflags )
                                 for v, d in zip( thisltcv['pixelflags'], data ) )
                 else:
                     # OMG
-                    assert all( v ==
-                                ( bitflag_nonevalue if ( ( 'frcex' not in d ) or
-                                                         ( d['frcex'] is None ) or
-                                                         ( d['frcex'].flags is None ) )
-                                  else d['frcex'].flags )
-                                if d['frc'] is not None else
-                                ( bitflag_nonevalue if ( ( 'srcex' not in d ) or
-                                                         ( d['srcex'] is None ) or
-                                                         ( d['srcex'].flags is None ) )
-                                  else d['srcex'].flags )
-                               for v, d in zip( thisltcv['flags'], data ) )
-                    assert all( v ==
-                                ( bitflag_nonevalue if ( ('frcex' not in d ) or
-                                                         ( d['frcex'] is None ) or
-                                                         ( d['frcex'].pixelflags is None )  )
-                                  else d['frcex'].pixelflags )
-                                if d['frc'] is not None else
-                                ( bitflag_nonevalue if ( ('srcex' not in d ) or
-                                                         ( d['srcex'] is None ) or
-                                                         ( d['srcex'].pixelflags is None )  )
-                                  else d['srcex'].pixelflags )
-                                for v, d in zip( thisltcv['pixelflags'], data ) )
+                    assert all( v == ( ( flags_nonevalue if ( ( 'frcex' not in d ) or
+                                                              ( d['frcex'] is None ) or
+                                                              ( d['frcex'].flags is None ) )
+                                         else d['frcex'].flags )
+                                       if d['frc'] is not None else
+                                       ( flags_nonevalue if ( ( 'srcex' not in d ) or
+                                                              ( d['srcex'] is None ) or
+                                                              ( d['srcex'].flags is None ) )
+                                         else d['srcex'].flags )
+                                      ) for v, d in zip( thisltcv['flags'], data ) )
+                    assert all( v == ( ( flags_nonevalue if ( ('frcex' not in d ) or
+                                                              ( d['frcex'] is None ) or
+                                                              ( d['frcex'].pixelflags is None )  )
+                                         else d['frcex'].pixelflags )
+                                       if d['frc'] is not None else
+                                       ( flags_nonevalue if ( ('srcex' not in d ) or
+                                                              ( d['srcex'] is None ) or
+                                                              ( d['srcex'].pixelflags is None )  )
+                                         else d['srcex'].pixelflags )
+                                      ) for v, d in zip( thisltcv['pixelflags'], data ) )
 
 
         if infos is not None:
