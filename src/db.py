@@ -1505,7 +1505,7 @@ class DBBase:
             return
 
         if isinstance( data, list ) and isinstance( data[0], dict ):
-            columns = data[0].keys()
+            columns = list( data[0].keys() )
             # Alas, psycopg's copy seems to index the thing it's passed,
             #   so we can't just pass it d.values()
             values = [ list( d.values() ) for d in data ]
@@ -1520,7 +1520,7 @@ class DBBase:
             #   want to use database defaults are going to be
             #   the same in every object.
             sd0 = data[0]._build_subdict()
-            columns = sd0.keys()
+            columns = list( sd0.keys() )
             data = [ d._build_subdict( columns=columns ) for d in data ]
             # Alas, psycopg's copy seems to index the thing it's passed,
             #   so we can't just pass it d.values()
@@ -1533,8 +1533,8 @@ class DBBase:
             con.execute_nofetch( "DROP TABLE IF EXISTS temp_bulk_upsert", explain=False, analyze=False )
             con.execute_nofetch( f"CREATE TEMP TABLE temp_bulk_upsert (LIKE {cls.__tablename__} INCLUDING DEFAULTS)",
                                  explain=False, analyze=False )
-            with con.cursor.copy( sql.SQL( "COPY temp_bulk_upsert({cols}) FROM STDIN" )
-                                  .format( cols=sql_columns ) ) as copier:
+            q = sql.SQL( "COPY temp_bulk_upsert({cols}) FROM STDIN" ).format( cols=sql_columns )
+            with con.cursor.copy( q ) as copier:
                 for v in values:
                     copier.write_row( v )
 
@@ -1543,9 +1543,9 @@ class DBBase:
                     conflict = sql.SQL( "ON CONFLICT DO NOTHING" )
                 else:
                     conflict = sql.SQL( "ON CONFLICT({pks}) DO UPDATE SET {colclause}"
-                                       ).format( pks=sql.SQL(",".join( sql.Identifier(k) for k in cls._pk ) ),
-                                                 colclause=sql.SQL(" ").join(
-                                                     sql.SQL( "{c}=EXCLUDED.{c}" ).format( c=sql.Identifier(c) )
+                                       ).format( pks=sql.SQL(",").join( sql.Identifier(k) for k in cls._pk ),
+                                                 colclause=sql.SQL(",").join(
+                                                     sql.SQL( "{x}=EXCLUDED.{x}" ).format( x=sql.Identifier(c) )
                                                      for c in columns ) )
                     # conflict = ( f"ON CONFLICT ({','.join(cls._pk)}) DO UPDATE SET "
                     #              + ",".join( f"{c}=EXCLUDED.{c}" for c in columns ) )
