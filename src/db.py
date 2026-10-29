@@ -24,7 +24,7 @@ import psycopg.types.json
 import pymongo
 
 import util
-from util import FDBLogger
+from util import FDBLogger, asUUID
 
 # These next three are for debugging, as sometimes it's very useful to
 # see the actual queries being sent to the database, and to see what
@@ -60,11 +60,11 @@ all_table_names = [ 'query_queue',
                     'spectruminfo', 'plannedspectra', 'wantedspectra',
                     'ppdb_alerts_sent', 'ppdb_diaforcedsource', 'ppdb_diasource', 'ppdb_diaobject', 'ppdb_host_galaxy',
                     'diaforcedsource_extra', 'diaforcedsource', 'diasource_brokerinfo', 'diasource_extra', 'diasource',
-                    'diaobject_host_match', 'diaobject_position', 'diaobject', 'root_diaobject', 'host_galaxy',
-                    'diasource_import_time',
+                    'diaobject_host_match', 'diaobject_position', 'diaobject', 'root_diaobject_tag', 'root_diaobject',
+                    'host_galaxy', 'diasource_import_time', 'tags',
                     'processing_version_alias', 'base_procver_of_procver',
                     'processing_version', 'base_processing_version',
-                    'passwordlink', 'authuser',
+                    'passwordlink', 'auth_user_group', 'authgroup', 'authuser',
                     'migrations_applied' ]
 
 # ======================================================================
@@ -1568,6 +1568,62 @@ class AuthUser( DBBase ):
     def __init__( self, *args, **kwargs ):
         super().__init__( *args, **kwargs )
 
+    usernamere = re.compile( r'^[a-zA-Z0-9_\.]+$' )
+    displaynamere = re.compile( r'^[\w_, \.]+$' )
+    emailre = re.compile( r'^[a-zA-Z0-9_\-\.]+\@[a-zA-Z0-9\-\.]+$' )
+
+    @classmethod
+    def create( cls, userid, username, displayname, email, groups=['users'], dbcon=None,
+                no_duplicate_displayname=True ):
+        userid = asUUID( userid )
+        username = username.strip()
+        displayname = displayname.strip()
+        email = email.strip()
+
+        if not AuthUser.usernamere.search( username ):
+            raise ValueError( "Invalid username, can only include a-z, A-Z, 0-9, _, and ." )
+        if not AuthUser.displaynamere.search( displayname ):
+            raise ValueError( "Invalid displayname, can only include letters, 0-9, _, space, , and ." )
+        if not AuthUser.emailre.search( email ):
+            raise ValueError( "Invalid email, can only include a-z, A-Z, 0-9, _, -, and ." )
+
+        with DBCon( dbcon ) as dbcon:
+            rows, _cols = dbcon.execute(
+                sql.SQL( "SELECT username, email, displayname FROM authuser "
+                         "WHERE username={user} OR email={email} OR displayname={displayname}" )
+                .format( user=username, email=email, displayname=displayname ) )
+            for row in rows:
+                if row[0] == username:
+                    raise ValueError( f"username {username} already exists" )
+                if row[1] == email:
+                    raise ValueError( f"email {email} already exists" )
+                if row[2] == displayname:
+                    if no_duplicate_displayname:
+                        raise ValueError( f"displayname {displayname} already exists" )
+                    else:
+                        FDBLogger.warning( f"displayname {displayname} already exists, but "
+                                           f"no_duplicate_displayname is False, so proceeding." )
+
+            rows, _cols = dbcon.execute(
+                sql.SQL( "SELECT id, name FROM authgroup WHERE name=ANY(ARRAY[{groups}])"
+                        ).format( groups=sql.SQL(",").join( groups ) ) )
+            knowngroups = set( r[1] for r in rows )
+            if set( groups ) != set( r[1] for r in rows ):
+                raise ValueError( f"Unknown groups: {groups - knowngroups}" )
+            groupids = [ r[0] for r in rows ]
+
+            dbcon.execute( sql.SQL( "INSERT INTO authuser(id, username, displayname, email) "
+                                    "VALUES ({userid}, {username}, {displayname}, {email})" )
+                           .format( userid=userid, username=username, displayname=displayname, email=email ) )
+            for gid in groupids:
+                dbcon.execute( sql.SQL( "INSERT INTO auth_user_group(userid, groupid) "
+                                        "VALUES ({userid}, {groupid})" )
+                               .format( userid=userid, groupid=gid ) )
+
+            dbcon.commit()
+
+            return AuthUser( id=userid, username=username, displayname=displayname, email=email )
+
 
 # ======================================================================
 
@@ -1780,10 +1836,69 @@ class ProcessingVersionAlias( DBBase ):
 
 # ======================================================================
 
+class Tag( DBBase ):
+    __tablename__ = "tags"
+    _tablemeta = None
+    _pk = [ 'id' ]
+
+    # Allow getting by id or tag
+    @classmethod
+    def get( cls, tag, dbcon=None ):
+        with DBCon() as dbcon:
+            try:
+                tagid = asUUID( tag )
+                q = sql.SQL( "SELECT * FROM tags WHERE id={tagid}" ).format( tagid=tagid )
+            except Exception:
+                q = sql.SQL( "SELECT * FROM tags WHERE tag={tag}" ).format( tag=tag )
+
+            rows, cols = dbcon.execute( q )
+            if len(rows) > 1:
+                raise RuntimeError( f"Database corruption: muiltiple tags {tag}.  This shouldn't happen" )
+            elif len(rows) == 0:
+                return None
+            else:
+                return Tag( dbcon, cols=cols, vals=rows[0] )
+
+
+# ======================================================================
+
 class RootDiaObject( DBBase ):
     __tablename__ = "root_diaobject"
     _tablemeta = None
     _pk = [ 'id' ]
+
+    # Allow getting by either rootid or diaobjectid, since diaobjectids are supposed to
+    #   be unique (although there will be possibly multiple diaobjectids for the same rootid)
+    @classmethod
+    def get( cls, objid, dbcon=None ):
+        with DBCon() as dbcon:
+            try:
+                rootid = asUUID( objid )
+                q = sql.SQL( "SELECT * FROM root_diaobject WHERE id={rootid}" ).format( rootid=rootid )
+            except Exception:
+                try:
+                    tmp = int(objid)
+                    objid = tmp
+                except Exception:
+                    raise ValueError( f"Invalid object id / root id {objid}" )
+                q = sql.SQL( "SELECT r.* FROM root_diaobject r "
+                             "INNER JOIN diaobject o ON o.rootid=r.id "
+                             "WHERE o.diaobjectid={objid}" ).format( objid=objid )
+            rows, cols = dbcon.execute( q )
+            if len(rows) > 1:
+                raise RuntimeError( f"Database corruption; multiple objects {objid}.  This shouldn't happen." )
+            elif len(rows) == 0:
+                return None
+            else:
+                return RootDiaObject( dbcon, cols=cols, vals=rows[0] )
+
+
+# ======================================================================
+
+class RootDiaObjectTag( DBBase ):
+    __tablename__ = "root_diaobject_tag"
+    _tablemeta = None
+    _pk = [ 'rootid', 'tagid' ]
 
 
 # ======================================================================

@@ -1,6 +1,8 @@
 import re
 import copy
 import logging
+import uuid
+import textwrap
 
 from psycopg import sql
 import flask
@@ -8,7 +10,7 @@ import flask_session
 
 import db
 import ltcv
-from util import FDBLogger
+from util import FDBLogger, asUUID
 import webserver.rkauth_flask as rkauth_flask
 import webserver.dbapp as dbapp
 import webserver.ltcvapp as ltcvapp
@@ -249,6 +251,265 @@ class ObjectSearch( BaseView ):
             raise FASTDBWebException( str(ex) )
 
 
+# ======================================================================
+
+class CreateTag( BaseView ):
+    def do_the_things( self, tag, description=None ):
+        self.check_groups( [ 'admin', 'tag_create' ] )
+
+        args = { 'tag': tag, 'description': description }
+        if flask.request.is_json:
+            args.update( flask.request.json )
+        if set( args.keys() ) != { 'tag', 'description' }:
+            return f"Unknown arguments: {set(args.keys()) - {'tag', 'description'}}", 422
+
+        try:
+            _ = asUUID( tag )
+            return f"Error, {tag} is an invalid tag name, it can't look like a uuid.", 422
+        except Exception:
+            pass
+
+        with db.DBCon() as dbcon:
+            rows, _cols = dbcon.execute( sql.SQL( "SELECT id, tag FROM tags WHERE tag={tag}" )
+                                         .format( tag=args['tag'] ) )
+            if len(rows) > 0:
+                return f"Tag {tag} already exists.", 422
+
+            tagid = uuid.uuid4()
+            dbcon.execute( sql.SQL( "INSERT INTO tags(id, tag, description) "
+                                    "VALUES ({tagid}, {tag}, {description})" )
+                           .format( tagid=tagid, tag=args['tag'], description=args['description'] ) )
+            dbcon.commit()
+            return { "status": "ok",
+                     "id": tagid,
+                     "tag": args['tag'],
+                     "description": args['description']
+                    }
+
+
+
+# ======================================================================
+
+class GetTag( BaseView ):
+    def do_the_things( self, tag ):
+        try:
+            tagid = asUUID( tag )
+            q = sql.SQL( "SELECT id, tag, description FROM tags WHERE id={tagid}" ).format( tagid=tagid )
+        except Exception:
+            q = sql.SQL( "SELECT id, tag, description FROM tags WHERE tag={tag}" ).format( tag=tag )
+
+        with db.DBCon() as dbcon:
+            rows, _cols = dbcon.execute( q )
+            if len(rows) == 0:
+                return f"Tag {tag} is not known.", 422
+            elif len(rows) > 1:
+                return f"Tag {tag} is multiply defined; this should never happen.", 422
+            else:
+                return { 'status': 'ok',
+                         'id': str(rows[0][0]),
+                         'tag': rows[0][1],
+                         'description': rows[0][2]
+                        }
+
+
+# ======================================================================
+
+class TagObjects( BaseView ):
+    def do_the_things( self, tag ):
+        self.check_groups( [ 'admin', 'tag_create' ] )
+
+        if not flask.request.is_json:
+            return "Error, must send JSON POST body with objects=list", 422
+        data = flask.request.json
+        if ( 'objects' not in data ) or ( not isinstance( data['objects'], list ) ):
+            return "Error, must send JSON POST body with objects=list", 422
+
+        ids_are_diaobjectid = ( 'ids_are_diaobjectid' in data ) and ( data['ids_are_diaobjectid'] )
+
+        if ids_are_diaobjectid:
+            q = sql.SQL( "SELECT rootid, diaobjectid FROM diaobject WHERE diaobjectid=ANY(ARRAY[{objids}])"
+                        ).format( objids=sql.SQL(",").join( data['objects'] ) )
+        else:
+            q = sql.SQL( "SELECT id FROM root_diaobject WHERE id=ANY(ARRAY[{objids}]::uuid[])"
+                         ).format( objids=sql.SQL(",").join( data['objects'] ) )
+
+        with db.DBCon() as dbcon:
+            tagobj = db.Tag.get( tag )
+            if tagobj is None:
+                return f"Unknown tag {tag}", 422
+
+            rows, _cols = dbcon.execute( q )
+            if len(rows) != len( data['objects'] ):
+                return ( f"You passed {len(data['objects'])} object ids, but I only found "
+                         f"{len(rows)} of those in the database" ), 422
+
+            if ids_are_diaobjectid:
+                rootids = list( set( row[0] for row in rows ) )
+            else:
+                rootids = [ row[0] for row in rows ]
+
+            data = { 'tagid': [ tagobj.id ] * len(rootids), 'rootid': rootids }
+            db.RootDiaObjectTag.bulk_insert_or_upsert( data, dbcon=dbcon )
+            # That will have committed
+
+        return { "status": "ok" }
+
+
+# =====================================================================
+
+class TagsForObject( BaseView ):
+    def do_the_things( self, objid ):
+        with db.DBCon() as dbcon:
+            try:
+                rootobj = db.RootDiaObject.get( objid, dbcon=dbcon )
+            except Exception as ex:
+                raise FASTDBWebException( str(ex) )
+            if rootobj is None:
+                return f"Unknown object {objid}", 422
+
+            q = sql.SQL( "SELECT t.tag FROM tags t "
+                         "INNER JOIN root_diaobject_tag r ON t.id=r.tagid "
+                         "WHERE r.rootid={rootid}" ).format( rootid=rootobj.id )
+            rows, _cols = dbcon.execute( q )
+
+            return { "rootid": rootobj.id,
+                     "tags": [ r[0] for r in rows ]
+                    }
+
+
+# ======================================================================
+
+class ObjectsForTag( BaseView ):
+    def do_the_things( self, tagid ):
+        with db.DBCon() as dbcon:
+            tagobj = db.Tag.get( tagid, dbcon=dbcon )
+            if tagobj is None:
+                return f"Unknown tag {tagid}", 422
+
+            q = sql.SQL( "SELECT rootid FROM root_diaobject_tag WHERE tagid={tagid}" ).format( tagid=tagobj.id )
+            rows, _cols = dbcon.execute( q )
+
+            return { "tagid": tagobj.id,
+                     "tag": tagobj.tag,
+                     "rootids": [ r[0] for r in rows ]
+                    }
+
+
+# ======================================================================
+class DeleteTag( BaseView ):
+    def do_the_things( self, tag ):
+        self.check_groups( [ 'admin', 'tag_create' ] )
+
+        if ( ( not flask.request.is_json ) or ( not isinstance( flask.request.json, dict ) ) or
+             ( 'I know what I am doing' not in flask.request.json) or
+             ( not flask.request.json['I know what I am doing'] )
+            ):
+            return "Only do this if you know what you are doing", 422
+
+        with db.DBCon() as dbcon:
+            try:
+                tagid = asUUID( tag )
+                q = sql.SQL( "SELECT id, tag FROM tags WHERE id={tag}" ).format( tag=tagid )
+            except Exception:
+                q = sql.SQL( "SELECT id, tag FROM tags WHERE tag={tag}" ).format( tag=tag )
+
+            rows, _cols = dbcon.execute( q )
+            if len(rows) == 0:
+                return f"Unknown tag {tag}", 422
+
+            tagid = rows[0][0]
+            tag = rows[0][1]
+
+            dbcon.execute( sql.SQL( "DELETE FROM tags WHERE id={tagid} " ).format( tagid=tagid ) )
+            dbcon.commit()
+
+            return { "status": "tag deleted",
+                     "tag": tag,
+                     "tagid": tagid
+                    }
+
+
+# ======================================================================
+
+class UntagObjects( BaseView ):
+    def do_the_things( self, tag ):
+        self.check_groups( [ 'admin', 'tag_create' ] )
+
+        if not flask.request.is_json:
+            return "Must POST JSON data with key objects, value list of object ids", 422
+
+        data = flask.request.json
+        if ( ( not isinstance( data, dict ) ) or ( 'objects' not in data ) or
+             ( not isinstance( data['objects'], list ) ) ):
+            return "Must POST JSON data with key objects, value list of object ids", 422
+
+        if ( 'I know what I am doing' not in data ) or ( not data['I know what I am doing'] ):
+            return "Only do this if you know what you are doing.", 422
+
+        ids_are_diaobjectid = ( 'ids_are_diaobjectid' in data ) and ( data['ids_are_diaobjectid'] )
+        ok_missing = ( 'ok_missing' in data ) and ( data['ok_missing'] )
+
+        with db.DBCon() as dbcon:
+            tagobj = db.Tag.get( tag, dbcon=dbcon )
+            if tagobj is None:
+                return f"Unknown tag {tag}", 422
+
+            if ( not ok_missing ) or ids_are_diaobjectid:
+                if ids_are_diaobjectid:
+                    compdex = 1
+                    q = sql.SQL( textwrap.dedent(
+                        """\
+                        SELECT o.rootid, o.diaobjectid FROM root_diaobject_tag rdt
+                        INNER JOIN diaobject o ON o.rootid=rdt.rootid
+                        WHERE o.diaobjectid=ANY(ARRAY[{objids}])
+                          AND rdt.tagid={tagid}
+                        """
+                    ) ).format( tagid=tagobj.id, objids=sql.SQL(",").join( data['objects'] ) )
+                else:
+                    compdex = 0
+                    q = sql.SQL( textwrap.dedent(
+                        """\
+                        SELECT rootid FROM root_diaobject_tag
+                        WHERE tagid={tagid}
+                          AND rootid=ANY(ARRAY[{objids}]::uuid[])
+                        """
+                    ) ).format( tagid=tagobj.id, objids=sql.SQL(",").join( data['objects'] ) )
+
+                try:
+                    rows, _cols = dbcon.execute( q )
+                except Exception as ex:
+                    return f"Database query error: {ex}", 422
+
+                if not ok_missing:
+                    foundobjs = set( row[compdex] for row in rows )
+                    wantedobjs = set( asUUID( data['objects'] ) )
+                    if ( foundobjs != wantedobjs ):
+                        return f"The following objects weren't in tag {tag}: {wantedobjs-foundobjs}", 422
+
+                rootids = [ row[0] for row in rows ]
+
+            else:
+                rootids = asUUID( data['objects'] )
+
+            if len(rootids) == 0:
+                if ( len( data['objects'] ) > 0 ) and not ok_missing:
+                    return "None of the objects you specified for were in tag {tag}", 422
+                else:
+                    return { "status": "ok" }
+
+            dbcon.execute( sql.SQL( textwrap.dedent(
+                """\
+                DELETE FROM root_diaobject_tag
+                WHERE tagid={tagid}
+                  AND rootid=ANY(ARRAY[{rootids}])
+                """
+            ) ).format( tagid=tagobj.id, rootids=sql.SQL(",").join(rootids) ) )
+            dbcon.commit()
+
+            return { "status": "ok" }
+
+
+
 # **********************************************************************
 # **********************************************************************
 # **********************************************************************
@@ -280,6 +541,7 @@ rkauth_flask.RKAuthConfig.setdbparams(
     db_name=db.dbname,
     db_user=db.dbuser,
     db_password=db.dbpasswd,
+    usegroups = True,
     email_from = config.emailfrom,
     email_subject = 'fastdb password reset',
     email_system_name = 'fastdb',
@@ -309,6 +571,13 @@ urls = {
     "/getdiaobjectinfo/<procver>/<objid>": GetDiaObjectInfo,
     "/objectsearch": ObjectSearch,
     "/objectsearch/<processing_version>": ObjectSearch,
+    "/createtag/<tag>": CreateTag,
+    "/createtag/<tag>/<description>": CreateTag,
+    "/tagobjects/<tag>": TagObjects,
+    "/tagsforobject/<objid>": TagsForObject,
+    "/objectsfortag/<tagid>": ObjectsForTag,
+    "/deletetag/<tag>": DeleteTag,
+    "/untagobjects/<tag>": UntagObjects
 }
 
 usedurls = {}

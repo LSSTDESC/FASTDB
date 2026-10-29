@@ -272,8 +272,10 @@ def asUUID( id ):
         return id
     elif isinstance( id, str ):
         return uuid.UUID( id )
+    elif isinstance( id, list ):
+        return [ x if isinstance(x, uuid.UUID) else uuid.UUID(x) for x in id ]
     else:
-        raise ValueError( f"Don't know how to turn {id} into UUID." )
+        raise ValueError( f"Don't know how to turn {id} into UUID or a list of UUIDs." )
 
 
 NULLUUID = asUUID( '00000000-0000-0000-0000-000000000000' )

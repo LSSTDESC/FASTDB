@@ -107,8 +107,10 @@ spec:
           name: fastdb-checkout
         - mountPath: /logs
           name: fastdb-brokerconsumer-logs
-        - mountPath: /rknop
-          name: rknop
+        - mountPath: /desctd
+          name: desctd
+        - mountPath: /descsn
+          name: descsn
         - mountPath: /pg_dump
           name: pgdump
         # - mountPath: /mongodata
@@ -148,9 +150,13 @@ spec:
         hostPath:
           path: /global/cfs/cdirs/desc-td/SOFTWARE/fastdb_deployment/production/brokerconsumer_logs
           type: Directory
-      - name: rknop
+      - name: desctd
         hostPath:
-          path: /global/cfs/cdirs/desc-td/users/raknop
+          path: /global/cfs/cdirs/desc-td
+          type: Directory
+      - name: descsn
+        hostPath:
+          path: /global/cfs/cdirs/desc-sn
           type: Directory
       - name: pgdump
         hostPath:
